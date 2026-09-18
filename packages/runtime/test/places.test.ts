@@ -17,6 +17,10 @@ import {
   PLACE_UNKNOWN_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  placeBehindLine,
+  placeDaemonBehind,
+  placeServesDaemonLine,
+  noHostCliLine,
   THREAD_OPS,
   placeDaemonPaths,
   absentComputer,
@@ -1643,8 +1647,13 @@ interface ForkingPlace {
   tunnels: { tunnelId: string; port: number }[];
   /** What the next create answers with instead of a machine; cleared after one use. */
   refuseCreate?: { error: string; kind: string; status: number };
+  /** What a pull request frame is refused with, for the note a bring back carries beside a landed push. */
+  refuseGitPr?: { error: string; code: string };
   /** Every op the host sent, in order. */
   ops: string[];
+  /** Every files or git frame the host sent for a workspace on this computer, whole: the workspace named on it is
+   * what a case reads. */
+  frames: Record<string, unknown>[];
   /** How many times each op was asked. */
   asked: Record<string, number>;
   /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
@@ -1727,6 +1736,7 @@ function forks(
     resumed: 0,
     tunnels: [],
     ops: [],
+    frames: [],
     asked: {},
     daemonAnswersAfter: 1,
     swallow: new Set<string>(),
@@ -1814,6 +1824,16 @@ function forks(
         return say({});
       case "exec":
         return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
+      // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
+      // what a workspace with no daemon of its own is served by.
+      case "git.push":
+        seen.frames.push(frame);
+        return say({ branch: "work", base: String(frame["base"] ?? ""), remote: "origin", ahead: 1, uncommitted: 0, stat: [" README.md | 2 +-"] });
+      case "git.pr": {
+        seen.frames.push(frame);
+        if (seen.refuseGitPr !== undefined) return void client.ws.send(JSON.stringify({ id, ok: false, ...seen.refuseGitPr }));
+        return say({ pr: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", host: "github.com" }, created: true });
+      }
       default:
         return;
     }
@@ -1967,6 +1987,83 @@ describe("a fork on a computer you joined", () => {
     expect(await store.get("workspaces", made.id)).toMatchObject({ place: placeId });
     // The place a fork landed on is where the next one lands when nobody says.
     expect((await placesOf()).find(p => p.default)!.id).toBe(placeId);
+  });
+
+  it("is served by that computer's daemon: the create says nothing of a daemon inside, the bring back's frames go up its link with the workspace named, and nothing is dialled", async () => {
+    // Found on spoo, 2026-09-18: a workspace on a computer somebody owns runs no daemon of its own, so the create
+    // printed "Daemon did not answer.", the row read Unreachable while exec answered from inside, and every bring
+    // back died at "has no daemon answering yet" before a byte left the box.
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c => (place = forks(c)),
+    });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    // Nothing was asked about a route or a daemon inside: a workspace here has neither.
+    expect(place.asked["machine.previewUrl"]).toBeUndefined();
+    // The two frames a bring back is made of go up this computer's link, each naming the workspace it is for, and
+    // the checkout path is the one the workspace sees.
+    const back = await runtime.workspaces.bringBack({ workspaceId: made.id, title: "bring back proof" });
+    expect(place.frames.map(f => f["op"])).toEqual(["git.push", "git.pr"]);
+    for (const frame of place.frames) expect(frame["machineId"]).toBe(made.machineId);
+    // The checkout as the workspace sees it, which is the project's own path on that computer.
+    expect(place.frames[0]).toMatchObject({ op: "git.push", cwd: (await runtime.workspaces.get(made.id)).project.path });
+    expect(back).toMatchObject({ branch: "work", ahead: 1, pr: { number: 7, url: "https://github.com/o/r/pull/7" } });
+    // The road to a daemon inside is refused in one sentence rather than minting a route to a port nothing listens
+    // on, and so is the update that would deploy one.
+    const said = placeServesDaemonLine("work", "srv");
+    await expect(runtime.workspaces.daemonReach(made.id)).rejects.toThrow(said);
+    await expect(runtime.workspaces.updateDaemon(made.id)).rejects.toThrow(said);
+    // And the row reads reachable while the workspace runs, off the computer's own answer for it, which is what
+    // read Unreachable before.
+    const status = (await runtime.status.list()).find(w => w.id === made.id)!;
+    expect(status.reach.state).toBe("reachable");
+    // And nothing was written or deployed inside it: no roots file, and no daemon put there by any road of this
+    // host's, since the daemon answering for it is that computer's own.
+    expect(place.asked["machine.putBytes"]).toBeUndefined();
+    const wrote = place.asked["machine.exec"] ?? 0;
+    await runtime.status.list();
+    expect(place.asked["machine.exec"] ?? 0).toBe(wrote);
+  });
+
+  it("refuses the bring back on a computer whose daemon is older than the one this wsp deploys, and carries a pull request refusal as the note beside the landed push", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client, placeId, pair } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION - 1 }),
+      answers: c => (place = forks(c)),
+    });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    // A daemon that reads no workspace name on a files or git frame would resolve the checkout's path against its
+    // own home, so the frames are not sent at all: the row's own word for a computer that is behind, and the line
+    // that moves it on.
+    const behind = placeBehindLine("srv", placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!);
+    await expect(runtime.workspaces.bringBack({ workspaceId: made.id })).rejects.toThrow(behind);
+    expect(place.frames).toEqual([]);
+
+    // The same computer on this wsp's daemon takes the frames; a pull request it cannot open is the note beside a
+    // push that landed, never a failed bring back.
+    const { client: fresh } = await relink(hostKey, placeId, pair, report("srv", { daemonVersion: DAEMON_VERSION }), c => (place = forks(c)));
+    sockets.push(fresh.ws);
+    place.refuseGitPr = { error: noHostCliLine("github.com"), code: "no-host-cli" };
+    const back = await runtime.workspaces.bringBack({ workspaceId: made.id });
+    expect(back.note).toBe(noHostCliLine("github.com"));
+    expect(back.pr).toBeUndefined();
+    expect(back).toMatchObject({ branch: "work", ahead: 1 });
+    expect(place.frames.map(f => f["op"])).toEqual(["git.push", "git.pr"]);
   });
 
   it("says the computer it was forked on where a record names one, and this host's own provider otherwise", async () => {

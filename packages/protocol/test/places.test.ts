@@ -32,6 +32,7 @@ import {
   placeBehindLine,
   placeCurrentLine,
   placeDaemonBehind,
+  placeServesDaemonLine,
   placeNoChipLine,
   placeUpdateLine,
   placeAddSheetWord,
@@ -354,6 +355,10 @@ describe("the one word a row says about the daemon a place runs", () => {
     expect(placeBehindLine("spoo", placeDaemonBehind({ daemonVersion: 27 })!)).toBe(
       `spoo is behind: daemon 27, host ${DAEMON_VERSION}; wsp add spoo --update puts this wsp's daemon on it`,
     );
+  });
+
+  it("says which computer answers a workspace that runs no daemon of its own, rather than a route to a port nothing listens on", () => {
+    expect(placeServesDaemonLine("landing-a", "spoo")).toBe("landing-a has no daemon of its own: spoo answers its files and git through this host");
   });
 
   it("refuses a place already on this daemon and one whose chip this wsp builds none for, each naming what it read", () => {

@@ -208,7 +208,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -2212,8 +2212,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // this host already holds, so no address goes on the end of this line where every other kind's still does.
       wspMcp: () => ({ command: "wsp", args: ["mcp"] }),
       hostUrl: () => opts.agents?.reach?.url,
-      hasDaemon: entry => Boolean(entry.machine.previewUrl),
-      daemonRoad: cloudRoad,
+      // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
+      // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
+      hasDaemon: entry => servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
+      daemonRoad: entry =>
+        servedByItsComputer(entry) === undefined
+          ? cloudRoad(entry)
+          : Promise.reject(new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)))),
       scratch: () => GUEST_TMP,
       daemonVersion: entry => helloVersion(entry),
       dropped: async () => {},
@@ -2946,10 +2951,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Where a workspace's checkout of its project sits on its machine: the copy made for this piece of work, else
    * the project's own path, which is the folder worked in place on this computer and the clone inside a fork. */
   const checkoutOf = (r: WorkspaceRecord): string => r.copy?.path ?? projectHeld(r.project).path;
+  /** What the computer holding a workspace is called, for the sentences about a workspace whose daemon is that
+   * computer's own: the name the person gave that computer, or the word for its kind of machine. */
+  const computerOf = (entry: LiveWorkspace): string =>
+    entry.record.place !== undefined ? (placeDoor?.nameOf(entry.record.place) ?? entry.record.place) : machineWord(entry.record.kind);
+
+  /** The computer a workspace's daemon is that computer's own: a workspace on a computer somebody owns runs no
+   * daemon inside it, so its machine answers the daemon's frames itself, over the link the host already holds.
+   * Read in one place, since it decides both which road the frames take and whether anything dials at all. */
+  const servedByItsComputer = (entry: LiveWorkspace): ((frame: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined =>
+    entry.machine.daemonFrame?.bind(entry.machine);
+
   /** One dial of a workspace's own daemon for the frames this host sends itself, closed however the work ends: the
    * road the app's panes take for git.status, taken here for the two a bring back is made of. A refusal comes back
-   * with the code the daemon put on it, so a caller reads the reason rather than the sentence. */
+   * with the code the daemon put on it, so a caller reads the reason rather than the sentence.
+   *
+   * Where the workspace's daemon is the computer's own, the frames go up that computer's link with the workspace
+   * named on each one and nothing is dialled: a computer running a daemon too old to read that name would resolve
+   * the checkout's path against its own home, so it is refused first, in the word its row already carries. */
   const withDaemon = async <T>(entry: LiveWorkspace, work: (ask: (frame: DaemonFrame) => Promise<Record<string, unknown>>) => Promise<T>): Promise<T> => {
+    const served = servedByItsComputer(entry);
+    if (served !== undefined) {
+      const behind = await placeBehind(entry);
+      if (behind !== undefined) throw new Error(behind);
+      return work(async frame => {
+        const reply = await served(frame);
+        if (reply["ok"] === true) return reply;
+        throw new DaemonRefusal(typeof reply["code"] === "string" ? reply["code"] : undefined, String(reply["error"] ?? `${frame.op} was refused`));
+      });
+    }
     const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
     if (reach.daemonToken === undefined) throw new Error(`${entry.record.name} has no daemon answering yet`);
     const channel = await openChannel({ url: reach.url, token: reach.daemonToken });
@@ -2962,6 +2992,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     } finally {
       channel.close();
     }
+  };
+
+  /** Why the computer holding this workspace cannot answer its frames yet, or nothing when it can: a daemon older
+   * than the one this wsp deploys reads no workspace name on a files or git frame and would resolve the path
+   * against its own home, which is a refusal a person cannot act on. The word is the one the computers table
+   * already shows for a computer that is behind, with the line that moves it on. */
+  const placeBehind = async (entry: LiveWorkspace): Promise<string | undefined> => {
+    const placeId = entry.record.place;
+    if (placeId === undefined || placeDoor === undefined) return undefined;
+    const report = await placeDoor.reportOf(placeId);
+    if (report === undefined) return undefined;
+    const behind = placeDaemonBehind(report);
+    return behind === undefined ? undefined : placeBehindLine(placeDoor.nameOf(placeId), behind);
   };
 
   /** What a machine that did not answer the branch read exits with, so a read that never happened is told apart
@@ -3351,6 +3394,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // without waiting for it, and a write that landed after the close would be this process touching a computer
     // it has let go of.
     if (closed) return;
+    // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
+    // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
+    if (servedByItsComputer(entry) !== undefined) return;
     // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
     // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
     // workspace here, each in a copy of the project folder at a path of its own.
@@ -3387,7 +3433,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * to reach the machine, which is the machine's own question and not its kind's. Both roads into updateDaemon
    * read this, so neither offers to deploy where the other would not. */
   const canDeployDaemon = (entry: LiveWorkspace): boolean =>
-    moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record).capabilities, entry.machine);
+    // Nothing is put inside a workspace whose computer serves its daemon: the daemon answering for it is that
+    // computer's own, moved as a computer and never as a workspace. Read here, so neither the sync nor the revive
+    // offers a deploy the update would refuse.
+    servedByItsComputer(entry) === undefined &&
+    moduleOf(entry.record.kind).deployDaemon !== undefined &&
+    landsBytes(backendFor(entry.record).capabilities, entry.machine);
 
   /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
    * that writes down how it went: a machine that answered with what it lacks keeps its own sentence and the
@@ -3442,6 +3493,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (held !== undefined) return held;
     const work = (async () => {
       const module = moduleOf(entry.record.kind);
+      // Nothing is deployed into a workspace whose computer serves its daemon, and no roots file is written in it:
+      // the daemon answering for it is that computer's own, which the update road moves as a computer and not as a
+      // workspace.
+      if (servedByItsComputer(entry) !== undefined) return;
       // A machine that answered with what it lacks is left alone until its window is out, whether it is being
       // given a first daemon or having one replaced: the thing it has not got stops both roads, and only a person
       // can change that answer. Read off the record above every round trip below, so a tick that finds the window
@@ -4516,7 +4571,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A computer that would not fork at the size asked for says so on the handle, and the create's own answer is
     // where a person reads it: the record already holds the size that computer actually gave.
     if (entry.machine.notice !== undefined) notices.push(entry.machine.notice);
-    if (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined) {
+    // A workspace whose computer serves its daemon is asked nothing here: there is no route to mint and no daemon
+    // inside to answer, so the create says nothing about either rather than printing a note about a port nothing
+    // listens on.
+    if (servedByItsComputer(entry) === undefined && (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined)) {
       // The route and the daemon are two questions, and the create asks them apart: minting is what the app and
       // the first client will dial, and a mint that fails is its own line rather than a verdict on the guest.
       if (entry.machine.previewUrl !== undefined) {
@@ -5015,6 +5073,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async updateDaemon(id, origin) {
       const entry = await entryOf(id, origin);
+      if (servedByItsComputer(entry) !== undefined) {
+        throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
+      }
       const deploy = moduleOf(entry.record.kind).deployDaemon;
       if (deploy === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
       if (entry.record.phase !== "running") throw new Error(`wake ${entry.record.name} before updating its daemon`);

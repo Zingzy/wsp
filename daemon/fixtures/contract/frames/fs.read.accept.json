@@ -9,5 +9,11 @@
     "op": "fs.read",
     "path": "logo.png",
     "encoding": "base64"
+  },
+  {
+    "id": 1,
+    "op": "fs.read",
+    "path": "repo/README.md",
+    "machineId": "wsp-a"
   }
 ]

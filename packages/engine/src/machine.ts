@@ -119,6 +119,13 @@ export interface Machine {
   /** Optional: what keeps a process running on this machine, read by the daemon deploy. Absent means the guest has
    * a service manager and the deploy registers a unit with it. */
   readonly daemonSupervisor?: DaemonSupervisor;
+  /** Optional: one frame of the daemon protocol answered for this machine by the daemon that serves it, where that
+   * daemon is the computer's own rather than one inside the machine. A workspace on a computer somebody owns runs
+   * no daemon of its own: it is that computer's directories, and its files and its git are answered by the daemon
+   * holding it, so the frame travels the road this backend already holds with the machine named on it. A refusal
+   * comes back as the reply object it was, `ok: false` with its code, so a caller reads the reason rather than the
+   * sentence. Absent on every machine whose daemon is dialled inside it. */
+  daemonFrame?(frame: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** Optional: backends that expose size and creation time per machine. */
   describe?(): Promise<MachineShape>;
   /** Optional: a machine that already existed before wsp says what it is; the status poll carries the answer. */

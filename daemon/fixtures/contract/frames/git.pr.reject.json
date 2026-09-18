@@ -9,5 +9,11 @@
     "cwd": "repo",
     "base": "main",
     "title": 7
+  },
+  {
+    "id": 1,
+    "op": "git.pr",
+    "cwd": "repo",
+    "machineId": 1
   }
 ]

@@ -25,11 +25,11 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use wsp_frames::{
-    words, BackendFacts, BackendPricing, Bind, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
-    LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply,
-    MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode,
-    PlaceCapacity, PreviewReach, Reply, RequestId, Share, SnapshotStoragePricing, WorkspaceCopy, WorkspaceSize,
+    words, BackendFacts, BackendPricing, Bind, Capabilities, CopyWord, DaemonErrorResponse, ExecResult, Lifecycle, LifecycleBudgets,
+    MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind,
+    MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply, MachineRoads,
+    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode, PlaceCapacity,
+    PreviewReach, Reply, RequestId, Share, SnapshotStoragePricing, WorkspaceCopy, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, CopyMade, Init, Layout, Workspace};
@@ -46,12 +46,8 @@ use crate::{answer_machine_op, no_backend_refusal};
 pub const OFFER: &str = "runtime";
 /// The kernel takes 64 bytes of host name and refuses the boot above it.
 pub const HOSTNAME_MAX: usize = 63;
-/// Where a sealed image keeps the script that keeps its daemon running; the boot runs it when it is there.
-pub const GUEST_SUPERVISOR_PATH: &str = "/root/wsp-daemon/supervise.sh";
 /// The environment every exec carries ahead of its command, as every wsp guest exec does.
 pub const EXEC_ENV: &str = "export HOME=/root USER=root";
-/// Whether the guest's daemon listens, asked from inside in the words a base image can answer in.
-pub const DAEMON_LISTENING_CHECK: &str = "(exec 3<>/dev/tcp/127.0.0.1/7070) 2>/dev/null";
 /// The label every workspace wears, so a listing is only ours.
 pub const WSP_LABEL: &str = "wsp";
 /// The label a workspace's own name rides on, which the host stamps at the create: what the refusal of a create
@@ -63,24 +59,11 @@ const DAEMON_ANSWERS_MS: u64 = 30_000;
 /// The Docker backend's default exec deadline.
 const EXEC_DEFAULT: Duration = Duration::from_millis(20_000);
 
-/// What every workspace boots: the daemon's supervisor once an image carries one, else a process that holds the
-/// workspace up so execs can reach it. The same line the Docker backend boots, so a sealed image starts the same.
+/// What every workspace boots: one process that holds it up so execs can reach it. Nothing supervises a daemon
+/// inside a workspace here, since the daemon that serves it is this computer's own: it answers that workspace's
+/// files and git off its rootfs and inside its namespaces, and nothing is deployed in.
 pub fn boot_cmd() -> Vec<String> {
-    vec![
-        "/bin/sh".to_owned(),
-        "-c".to_owned(),
-        format!("if [ -x {GUEST_SUPERVISOR_PATH} ]; then exec {GUEST_SUPERVISOR_PATH}; fi\nexec sleep infinity"),
-    ]
-}
-
-/// Whether a command run inside is the workspace doing something or this computer asking whether it is still
-/// there. The daemon-listening probe is the host's own health check, asked of every running workspace every few
-/// seconds for as long as the host is up, so a workspace whose probe counted would read busy for ever and never
-/// reach a window's end. Everything else a command road carries was asked for by somebody.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Seen {
-    Command,
-    Probe,
+    vec!["sleep".to_owned(), "infinity".to_owned()]
 }
 
 /// What every exec carries ahead of its command: the home and the user every wsp guest exec sets, and the
@@ -143,7 +126,7 @@ impl OpError {
     }
 
     fn no_workspace(id: &str) -> OpError {
-        OpError::missing(format!("no such workspace: {id}"))
+        OpError::missing(crate::no_such_workspace(id))
     }
 }
 
@@ -393,7 +376,7 @@ impl Ops {
             MachineOp::List { labels } => body(MachineListReply { machines: self.list(labels.as_ref())? }),
             MachineOp::Exec { machine_id, cmd, timeout_ms } => {
                 let record = self.running(&machine_id)?;
-                body(MachineExecReply { result: self.exec(&record, &cmd, None, deadline(timeout_ms), Seen::Command).await? })
+                body(MachineExecReply { result: self.exec(&record, &cmd, None, deadline(timeout_ms)).await? })
             }
             MachineOp::Pause { machine_id } => {
                 let record = self.record(&machine_id)?;
@@ -435,10 +418,12 @@ impl Ops {
                 })
             }
             MachineOp::Metrics { machine_id } => body(MachineReadingReply { reading: self.reading(&self.record(&machine_id)?) }),
-            MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
-                let record = self.running(&machine_id)?;
-                let result = self.exec(&record, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms), Seen::Probe).await?;
-                body(MachineAnswersReply { answers: result.exit_code == 0 })
+            // The daemon that serves this workspace is this one, so what it answers is whether the workspace runs.
+            // Nothing is asked inside: a port inside is nobody's road to it, and a probe run in the workspace would
+            // be this computer asking itself.
+            MachineOp::DaemonAnswers { machine_id, timeout_ms: _ } => {
+                let record = self.record(&machine_id)?;
+                body(MachineAnswersReply { answers: runtime::alive(&record.init) })
             }
             MachineOp::PutBytes { machine_id, path, upload_id, seq, last, data, timeout_ms } => {
                 let record = self.running(&machine_id)?;
@@ -933,17 +918,11 @@ impl Ops {
         self.boot(record).await
     }
 
-    async fn exec(
-        &self,
-        record: &Workspace,
-        cmd: &str,
-        stdin: Option<Vec<u8>>,
-        timeout: Duration,
-        seen: Seen,
-    ) -> Result<ExecResult, OpError> {
-        if seen == Seen::Command {
-            self.net.touched(&record.id);
-        }
+    /// Every command run inside was asked for by somebody, so every one of them is the workspace working and keeps
+    /// its quiet clock at zero: this computer asks a workspace nothing of its own any more, since the daemon that
+    /// serves it is this one and a workspace that runs is a workspace that answers.
+    async fn exec(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
+        self.net.touched(&record.id);
         let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
         let done = self.runtime.exec(&record.id, &args, stdin, timeout).await?;
         Ok(ExecResult { exit_code: done.exit_code, stdout: done.stdout, stderr: done.stderr })
@@ -986,7 +965,7 @@ impl Ops {
         let whole = fs::read(&part)?;
         let _ = fs::remove_file(&part);
         let script = land_script(path, whole.len());
-        let done = self.exec(record, &script, Some(whole), timeout, Seen::Command).await?;
+        let done = self.exec(record, &script, Some(whole), timeout).await?;
         if done.exit_code != 0 {
             return Err(OpError::plain(format!("landing {path} on {} exited {}: {}", record.id, done.exit_code, done.stderr.trim())));
         }
@@ -1027,7 +1006,8 @@ impl Ops {
             labels: Some(record.labels.clone()),
             seen,
             replayed,
-            daemon_supervisor: Some(DaemonSupervisor::Entrypoint),
+            // None: no daemon runs inside a workspace here, so nothing supervises one and no deploy reads this.
+            daemon_supervisor: None,
             notice: None,
             roads: MachineRoads { preview_url: true, daemon_answers: true, put_bytes: true, describe: true, facts: false, metrics: true },
         }
@@ -1053,6 +1033,22 @@ impl Ops {
             cgroup: cgroup.display().to_string(),
             upper: self.layout.upper(&record.id).display().to_string(),
         }
+    }
+
+    /// Where one running workspace's files are on this computer: its rootfs under the run directory, which is the
+    /// workspace's own view of / and the one place a path inside it resolves against. A stopped workspace has no
+    /// rootfs mounted, so it is refused in the same sentence an exec into one is.
+    pub fn rootfs_of_running(&self, id: &str) -> Result<PathBuf, OpError> {
+        let record = self.running(id)?;
+        Ok(self.layout.rootfs(&record.id))
+    }
+
+    /// One command inside a running workspace, for the halves of this daemon that serve a workspace's own work:
+    /// the git road runs here rather than on the computer, since a checkout's hooks and config are agent-written
+    /// and belong inside the workspace's namespaces, its cgroup and its covers.
+    pub async fn exec_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
+        let record = self.running(id)?;
+        self.exec(&record, cmd, stdin, timeout).await
     }
 
     fn record(&self, id: &str) -> Result<Workspace, OpError> {
@@ -1389,6 +1385,55 @@ mod tests {
             shares: Vec::new(),
             binds: Vec::new(),
         }
+    }
+
+    /// A workspace here runs no daemon of its own: it boots one process that holds it up, nothing supervises a
+    /// daemon inside it, and the daemon that answers for it is this one, which answers whether the workspace runs.
+    #[tokio::test]
+    async fn a_workspace_here_boots_one_process_and_this_daemon_answers_for_it() {
+        // No shell, no supervisor script, nothing to look for: the boot is the one process execs reach it through.
+        assert_eq!(boot_cmd(), vec!["sleep".to_owned(), "infinity".to_owned()]);
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let running = runtime::identity_of(std::process::id() as i32).unwrap();
+        for (id, init) in [("wsp-awake", running), ("wsp-asleep", Init { pid: i32::MAX, started: 0, boot_id: String::new() })] {
+            let mut record = awake(id, None);
+            record.init = init;
+            fs::create_dir_all(layout.upper(id)).unwrap();
+            bundle::write_json(&layout.record(id), &record).unwrap();
+        }
+        let answers = async |id: &str| -> Value {
+            let frame = serde_json::json!({ "id": 1, "op": "machine.daemonAnswers", "machineId": id, "timeoutMs": 1000 });
+            serde_json::from_str(&ops.answer(Some(RequestId::from(1)), &frame).await).unwrap()
+        };
+        // Read off the record and nothing else: this workspace's init is a live process, so its daemon answers.
+        // Nothing was execed inside it, which a workspace with no container would have failed at.
+        assert_eq!(answers("wsp-awake").await, serde_json::json!({ "id": 1, "ok": true, "answers": true }));
+        // A stopped workspace answers no rather than refusing: the poll reads it as napping off its state.
+        assert_eq!(answers("wsp-asleep").await, serde_json::json!({ "id": 1, "ok": true, "answers": false }));
+        // And a workspace this computer does not know is the missing refusal, as every other op answers it.
+        let unknown = answers("wsp-x").await;
+        assert_eq!(
+            (unknown["ok"].as_bool(), unknown["error"].as_str(), unknown["kind"].as_str()),
+            (Some(false), Some("no such workspace: wsp-x"), Some("missing"))
+        );
+        // The handle names no supervisor: nothing keeps a daemon up inside a workspace here, and no deploy reads it.
+        let handle = serde_json::from_str::<Value>(
+            &ops.answer(Some(RequestId::from(1)), &serde_json::json!({ "id": 1, "op": "machine.get", "machineId": "wsp-awake" })).await,
+        )
+        .unwrap();
+        assert_eq!(handle["ok"], true, "{handle}");
+        assert!(handle["machine"].get("daemonSupervisor").is_none(), "{handle}");
+        // The two roads the daemon's own halves take into a running workspace: its rootfs, and a command inside.
+        assert_eq!(ops.rootfs_of_running("wsp-awake").unwrap(), layout.rootfs("wsp-awake"));
+        assert_eq!(ops.rootfs_of_running("wsp-asleep").unwrap_err().message, "workspace wsp-asleep is stopped");
+        assert_eq!(ops.rootfs_of_running("wsp-x").unwrap_err().message, "no such workspace: wsp-x");
+        assert_eq!(
+            ops.exec_in("wsp-asleep", "true", None, Duration::from_secs(1)).await.unwrap_err().message,
+            "workspace wsp-asleep is stopped"
+        );
+        assert_eq!(ops.exec_in("wsp-x", "true", None, Duration::from_secs(1)).await.unwrap_err().message, "no such workspace: wsp-x");
     }
 
     /// A create a box has no room for is refused in one sentence, and the sentence names the workspace to stop:

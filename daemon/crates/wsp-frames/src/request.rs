@@ -77,21 +77,43 @@ pub enum DaemonOp {
         path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         gitignore: Option<bool>,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
     #[serde(rename = "fs.read", rename_all = "camelCase")]
     FsRead {
         path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         encoding: Option<FsReadEncoding>,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
-    #[serde(rename = "git.status")]
-    GitStatus { cwd: String },
+    #[serde(rename = "git.status", rename_all = "camelCase")]
+    GitStatus {
+        cwd: String,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "git.diff", rename_all = "camelCase")]
     GitDiff {
         cwd: String,
         scope: GitDiffScope,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
     /// Pushes the branch this checkout is on to its remote, refusing the base branch itself: work leaves a
     /// workspace through git, and the branch is the agent's own to make.
@@ -102,6 +124,11 @@ pub enum DaemonOp {
         /// project recorded without a base was cloned at.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base: Option<String>,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
     /// Opens the branch's pull request against the base through the git host's own signed-in command line, or
     /// answers with the one that is already open.
@@ -114,10 +141,22 @@ pub enum DaemonOp {
         title: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
     /// Where the branch's pull request stands, read back through that same command line.
     #[serde(rename = "git.prState", rename_all = "camelCase")]
-    GitPrState { cwd: String },
+    GitPrState {
+        cwd: String,
+        /// The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
+        /// that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
+        /// this daemon's own roots.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "tunnel.open", rename_all = "camelCase")]
     TunnelOpen { tunnel_id: String, port: NonZeroU16 },
     #[serde(rename = "tunnel.write", rename_all = "camelCase")]

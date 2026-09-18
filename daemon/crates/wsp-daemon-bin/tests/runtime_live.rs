@@ -251,8 +251,10 @@ async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_comm
     assert_eq!(lines[2], "0", "{out}");
     assert_eq!(lines[3], "t");
     assert_eq!(lines[4], format!("wsp-live-665-build-{}", checkout_key()));
-    assert!(out.contains("exec sleep infinity"), "the boot command runs: {out}");
-    assert!(out.contains("/sbin/wsp-init runtime init"), "the init runs first: {out}");
+    // One process under the init, and no shell between them: nothing inside a workspace here looks for a daemon
+    // supervisor, since the daemon that serves it is this computer's own.
+    assert!(out.contains("/sbin/wsp-init runtime init -- sleep infinity"), "the init runs the boot command: {out}");
+    assert!(!out.contains("supervise.sh"), "something inside still looks for a daemon supervisor: {out}");
     // The same key again answers the workspace that exists, replayed.
     let again =
         w.ok("machine.create", json!({ "spec": spec(json!({ "idempotencyKey": format!("live-665-build-{}", checkout_key()) })) })).await;
@@ -265,7 +267,8 @@ async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_comm
     let got = w.ok("machine.get", json!({ "machineId": id })).await;
     assert_eq!(got["machine"]["labels"], json!({ "wsp": "1", "wsp-owner": live_owner() }));
     assert_eq!(got["machine"]["seen"]["state"], "running");
-    assert_eq!(got["machine"]["daemonSupervisor"], "entrypoint");
+    // No supervisor: nothing keeps a daemon up inside a workspace here and no deploy puts one there.
+    assert!(got["machine"].get("daemonSupervisor").is_none(), "{got}");
     w.close().await;
 }
 
@@ -779,20 +782,34 @@ async fn puts_bytes_where_they_belong_and_serves_no_signed_url() {
     w.close().await;
 }
 
+/// What this computer's daemon answers about one workspace of its own: whether that workspace runs.
+async fn daemon_answers(w: &World, id: &str) -> bool {
+    w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"].as_bool().unwrap()
+}
+
+/// The daemon that serves a workspace here is this one, so what it answers about that workspace is whether it
+/// runs: nothing listens inside, nothing is asked inside, and a stopped workspace answers no.
 #[tokio::test]
-async fn asks_the_guest_itself_whether_the_daemon_is_listening_and_says_it_is_the_entrypoint() {
+async fn answers_for_a_workspace_itself_rather_than_asking_a_port_inside_it() {
     if !live() {
         return;
     }
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
-    assert_eq!(w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"], false);
-    // A listener on the guest's own loopback: the base image carries perl, and nothing else that listens.
-    let (code, _, err) = w.exec(&id, "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"127.0.0.1\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; sleep 60' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err").await;
-    assert_eq!((code, err.as_str()), (0, ""));
-    assert_eq!(w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"], true);
+
+    // Nothing listens on 7070 inside and the answer is still yes: the workspace runs, and this daemon is the one
+    // that serves its files and its git.
+    let (code, listening, err) = w.exec(&id, "(exec 3<>/dev/tcp/127.0.0.1/7070) 2>/dev/null; echo inside $?").await;
+    show("what listens on the daemon port inside a workspace", code, &listening, &err);
+    assert_eq!(listening.trim(), "inside 1", "something listens on 7070 inside: {listening}");
+    assert!(daemon_answers(&w, &id).await, "the workspace runs and its daemon answered no");
+    // And a stopped workspace answers no, which is what the row reads as napping.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    assert!(!daemon_answers(&w, &id).await);
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+    assert!(daemon_answers(&w, &id).await);
     let got = w.ok("machine.get", json!({ "machineId": id })).await;
-    assert_eq!(got["machine"]["daemonSupervisor"], "entrypoint");
+    assert!(got["machine"].get("daemonSupervisor").is_none(), "{got}");
     let facts = w.ask("machine.facts", json!({ "machineId": id })).await;
     assert_eq!(facts["error"], "this computer's backend has no facts");
     w.ok("machine.metrics", json!({ "machineId": id })).await;
@@ -2156,4 +2173,167 @@ async fn a_btrfs_subvolume_is_snapshotted_rather_than_walked_at_all() {
     assert_eq!(fs::read(from.join("README.md")).unwrap(), b"the checkout\n");
     copier.remove(&to).unwrap();
     assert!(!to.exists(), "the snapshot's own directory stayed after the remove");
+}
+
+/// git on the box for the cases that build a repo there: the identity every commit here carries, since a box may
+/// have none of its own.
+fn git_at(cwd: impl AsRef<Path>, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd.as_ref())
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@x")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@x")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A daemon of this computer's on the same runtime root the cases drive, for the frames a workspace's files and
+/// git ride: what a host holding this computer's link sends, sent here over a socket of its own.
+struct FramesDaemon {
+    addr: std::net::SocketAddr,
+    _token: tempfile::NamedTempFile,
+}
+
+const FRAMES_TOKEN: &str = "runtime-live-token";
+
+async fn frames_daemon() -> FramesDaemon {
+    let mut token = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut token, format!("{FRAMES_TOKEN}\n").as_bytes()).unwrap();
+    let mut options = wsp_daemon::Options::new(token.path());
+    options.host = "127.0.0.1".to_owned();
+    options.port = 0;
+    options.root = Some(root());
+    options.roots_path = Some(root().join("roots"));
+    options.runtime_root = Some(root());
+    let daemon = wsp_daemon::Daemon::bind(options).await.unwrap();
+    let addr = daemon.local_addr();
+    tokio::spawn(daemon.run());
+    FramesDaemon { addr, _token: token }
+}
+
+/// One authed socket on that daemon, one frame at a time.
+struct FrameClient {
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    next_id: u64,
+}
+
+impl FrameClient {
+    async fn connect(addr: std::net::SocketAddr) -> FrameClient {
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/")).await.unwrap();
+        let mut c = FrameClient { ws, next_id: 0 };
+        assert_eq!(c.request("auth", json!({ "token": FRAMES_TOKEN })).await["ok"], true);
+        c
+    }
+
+    async fn request(&mut self, op: &str, params: Value) -> Value {
+        use futures_util::{SinkExt, StreamExt};
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut frame = json!({ "id": id, "op": op });
+        for (k, v) in params.as_object().unwrap() {
+            frame[k] = v.clone();
+        }
+        self.ws.send(tokio_tungstenite::tungstenite::Message::text(frame.to_string())).await.unwrap();
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(120), self.ws.next()).await.expect("the daemon answers");
+            match next {
+                Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
+                    let value: Value = serde_json::from_str(&t).unwrap();
+                    if value.get("id") == Some(&json!(id)) {
+                        return value;
+                    }
+                }
+                Some(Ok(_)) => continue,
+                other => panic!("the socket ended while {frame} was pending: {other:?}"),
+            }
+        }
+    }
+}
+
+/// The files and the git of a workspace on a computer somebody owns, answered by that computer's daemon for the
+/// workspace the frame names: a workspace here runs no daemon of its own, so the daemon this case starts on the
+/// same root serves them. Files are read on the box side through the workspace's rootfs, since a read runs no code;
+/// git runs inside the workspace, which is what the hook this case writes proves.
+#[tokio::test]
+async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspace_named() {
+    if !live() {
+        return;
+    }
+    let key = checkout_key();
+    // A checkout with a bare origin beside it, both on the box, so the push has somewhere to land with no network
+    // and no credential. The pre-push hook is what says where git ran: it writes a file, and that file may exist
+    // in the workspace's own upper and nowhere on the box.
+    let from = root().join("projects").join(format!("live-frames-{key}"));
+    let origin = root().join("projects").join(format!("live-frames-origin-{key}.git"));
+    for at in [&from, &origin] {
+        let _ = fs::remove_dir_all(at);
+    }
+    fs::create_dir_all(&from).unwrap();
+    git_at(root(), &["init", "-q", "--bare", "-b", "main", &origin.to_string_lossy()]);
+    git_at(&from, &["init", "-q", "-b", "main"]);
+    fs::write(from.join("README.md"), b"the checkout\n").unwrap();
+    git_at(&from, &["add", "-A"]);
+    git_at(&from, &["commit", "-q", "-m", "first"]);
+    git_at(&from, &["remote", "add", "origin", &origin.to_string_lossy()]);
+    git_at(&from, &["push", "-q", "-u", "origin", "main"]);
+    git_at(&from, &["switch", "-q", "-c", "work"]);
+    fs::write(from.join("one.txt"), b"one\n").unwrap();
+    git_at(&from, &["add", "one.txt"]);
+    git_at(&from, &["commit", "-q", "-m", "one"]);
+    let hook = from.join(".git/hooks/pre-push");
+    fs::write(&hook, "#!/bin/sh\nhostname > /var/tmp/wsp-pre-push-ran\n").unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let marker = "/var/tmp/wsp-pre-push-ran";
+    let _ = fs::remove_file(marker);
+
+    let mut w = World::open().await;
+    let at = "/root/live-frames";
+    let id = w.create(spec(json!({ "copy": { "from": from.display().to_string(), "at": at } }))).await;
+    // A symlink inside the checkout that leads out of the workspace: read through the frame road it is refused,
+    // since the path is resolved against the workspace's own rootfs and nowhere else.
+    let (code, _, err) = w.exec(&id, &format!("ln -sfn /etc/shadow {at}/escape")).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+
+    let daemon = frames_daemon().await;
+    let mut client = FrameClient::connect(daemon.addr).await;
+    // The checkout as the workspace sees it: one directory read on the box side through the rootfs.
+    let listed = client.request("fs.list", json!({ "path": at, "machineId": &id })).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    let names: Vec<&str> = listed["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"README.md") && names.contains(&"one.txt"), "{listed}");
+    // The branch the agent made, read by a git that ran inside the workspace.
+    let status = client.request("git.status", json!({ "cwd": at, "machineId": &id })).await;
+    assert_eq!((status["ok"].as_bool(), status["branch"]["head"].as_str()), (Some(true), Some("work")), "{status}");
+    assert_eq!(status["root"].as_str(), Some(at));
+    // A path that leaves the workspace is refused, and so is a workspace this computer does not run.
+    let escaped = client.request("fs.read", json!({ "path": format!("{at}/escape"), "machineId": &id })).await;
+    assert_eq!((escaped["ok"].as_bool(), escaped["code"].as_str()), (Some(false), Some("outside-root")), "{escaped}");
+    let nowhere = client.request("git.status", json!({ "cwd": at, "machineId": "wsp-nobody" })).await;
+    assert_eq!((nowhere["ok"].as_bool(), nowhere["error"].as_str()), (Some(false), Some("no such workspace: wsp-nobody")), "{nowhere}");
+
+    // The push: the branch lands on the bare origin on the box, and the hook ran inside the workspace, which is
+    // the whole reason git runs there. Its marker is in the workspace's own upper and on no path of the box's.
+    let pushed = client.request("git.push", json!({ "cwd": at, "base": "main", "machineId": &id })).await;
+    assert_eq!(pushed["ok"], true, "{pushed}");
+    assert_eq!((pushed["branch"].as_str(), pushed["base"].as_str(), pushed["ahead"].as_u64()), (Some("work"), Some("main"), Some(1)));
+    assert_eq!(git_at(&origin, &["rev-parse", "work"]).trim(), git_at(&from, &["rev-parse", "work"]).trim());
+    let (code, ran, _) = w.exec(&id, &format!("cat {marker}")).await;
+    assert_eq!(code, 0, "the pre-push hook did not run inside the workspace");
+    assert!(!ran.trim().is_empty(), "the hook wrote nothing inside");
+    assert!(!Path::new(marker).exists(), "the hook ran on the box rather than inside the workspace");
+
+    // A stopped workspace has no rootfs mounted and no process to run git in, and says so in the runtime's words.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    let asleep = client.request("git.status", json!({ "cwd": at, "machineId": &id })).await;
+    assert_eq!(
+        (asleep["ok"].as_bool(), asleep["error"].as_str()),
+        (Some(false), Some(format!("workspace {id} is stopped").as_str())),
+        "{asleep}"
+    );
+    w.close().await;
 }

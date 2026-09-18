@@ -3023,25 +3023,33 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * with --root) or absolute inside it or an imported project folder named in
    * DAEMON_ROOTS_PATH; anything resolving outside every root, through .. or a
    * symlink, is refused with code outside-root. gitignore hides .git and the
-   * entries git would ignore. */
+   * entries git would ignore.
+   *
+   * machineId, on these seven and on no other op of this road: the workspace the frame is for, on a daemon that
+   * runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the
+   * computer holding it answers for it: the path then names the folder as that workspace sees it, a file is read
+   * through the workspace's own rootfs and a git operation runs inside the workspace, in its namespaces and its
+   * cgroup. Without one the path is resolved under the daemon's own roots, which is every other machine. A daemon
+   * that runs no workspace answers the missing refusal for any machineId. */
   z.object({
     id: reqId,
     op: z.literal("fs.list"),
     path: z.string(),
     gitignore: z.boolean().optional(),
+    machineId: z.string().optional(),
   }),
-  z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
-  z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
-  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
-  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional(), machineId: z.string().optional() }),
   /** Opens the branch's pull request against the base through the git host's own signed-in command line, or
    * answers with the one already open. Refused with code no-host-cli where that command line is not there. */
-  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
   /** Where the branch's pull request stands, read back through that same command line. */
-  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string() }),
+  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3432,6 +3440,13 @@ export const placeForksNowhereLine = (place: string): string => `${place} is no 
  * road to a workspace there. */
 export const placeNotAWorkspaceLine = (place: string): string => `${place} is a computer you joined, not a workspace; its forks are the workspaces`;
 export const placeNotAWorkspaceFix = (place: string): string => `Fork one there: wsp new <name> --on ${place}.`;
+
+/** What a caller asking for the road to a workspace's own daemon is told, where that workspace runs none: a
+ * workspace on a computer somebody owns is that computer's directories under the computer's own daemon, and that
+ * daemon answers its files and its git through the host. Said rather than a route minted to a port nothing listens
+ * on, which is what the panes and the relay read before. */
+export const placeServesDaemonLine = (workspace: string, computer: string): string =>
+  `${workspace} has no daemon of its own: ${computer} answers its files and git through this host`;
 
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */

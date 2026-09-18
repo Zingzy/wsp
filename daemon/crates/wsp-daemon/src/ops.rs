@@ -355,6 +355,97 @@ async fn locate(ctx: &Ctx, requested: &str) -> Result<PathBuf, OpError> {
     fs::blocking(move || paths::resolve_inside(&paths::roots_now(&root, &roots_path)?, &requested)).await
 }
 
+/// Which way an op runs a program, and so which machine it is answered for: this computer, or one workspace this
+/// computer holds. One enum rather than a generic on every arm, and one module behind each way.
+enum Runner {
+    Here(git::here::Here),
+    #[cfg(target_os = "linux")]
+    Inside(git::inside::Inside),
+}
+
+impl git::Runs for Runner {
+    async fn run(
+        &self,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        input: Option<&[u8]>,
+        max_bytes: Option<usize>,
+    ) -> Result<git::GitResult, OpError> {
+        match self {
+            Runner::Here(here) => here.run(cwd, program, args, input, max_bytes).await,
+            #[cfg(target_os = "linux")]
+            Runner::Inside(inside) => inside.run(cwd, program, args, input, max_bytes).await,
+        }
+    }
+
+    async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+        match self {
+            Runner::Here(here) => here.on_path(program).await,
+            #[cfg(target_os = "linux")]
+            Runner::Inside(inside) => inside.on_path(program).await,
+        }
+    }
+}
+
+/// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns
+/// runs no daemon of its own, so this daemon answers for it. A daemon that runs no workspace, and one that runs
+/// none by this name, answer the same missing refusal every other op answers for a machine it does not know.
+#[cfg(target_os = "linux")]
+fn workspaces_of(ctx: &Ctx, machine: &str) -> Result<std::sync::Arc<wsp_runtime::ops::Ops>, OpError> {
+    match &ctx.runtime {
+        Some(ops) => Ok(std::sync::Arc::clone(ops)),
+        None => Err(no_such_workspace(machine)),
+    }
+}
+
+/// The refusal for a workspace this daemon does not run, in the runtime's own words and with its own code, so the
+/// host reads one sentence whether the workspace is gone or the computer runs none at all.
+fn no_such_workspace(machine: &str) -> OpError {
+    OpError::coded(DaemonErrorCode::NotFound, wsp_runtime::no_such_workspace(machine))
+}
+
+/// A refusal the workspace runtime gave, as this switch answers it: the workspace it does not know carries the
+/// same code a daemon running no workspaces answers with, and every other sentence is the runtime's own.
+#[cfg(target_os = "linux")]
+pub(crate) fn from_runtime(e: wsp_runtime::ops::OpError) -> OpError {
+    match e.kind {
+        Some(wsp_frames::MachineErrorKind::Missing) => OpError::coded(DaemonErrorCode::NotFound, e.message),
+        _ => OpError::plain(e.message),
+    }
+}
+
+/// Where a path a frame names is read, and how a program for it is run: on this computer as ever, or under one
+/// workspace's rootfs with git run inside that workspace. A path inside is held to the wire's own plain-path rule
+/// and then resolved against the rootfs, so `..` and a symlink that leaves the workspace are refused exactly as a
+/// path that leaves a root is.
+#[cfg(target_os = "linux")]
+async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+    let Some(machine) = machine else {
+        let at = locate(ctx, requested).await?;
+        return Ok((Runner::Here(git::here::Here::new()), at.clone(), at));
+    };
+    let ops = workspaces_of(ctx, machine)?;
+    let rootfs = ops.rootfs_of_running(machine).map_err(from_runtime)?;
+    let joined =
+        wsp_runtime::bundle::inside(&rootfs, requested).map_err(|e| OpError::coded(DaemonErrorCode::OutsideRoot, e.to_string()))?;
+    let under = fs::blocking(move || paths::resolve_inside(&[rootfs], &joined.to_string_lossy())).await?;
+    Ok((Runner::Inside(git::inside::Inside::new(ops, machine)), under, PathBuf::from(requested)))
+}
+
+/// The same on a computer whose daemon runs no workspace at all: every path is its own, and a frame that names a
+/// workspace is the missing refusal.
+#[cfg(not(target_os = "linux"))]
+async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+    match machine {
+        Some(machine) => Err(no_such_workspace(machine)),
+        None => {
+            let at = locate(ctx, requested).await?;
+            Ok((Runner::Here(git::here::Here::new()), at.clone(), at))
+        }
+    }
+}
+
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
     match op {
         DaemonOp::PtyCreate { cols, rows, shell, cwd, env } => {
@@ -425,42 +516,59 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             text(&Reply::new(id, run_exec(Path::new(&ctx.root), &env, &cmd, opts).await))
         }
-        DaemonOp::FsList { path, gitignore } => {
-            let listed = async { fs::list_dir(locate(ctx, &path).await?, gitignore == Some(true), numbers::FS_LIST_CAP_ENTRIES).await };
+        DaemonOp::FsList { path, gitignore, machine_id } => {
+            let listed = async {
+                let (runner, under, at) = road(ctx, machine_id.as_deref(), &path).await?;
+                fs::list_dir(under, &at, gitignore == Some(true), numbers::FS_LIST_CAP_ENTRIES, &runner).await
+            };
             answer(id, listed.await)
         }
-        DaemonOp::FsRead { path, encoding } => {
+        DaemonOp::FsRead { path, encoding, machine_id } => {
             let read = async {
-                fs::read_file_bounded(locate(ctx, &path).await?, encoding.unwrap_or(FsReadEncoding::Utf8), numbers::FS_READ_CAP_BYTES).await
+                let (_, under, _) = road(ctx, machine_id.as_deref(), &path).await?;
+                fs::read_file_bounded(under, encoding.unwrap_or(FsReadEncoding::Utf8), numbers::FS_READ_CAP_BYTES).await
             };
             answer(id, read.await)
         }
-        DaemonOp::GitStatus { cwd } => answer(id, async { git::git_status(&locate(ctx, &cwd).await?).await }.await),
-        DaemonOp::GitDiff { cwd, scope, path } => {
-            let diff = async { git::git_diff(&locate(ctx, &cwd).await?, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await };
+        DaemonOp::GitStatus { cwd, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                git::git_status(&runner, &at).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitDiff { cwd, scope, path, machine_id } => {
+            let diff = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                git::git_diff(&runner, &at, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await
+            };
             answer(id, diff.await)
         }
-        DaemonOp::GitPush { cwd, base } => answer(id, async { bring_back::push(&locate(ctx, &cwd).await?, base.as_deref()).await }.await),
-        DaemonOp::GitPr { cwd, base, title, body } => {
+        DaemonOp::GitPush { cwd, base, machine_id } => {
+            let pushed = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                bring_back::push(&runner, &at, base.as_deref()).await
+            };
+            answer(id, pushed.await)
+        }
+        DaemonOp::GitPr { cwd, base, title, body, machine_id } => {
             let opened = async {
-                let at = locate(ctx, &cwd).await?;
-                let (remote, remote_url) = bring_back::remote_url(&at).await?;
-                let base = bring_back::base_of(&at, &remote, base.as_deref()).await?;
-                let branch = bring_back::head_for(&at, &base).await?;
-                let path = hosts::daemon_path();
-                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch, path: &path };
-                hosts::open(&ask, &base, title.as_deref(), body.as_deref()).await
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (remote, remote_url) = bring_back::remote_url(&runner, &at).await?;
+                let base = bring_back::base_of(&runner, &at, &remote, base.as_deref()).await?;
+                let branch = bring_back::head_for(&runner, &at, &base).await?;
+                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
+                hosts::open(&runner, &ask, &base, title.as_deref(), body.as_deref()).await
             };
             answer(id, opened.await)
         }
-        DaemonOp::GitPrState { cwd } => {
+        DaemonOp::GitPrState { cwd, machine_id } => {
             let read = async {
-                let at = locate(ctx, &cwd).await?;
-                let branch = bring_back::branch_at(&at).await?;
-                let (_, remote_url) = bring_back::remote_url(&at).await?;
-                let path = hosts::daemon_path();
-                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch, path: &path };
-                Ok(GitPrStateReply { pr: hosts::find(&ask).await? })
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let branch = bring_back::branch_at(&runner, &at).await?;
+                let (_, remote_url) = bring_back::remote_url(&runner, &at).await?;
+                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
+                Ok(GitPrStateReply { pr: hosts::find(&runner, &ask).await? })
             };
             answer(id, read.await)
         }
@@ -917,6 +1025,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(refused["error"], words::NOT_ON_THIS_ROAD);
+    }
+
+    /// A files or git frame that names a workspace is answered for that workspace by the daemon of the computer
+    /// holding it. This bench runs no workspaces at all, which is every computer that is not a place: each of the
+    /// seven answers the one missing refusal, and the same frame without a workspace named resolves under this
+    /// daemon's own roots as it always has.
+    #[tokio::test]
+    async fn a_frame_that_names_a_workspace_this_daemon_does_not_run_is_refused_as_missing() {
+        let b = bench();
+        let (sock, _rx) = conn(None);
+        for op in ["fs.list", "fs.read"] {
+            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "path": "repo", "machineId": "wsp-x"})).await;
+            assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
+        }
+        for op in ["git.status", "git.push", "git.pr", "git.prState"] {
+            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "cwd": "repo", "machineId": "wsp-x"})).await;
+            assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
+        }
+        let diff = reply(&b, &sock, json!({"id": 1, "op": "git.diff", "cwd": "repo", "scope": "branch", "machineId": "wsp-x"})).await;
+        assert_eq!(diff, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
+        // The same refusal a machine op on the link answers for a workspace this computer does not run, so a
+        // workspace that is gone and a computer that runs none read as one thing.
+        assert_eq!(wsp_runtime::no_such_workspace("wsp-x"), "no such workspace: wsp-x");
+        // And with no workspace named, the path is this daemon's own: a folder outside every root is refused as it
+        // always was, and nothing here reads a workspace at all.
+        let outside = reply(&b, &sock, json!({"id": 2, "op": "git.status", "cwd": "/etc"})).await;
+        assert_eq!(outside["code"], "outside-root");
     }
 
     #[tokio::test]

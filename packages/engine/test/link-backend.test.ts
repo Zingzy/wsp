@@ -179,6 +179,27 @@ describe("a machine over a link", () => {
     expect(l.sent.filter(s => s.op === "machine.exec").length).toBeGreaterThan(0);
   });
 
+  it("answers one daemon frame for this machine by sending it up the link with the machine named, and hands a refusal back as the reply", async () => {
+    // A workspace on a computer somebody owns runs no daemon of its own: its files and its git are answered by the
+    // daemon of the computer holding it, over the link this backend already holds.
+    const { l, backend } = await withMachine(sent => (sent.op === "git.status" ? { branch: { head: "work" }, entries: [], root: "/root/work" } : {}));
+    const machine = await backend.get("c1");
+    const reply = await machine.daemonFrame!({ op: "git.status", cwd: "/root/work" });
+    expect(l.sent.at(-1)).toMatchObject({ op: "git.status", params: { cwd: "/root/work", machineId: "c1" } });
+    expect(reply).toMatchObject({ ok: true, root: "/root/work" });
+    // A refusal comes back as the reply it was, with the code the daemon put on it, so a caller reads the reason:
+    // a bring back tells a computer with no signed-in gh from a checkout with no remote by that code alone.
+    const refused = opened(sent =>
+      sent.op === "machine.get" ? { machine: HANDLE } : Object.assign(new Error("no signed-in command line for github.com"), { code: "no-host-cli" }),
+    );
+    const other = await (await LinkBackend.open(refused.link)).get("c1");
+    expect(await other.daemonFrame!({ op: "git.pr", cwd: "/root/work" })).toEqual({
+      ok: false,
+      error: "no signed-in command line for github.com",
+      code: "no-host-cli",
+    });
+  });
+
   it("reads a refusal the far side's own backend gave, so a container it lost is missing here", async () => {
     const l = opened(sent => (sent.op === "machine.get" ? Object.assign(new Error("no such container"), { kind: "missing", status: 404 }) : {}));
     const backend = await LinkBackend.open(l.link);

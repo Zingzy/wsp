@@ -1060,6 +1060,24 @@ describe("daemon files and diff ops", () => {
     expect(() => DaemonRequest.parse({ id: 7, op: "fs.list", path: 7 })).toThrow();
   });
 
+  it("takes the workspace a files or git frame is for on those seven ops and refuses one that is not a word", () => {
+    // A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the computer holding it
+    // answers these seven for the workspace the frame names; the path is then the one that workspace sees.
+    const named = [
+      { id: 1, op: "fs.list", path: "repo", machineId: "wsp-a" },
+      { id: 2, op: "fs.read", path: "repo/README.md", machineId: "wsp-a" },
+      { id: 3, op: "git.status", cwd: "repo", machineId: "wsp-a" },
+      { id: 4, op: "git.diff", cwd: "repo", scope: "branch", machineId: "wsp-a" },
+      { id: 5, op: "git.push", cwd: "repo", base: "main", machineId: "wsp-a" },
+      { id: 6, op: "git.pr", cwd: "repo", base: "main", machineId: "wsp-a" },
+      { id: 7, op: "git.prState", cwd: "repo", machineId: "wsp-a" },
+    ];
+    for (const r of named) expect(DaemonRequest.parse(r)).toEqual(r);
+    for (const r of named) expect(() => DaemonRequest.parse({ ...r, machineId: 1 })).toThrow();
+    // And no other op of this road carries one: an exec on a workspace has its own road, over the machine ops.
+    expect(DaemonRequest.parse({ id: 8, op: "exec", cmd: "true", machineId: "wsp-a" })).toEqual({ id: 8, op: "exec", cmd: "true" });
+  });
+
   it("parses the typed replies", () => {
     const list = { entries: [{ name: "a.ts", type: "file", size: 12, mtime: 1_700_000_000_000 }], truncated: false, total: 1 };
     expect(FsListReply.parse(list)).toEqual(list);
