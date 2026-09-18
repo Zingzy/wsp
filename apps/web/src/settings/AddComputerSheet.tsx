@@ -20,7 +20,7 @@ import type { InstallStage } from "../protocol/client.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
-import { CopyRow, RefusalSlot, RoadLines, type RoadLine } from "./sheetParts.js";
+import { RefusalSlot, RoadLines, type RoadLine } from "./sheetParts.js";
 
 const WORDS = PLACES_WORDS.sheet;
 const MINE = ADD_COMPUTER_WORDS;
@@ -80,7 +80,6 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   const description = `${installed === null ? WORDS.description : MINE.runsWorkspaces} ${WORDS.whileAsleep}`;
   const footNote = installed !== null ? undefined : running ? { word: MINE.running } : { kbd: "↵", word: MINE.adds };
   const held = login.trim() === "" ? MINE.loginFirst : api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
-  const typing = installed === null && stages === null;
 
   return (
     <Sheet open onOpenChange={open => (open ? undefined : onClose())}>
@@ -94,9 +93,10 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
             <PlaceTable menu={false} k="joined-table">
               <PlaceRow place={installed} now={now()} />
             </PlaceTable>
-          ) : running ? (
-            <CopyRow k="ssh-login" label={MINE.addon} value={login} />
           ) : (
+            // The field stays where it is once Add is pressed, holding the login it was given and dimmed: a field
+            // that left the tree took the focus with it and drew the ring round the whole sheet, and the row that
+            // stood in for it was a second shape for one fact.
             <>
               <div data-k="login-field" className="flex min-w-0 flex-col gap-2">
                 <label htmlFor="add-computer-login" className={FIELD_LABEL}>
@@ -111,6 +111,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
                   autoComplete="off"
                   spellCheck={false}
                   autoCapitalize="off"
+                  disabled={running}
                   value={login}
                   placeholder={MINE.loginPlaceholder}
                   // Only when it is true: the input's own rule matches the attribute being there at all, so a
@@ -139,12 +140,13 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
             )}
           </span>
           <Button variant="outline" onClick={onClose}>
-            {typing ? MINE.cancel : WORDS.close}
+            {installed === null ? MINE.cancel : WORDS.close}
           </Button>
-          {typing ? (
-            // The reason it is held stands in the slot under the field it waits on; the keycap's own drawing is
-            // the button's.
-            <Button data-k="ssh-add" held={held !== undefined} onClick={add}>
+          {installed === null ? (
+            // Three parts in the footer in both states, the same three: a footer that swapped Add away while the
+            // install ran moved the button beside it. The reason it is held stands in the slot under the field it
+            // waits on; the keycap's own drawing is the button's.
+            <Button data-k="ssh-add" held={running || held !== undefined} onClick={add}>
               {MINE.add}
             </Button>
           ) : null}

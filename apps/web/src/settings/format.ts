@@ -36,9 +36,12 @@ export const WHERE_WORDS = {
   copiesNothing: "copies nothing",
   /** What a copy there has for a network, in the protocol's own words off the flags the landing carries. */
   ports: "Ports",
-  /** Puts this wsp's daemon on that computer and runs the recipe there again. */
+  /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
+   * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
-  updating: "Updating\u2026",
+  /** Why a cell of the table holds no figure on a cloud account's row: the size and the disk are the workspace's
+   * there, asked for one at a time, so the account has neither of its own. */
+  noFactOfACloud: "A cloud account has no size and no disk of its own: every workspace there is asked for with one.",
   default: "default",
   setDefault: "Set as default",
   rename: "Rename",
@@ -75,8 +78,6 @@ export const ADD_COMPUTER_WORDS = {
   cancel: "Cancel",
   login: "ssh login",
   loginPlaceholder: "root@host",
-  /** The label on the row that carries the login while the install runs. */
-  addon: "ssh",
   add: "Add",
   adds: "adds",
   loginFirst: "type the login first",

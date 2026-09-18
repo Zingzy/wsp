@@ -76,6 +76,13 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
 function MadeOf({ creation }: { creation: Creation }) {
   const places = useStore(s => s.places);
   const landing = useStore(s => (creation.project === undefined ? null : s.landings[creation.project] ?? null));
+  const loadLanding = useStore(s => s.loadLanding);
+  // The flags this line's second half reads are the landing's, and the landing is asked for per project: on the
+  // first run this screen is the first one drawn, with no row anywhere else to have asked, and the line read the
+  // copy word alone. The store asks once per project, so a sidebar that has asked already costs nothing here.
+  useEffect(() => {
+    if (creation.project !== undefined) void loadLanding(creation.project);
+  }, [creation.project, loadLanding]);
   const workspace = useStore(s => (creation.workspaceId === null ? undefined : s.workspaces.find(w => w.id === creation.workspaceId)));
   // The computer's name where the work did not land on the computer the app runs on, which is the row's own rule
   // for the same line: this computer is not named on a screen that is already on it.

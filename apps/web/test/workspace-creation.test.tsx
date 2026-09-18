@@ -5,7 +5,7 @@
 // creation-layout.browser.test.ts; this file checks the structure jsdom can see.
 // Under the log, the view's own last line: the word table's reading of the
 // record the create answered with, in the words the row it becomes carries.
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { HOSTNAME_KEPT, type WorkspaceView } from "@wsp/protocol";
 import { localZoneLabel } from "../src/lib/timestampFormat.js";
@@ -219,6 +219,18 @@ describe("the view's own last line", () => {
     const view = await mount(answered({ copy: { road: "in-place", path: "/Users/dev/spoo", source: "/Users/dev/spoo", base: "", branch: "", carried: "nothing" }, portBase: undefined }));
     expect(within(view).getByText("in this folder · shares this Mac's ports")).toBeTruthy();
     expect(view.textContent).not.toContain("zingzy-mbp");
+  });
+
+  it("asks for the landing of the project the create is on, since on a first run no other screen has", async () => {
+    const asked: string[] = [];
+    useStore.setState({
+      places: [],
+      workspaces: [],
+      landings: {},
+      api: { subscribe: () => () => {}, workspacesLanding: async (project: string) => { asked.push(project); return { name: "here", capabilities: { copies: true, ownNetwork: false } }; } },
+    } as never);
+    await mount({ key: "creating:1", name: "add a LICENSE file", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: null });
+    await waitFor(() => expect(asked).toEqual(["pr_1"]));
   });
 
   it("holds the slot empty until the record lands, so nothing under it moves when it does", async () => {

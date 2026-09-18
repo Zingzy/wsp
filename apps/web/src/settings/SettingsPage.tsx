@@ -123,7 +123,9 @@ export function SettingsPage() {
           </Row>
         </Section>
         <Section id="settings-where" title={PLACES_WORDS.section}>
-          <Computers />
+          {/* One read of the host's setup on this page, handed to the section that draws its keys and its agents:
+              two components asking for one record at one mount asked the host twice for it. */}
+          <Computers setup={setup} />
         </Section>
         {keyHeld(CLOUD_SECTION.id, setup) ? <ImageSection title={CLOUD_SECTION.name} /> : null}
         <AccountSection />

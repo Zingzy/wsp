@@ -30,13 +30,16 @@
 //                    reads as on their rows
 //   computers-open   one of those boxes open on its agents block
 //   computers-here   this Mac's row open on the agents found here
+//   computers-failed the box whose recipe lost rows, open on the agent it could
+//                    not put on, the file that failed and the server set aside
 //   add-computer     the Add a computer sheet, one field, nothing typed
 //   add-computer-run the same sheet with the install under way
+//   add-computer-refused  the same sheet with what ssh said in the slot
 //   remove-computer  the Remove dialog over the table
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, startingLine, type Capabilities, type InitAgent, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { SettingsPage } from "../../src/settings/SettingsPage";
@@ -45,6 +48,7 @@ import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
+import { useRightPanelStore } from "../../src/rightPanelStore";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
@@ -197,25 +201,31 @@ const COMPUTERS: PlaceView[] = [
       rows: [
         { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
         { id: "tools/uv", label: "uv", outcome: "failed", note: "the script exited 1" },
-        ...REPORTED.map(id => ({ id: `agents/${id}`, label: agentName(id), outcome: "installed" as const })),
+        // The agent the job could not put on, beside the ones it did: what a person reads on this row is which
+        // agent they cannot open a thread with there and why.
+        { id: `agents/${REPORTED[1]}`, label: agentName(REPORTED[1]!), outcome: "failed", note: "npm exited 1" },
+        ...REPORTED.slice(2).map(id => ({ id: `agents/${id}`, label: agentName(id), outcome: "installed" as const })),
+        { id: `agents/${REPORTED[0]}`, label: agentName(REPORTED[0]!), outcome: "installed" as const },
         { id: "tools/node", label: "Node 22 with npm", outcome: "installed" as const },
         { id: "tools/git", label: "git", outcome: "present" as const },
-        { id: "agents/files/skills", label: "code-review", outcome: "installed" as const, kind: "file" as const },
-        { id: "agents/mcp/linear", label: "linear", outcome: "installed" as const, kind: "server" as const },
+        { id: "agents/files/skills", label: "code-review", outcome: "failed" as const, kind: "file" as const, note: "no home folder for that login" },
+        { id: "agents/mcp/linear", label: "linear", outcome: "skipped" as const, kind: "server" as const, note: "waited on GitHub CLI" },
       ],
     }),
   }),
+  // A job that ended before its rows did, which the row says in the protocol's own word for it.
+  box("p_attic", "attic", { provision: provision({ state: "stopped", finishedAt: undefined, said: "the link dropped" }) }),
   { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, rateUsdPerHour: 0.11 } as PlaceView,
 ];
 
 const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent", "first-run-agents"];
 /** The screens that are Settings in the centre rather than a workspace: the table, one row open, the sheet and
  * the Remove dialog. */
-const computerScreens = ["computers", "computers-many", "computers-open", "computers-here", "add-computer", "add-computer-run", "remove-computer"];
+const computerScreens = ["computers", "computers-many", "computers-open", "computers-here", "computers-failed", "add-computer", "add-computer-run", "add-computer-refused", "remove-computer"];
 const settings = computerScreens.includes(screen);
 /** Which computers this host holds on this screen: one alone where the table is read fresh, the whole list where
  * it is read with boxes and a cloud on it. */
-const manyComputers = ["computers-many", "computers-open", "remove-computer"].includes(screen);
+const manyComputers = ["computers-many", "computers-open", "computers-failed", "remove-computer"].includes(screen);
 const computers = settings ? (manyComputers ? COMPUTERS : [COMPUTERS[0]!]) : places;
 const drawsSidebar = !firstRunScreens.includes(screen) && screen !== "creating";
 
@@ -264,11 +274,14 @@ const api = {
   spend: async () => [],
   image: async () => ({ image: null, copies: [] }),
   hostTerminalConfig: async () => ({ files: [] }),
-  // The one road the sheet runs: it reports each step and never answers, so the run screen stands still for a shot.
-  addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: string; word: string; state: string }) => void) => {
-    onStage({ step: "connect", word: "connecting over ssh", state: "done" });
-    onStage({ step: "host-key", word: "keeps the box's host key here", state: "done" });
-    onStage({ step: "wsp", word: "installing wsp", state: "running" });
+  // The one road the sheet runs: it reports each step in the protocol's own words for it, the way the client does,
+  // so no line on the plan says one thing before Add and another after. On the refused screen it answers with
+  // ssh's own line instead, which lands in the slot under the field.
+  addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
+    if (screen === "add-computer-refused") throw new Error("ssh refused the login (publickey).");
+    onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
+    onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+    onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
     return new Promise<never>(() => {});
   },
 } as unknown as Api;
@@ -280,7 +293,7 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: ["add-computer", "add-computer-run"].includes(screen),
+  addComputerOpen: ["add-computer", "add-computer-run", "add-computer-refused"].includes(screen),
   projects: drawsSidebar ? [SPOO, WSP, LANDING] : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},
@@ -289,6 +302,9 @@ useStore.setState({
   selectedThreadId: null,
 } as never);
 useStore.getState().bind(api);
+// A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
+// creation view is what this shot is of, so the panel on that workspace is shut before the first paint.
+if (screen === "creating") useRightPanelStore.setState({ byWorkspaceId: { [CREATED_ID]: { isOpen: false, activeSurfaceId: null, surfaces: [] } } });
 
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
@@ -371,9 +387,10 @@ setTimeout(() => {
     }, 120);
   };
   if (screen === "computers-open") clickWhenThere('[data-place-row="p_spoo"]');
+  if (screen === "computers-failed") clickWhenThere('[data-place-row="p_lab"]');
   if (screen === "computers-here") clickWhenThere('[data-place-row="here"]');
   if (screen === "remove-computer") clickWhenThere('[data-place-row="p_spoo"]', () => clickWhenThere('[data-k="place-detail"] [data-k="remove"]'));
-  if (screen === "add-computer-run") {
+  if (screen === "add-computer-run" || screen === "add-computer-refused") {
     typed("login", "root@spoo");
     setTimeout(() => document.querySelector<HTMLButtonElement>("[data-k=ssh-add]")?.click(), 60);
   }

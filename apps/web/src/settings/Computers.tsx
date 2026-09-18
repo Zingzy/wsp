@@ -19,7 +19,7 @@
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, PLACES_WORDS, PROVISION_KIND_WORDS, isLocalWorkspace, offlineFor, placeSpendLine, placesSpendFoot, portsWord, workspaceStateOf, workspaceWord, type InitSetup, type PlaceSpend, type PlaceView, type SealedImageCopy, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, PLACES_WORDS, PROVISION_KIND_WORDS, fmtBytes, fmtSize, isLocalWorkspace, offlineFor, placeSpendLine, placesSpendFoot, portsWord, workspaceStateOf, workspaceWord, type InitSetup, type PlaceSpend, type PlaceView, type SealedImageCopy, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
@@ -28,7 +28,7 @@ import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { FACT, AGENTS_WORDS, WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
-import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, computerRows, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeName, placeOf, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
+import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, computerRows, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeCpuWord, placeName, placeOf, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
@@ -50,7 +50,7 @@ export function holdingsFor(
   return held;
 }
 
-export function Computers({ now = Date.now() }: { now?: number }) {
+export function Computers({ setup, now = Date.now() }: { /** What the host says about its own setup, read once by the page this section stands on: the keys it holds, which is what puts a cloud row on the table, and the agents on this computer, which are this computer's own block. Null until that read answers, and null on a host that answered nothing. */ setup: InitSetup | null; now?: number }) {
   const places = useStore(s => s.places);
   const workspaces = useStore(s => s.workspaces);
   const projects = useStore(s => s.projects);
@@ -60,9 +60,6 @@ export function Computers({ now = Date.now() }: { now?: number }) {
   const statuses = useStore(s => s.statuses);
   const api = useStore(s => s.api);
   const openAddComputer = useStore(s => s.openAddComputer);
-  /** What the host says about its own setup: the keys it holds, which is what puts a cloud row on the table, and
-   * the agents on this computer, which are this computer's own block. One read for both. */
-  const [setup, setSetup] = useState<InitSetup | null>(null);
   /** Every built copy of this host's image by the computer it sits on, so Remove can say what comes off that one. */
   const [copies, setCopies] = useState<readonly SealedImageCopy[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -97,21 +94,6 @@ export function Computers({ now = Date.now() }: { now?: number }) {
   }, [api]);
   useEffect(readCopies, [readCopies]);
   useEffect(readSpend, [readSpend]);
-  useEffect(() => {
-    if (api?.initGet === undefined) return;
-    let live = true;
-    void api.initGet().then(
-      read => {
-        if (live) setSetup(read);
-      },
-      () => {
-        if (live) setSetup(null);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [api]);
   // What a copy on a computer has for a network is the landing's two flags, which the wire answers for a project
   // rather than for a computer: one project on each row is asked about, and a row with no project says nothing
   // about ports rather than a word this screen wrote.
@@ -247,7 +229,7 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
     void updatePlace(place.id).finally(() => setUpdating(false));
   };
   const rows = [
-    { k: "update", word: updating ? WHERE_WORDS.updating : WHERE_WORDS.update, held: noUpdate || updating, run: update },
+    { k: "update", word: WHERE_WORDS.update, held: noUpdate || updating, run: update },
     { k: "rename", word: WHERE_WORDS.rename, held: true, run: () => {} },
     ...(place.default ? [] : [{ k: "set-default", word: WHERE_WORDS.setDefault, held: true, run: () => {} }]),
     { k: "remove", word: WHERE_WORDS.remove, held: false, run: onRemove },
@@ -292,8 +274,15 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
   const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? ` · ${place.dialled.roundTripMs} ms` : "";
   const copies = copiesWord(place, here);
   const ports = landing === null ? "" : portsWord(landing.capabilities, undefined, APP_PLATFORM);
-  const rows: { k: string; label: string; value: string }[] = [
+  /** One row of the detail: its label, what it says, and whether it is a row only a narrow window draws, where the
+   * column it stands for has left the table. A row with more than one thing to say says them one to a line rather
+   * than in a sentence cut from the right. */
+  const rows: { k: string; label: string; value: string; lines?: readonly string[]; narrow?: boolean }[] = [
     ...(road === null || road.address === null ? [] : [{ k: "address", label: WHERE_WORDS.address, value: road.address }]),
+    // The two columns a phone does not hold, said here instead, in the table's own words for them. Drawn below
+    // 640 px alone: above it they are the row's own cells and this would say them twice.
+    ...(place.shape === undefined ? [] : [{ k: "size", label: PLACES_WORDS.columns[1]!, value: fmtSize(place.shape, placeCpuWord(place)), narrow: true }]),
+    ...(place.diskFreeBytes === undefined ? [] : [{ k: "disk-free", label: PLACES_WORDS.columns[2]!, value: fmtBytes(place.diskFreeBytes), narrow: true }]),
     // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
     // two screens is stale is the whole of what this row was reported for.
     ...(place.os === undefined
@@ -301,7 +290,14 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
       : [{ k: "system", label: WHERE_WORDS.system, value: lastKnown(place.engine !== undefined && place.engine !== "none" ? `${place.os} · ${place.engine}` : place.os, away) }]),
     ...(copies === "" ? [] : [{ k: "copies", label: WHERE_WORDS.copies, value: copies }]),
     ...(ports === "" ? [] : [{ k: "ports", label: WHERE_WORDS.ports, value: ports }]),
-    { k: "workspaces", label: PLACES_WORDS.columns[3]!, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", ") },
+    {
+      k: "workspaces",
+      label: PLACES_WORDS.columns[3]!,
+      value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", "),
+      // One line per workspace: the cell yields to the table, so three workspaces in one sentence read as two and
+      // an ellipsis, and what a person opened the row for was the third.
+      ...(holding.workspaces.length === 0 ? {} : { lines: holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`) }),
+    },
     // A computer of the person's own charges them nothing, so only a cloud has a Spend row at all.
     ...(spend === undefined || !isProviderPlace(place) ? [] : [{ k: "spend", label: WHERE_WORDS.spend, value: placeSpendLine(spend, workspaces) }]),
     ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.joinedAt))) }]),
@@ -318,14 +314,16 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
       <TableCell colSpan={5} className="max-w-0 py-3 pr-2 pl-4">
         <div className="flex flex-col gap-2 border-border border-l pl-4">
           {rows.map(row => (
-            <div key={row.k} data-k={row.k} className="flex items-baseline gap-4">
+            <div key={row.k} data-k={row.k} className={cn("flex items-baseline gap-4", row.narrow === true && "sm:hidden")}>
               <span className="w-24 shrink-0 text-[13px] text-muted-foreground">{row.label}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-xs tabular-nums text-foreground" title={row.value}>
-                {row.value}
+                {row.lines === undefined ? row.value : row.lines.map(line => <span key={line} className="block truncate">{line}</span>)}
               </span>
             </div>
           ))}
-          <AgentsBlock place={place} here={here} agents={agents} recipe={recipe} />
+          {/* A cloud account reports no agent: the agents there are in the image built there, so a block saying
+              none would state a fact the host does not hold. It goes with the Address and Answered rows. */}
+          {isProviderPlace(place) ? null : <AgentsBlock place={place} here={here} agents={agents} recipe={recipe} />}
           {/* Wrapped, not cut: the cell it sits in is nowrap for its fact columns, and a refusal inheriting that
               pushed the table past the card (640 against 622) and clipped the half that says what happened. */}
           {road === null || (line ?? road.refused ?? heldWhy) === null ? null : (
@@ -333,7 +331,7 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
               {line ?? road.refused ?? heldWhy}
             </p>
           )}
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1">
             {road === null || dialRoad === undefined ? null : <DialButton busy={busy} held={held} road={dialRoad} onDial={dial} />}
             {here ? null : <PlaceActions place={place} onRemove={onRemove} inMenu={false} />}
           </div>
@@ -348,6 +346,14 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
  * that agent's own config names the wsp tools, and the one action is handing them over; on a computer somebody
  * joined it is what the recipe job came to for that agent, and the sign-in beside it is held with the command line
  * that runs one. */
+/** The height every line of the block stands, whatever it holds: the height of the extra-small button one of them
+ * carries, at both of that button's own sizes. */
+const BLOCK_LINE = "min-h-7 sm:min-h-6";
+/** The slot a line's own word stands in: two of its lines at a phone's width, where the column holds eighteen
+ * characters and a reason runs to twenty, and one above 640 px, where the whole reason reads on one. Every line
+ * carries the slot, so the block is one height at either width. */
+const BLOCK_WORD = "min-h-[2lh] line-clamp-2 whitespace-normal sm:min-h-[1lh] sm:line-clamp-1";
+
 function AgentsBlock({ place, here, agents, recipe }: { place: PlaceView; here: boolean; agents: readonly AgentLine[]; recipe: readonly { id: string; kind: keyof typeof PROVISION_KIND_WORDS; label: string; state: string }[] }) {
   return (
     <div data-k="agents-block" className="flex flex-col gap-2 pt-1">
@@ -358,9 +364,11 @@ function AgentsBlock({ place, here, agents, recipe }: { place: PlaceView; here: 
         </span>
       ) : (
         agents.map(agent => (
-          <div key={agent.id} data-k="agent" data-agent={agent.id} className="flex items-baseline gap-4">
+          // Every line stands the button's own height whether it holds one or not: a block where a line with a
+          // word was 43 px and a line with a button 50 read as three lists.
+          <div key={agent.id} data-k="agent" data-agent={agent.id} className={cn("flex items-center gap-4", BLOCK_LINE)}>
             <span className="w-24 shrink-0 text-[13px] text-foreground">{agent.name}</span>
-            <span className={cn(FACT, "min-w-0 flex-1 truncate")} data-k="agent-state" title={agent.state}>
+            <span className={cn(FACT, "min-w-0 flex-1", BLOCK_WORD)} data-k="agent-state" title={agent.state}>
               {agent.state}
             </span>
             {agent.held === undefined ? (
@@ -378,11 +386,11 @@ function AgentsBlock({ place, here, agents, recipe }: { place: PlaceView; here: 
         ))
       )}
       {recipe.map(row => (
-        <div key={row.id} data-k="recipe-row" data-kind={row.kind} className="flex items-baseline gap-4">
+        <div key={row.id} data-k="recipe-row" data-kind={row.kind} className={cn("flex items-center gap-4", BLOCK_LINE)}>
           <span className="w-24 shrink-0 truncate text-[13px] text-foreground" title={row.label}>
             {row.label}
           </span>
-          <span className={cn(FACT, "min-w-0 flex-1 truncate")} data-k="recipe-state" title={row.state}>
+          <span className={cn(FACT, "min-w-0 flex-1", BLOCK_WORD)} data-k="recipe-state" title={row.state}>
             {`${PROVISION_KIND_WORDS[row.kind]} · ${row.state}`}
           </span>
         </div>
