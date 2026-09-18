@@ -386,6 +386,16 @@ describe("putFiles", () => {
     expect(g.files.get("/tmp/wsp-run/t8.in")).toBe("first\nsecond\nthird\n");
   });
 
+  it("answers the pieces the upload took, since each is a call of its own on a road that pays a round trip for it", async () => {
+    const g = diskGuest();
+    const big = await putFiles(g.machine, [{ path: "/tmp/wsp-run/t9.in", text: BIG_INPUT }]);
+    expect(big.pieces).toBe(g.calls.filter(c => c.endsWith("echo WSP_PIECE")).length);
+    expect(big.pieces).toBeGreaterThan(1);
+    // Nothing was cut up: the one exec that lands the file is not a piece.
+    const small = await putFiles(g.machine, [{ path: "/tmp/wsp-run/t10.in", text: "one line\n" }]);
+    expect(small.pieces).toBe(0);
+  });
+
   it("a piece that does not confirm fails before the last exec goes", async () => {
     const calls: string[] = [];
     const machine = { id: "m9", exec: async (cmd: string) => { calls.push(cmd); return { exitCode: 0, stdout: "", stderr: "" }; } } as unknown as Machine;

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
+import { MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedFilesScript, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import type { McpPlan } from "../src/golden-mcp.js";
@@ -255,6 +255,28 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(read(root, ".claude-cfg/.claude.json")).toBe('{ "numStartups": 3 }\n');
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     expect(readFileSync(at.landed, "utf8")).not.toContain(".claude.json");
+  });
+
+  it("says what it packed, what went over and what the landing walked, each as a line of its own", async () => {
+    const { root, machine } = box();
+    const said: string[] = [];
+    const tar = TAR();
+    const landed = await provisionFiles(machine, { home: root, lands: LANDS, pack: async () => packed(tar), say: line => said.push(line) });
+    expect(landed.rows.map(r => r.outcome)).toEqual(["installed", "installed", "installed"]);
+    expect(said).toEqual([
+      provisionPackedLine(LANDS.length, tar.length, tar.length),
+      // The box's own road takes the part whole, so there is no piece count on the line it says.
+      provisionShippedLine({ part: 1, parts: 1, bytes: tar.length, total: tar.length }),
+      // The four files of the archive, each walked against what stands at its path there.
+      provisionLandedLine(4),
+    ]);
+
+    // And the list beside the job says how many keys it holds, which is the read the servers round opens with.
+    await appendLanding(machine, root, [`${MCP_ID_PREFIX}claude/github\td1\td1`]);
+    await closeAgentFiles(machine, root);
+    said.length = 0;
+    expect((await landedServers(machine, root, line => said.push(line))).size).toBe(1);
+    expect(said).toEqual([provisionListReadLine(1)]);
   });
 
   it("closes a round that landed only keys, and carries a key's line through as the servers step wrote it", async () => {

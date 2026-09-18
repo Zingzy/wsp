@@ -7856,7 +7856,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         };
         return forking.create(spec);
       },
-      land: (machine, path, bytes) => landBytes(machine, path, bytes),
+      land: async (machine, path, bytes) => void (await landBytes(machine, path, bytes)),
       // A first-life fork of the image: the one snapshot road, the same the project goldens take.
       checkpoint: (machine, name) => machine.snapshot(name, { firstLife: true }),
       scratch: () => GUEST_TMP,

@@ -254,6 +254,19 @@ describe("vault import in parts", () => {
     ]);
   });
 
+  it("says how many pieces a part was cut into on a road that cuts them, and nothing on one that takes it whole", async () => {
+    const { machine, fetchStub } = vaultStub();
+    const seen: unknown[] = [];
+    const tar = Buffer.from("a small archive");
+    const byRoad: Machine = { ...machine, putBytes: async () => ({ pieces: 7 }) };
+    await importInto(byRoad, tar, "/root", { fetch: fetchStub, onPart: p => void seen.push(p) });
+    expect(seen).toEqual([{ part: 1, parts: 1, bytes: tar.length, total: tar.length, pieces: 7 }]);
+    // The signed URL road puts the part in one call, so there is no piece count to carry.
+    seen.length = 0;
+    await importInto(machine, tar, "/root", { fetch: fetchStub, onPart: p => void seen.push(p) });
+    expect(seen).toEqual([{ part: 1, parts: 1, bytes: tar.length, total: tar.length }]);
+  });
+
   it("a part the edge answers 502 or drops is retried with a bound; the retry is per part and the parts already up are not sent again", async () => {
     const { machine, fetchStub } = vaultStub();
     const answers = [200, 502, "drop", 200];

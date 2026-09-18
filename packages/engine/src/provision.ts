@@ -6,7 +6,7 @@
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
 import { ROAD_MODULES } from "@wsp/catalog";
-import { agentOfRow, plural, presentElsewhereLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, type SkippedPath, type ToolInstall } from "./golden-import.js";
@@ -272,7 +272,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   if (plan.files !== undefined) {
     const files = plan.files;
     stage(`${FILES_LABEL}: ${plural(files.lands.length, "path")}`, round(FILES_LABEL));
-    const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack });
+    const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line, round(FILES_LABEL)) });
     skippedFiles = landed.skipped;
     landedNow = landed.owned;
     for (const row of landed.rows) say(row, round(FILES_LABEL));
@@ -288,6 +288,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
         if (detail !== undefined) stage(detail, round(MCP_LABEL));
       },
     });
+    stage(provisionServersLine(servers.filter(r => r.outcome === "installed").length, servers.length), round(MCP_LABEL));
     for (const row of servers) say(row, round(MCP_LABEL));
     done++;
   }

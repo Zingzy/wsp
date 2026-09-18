@@ -4,7 +4,7 @@
 // own road. Every caller that used to reach for uploadUrl comes through here,
 // so a backend without signed URLs is not a road each caller has to know about.
 
-import type { Machine } from "./machine.js";
+import type { BytesLanded, Machine } from "./machine.js";
 
 export interface LandBytesOptions {
   /** The upload's transport for the signed URL road; tests hand in their own. */
@@ -25,15 +25,15 @@ export function landsBytes(capabilities: { signedUrls: boolean }, machine: Pick<
   return capabilities.signedUrls || hasByteRoad(machine);
 }
 
-/** Puts one file on the machine. The backend's own road goes first: it is one call to the provider where the signed
- * URL is two, and it is the only road on a backend that mints none. */
-export async function landBytes(machine: Machine, path: string, bytes: Uint8Array, opts: LandBytesOptions = {}): Promise<void> {
+/** Puts one file on the machine, and answers what the road it took counted. The backend's own road goes first: it
+ * is one call to the provider where the signed URL is two, and it is the only road on a backend that mints none. */
+export async function landBytes(machine: Machine, path: string, bytes: Uint8Array, opts: LandBytesOptions = {}): Promise<BytesLanded | undefined> {
   if (machine.putBytes !== undefined) {
-    await machine.putBytes(path, bytes, opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {});
-    return;
+    return (await machine.putBytes(path, bytes, opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})) ?? undefined;
   }
   const url = await machine.uploadUrl(path);
   // A copy into a plain buffer: the fetch body types take an ArrayBuffer's view, not every Uint8Array flavour.
   const put = await (opts.fetch ?? globalThis.fetch)(url, { method: "PUT", body: new Uint8Array(bytes) });
   if (!put.ok) throw new Error(`${path} did not land on ${machine.id}: HTTP ${put.status}`);
+  return undefined;
 }

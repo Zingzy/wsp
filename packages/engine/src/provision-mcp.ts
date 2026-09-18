@@ -134,7 +134,7 @@ export async function provisionMcp(
       return path !== undefined && text !== undefined ? [[path, text] as const] : [];
     }),
   );
-  const owned = await landedServers(machine, o.home);
+  const owned = await landedServers(machine, o.home, line => o.stage("installing-mcp", line));
   const lib: McpEditLib = { rewriteString: (s, command) => rewriteString(plan, s, command) };
   /** Whether the files round put that file there whole this run, which makes every name in it wsp's own hand. */
   const arrivedWhole = (path: string | undefined): boolean => path !== undefined && o.landed.get(path) === "installed";
