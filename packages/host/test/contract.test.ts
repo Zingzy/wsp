@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { DAEMON_TOKEN_PATH, EXIT_CODES, VerbFailure } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, EXIT_CODES, HERE_PLACE_ID, VerbFailure } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -24,7 +24,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, hasTool, noHostServingLine } from "../src/verbs.js";
+import { CLI_VERBS, hasTool, noHostServingLine, type HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
@@ -33,6 +33,46 @@ import { runsFromItsOwnFolder } from "./own-folder.js";
 runsFromItsOwnFolder();
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
+
+/** A serving host as the doctor's computer road meets one: the rows it holds, the lines its road says and the code
+ * it answers with. Nothing is dialled and no host is started; what the fake was asked is what the road asked. */
+function fakeDoctorHost(o: { code?: number; lines?: readonly (readonly [string, "out" | "err"])[] } = {}) {
+  const asked: string[] = [];
+  const doctored: { placeId: string; project?: string }[] = [];
+  const listeners = new Set<(frame: Record<string, unknown>) => void>();
+  const places = [
+    { id: HERE_PLACE_ID, kind: "computer", name: "zingzys-mac", default: true },
+    { id: "p_1", kind: "computer", name: "spoo", default: false, present: true },
+  ];
+  let closed = 0;
+  const client = {
+    request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
+      asked.push(op);
+      if (op === "places.list") return { places } as unknown as T;
+      if (op !== "places.doctor") throw new Error(`the doctor asked this host for ${op}`);
+      doctored.push({ placeId: params["placeId"] as string, ...(params["project"] === undefined ? {} : { project: params["project"] as string }) });
+      for (const [line, stream] of o.lines ?? []) for (const fn of [...listeners]) fn({ type: "doctor.line", doctorId: params["doctorId"], line, stream });
+      return { code: o.code ?? 0 } as unknown as T;
+    },
+    events: async (): Promise<void> => {},
+    onFrame: (fn: (frame: Record<string, unknown>) => void): (() => void) => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+    closed: new Promise<void>(() => {}),
+    closeWords: () => "the host closed the connection",
+    close: () => void closed++,
+    terminate: () => void closed++,
+  };
+  return {
+    asked,
+    doctored,
+    get closed() {
+      return closed;
+    },
+    deps: { dial: async () => client as unknown as HostClient },
+  };
+}
 
 /** The image record a host owns once a seal has written one, with the recipe a copy would be built from; the hashes
  * are plainly fake, as every fixture key here is. */
@@ -420,14 +460,34 @@ describe("the agent contract on the command line and the tool door", () => {
     const said: string[] = [];
     err.on("data", (c: Buffer) => said.push(c.toString()));
     const fresh = join(dir, "other.json");
-    expect(await cli(["doctor", "nosuchbox", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
-    expect(await cli(["doctor", "nosuchbox", "extra", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
-    expect(await cli(["doctor", "--project", "www", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
+    // The word is resolved off the host that holds the links, so the fake below is the whole host this road meets.
+    const host = fakeDoctorHost();
+    expect(await cli(["doctor", "nosuchbox", "--state", fresh], jsonCliIO(err), undefined, process.env, false, {}, host.deps)).toBe(EXIT_CODES.usage);
+    expect(await cli(["doctor", "nosuchbox", "extra", "--state", fresh], jsonCliIO(err), undefined, process.env, false, {}, host.deps)).toBe(EXIT_CODES.usage);
+    expect(await cli(["doctor", "--project", "www", "--state", fresh], jsonCliIO(err), undefined, process.env, false, {}, host.deps)).toBe(EXIT_CODES.usage);
+    // One list read for the word, nothing else asked of that host, and no host of this computer's started for it.
+    expect(host.asked).toEqual(["places.list"]);
+    expect(host.closed).toBe(1);
+    expect(existsSync(lockPathFor(fresh))).toBe(false);
     expect(said.join("")).toContain("no place named nosuchbox");
     expect(said.join("")).toContain("wsp doctor proves one computer, and it was given 2 words");
     expect(said.join("")).toContain("no computer was named");
     // Not one key question on any of the three, which off a terminal would have been the auth class and this line.
     expect(said.join("")).not.toContain("--json asks nothing");
+  });
+
+  it("hands a computer somebody joined to the host that holds its link and prints the lines it says, exiting with what that road came to", async () => {
+    const host = fakeDoctorHost({ code: 1, lines: [["spoo answers", "out"], ["DOCTOR FAIL: spoo", "err"]] });
+    const io = captured();
+    const fresh = join(dir, "over-the-host.json");
+    expect(await cli(["doctor", "spoo", "--project", "spoo-landing", "--state", fresh], io, undefined, process.env, false, {}, host.deps)).toBe(1);
+    expect(io.lines).toContain("spoo answers");
+    expect(io.errors).toContain("DOCTOR FAIL: spoo");
+    expect(host.asked).toEqual(["places.list", "places.doctor"]);
+    expect(host.doctored).toEqual([{ placeId: "p_1", project: "spoo-landing" }]);
+    // Nothing of the road ran here: no runtime of this line's own touched the state file.
+    expect(existsSync(fresh)).toBe(false);
+    expect(host.closed).toBe(1);
   });
 
   it("asks for a provider key on the doctor road that forks at one and on no other", () => {

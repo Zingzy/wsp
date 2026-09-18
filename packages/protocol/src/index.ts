@@ -2497,6 +2497,18 @@ export const PlaceStageEvent = z.object({
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
+/** One line of the doctor's computer road as the host that holds that computer's link says it, keyed by the id the
+ * terminal minted for its own run: a road's lines ride the events channel to whoever asked for them, under the
+ * stream they were said on. A host source's event and no member of the runtime's own union: it carries no sequence,
+ * nothing retains it, and a socket that comes back later is not replayed it. */
+export const DoctorLineEvent = z.object({
+  type: z.literal("doctor.line"),
+  doctorId: z.string(),
+  line: z.string(),
+  stream: z.enum(["out", "err"]),
+});
+export type DoctorLineEvent = z.infer<typeof DoctorLineEvent>;
+
 export const PlaceKind = z.enum(["computer", "provider"]);
 export type PlaceKind = z.infer<typeof PlaceKind>;
 
@@ -4430,6 +4442,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  /** Runs the doctor's computer road here, for a computer this host holds the link to: the six steps against that
+   * link, and every line of them pushed as a doctor.line event under `doctorId` to the sockets subscribed to
+   * events. The id is the caller's own, minted before the request, since the first line is said before the reply
+   * lands. Answers `{ code }` once the road printed its last line. The person's own road only, as every other
+   * place op is. */
+  z.object({ id: reqId, op: z.literal("places.doctor"), placeId: z.string(), doctorId: z.string().max(64), project: z.string().max(200).optional() }),
   /** Dials one computer once, now: a frame over the link it holds, or a login over the road it was added on when
    * it holds none. Answers a PlaceDial: what came back, the sentence to say it in, and the row with the answer
    * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left

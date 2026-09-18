@@ -13,9 +13,11 @@ import { copyKey, createRuntime, memoryStore, type HarnessAdapterFactory, type R
 import { execFileSync } from "node:child_process";
 import { DAEMON_PORT } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cli, serve, type CliIO } from "../src/cli.js";
+import WebSocket from "ws";
+import { cli, hostDoctorReaders, serve, type CliIO } from "../src/cli.js";
+import { placeWiring } from "../src/places.js";
 import { claudeEnvs } from "../src/doctor.js";
-import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
+import { REAP_INTERVAL_MS, startHost, type HostDoctorReaders, type HostHandle } from "../src/server.js";
 import { VERSION } from "../src/version.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -59,6 +61,38 @@ function testRuntime(seedGolden = true): { rt: Runtime; backend: StubBackend; st
   if (seedGolden) void store.put("goldens", copyKey("default", "default"), GOLDEN);
   const rt = createRuntime({ backend, store, adapters: {} });
   return { rt, backend, store };
+}
+
+/** One socket to a host started here, speaking the protocol by hand: auth, then request and reply by id, with
+ * every frame the host pushed kept in order. */
+async function wsClient(port: number, token: string): Promise<{ request(op: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>; frames: Record<string, unknown>[]; close(): void }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  let next = 1;
+  const pending = new Map<number, (f: Record<string, unknown>) => void>();
+  const frames: Record<string, unknown>[] = [];
+  ws.on("message", raw => {
+    const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+    const waiting = typeof frame["id"] === "number" ? pending.get(frame["id"] as number) : undefined;
+    if (waiting !== undefined) {
+      pending.delete(frame["id"] as number);
+      waiting(frame);
+      return;
+    }
+    frames.push(frame);
+  });
+  const request = (op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> => {
+    const id = next++;
+    return new Promise(resolve => {
+      pending.set(id, resolve);
+      ws.send(JSON.stringify({ id, op, ...params }));
+    });
+  };
+  await request("auth", { token });
+  return { request, frames, close: () => ws.close() };
 }
 
 async function getJson(url: string): Promise<{ status: number; body: any }> {
@@ -999,5 +1033,66 @@ describe("host names snapshot storage at start", () => {
     };
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(lines).toEqual(["storage: snapshot listing failed (502 Bad Gateway)"]);
+  });
+});
+
+describe("the doctor's computer road on the host that holds the link", () => {
+  let handle: HostHandle | undefined;
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A host holding one computer that joined and has not dialled back, which is every computer this process holds
+   * no link to: the road's first step reads that off the host's own places door. */
+  async function serving(readers?: HostDoctorReaders): Promise<HostHandle> {
+    const store = memoryStore();
+    await store.put("places", "p_1", {
+      id: "p_1",
+      name: "spoo",
+      publicKey: "k",
+      joinedAt: "2026-09-18T09:00:00.000Z",
+      lastSeenAt: "2026-09-18T09:00:00.000Z",
+      report: { name: "spoo", platform: "linux", arch: "x64", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 4096 }, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, runsWorkspaces: true, engine: "none", daemonVersion: 54, agents: [], wsp: ["/usr/local/bin/wsp"] },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(join(tmpdir(), `wsp-doctor-host-${Date.now()}`, "state.json"), {}) });
+    const dir = fakeWebDir();
+    dirs.push(dir);
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, ...(readers === undefined ? {} : { doctor: readers }) });
+    return handle;
+  }
+
+  it("runs the road here and says each of its lines as an event, out for what it printed and err for what it failed with", async () => {
+    const asked: string[] = [];
+    const up = await serving({ vault: () => ({}), plan: async () => (asked.push("plan"), { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] }) });
+    const c = await wsClient(up.wsPort, up.authToken);
+    await c.request("events.subscribe");
+    const reply = await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" });
+    // The road ran here and failed where it had to: this process holds no link to that computer, and present is
+    // the map of links the process that computer dialled is holding.
+    expect(reply).toMatchObject({ ok: true, code: 1 });
+    const lines = c.frames.filter(f => f["type"] === "doctor.line");
+    expect(lines.every(f => f["doctorId"] === "d_1")).toBe(true);
+    // What the road printed rode the out stream and what it failed with rode err, each as the road said it.
+    expect(lines[0]).toMatchObject({ stream: "out", line: expect.stringContaining("proving spoo, a computer you added") });
+    expect(lines.filter(f => f["stream"] === "err").map(f => String(f["line"]))).toEqual([expect.stringContaining("spoo is not answering")]);
+    expect(lines.at(-1)).toMatchObject({ stream: "err" });
+    c.close();
+  });
+
+  it("reads the recipe through the planner the places wiring already holds, and no second one", async () => {
+    const plan = { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] };
+    let asked = 0;
+    const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"), {});
+    links.provision = { plan: async () => (asked++, plan), run: async () => [] };
+    const readers = hostDoctorReaders(links, {});
+    expect(await readers.plan!()).toBe(plan);
+    expect(asked).toBe(1);
+    // A wiring that plans no recipe hands the road no reader at all, and the tools step says so in its own words.
+    const bare = placeWiring(join(tmpdir(), `wsp-doctor-bare-${Date.now()}`, "state.json"), {});
+    delete bare.provision;
+    expect(hostDoctorReaders(bare, {}).plan).toBeUndefined();
   });
 });

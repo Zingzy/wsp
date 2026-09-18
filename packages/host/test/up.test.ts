@@ -229,8 +229,12 @@ describe("wsp up", () => {
     expect(() => process.kill(child, 0)).not.toThrow();
     expect(stream.run).toBeDefined();
     expect(await localWiring(home).execStream().attach!(stream.run!, { input: false })).not.toBe("gone");
+    // What the close freed is the reading: this process stopped polling that run, so the stream it handed out
+    // settles no more and the timer that read it is no longer holding this process open.
+    const quiet = await Promise.race([stream.exited.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("still running"), 500))]);
+    expect(quiet).toBe("still running");
+    // The turn is ended here by the signal, which reaches the group whether or not anybody is reading it.
     stream.kill();
-    await stream.exited;
     await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5_000 });
   }, 15_000);
 

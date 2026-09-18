@@ -1777,3 +1777,27 @@ describe("bringing work back", () => {
     expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete")).toContain("bring its work back");
   });
 });
+
+describe("the doctor's computer road on the wire", () => {
+  it("takes the computer, the id its lines ride and the project, and refuses an id longer than the field", () => {
+    for (const req of [
+      { id: 1, op: "places.doctor", placeId: "p_1", doctorId: "d_abc" },
+      { id: 2, op: "places.doctor", placeId: "p_1", doctorId: "d_abc", project: "spoo-landing" },
+    ]) {
+      expect(wire.RuntimeRequest.parse(req)).toEqual(req);
+    }
+    expect(() => wire.RuntimeRequest.parse({ id: 3, op: "places.doctor", placeId: "p_1" })).toThrow();
+    expect(() => wire.RuntimeRequest.parse({ id: 4, op: "places.doctor", placeId: "p_1", doctorId: "d".repeat(65) })).toThrow();
+  });
+
+  it("one line of a road carries which run it is, the words and which stream said them", () => {
+    for (const stream of ["out", "err"] as const) {
+      const line = { type: "doctor.line", doctorId: "d_abc", line: "spoo answers", stream };
+      expect(wire.DoctorLineEvent.parse(line)).toEqual(line);
+    }
+    expect(() => wire.DoctorLineEvent.parse({ type: "doctor.line", doctorId: "d_abc", line: "spoo answers", stream: "log" })).toThrow();
+    // A host source's event and no member of the runtime's own union: nothing retains it and nothing replays it,
+    // so a socket that comes back reads the lines said after it came back and no others.
+    expect(() => wire.EventUnion.parse({ type: "doctor.line", doctorId: "d_abc", line: "spoo answers", stream: "out" })).toThrow();
+  });
+});

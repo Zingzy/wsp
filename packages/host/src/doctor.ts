@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, hereDaemonBehindLine, HERE_PLACE_ID, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -21,6 +21,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemo
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS } from "./env-keys.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
+import type { HostClient } from "./verbs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1554,24 +1555,59 @@ function agentsStepNote(io: Pick<CliIO, "log">, computer: PlaceView): string {
   return agents.length === 0 ? "the computer reported no agent" : `${plural(agents.length, "agent")}`;
 }
 
-/** The doctor's one door: the computer a person named, else this computer and then every computer joined to it.
- * A computer somebody joined is proved where it stands; a cloud account is forked, which bills, and so runs only
- * when its own row is named. The word itself is resolved where it was typed, so this takes the row. */
-export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
-  const named = opts.computer;
-  if (named !== undefined) {
-    // This computer's own row takes the local road: it is already the one workspace it can be, and the projects on
-    // it are folders worked in place with no checkout of their own for a workspace to copy.
-    if (named.id === HERE_PLACE_ID) return localDoctor(rt, io, opts);
-    return named.kind === "computer" ? computerDoctor(rt, io, named, opts) : forkDoctor(rt, io, opts);
+/** What the computer road asks of the host that holds the link: one request, the frames it pushes while the road
+ * runs, and the subscription that starts them. Narrower than the whole client so this road is drivable against a
+ * fake. */
+export type DoctorClient = Pick<HostClient, "request" | "events" | "onFrame">;
+
+/** The doctor's computer road as a terminal walks it: the host holding that computer's link runs the six steps and
+ * says each line as it lands, and this prints them where the person typed. The id is minted here and not read off
+ * the reply, since the first line is said before the reply comes; the listener goes on before the request for the
+ * same reason. What the line exits with is what the host's road came to, and a socket that closes mid-road is the
+ * host's own sentence in the class its error carries. */
+export async function hostDoctor(client: DoctorClient, io: CliIO, computer: Pick<PlaceView, "id" | "name">, opts: Pick<DoctorOptions, "project"> = {}): Promise<number> {
+  const doctorId = `d_${randomBytes(6).toString("hex")}`;
+  const off = client.onFrame(frame => {
+    const said = DoctorLineEvent.safeParse(frame);
+    if (!said.success || said.data.doctorId !== doctorId) return;
+    if (said.data.stream === "err") io.error(said.data.line);
+    else io.log(said.data.line);
+  });
+  try {
+    await client.events();
+    const reply = await client.request<{ code: number }>("places.doctor", {
+      placeId: computer.id,
+      doctorId,
+      ...(opts.project !== undefined ? { project: opts.project } : {}),
+    });
+    return reply.code;
+  } catch (e) {
+    io.error(e instanceof Error ? e.message : String(e));
+    return EXIT_CODES[exitClassOf(e)];
+  } finally {
+    off();
   }
-  let code = await localDoctor(rt, io, opts);
-  const joined = ((await rt.places?.list(Date.now())) ?? []).filter(place => place.kind === "computer" && place.id !== HERE_PLACE_ID);
-  for (const place of joined) {
-    const said = await computerDoctor(rt, io, place, opts);
+}
+
+/** Every computer joined to this host, proved one after another on the host that holds their links, over the one
+ * socket the line opened. The exit is the worst of them, as a run that named no computer has always answered. */
+export async function doctorOverHost(client: DoctorClient, io: CliIO, places: readonly PlaceView[], opts: Pick<DoctorOptions, "project"> = {}): Promise<number> {
+  let code = 0;
+  for (const place of places.filter(p => p.kind === "computer" && p.id !== HERE_PLACE_ID)) {
+    const said = await hostDoctor(client, io, place, opts);
     if (said !== 0) code = said;
   }
   return code;
+}
+
+/** The doctor's two roads at the terminal: this computer, whose files and threads are here and nowhere else, and a
+ * cloud account, whose fork bills while it runs and whose key is asked for where a person is sitting. A computer
+ * somebody joined takes neither: its link is held by the host it dials, so that host runs its road and the line
+ * prints what it says. */
+export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  // This computer's own row takes the local road, and so does a line that named nothing: this computer is already
+  // the one workspace it can be, and the projects on it are folders worked in place with no checkout to copy.
+  return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);
 }
 
 /** The doctor's fork road: this host's own image, a machine forked from it at the provider, wsp deployed on that

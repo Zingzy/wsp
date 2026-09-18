@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { createServer } from "node:net";
 import { tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, daemonListeningLine, type DaemonEvent, type ProcInspectReply, type ProcSnapshot, type SysSample } from "@wsp/protocol";
 import { connectDaemon } from "@wsp/runtime";
 import { daemonBinaryHere } from "../src/assets.js";
@@ -41,7 +41,7 @@ function alive(pid: number): boolean {
  * frame, and then either sends a hello of the version a case names or nothing at all, which is the binary too old
  * to say and the binary that is not a daemon. Written as a script so the real start road runs: a child process, its
  * stdout read for the port, and a socket opened to it with the token the start minted. */
-function fakeDaemon(root: string, version?: number): string {
+function fakeDaemon(root: string, version?: number, noise: readonly string[] = []): string {
   const bin = join(root, "fake-daemon.mjs");
   const hello = version === undefined ? '    if (frame.op === "auth") console.error("nothing of a hello");' : `    if (frame.op === "auth") socket.send(JSON.stringify({ type: "daemon.hello", root: "/wsp", version: ${version} }));`;
   writeFileSync(
@@ -52,6 +52,7 @@ function fakeDaemon(root: string, version?: number): string {
       'import { writeFileSync } from "node:fs";',
       'const at = process.argv.indexOf("--root");',
       'writeFileSync(process.argv[at + 1] + "/fake-daemon-pid", String(process.pid));',
+      ...noise.map(line => `console.error(${JSON.stringify(line)});`),
       'const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 }, () => {',
       `  console.log(${JSON.stringify(daemonListeningLine("127.0.0.1", "PORT"))}.replace("PORT", String(wss.address().port)));`,
       "});",
@@ -251,5 +252,44 @@ describe("local daemon", () => {
     const bin = join(root, "not-a-daemon.sh");
     writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
     await expect(LocalDaemon.start({ root, workFolder: root, binary: bin })).rejects.toThrow(/exited with 3 before it listened: refusing/);
+  });
+
+  it("hands what the binary says on its own stderr to the sink the caller named, a line at a time, and writes none of it itself", async () => {
+    const noise = ["oom_score_adj not set: No such file or directory (os error 2)", "priority not set: Permission denied (os error 13)"];
+    const said: string[] = [];
+    const wrote: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      wrote.push(String(chunk));
+      return true;
+    });
+    try {
+      daemon = await LocalDaemon.start({ root, workFolder: root, binary: fakeDaemon(root, 54, noise), say: line => void said.push(line) });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(said).toEqual(noise);
+    expect(wrote.join("")).not.toContain("oom_score_adj");
+  }, 20_000);
+
+  it("writes them to this process's own stderr where the caller named no sink, which is a serving host's log", async () => {
+    const wrote: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      wrote.push(String(chunk));
+      return true;
+    });
+    try {
+      daemon = await LocalDaemon.start({ root, workFolder: root, binary: fakeDaemon(root, 54, ["priority not set: Permission denied (os error 13)"]) });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(wrote.join("")).toContain("priority not set: Permission denied (os error 13)");
+  }, 20_000);
+
+  it("a start that fails still carries what the binary said in its own sentence, whichever sink the lines went to", async () => {
+    const bin = join(root, "noisy-refusal.sh");
+    writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
+    const said: string[] = [];
+    await expect(LocalDaemon.start({ root, workFolder: root, binary: bin, say: line => void said.push(line) })).rejects.toThrow(/exited with 3 before it listened: refusing/);
+    expect(said).toEqual(["refusing"]);
   });
 });

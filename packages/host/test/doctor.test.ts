@@ -12,9 +12,9 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
   connectDaemonSocket,
@@ -47,6 +47,8 @@ import {
   preflightScript,
   cleanOrphans,
   doctor,
+  doctorOverHost,
+  hostDoctor,
   localDoctor,
   localPrompt,
   promoteGoldens,
@@ -68,7 +70,7 @@ import { agentName, catalogEntry, VAULT_VARIABLES } from "@wsp/catalog";
 import { daemonFixLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
 import { captured, createOn, projectOn } from "./verbs-fixture.js";
-import { commandPage, COMMANDS_FOR_HELP, doctorRow, SHARED_FLAGS, type CliIO } from "../src/cli.js";
+import { commandPage, COMMANDS_FOR_HELP, doctorRow, localWiring, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -836,16 +838,14 @@ describe("which road wsp doctor takes", () => {
     return { rt, created };
   }
 
-  it("with no word proves this computer and then every computer joined to it, and forks nothing", async () => {
+  it("with no word takes the local road here and no other: a computer somebody joined is proved by the host holding its link", async () => {
     const host = fakeHost([computer({ id: HERE_PLACE_ID, name: "this computer", kind: "computer", takesForks: false }), computer(), { id: "solari", kind: "provider", name: "solari", default: false }]);
     const io = captured();
     expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] }) })).toBe(0);
-    // The local road first, in its own words, then the computer joined to it; the cloud row is not touched.
     expect(io.lines.some(l => l.includes(`proving a thread on ${THIS_COMPUTER}`))).toBe(true);
-    expect(io.lines.some(l => l.includes("proving spoo, a computer you added"))).toBe(true);
+    // Nothing of the computer road runs in this process: its link is held by the host that computer dials.
+    expect(io.lines.some(l => l.includes("a computer you added"))).toBe(false);
     expect(io.lines.some(l => l.toLowerCase().includes("forked from it"))).toBe(false);
-    // This computer's own row is never proved as a computer you added: it is already the workspace it is.
-    expect(io.lines.filter(l => l.includes("a computer you added"))).toHaveLength(1);
   });
 
   it("with this computer's own row named takes the local road, since its projects are folders worked in place", async () => {
@@ -865,14 +865,155 @@ describe("which road wsp doctor takes", () => {
 });
 
 
+describe("what a road of the doctor's leaves open", () => {
+  it("a wiring built the doctor's way lets go of a turn it is reading when it closes, so nothing it opened holds this process", async () => {
+    const home = tmp("wsp-doctor-handles-");
+    const runDir = join(home, "runs");
+    // Counted, not named: the runner holds timers of its own, and what this case is about is the one this wiring
+    // adds. The list goes into the failure so a run that drifts says what it was holding.
+    const held = (): string[] => process.getActiveResourcesInfo().filter(kind => kind === "Timeout");
+    const before = held().length;
+    // The wiring the doctor command builds: this computer's own, with the run folder beside the state file it was
+    // given and a sink that keeps the daemon's own stderr off the person's screen.
+    const local = localWiring(home, { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, undefined, runDir, undefined, () => {});
+    const stream = local.execStream()("sleep 300", { env: {} });
+    // A turn left running here is what a doctor's runtime re-opens on a state a host is serving: the poll that
+    // reads it is a timer, and a timer nobody stopped holds the loop after the last line is printed.
+    await vi.waitFor(() => expect(held().length).toBeGreaterThan(before));
+    await local.close?.();
+    expect(held().length, `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+    // The turn itself is left running, as a turn on this computer always is; this process is simply done reading it.
+    stream.kill();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    rmSync(home, { recursive: true, force: true });
+  }, 20_000);
+});
+
+describe("the doctor's computer road over the host that holds the link", () => {
+  const computer = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, ...over });
+
+  /** A host client as this road drives one: the frames it pushes, what it was asked and how many times it
+   * subscribed. `answer` is what the request comes to, and it may push frames of its own before it settles. */
+  function fakeClient(answer: (op: string, params: Record<string, unknown>, push: (frame: Record<string, unknown>) => void) => Promise<Record<string, unknown>>, onSubscribe?: (push: (frame: Record<string, unknown>) => void) => void) {
+    const listeners = new Set<(frame: Record<string, unknown>) => void>();
+    const asked: { op: string; params: Record<string, unknown> }[] = [];
+    let subscribed = 0;
+    const push = (frame: Record<string, unknown>): void => {
+      for (const fn of [...listeners]) fn(frame);
+    };
+    const client = {
+      request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
+        asked.push({ op, params });
+        return (await answer(op, params, push)) as T;
+      },
+      events: async (): Promise<void> => {
+        subscribed++;
+        onSubscribe?.(push);
+      },
+      onFrame: (fn: (frame: Record<string, unknown>) => void): (() => void) => {
+        listeners.add(fn);
+        return () => void listeners.delete(fn);
+      },
+    };
+    return { client, asked, listeners, subscribed: () => subscribed };
+  }
+
+  const line = (doctorId: string, words: string, stream: "out" | "err" = "out"): Record<string, unknown> => ({ type: "doctor.line", doctorId, line: words, stream });
+
+  it("prints every line of the road as the host says it, by the stream it was said on, and exits with what the host's road came to", async () => {
+    const { client, asked, subscribed } = fakeClient(async (op, params, push) => {
+      const id = params["doctorId"] as string;
+      push(line(id, "spoo answers"));
+      // A line of somebody else's run on the same socket: this one prints its own and no others.
+      push(line("d_other", "another run's line"));
+      push(line(id, "DOCTOR FAIL: spoo", "err"));
+      return { ok: true, code: 1 };
+    });
+    const io = captured();
+    expect(await hostDoctor(client, io, computer(), { project: "spoo-landing" })).toBe(1);
+    expect(io.lines).toEqual(["spoo answers"]);
+    expect(io.errors).toEqual(["DOCTOR FAIL: spoo"]);
+    // One subscription, and the request carries the computer, the id its lines ride and the project.
+    expect(subscribed()).toBe(1);
+    expect(asked).toEqual([{ op: "places.doctor", params: { placeId: "p_1", doctorId: expect.stringMatching(/^d_[0-9a-f]{12}$/), project: "spoo-landing" } }]);
+  });
+
+  it("is listening before it subscribes and before it asks, so no line said between them is lost", async () => {
+    const order: string[] = [];
+    const { client } = fakeClient(async (op, params, push) => {
+      order.push("request");
+      push(line(params["doctorId"] as string, "said with the reply"));
+      return { ok: true, code: 0 };
+    });
+    const io = captured();
+    const watched = {
+      ...client,
+      events: async () => {
+        order.push("events");
+        await client.events();
+      },
+      onFrame: (fn: (frame: Record<string, unknown>) => void): (() => void) => {
+        order.push("onFrame");
+        return client.onFrame(fn);
+      },
+    };
+    expect(await hostDoctor(watched, io, computer())).toBe(0);
+    expect(order).toEqual(["onFrame", "events", "request"]);
+    expect(io.lines).toEqual(["said with the reply"]);
+  });
+
+  it("names no project where the line named none", async () => {
+    const { client, asked } = fakeClient(async () => ({ ok: true, code: 0 }));
+    expect(await hostDoctor(client, captured(), computer())).toBe(0);
+    expect(Object.keys(asked[0]!.params).sort()).toEqual(["doctorId", "placeId"]);
+  });
+
+  it("a socket the host closed mid-road is the host's own sentence and the class its error carries", async () => {
+    const closed = fakeClient(async () => {
+      throw new Error("the host stopped");
+    });
+    const io = captured();
+    expect(await hostDoctor(closed.client, io, computer())).toBe(EXIT_CODES.provider);
+    expect(io.errors).toEqual(["the host stopped"]);
+    const refused = fakeClient(async () => {
+      throw Object.assign(new Error(doctorRowRefusal("spoo")), { kind: "usage" });
+    });
+    const said = captured();
+    expect(await hostDoctor(refused.client, said, computer())).toBe(EXIT_CODES.usage);
+    expect(said.errors).toEqual([doctorRowRefusal("spoo")]);
+  });
+
+  it("proves every computer joined to this one in the order the host listed them, and never its own row or a cloud row", async () => {
+    const codes = new Map<string, number>([
+      ["p_1", 0],
+      ["p_2", 1],
+      ["p_3", 0],
+    ]);
+    const { client, asked } = fakeClient(async (_op, params) => ({ ok: true, code: codes.get(params["placeId"] as string) ?? 0 }));
+    const rows = [
+      computer({ id: HERE_PLACE_ID, name: "this computer" }),
+      computer({ id: "p_1", name: "one" }),
+      { id: "solari", kind: "provider", name: "solari", default: false } as PlaceView,
+      computer({ id: "p_2", name: "two" }),
+      computer({ id: "p_3", name: "three" }),
+    ];
+    // The worst of them is what the line exits with, as a run that named no computer has always answered.
+    expect(await doctorOverHost(client, captured(), rows)).toBe(1);
+    expect(asked.map(a => a.params["placeId"])).toEqual(["p_1", "p_2", "p_3"]);
+  });
+});
+
 describe("the words wsp doctor says about itself", () => {
   const row = COMMANDS_FOR_HELP["doctor"]!;
 
   it("names the computer it takes, what each road does and which one bills, on its usage, its about and its terminal-only line", () => {
     expect(row.usage).toBe("wsp doctor [<computer>] [--project <name>] [--local] [--yes]");
     expect(row.about).toBe(
-      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer gets a short-lived workspace made there and the recipe's tools read inside it; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
+      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived workspace there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
     );
+    // The line says which process walks the computer road, since that is what a person reads when they wonder why
+    // a host has to be up for it.
+    expect(row.about).toContain("proved by the host that computer dials");
     // The line a person reads when they aim this at a host somewhere else: what it does here is what it says.
     expect(row.cliOnly).toBe("runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
   });

@@ -2090,7 +2090,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const here = local?.hereDaemon;
     if (here !== undefined) {
       const version = await here.version();
-      if (version < DAEMON_VERSION) throw Object.assign(new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix)), { kind: "invalid" });
+      // No kind: a daemon behind this wsp is not a mistyped line and not a name somebody took, and an error with
+      // none of those reads as what the host refused, which is the class this is.
+      if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
     }
     const to = copyPathFor(project.path, work.slug);
     const report = await copier.make({

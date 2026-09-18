@@ -56,6 +56,11 @@ export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "d
   /** How the turn's tree is read; ps is the road on this computer. A test hands in a reader that answers off the
    * clock the rule measures against, since what a real tree is given on a loaded box is not what the rule is. */
   readWork?: GroupWorkReader;
+  /** Every run this process is reading, each as the call that stops reading it. A poll of a run holds the event
+   * loop until that run ends, so a process that is done with its work has to let go of the ones still going: the
+   * turns themselves lead their own process groups and go on, and whatever opens them next reads their logs from
+   * the first byte. The wiring that made this factory owns the set and empties it when it closes. */
+  reading?: Set<() => void>;
 }
 
 /** How often the log is read and the limits are read against the clock; the cloud road polls its guest the same way,
@@ -329,6 +334,28 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     let offset = 0;
     let downs = 0;
     let reading = false;
+    /** Set when this process lets go of the run: the poll ends where it stands, the stream never settles and the
+     * run is left exactly as it is, since ending it here would write the turn off for whoever owns it. */
+    let dropped = false;
+    let wake: (() => void) | undefined;
+    const nap = (ms: number): Promise<void> =>
+      new Promise<void>(resolve => {
+        const timer = setTimeout(() => {
+          wake = undefined;
+          resolve();
+        }, ms);
+        wake = () => {
+          clearTimeout(timer);
+          wake = undefined;
+          resolve();
+        };
+      });
+    const drop = (): void => {
+      dropped = true;
+      opts.reading?.delete(drop);
+      wake?.();
+    };
+    opts.reading?.add(drop);
     /** What the log holds past what has been read, a chunk at a time so one poll of a run that printed megabytes
      * while nobody watched cannot hold the loop. */
     const readLog = (): Buffer => {
@@ -349,6 +376,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     };
     const settle = async (code: number | null, cut?: Error): Promise<void> => {
       if (finishCode !== undefined) return;
+      opts.reading?.delete(drop);
       await reapRun(base);
       if (cut === undefined) lines.end();
       else lines.fail(cut);
@@ -356,7 +384,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     };
 
     const poll = async (): Promise<void> => {
-      while (finishCode === undefined) {
+      while (finishCode === undefined && !dropped) {
         if (killed) return settle(null);
         // Nothing was launched, so no process will write a log or an exit code: the stream ends where a run that
         // was killed before it answered ends, rather than polling a log nobody writes.
@@ -386,7 +414,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (ended !== undefined) return settle(Number.parseInt(ended.trim(), 10));
         // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
         if ((pid === undefined || !alive(pid)) && ++downs > 1) return settle(null);
-        await sleep(pollMs);
+        await nap(pollMs);
       }
     };
     // Nothing the poll does may reach this process's own error road: a reader that threw would take the host and

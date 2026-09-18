@@ -16,6 +16,10 @@ import {
   ACCOUNT_UNSERVED,
   DEVICES_TICKET_REFUSAL,
   DEVICE_REVOKE_REFUSAL,
+  DOCTOR_UNSERVED,
+  doctorRowRefusal,
+  doctorRunningLine,
+  HERE_PLACE_ID,
   HOST_STOPPING_CLOSE,
   LOOPBACK,
   PAIR_CODE_REFUSAL,
@@ -27,6 +31,7 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACE_UNKNOWN_REFUSAL,
+  noSuchPlaceRefusal,
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
   THREAD_OPS,
@@ -38,6 +43,7 @@ import {
   threadOpRefusal,
   type AccountView,
   type DeviceView,
+  type DoctorLineEvent,
   type ExecEvent,
   type SealedImage,
   type SealedImageExport,
@@ -101,6 +107,9 @@ export interface ServeOptions {
   terminalConfig?: HostTerminalConfig;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
+  /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
+   * op is refused, since the road is the host's own and the runtime holds none of what it reads. */
+  doctor?: PlaceDoctor;
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
@@ -119,6 +128,15 @@ export interface PlaceDoorControl {
    * port and opens nothing. The key proved there is not the host's to say: the place door holds the pair, and the
    * runtime puts its fingerprint on the view it serves. */
   open(): Promise<Omit<PlaceDoorView, "hostKey">>;
+}
+
+/** How the runtime asks the host to prove one computer it holds the link to. `run` walks the road and answers what
+ * the line exits with; `on` is the source its lines arrive on, the shape the init door's own has, so they ride the
+ * events channel without entering the runtime's ring: no sequence, nothing retained, no replay to a socket that
+ * comes back. */
+export interface PlaceDoctor {
+  run(req: { placeId: string; doctorId: string; project?: string }): Promise<{ code: number }>;
+  on(fn: (e: DoctorLineEvent) => void): () => void;
 }
 
 /** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
@@ -206,6 +224,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
   const pairTtlMs = opts.pairTtlMs ?? PAIR_CODE_TTL_MS;
   const tickets = new Map<string, Ticket>();
+  /** The computers a doctor's road is running on right now, so a second one on the same computer is refused rather
+   * than making a second workspace there. One set for this host, since the road is the host's and not a socket's. */
+  const doctoring = new Set<string>();
   const devices = (): DeviceDoor => {
     if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
     return opts.devices;
@@ -486,6 +507,41 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
               return;
             }
+            case "places.doctor": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              if (opts.doctor === undefined) {
+                send({ id: msg.id, ok: false, error: DOCTOR_UNSERVED });
+                return;
+              }
+              const rows = await places().list(now());
+              const row = rows.find(place => place.id === msg.placeId);
+              if (row === undefined) {
+                send({ id: msg.id, ok: false, error: noSuchPlaceRefusal(msg.placeId, rows.map(place => place.name)), kind: "usage" });
+                return;
+              }
+              // The road makes a workspace on a computer somebody joined and reads the tools inside it: the row for
+              // the computer this host runs on and a provider's row are proved where the line was typed, so they
+              // are refused here rather than failing at the first step of a road they were never for.
+              if (row.kind !== "computer" || row.id === HERE_PLACE_ID) {
+                send({ id: msg.id, ok: false, error: doctorRowRefusal(row.name), kind: "usage" });
+                return;
+              }
+              if (doctoring.has(row.id)) {
+                send({ id: msg.id, ok: false, error: doctorRunningLine(row.name), kind: "conflict" });
+                return;
+              }
+              doctoring.add(row.id);
+              try {
+                const { code } = await opts.doctor.run({ placeId: row.id, doctorId: msg.doctorId, ...(msg.project !== undefined ? { project: msg.project } : {}) });
+                send({ id: msg.id, ok: true, code });
+              } finally {
+                doctoring.delete(row.id);
+              }
+              return;
+            }
             case "places.door": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACE_DOOR_REFUSAL });
@@ -583,6 +639,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               detaches.push(rt.events.on("*", pass));
               if (opts.forwards) detaches.push(opts.forwards.on(pass));
               if (opts.init) detaches.push(opts.init.on(pass));
+              if (opts.doctor) detaches.push(opts.doctor.on(pass));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) pass(e);
               return;
