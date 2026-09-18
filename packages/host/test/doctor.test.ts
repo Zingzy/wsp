@@ -12,7 +12,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { noSuchPlaceRefusal, noSuchProjectLine, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -706,8 +706,34 @@ describe("the doctor's computer road", () => {
     // The tools were read inside that workspace, on the one PATH a machine's tools sit on.
     expect(host.execs.some(cmd => cmd.includes(`export PATH=${TOOLS_PATH}`) && cmd.includes("agent-browser"))).toBe(true);
     expect(host.deleted).toEqual(["w_1"]);
-    // Each agent the computer reported, by its catalog name.
+    // Each agent the computer reported, by its catalog name. This one reported no version and no sign-in, which
+    // is a daemon older than those fields, so the name is the whole of the line.
     for (const id of ["claude", "codex"]) expect(io.lines).toContain(`${agentName(id)} on spoo`);
+    expect(io.lines.at(-1)).toContain("DOCTOR PASS");
+  });
+
+  it("says each agent's version and whether a sign-in stands there, in the words the computers table says them in", async () => {
+    const host = fakeHost({ projects: [project({ checkout: "/root/c" })], inside: answering });
+    const io = captured();
+    const said = computer({
+      agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" },
+      signIns: { claude: "vault-key", codex: "none" },
+    });
+    expect(await computerDoctor(host.rt, io, said, { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
+    expect(io.lines).toContain(`${agentName("claude")} on spoo: 2.1.270, your key`);
+    expect(io.lines).toContain(`${agentName("codex")} on spoo: 0.153.0, not signed in`);
+    // The words are the protocol's own, so this step and the table cannot say them two ways.
+    expect(io.lines).toContain(`${agentName("codex")} on spoo: ${agentVersionWord("codex-cli 0.153.0")}, ${agentSignInWord("none")}`);
+    // An agent with no sign-in of its own is a person's to see to, never this run's to fail on.
+    expect(io.lines.filter(l => /^agents there\b/.test(l)).at(0)).toContain(plural(2, "agent"));
+    expect(io.lines.at(-1)).toContain("DOCTOR PASS");
+  });
+
+  it("says the computer reported no agent where it reported none, and still passes", async () => {
+    const host = fakeHost({ projects: [project({ checkout: "/root/c" })], inside: answering });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer({ agents: [] }), { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
+    expect(io.lines.filter(l => /^agents there\b/.test(l)).at(0)).toContain("the computer reported no agent");
     expect(io.lines.at(-1)).toContain("DOCTOR PASS");
   });
 
