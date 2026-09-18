@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedFilesScript, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedFilesScript, landedServers, oncePathsOf, parseLanded, provisionFiles, type FilesSay, type ProvisionLanding } from "../src/provision-files.js";
 import type { McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
@@ -97,6 +97,10 @@ function box(): BoxGuest {
   return g;
 }
 
+/** The tests below are about what lands, not about what the round says as it goes: they read the stage lines
+ * nowhere, and every step of the round takes a say. */
+const QUIET: FilesSay = () => {};
+
 const file = (path: string, content: string) => ({ path, mode: 0o644, content });
 const write = (root: string, rel: string, text: string): void => {
   mkdirSync(join(root, rel, ".."), { recursive: true });
@@ -143,7 +147,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // What the person keeps there: their own AGENTS.md, and a CLAUDE.md that is already the copy this would land.
     write(root, ".codex/AGENTS.md", "what he wrote on the box\n");
     write(root, ".claude-cfg/CLAUDE.md", "his standing rules\n");
-    const landed = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    const landed = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     expect(read(root, ".claude-cfg/skills/why/SKILL.md")).toBe("the why skill\n");
     expect(read(root, ".codex/AGENTS.md")).toBe("what he wrote on the box\n");
     expect(landed.rows.map(r => [r.id, r.outcome])).toEqual([
@@ -163,7 +167,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
   it("lands its own copy again when this computer's file changed, and leaves that file alone once the person has written it themselves", async () => {
     const { root, machine } = box();
     const at = placeProvisionPaths(root);
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     await closeAgentFiles(machine, root);
     // What wsp owns there is written down, and the tree that travelled is gone from its folder.
     expect(readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "").map(l => l.split("\t")[0]).sort()).toEqual([
@@ -175,19 +179,19 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(existsSync(at.staging)).toBe(false);
 
     // A second run of the same recipe puts nothing there.
-    const again = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    const again = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     expect(again.rows.map(r => r.outcome)).toEqual(["present", "present", "present"]);
     await closeAgentFiles(machine, root);
 
     // This computer's copy changed: the copy on that computer is wsp's own and is replaced.
-    const changed = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "the why skill, rewritten\n" }), lands: LANDS });
+    const changed = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "the why skill, rewritten\n" }), lands: LANDS, say: QUIET });
     expect(changed.rows.map(r => r.outcome)).toEqual(["installed", "present", "present"]);
     expect(read(root, ".claude-cfg/skills/why/SKILL.md")).toBe("the why skill, rewritten\n");
     await closeAgentFiles(machine, root);
 
     // The person wrote that file themselves on the box: their words stand, and the row names the path it kept.
     write(root, ".claude-cfg/skills/why/SKILL.md", "his own skill now\n");
-    const theirs = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "a third copy\n" }), lands: LANDS });
+    const theirs = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "a third copy\n" }), lands: LANDS, say: QUIET });
     // The row covers the two skills that travelled: one is theirs now and one is the same copy as before, so the
     // row reads present and names the path it kept rather than reading skipped for the pair.
     expect(theirs.rows[0]!.outcome).toBe("present");
@@ -198,21 +202,21 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
   it("leaves the list as it was after a round that landed nothing, so the paths it landed before stay its own", async () => {
     const { root, machine } = box();
     const at = placeProvisionPaths(root);
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     await closeAgentFiles(machine, root);
     const listed = readFileSync(at.landed, "utf8");
 
     // The person writes their own words over every path that travelled: the landing keeps all of them, so it
     // lands nothing and the close has nothing of this round to fold in.
     for (const rel of [".claude-cfg/skills/why/SKILL.md", ODD, ".claude-cfg/CLAUDE.md", ".codex/AGENTS.md"]) write(root, rel, `his own ${rel}\n`);
-    const none = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    const none = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     expect(none.rows.every(r => r.outcome === "skipped")).toBe(true);
     await closeAgentFiles(machine, root);
     expect(readFileSync(at.landed, "utf8")).toBe(listed);
 
     // And a path this round did land keeps one line, the one it wrote: the list holds no second line for it.
     write(root, ".claude-cfg/CLAUDE.md", "his standing rules\n");
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     await closeAgentFiles(machine, root);
     const lines = readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "");
     expect(lines.filter(l => l.startsWith(".claude-cfg/CLAUDE.md\t"))).toHaveLength(1);
@@ -220,10 +224,10 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
 
   it("reads its own copy of a path holding a backslash off the list, and replaces it when this computer's copy changed", async () => {
     const { root, machine } = box();
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     await closeAgentFiles(machine, root);
     expect(read(root, ODD)).toBe("a skill with a backslash in its folder\n");
-    const changed = await landAgentFiles(machine, { home: root, tar: TAR({ odd: "the same skill, rewritten\n" }), lands: LANDS });
+    const changed = await landAgentFiles(machine, { home: root, tar: TAR({ odd: "the same skill, rewritten\n" }), lands: LANDS, say: QUIET });
     // The path is read back off the list by the bytes, not by a name a shell read the backslash out of.
     expect(changed.rows[0]!.outcome).toBe("installed");
     expect(changed.rows[0]!.note).not.toContain("other content");
@@ -240,7 +244,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     mkdirSync(at.dir, { recursive: true });
     writeFileSync(at.landed, ".claude-cfg/.claude.json\tdead\tdead\n");
 
-    const first = await landAgentFiles(machine, { home: root, tar: tar("{}\n"), lands });
+    const first = await landAgentFiles(machine, { home: root, tar: tar("{}\n"), lands, say: QUIET });
     expect(first.rows[0]!.outcome).toBe("installed");
     expect(first.owned.get(`${root}/.claude-cfg/.claude.json`)).toBe("installed");
     await closeAgentFiles(machine, root, oncePathsOf(lands));
@@ -249,7 +253,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // The agent writes its own file, as it does at every launch: the landing leaves it, whatever this computer's
     // copy of it says now, and the row says it is there rather than that wsp put it there.
     write(root, ".claude-cfg/.claude.json", '{ "numStartups": 3 }\n');
-    const again = await landAgentFiles(machine, { home: root, tar: tar('{ "mcpServers": {} }\n'), lands });
+    const again = await landAgentFiles(machine, { home: root, tar: tar('{ "mcpServers": {} }\n'), lands, say: QUIET });
     expect(again.rows[0]!.outcome).toBe("present");
     expect(again.rows[0]!.note).toBeUndefined();
     expect(read(root, ".claude-cfg/.claude.json")).toBe('{ "numStartups": 3 }\n');
@@ -282,7 +286,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
   it("closes a round that landed only keys, and carries a key's line through as the servers step wrote it", async () => {
     const { root, machine } = box();
     const at = placeProvisionPaths(root);
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     const keys = [`${MCP_ID_PREFIX}claude/github\td1\td1`, `${MCP_ID_PREFIX}codex/context7\td2\td2`];
     await appendLanding(machine, root, keys);
     await closeAgentFiles(machine, root);
@@ -293,12 +297,12 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(md[1]).toMatch(/^[0-9a-f]{64}$/);
     expect(md[2]).toBe(md[1]);
     // The list is read back as the digest per key, which is what says whose a server in an agent's own file is.
-    expect(await landedServers(machine, root)).toEqual(new Map([[`${MCP_ID_PREFIX}claude/github`, "d1"], [`${MCP_ID_PREFIX}codex/context7`, "d2"]]));
+    expect(await landedServers(machine, root, QUIET)).toEqual(new Map([[`${MCP_ID_PREFIX}claude/github`, "d1"], [`${MCP_ID_PREFIX}codex/context7`, "d2"]]));
 
     // A round that landed no file of the person's at all still closes, and the keys it wrote are in the list.
     await appendLanding(machine, root, [`${MCP_ID_PREFIX}claude/gsc\td3\td3`]);
     await closeAgentFiles(machine, root);
-    expect([...(await landedServers(machine, root)).keys()].sort()).toEqual([`${MCP_ID_PREFIX}claude/github`, `${MCP_ID_PREFIX}claude/gsc`, `${MCP_ID_PREFIX}codex/context7`]);
+    expect([...(await landedServers(machine, root, QUIET)).keys()].sort()).toEqual([`${MCP_ID_PREFIX}claude/github`, `${MCP_ID_PREFIX}claude/gsc`, `${MCP_ID_PREFIX}codex/context7`]);
   });
 
   it("reads a round whose files never left this computer as one that put nothing there, and leaves the servers in the agents' own files as they are", async () => {
@@ -334,7 +338,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // was, so the keys wsp wrote on that computer are still written down.
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     expect(readFileSync(placeProvisionPaths(root).landed, "utf8")).toBe(listed);
-    expect((await landedServers(machine, root)).get(`${MCP_ID_PREFIX}claude/github`)).toMatch(/^[0-9a-f]{64}$/);
+    expect((await landedServers(machine, root, QUIET)).get(`${MCP_ID_PREFIX}claude/github`)).toMatch(/^[0-9a-f]{64}$/);
 
     // With nothing of this computer's beside it, the server in the agent's own file is read and not written: it is
     // there as the recipe asks, and its row says so rather than saying whose the file is.
@@ -358,7 +362,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // What two updates left on a box: one zero-byte marker per batch of log lines appended, 117 of them beside
     // the log itself, swept by nothing.
     for (const mark of ["afff817b8c5d9", "afe821d3a8a49"]) writeFileSync(`${at.log}.${mark}`, "");
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     await closeAgentFiles(machine, root);
     expect(
       readdirSync(at.dir)
@@ -371,7 +375,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
 
   it("puts what travels under wsp's own folder on that computer, never the folder every login there shares", async () => {
     const { root, machine, landed } = box();
-    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     expect(landed.length).toBeGreaterThan(0);
     for (const path of landed) expect(path.startsWith(`${placeProvisionPaths(root).dir}/`)).toBe(true);
   });

@@ -29,7 +29,8 @@ import { importInto } from "./vault.js";
 
 /** Where each stage of this round says what it came to: the round is minutes long on a computer somebody owns,
  * and a line of its own per stage is what says which of them the minutes went to, since the job's own log on that
- * computer carries the time of every line. */
+ * computer carries the time of every line. Every step here takes one; `provisionFiles` is where a caller that
+ * wants none is answered, once. */
 export type FilesSay = (line: string) => void;
 
 /** One planned file of the person's, as the run needs it: the recipe row it came from and where it lands under the
@@ -316,17 +317,16 @@ const LAND_MS = 300_000;
 /** Lands the person's agent files on the computer itself: the archive extracted into wsp's own folder there, then
  * one run that puts each file in its agent's home under the rules above, then the rows. The staging tree stays
  * until the job closes, since the servers step reads the configs that travelled out of it. */
-export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; say?: FilesSay }): Promise<LandFilesResult> {
+export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; say: FilesSay }): Promise<LandFilesResult> {
   const at = placeProvisionPaths(o.home);
-  const say = o.say ?? ((): void => {});
   await machine.exec(`rm -rf ${shellQuote(at.staging)}`, { timeoutMs: INLINE_EXEC_MS });
   // Under wsp's own folder there, never the shared temporary one: on a computer somebody owns, another account
   // could be sitting in /tmp first, and what travels is the person's own configuration.
-  await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir, onPart: p => say(provisionShippedLine(p)) });
+  await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir, onPart: p => o.say(provisionShippedLine(p)) });
   const res = await machine.run(landFilesScript(o.home, oncePathsOf(o.lands)), { deadlineMs: LAND_MS });
   if (res.exitCode !== 0) throw new Error(`the agents' files did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.slice(-300)}`);
   const landed = parseLanded(res.stdout);
-  say(provisionLandedLine(landed.length));
+  o.say(provisionLandedLine(landed.length));
   return {
     rows: filesRows(o.lands, landed, o.home),
     owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[`${o.home}/${l.rel}`, l.outcome] as const] : []))),
@@ -337,7 +337,7 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
 /** What wsp owns in the agents' own files on that computer, off the list beside the job: one entry per server it
  * wrote there, with the digest of that entry as it left it. Empty where the computer has no list yet or would not
  * answer, which reads every server in those files as the agent's own and leaves them. */
-export async function landedServers(machine: Machine, home: string, say?: FilesSay): Promise<Map<string, string>> {
+export async function landedServers(machine: Machine, home: string, say: FilesSay): Promise<Map<string, string>> {
   const res = await machine.run(landedServersScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
   if (res === undefined || res.exitCode !== 0) return new Map();
   const keys = new Map(
@@ -346,7 +346,7 @@ export async function landedServers(machine: Machine, home: string, say?: FilesS
       return words[0] === SERVER_MARK && words.length > 2 ? [[words.slice(2).join("\t"), words[1]!] as const] : [];
     }),
   );
-  say?.(provisionListReadLine(keys.size));
+  say(provisionListReadLine(keys.size));
   return keys;
 }
 
@@ -379,10 +379,12 @@ export async function appendLanding(machine: Machine, home: string, lines: reado
  * with the reason, since the archive is the person's whole set of agent files and one row of it cannot fail
  * alone, and the round then says it put nothing there rather than anything about whose the files are. */
 export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: () => Promise<PackedFiles>; say?: FilesSay }): Promise<LandFilesResult> {
+  // The one place the stages may go unsaid, so every step below takes a say and none of them asks whether it has one.
+  const say = o.say ?? ((): void => {});
   try {
     const packed = await o.pack();
-    o.say?.(provisionPackedLine(o.lands.length, packed.bytes, packed.unpacked));
-    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, ...(o.say !== undefined ? { say: o.say } : {}) });
+    say(provisionPackedLine(o.lands.length, packed.bytes, packed.unpacked));
+    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, say });
     return { ...landed, skipped: [...packed.skipped, ...landed.skipped] };
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;

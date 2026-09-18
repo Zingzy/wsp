@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { fmtBytes, fmtBytesOfTotal, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
+import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -3929,7 +3929,7 @@ export function provisionLines(name: string, p: PlaceProvision): string[] {
 /** One line of the job's own log on a computer you own: the time it was written, in UTC to the second, then the
  * line. Every line that log takes carries one, so what each part of a run took is read off the computer's own log
  * afterwards rather than timed while it happens. */
-export const provisionLogLine = (at: number, line: string): string => `${new Date(at).toISOString().replace(/\.\d+Z$/, "Z")} ${line}`;
+export const provisionLogLine = (at: number, line: string): string => `${isoSeconds(at)} ${line}`;
 
 /** What the round that lands the person's agent files packed on this computer: the paths the recipe planned, the
  * archive that goes over the link, and what it comes to once it is unpacked there. */
