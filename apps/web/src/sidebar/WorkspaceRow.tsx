@@ -9,7 +9,10 @@
 // two: what this workspace is made of, off the protocol's word table. Line
 // three: the branch the agent is on, or what the last bring back answered about
 // it; the one sentence a person may be waiting on takes that line while it
-// lasts, cut at the row's own cap with the whole of it on the row's hover text. No figure stands on this row: what a machine
+// lasts. The slot cuts by its own width and by nothing else, with the whole of
+// it on the row's hover text: a cap counted in characters cut a 44 character
+// line to 30 at every width, so the half that says what happened was gone at
+// 390 where the line fits whole. No figure stands on this row: what a machine
 // costs and what shape it is are facts about the computer it runs on and live
 // on that computer's row in Settings. The row's actions, the collapse
 // chevron and new thread on a live row, forget and rebuild on a dead one, show
@@ -30,7 +33,7 @@ import { cn } from "../lib/utils.js";
 import { useAbsentComputer, useBroughtBack } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { NEW_THREAD_TITLE, glyphStateClass, holdsStateWord, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine, workspaceMetaTitle } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
@@ -162,7 +165,7 @@ export function WorkspaceRow({
             {madeOf}
           </span>
           <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={absent?.sentence ?? metaWhole}>
-            {rowLineCut(meta)}
+            {meta}
           </span>
         </span>
       </SidebarMenuButton>

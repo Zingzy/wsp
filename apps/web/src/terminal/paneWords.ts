@@ -37,7 +37,7 @@ const NEVER = (): (() => void) => () => {};
 
 /** This workspace's link as the registry holds it, for a surface that draws no pane of its own. A workspace with no
  * model yet reads as a link nothing has been open on, which is what it is. */
-function useLinkSocket(workspaceId: string | null): { socket: DaemonLinkStatus; refusal: string | null } {
+export function useLinkSocket(workspaceId: string | null): { socket: DaemonLinkStatus; refusal: string | null } {
   const terms = useSyncExternalStore(onTerminals, () => (workspaceId === null ? null : getTerminals(workspaceId)));
   const subscribe = useCallback((fn: () => void) => terms?.onStatus(fn) ?? NEVER(), [terms]);
   const socket = useSyncExternalStore(subscribe, () => terms?.status() ?? NOT_OPENED_YET);

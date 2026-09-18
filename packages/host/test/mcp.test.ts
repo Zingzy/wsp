@@ -535,7 +535,7 @@ describe("the MCP server over the host", () => {
 
     const asked = await call("delete", { workspace: "alpha" });
     expect(asked.isError).toBe(true);
-    expect(asked.text).toBe("alpha kept. Its machine is deleted at the provider; its record and 1 thread leave this computer. Ask the person, then call delete again with confirm true.");
+    expect(asked.text).toBe("alpha kept. Its computer is deleted in the cloud; its record and 1 thread leave this computer. Ask the person, then call delete again with confirm true.");
     expect(asked.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", machineId: alpha!.machineId, threads: 1 });
     expect(backend.machines[0]!.killed).toBe(false);
     expect(await rt.workspaces.list()).toHaveLength(1);
@@ -547,7 +547,7 @@ describe("the MCP server over the host", () => {
     const deleted = await call("delete", { workspace: "alpha", confirm: true });
     expect(deleted.isError).toBe(false);
     expect(deleted.structured).toEqual({ workspaceId: alpha!.id, name: "alpha", machineId: alpha!.machineId, threads: 1 });
-    expect(deleted.text).toBe(`deleted alpha ${alpha!.id}: machine ${alpha!.machineId} is gone at the provider, and its record and 1 thread are gone from this computer`);
+    expect(deleted.text).toBe(`deleted alpha ${alpha!.id}: computer ${alpha!.machineId} is gone in the cloud, and its record and 1 thread are gone from this computer`);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();

@@ -249,8 +249,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </MenuPopup>
           </Menu>
           {/* The path and the branch leave the header at the narrow width: the file list under it names the file
-              and the workspace's own row names the branch, and three facts on a 390 px header drew over one another. */}
-          <FolderBreadcrumbs workspaceId={workspaceId} className="hidden flex-initial sm:flex" />
+              and the workspace's own row names the branch, and three facts on a 390 px header drew over one
+              another. The path leaves again when a comment puts Send to thread on the header: it is the one fact
+              here with no bound, and squeezed to two letters it says nothing while the branch beside it still reads. */}
+          {comments.length === 0 ? <FolderBreadcrumbs workspaceId={workspaceId} className="hidden flex-initial sm:flex" /> : null}
           {shown.kind === "repo" ? (
             <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />

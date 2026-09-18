@@ -97,7 +97,7 @@ import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { TerminalWire } from "../src/terminal/link.js";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
@@ -275,18 +275,36 @@ describe("composer checkout row", () => {
     expect(folder()).toBe("/root");
   });
 
-  it("says nothing beside the locked label for a read that did not happen: a dropped wire is not a refusal", async () => {
+  it("says the same word beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": () => new Error("socket closed") }));
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     expect(row()?.dataset["pickable"]).toBeUndefined();
-    await waitFor(() => expect(branch()).toBe("unknown"));
+    await waitFor(() => expect(branch()).toBe("refused"));
     const slot = branchSlot()!;
-    // The slot keeps its height and stays empty: a state word for a read nobody made is a word about nothing.
-    expect(slot.textContent).toBe("");
+    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
-    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
+    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("asks again every time the link changes its word, so a read made before it was up is not the row's last word", async () => {
+    // The wire is there from the first paint and the link is up a moment later; asked once, the row kept the
+    // refusal from that first read for the whole of a session, on a folder it could read fine.
+    let up = false;
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => (up ? STATUS : new Error("daemon unreachable")) });
+    provideDaemonWire(WS, wire);
+    const terminals = new WorkspaceTerminals(wire);
+    provideTerminals(WS, terminals);
+    const { api } = fixtureApi(CHAT_STREAM.slice());
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(branch()).toBe("refused"));
+    up = true;
+    act(() => terminals.feedStatus("live"));
+    await waitFor(() => expect(branch()).toBe("feature/panes"));
+    expect(branchSlot()?.textContent).toBe("feature/panes");
+    provideTerminals(WS, null);
   });
 
   it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {

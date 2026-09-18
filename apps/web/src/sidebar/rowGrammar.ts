@@ -6,7 +6,6 @@
 // two-line thread row's, the leading slot the workspace kind's glyph sits in,
 // and the one id each row wears, which the keyboard traversal walks and the
 // name box is opened by.
-import { ROW_LINE_MAX, cutLine } from "@wsp/protocol";
 import { TWO_LINE_SLOT } from "../settings/format.js";
 
 export const TOP_ROW_CLASS = "px-2 transition-[background-color,color] duration-150";
@@ -33,11 +32,6 @@ export const FOOT_ROW_GRAMMAR = "flex h-7 w-full items-center gap-1.5 rounded-md
 /** A foot row the whole width of which is pressed, with the same hover and focus every other row wears. The host
  * switcher and the Settings row are both one of these. */
 export const FOOT_ROW_CLASS = `${FOOT_ROW_GRAMMAR} transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none`;
-
-/** The cut every line written for a workspace row's third slot is measured against; the whole sentence rides the
- * row's hover text. The cap is the protocol's, beside the lines written to fit it. */
-export const rowLineCut = (line: string): string => cutLine(line, ROW_LINE_MAX);
-export { ROW_LINE_MAX };
 
 export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId}`;
 /** A project's header row, which the keyboard does not walk and a test and a screenshot step name it by. */
