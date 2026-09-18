@@ -4127,6 +4127,10 @@ export const PlaceSignature = base64(64);
 export type PlaceEngine = "none" | "docker" | "podman";
 export const engineWord = (hasDocker: boolean, hasPodman: boolean): PlaceEngine => (hasDocker ? "docker" : hasPodman ? "podman" : "none");
 
+/** How many agents one computer may report: the list and the version map keyed by it are held to one number, and
+ * the daemon's own deserialiser holds them to the same one. */
+const AGENTS_REPORTED_MAX = 32;
+
 /** What a place says about itself on every link, and once at join. Read by the host into the place record and the
  * workspace recorded on it; nothing here is trusted for paths until isPlainPath has read it. */
 export const PlaceReport = z.object({
@@ -4157,10 +4161,14 @@ export const PlaceReport = z.object({
   wsp: z.array(z.string()).min(1),
   /** The catalog ids of the agents found on that computer's own login PATH, for the line the person reads as it
    * joins. Capped because it lands in a sentence, not in a list a person scrolls. */
-  agents: z.array(z.string().max(32)).max(32),
+  agents: z.array(z.string().max(32)).max(AGENTS_REPORTED_MAX),
   /** What each of those agents answered its own version flag with, by the same catalog id: the first line of
-   * `<bin> --version`, as the computer said it. Absent on a computer whose agents have not been read yet. */
-  agentVersions: z.record(z.string().max(64)).optional(),
+   * `<bin> --version`, as the computer said it. Absent on a computer whose agents have not been read yet. Under
+   * the same cap as the list it is keyed by, since zod counts an object's keys nowhere else. */
+  agentVersions: z
+    .record(z.string().max(64))
+    .refine(said => Object.keys(said).length <= AGENTS_REPORTED_MAX, `at most ${AGENTS_REPORTED_MAX} agents`)
+    .optional(),
   /** The files under that computer's logins directory, each named under it: what a sign-in there wrote and every
    * workspace on it shares. Absent from a report a daemon older than this field sent, which is unknown and not
    * none; a name that walks out of that folder is refused, since the host joins it onto a folder of its own. */

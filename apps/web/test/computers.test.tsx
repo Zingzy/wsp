@@ -633,7 +633,7 @@ describe("a computer's own row", () => {
     await settle();
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     expect(agentRows()).toEqual([
-      { agent: "claude", name: "Claude Code", state: "2.1.270 · key from this wsp", action: undefined },
+      { agent: "claude", name: "Claude Code", state: "2.1.270 · your key", action: undefined },
       { agent: "codex", name: "Codex", state: "0.153.0 · not signed in", action: AGENTS_WORDS.signIn },
     ]);
     // A held control for a finished thing is one more thing to read past, so the signed-in line carries none.

@@ -120,15 +120,17 @@ impl AgentVersions {
     }
 }
 
-/// What `<bin> --version` printed: its first line, trimmed and cut to what the report carries. Nothing where the
-/// binary would not start or said nothing inside the deadline, which the next dial reads again. The exit code is
-/// not read: what a tool printed about itself is the fact, and some print it and exit non-zero.
+/// What `<bin> --version` printed: the first line it said that is not blank, trimmed and cut to what the report
+/// carries. Both streams are read, stdout first: a tool that prints its version on stderr would otherwise read as
+/// nothing and be run again at every dial, a process per dial where the point of this is one stat. Nothing where
+/// the binary would not start or said nothing inside the deadline, which the next dial reads again. The exit code
+/// is not read: what a tool printed about itself is the fact, and some print it and exit non-zero.
 fn version_line(at: &Path, deadline: Duration) -> Option<String> {
     let mut child = std::process::Command::new(at)
         .arg("--version")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .ok()?;
     let until = Instant::now() + deadline;
@@ -145,9 +147,9 @@ fn version_line(at: &Path, deadline: Duration) -> Option<String> {
         }
     }
     let out = child.wait_with_output().ok()?;
-    let said = String::from_utf8_lossy(&out.stdout);
-    let line: String = said.lines().next().unwrap_or_default().trim().chars().take(VERSION_LINE_MAX).collect();
-    (!line.is_empty()).then_some(line)
+    let streams = [String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)];
+    let said = streams.iter().flat_map(|stream| stream.lines()).map(str::trim).find(|line| !line.is_empty())?;
+    Some(said.chars().take(VERSION_LINE_MAX).collect())
 }
 
 /// Where this computer keeps the logins every workspace on it shares, as the runtime spells it and nothing here
@@ -572,6 +574,32 @@ mod tests {
         fake_bin(dir.path(), "long", &"v".repeat(200), &counter);
         held.refresh(&parse_agents(&["long=long".to_owned()]), &dir.path().to_string_lossy(), VERSION_DEADLINE);
         assert_eq!(held.lines()["long"].len(), VERSION_LINE_MAX);
+    }
+
+    /// A tool that says its version on stderr is read like any other. Reading stdout alone would leave it with no
+    /// line at all, so every dial would run it again: a process per dial where the whole point is one stat.
+    #[test]
+    fn a_version_printed_on_stderr_is_read_once_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs");
+        let at = dir.path().join("noisy");
+        std::fs::write(&at, format!("#!/bin/sh\necho ran >> {}\necho '' \necho 'noisy 4.5.6' 1>&2\n", counter.display())).unwrap();
+        std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let agents = parse_agents(&["noisy=noisy".to_owned()]);
+        let path = dir.path().to_string_lossy().into_owned();
+        let mut held = AgentVersions::default();
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("noisy").map(String::as_str), Some("noisy 4.5.6"));
+        assert_eq!(ran(&counter), 1);
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(ran(&counter), 1, "a version read off stderr was read again at the next dial");
+
+        // What a tool printed on stdout is still what the report carries, whatever it put on stderr beside it.
+        let both = dir.path().join("both");
+        std::fs::write(&both, "#!/bin/sh\necho 'warning: old config' 1>&2\necho 'both 1.2.3'\n").unwrap();
+        std::fs::set_permissions(&both, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        held.refresh(&parse_agents(&["both=both".to_owned()]), &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("both").map(String::as_str), Some("both 1.2.3"));
     }
 
     #[test]

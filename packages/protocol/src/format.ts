@@ -3435,10 +3435,10 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
 }
 
 /** What a person reads for whether an agent on a computer can take a turn there as things stand: its own login on
- * that computer, the key or token this wsp's vault holds for it, or nothing yet. One home for the three words, so
- * the table, the doctor and the agents block under a computer's row cannot word them three ways. */
+ * that computer, the key of theirs wsp hands it, or nothing yet. One home for the three words, so the table, the
+ * doctor and the agents block under a computer's row cannot word them three ways. */
 export function agentSignInWord(state: AgentSignInState): string {
-  return state === "signed-in" ? "signed in" : state === "vault-key" ? "key from this wsp" : "not signed in";
+  return state === "signed-in" ? "signed in" : state === "vault-key" ? "your key" : "not signed in";
 }
 
 /** The version number in what an agent's own version flag printed: agents word that line their own way (`2.1.270
@@ -3465,13 +3465,14 @@ export function agentsCell(place: Pick<PlaceView, "agents" | "agentVersions" | "
  * narrowed one, short enough to stay one sentence. */
 const REFUSAL_REASON_MAX = 80;
 
-/** The one line a codex turn fails with when it ran on the key this wsp's vault holds and the provider turned that
- * key down: what was refused, what the provider said about it, and the two ways out. Never the not-signed-in line,
+/** The one line a codex turn fails with when it ran on the person's own key and the provider turned that key down:
+ * whose key was refused, what the provider said about it, and the two ways out. Never the not-signed-in line,
  * which would send a person to sign in when what they have is a key that no longer works. `reason` is what the CLI
- * printed after the status, empty when it printed nothing; `login` is the catalog's sign-in command for a machine. */
+ * printed after the status, empty when it printed nothing, and a refusal with nothing after it drops the clause
+ * rather than reading as a colon with nothing behind it; `login` is the catalog's sign-in command for a machine. */
 export function codexKeyRefusedLine(keyEnv: string, reason: string, login: string): string {
   const said = reason.trim().slice(0, REFUSAL_REASON_MAX).trim();
-  return `Codex's provider refused the ${keyEnv} this wsp holds${said === "" ? "" : ` (${said})`}; put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`;
+  return `OpenAI refused your ${keyEnv}${said === "" ? "" : `: ${said}`}. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`;
 }
 
 /** The verb alone, for the host road that runs that leave on another computer over the line that computer said

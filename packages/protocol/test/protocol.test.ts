@@ -195,6 +195,11 @@ describe("what a computer says about its agents, and what a person reads off it"
     expect(wire.PlaceReport.safeParse({ ...said, logins: ["/wsp/logins/codex/auth.json"] }).success).toBe(false);
     expect(wire.PlaceReport.safeParse({ ...said, agentVersions: 17 }).success).toBe(false);
     expect(wire.PlaceReport.safeParse({ ...said, agentVersions: { claude: "x".repeat(65) } }).success).toBe(false);
+    // The map is keyed by the agents list, so it is under that list's own cap: one rule, and the daemon's own
+    // deserialiser holds a report to the same number.
+    const many = Object.fromEntries(Array.from({ length: 33 }, (_, n) => [`a${n}`, "1.0.0"]));
+    expect(wire.PlaceReport.safeParse({ ...said, agentVersions: many }).success).toBe(false);
+    expect(wire.PlaceReport.safeParse({ ...said, agentVersions: Object.fromEntries(Object.entries(many).slice(0, 32)) }).success).toBe(true);
   });
 
   it("a computer's row carries those versions and the one word the host worked out per agent", () => {
@@ -212,7 +217,7 @@ describe("what a computer says about its agents, and what a person reads off it"
 
   it("the agents cell names each agent, its version and its sign-in, and says nothing for a row that reported none", () => {
     const row = { agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
-    expect(wire.agentsCell(row)).toBe("claude 2.1.270 key from this wsp · codex 0.153.0 not signed in");
+    expect(wire.agentsCell(row)).toBe("claude 2.1.270 your key · codex 0.153.0 not signed in");
     expect(wire.agentsCell({ agents: ["codex"], signIns: { codex: "signed-in" } })).toBe("codex signed in");
     expect(wire.agentsCell({})).toBe("");
     expect(wire.agentSignInWord("signed-in")).toBe("signed in");
@@ -221,13 +226,14 @@ describe("what a computer says about its agents, and what a person reads off it"
   it("a key the provider turned down is said as a refused key, with what the provider said about it", () => {
     const login = "codex login --device-auth";
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "invalid_api_key", login)).toBe(
-      `Codex's provider refused the OPENAI_API_KEY this wsp holds (invalid_api_key); put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`,
+      `OpenAI refused your OPENAI_API_KEY: invalid_api_key. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`,
     );
+    // A refusal the provider said nothing after drops the clause rather than reading as a colon with nothing behind it.
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "", login)).toBe(
-      `Codex's provider refused the OPENAI_API_KEY this wsp holds; put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`,
+      `OpenAI refused your OPENAI_API_KEY. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`,
     );
     // The provider's reason is a clause in somebody else's sentence, so it is cut before it becomes a paragraph.
-    expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "x".repeat(200), login)).toContain(`(${"x".repeat(80)})`);
+    expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "x".repeat(200), login)).toContain(`: ${"x".repeat(80)}.`);
   });
 });
 
