@@ -632,7 +632,10 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
         assert_eq!(code, 0);
         let lines: Vec<&str> = held.lines().collect();
         assert_eq!(lines.first().map(|n| n.trim()), Some(own.to_string().as_str()), "{root} reads differently inside: {held}");
-        assert!(lines.get(1).is_some_and(|options| options.contains("ro")), "{root} is not read-only inside: {held}");
+        // Two mounts stack at the root inside: the boot's own bind, and the read-only one the container runtime
+        // makes over it off the config. findmnt prints them oldest first, and the one a process inside reads is
+        // the last, so the read-only word is read there and not on the bind under it.
+        assert!(lines.last().is_some_and(|options| options.contains("ro")), "{root} is not read-only inside: {held}");
         // A write into the prefix is refused: an install happens on the computer, through the recipe, and what a
         // tool writes while it runs goes under /root, which is the computer's own and read-write.
         let (code, _, refused) = w.exec(&id, &format!("touch {root}/wsp-probe")).await;
@@ -2217,6 +2220,12 @@ async fn frames_daemon() -> FramesDaemon {
     options.root = Some(root());
     options.roots_path = Some(root().join("roots"));
     options.runtime_root = Some(root());
+    // A daemon serves workspaces only where a place file names one, which is what a computer somebody joined has
+    // and what the product's own daemon on a box is started with. The file itself need not be there: a daemon
+    // whose file is missing logs that it has no host to dial and dials nothing, and the workspaces it runs are
+    // still its own to answer for.
+    options.home = Some(root().join("frames-home"));
+    options.place_file = Some(root().join("frames-home").join("place.json"));
     let daemon = wsp_daemon::Daemon::bind(options).await.unwrap();
     let addr = daemon.local_addr();
     tokio::spawn(daemon.run());
@@ -2310,7 +2319,11 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
     let _ = fs::remove_file(marker);
 
     let mut w = World::open().await;
-    let at = "/root/live-frames";
+    // Outside /root and outside every overlaid tree: the mount point a copy's bind makes is made through the
+    // rootfs, and under a tree the boot bound in that means a directory on the computer's own shared home, left
+    // there after the workspace is gone. A path of the workspace's own leaves the mount point in its run folder,
+    // which the kill takes with everything else.
+    let at = "/live-frames";
     let id = w.create(spec(json!({ "copy": { "from": from.display().to_string(), "at": at } }))).await;
     // A symlink inside the checkout that leads out of the workspace: read through the frame road it is refused,
     // since the path is resolved against the workspace's own rootfs and nowhere else.
@@ -2331,6 +2344,10 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
     // A path that leaves the workspace is refused, and so is a workspace this computer does not run.
     let escaped = client.request("fs.read", json!({ "path": format!("{at}/escape"), "machineId": &id })).await;
     assert_eq!((escaped["ok"].as_bool(), escaped["code"].as_str()), (Some(false), Some("outside-root")), "{escaped}");
+    // The refusal names the path the frame gave, as the workspace sees it, and not where this computer keeps that
+    // workspace's files: the person who asked knows the folder by the one and never by the other.
+    assert_eq!(escaped["error"].as_str(), Some(format!("{at}/escape resolves outside the workspace root").as_str()), "{escaped}");
+    assert!(!escaped["error"].as_str().unwrap_or_default().contains(&root().display().to_string()), "{escaped}");
     let nowhere = client.request("git.status", json!({ "cwd": at, "machineId": "wsp-nobody" })).await;
     assert_eq!((nowhere["ok"].as_bool(), nowhere["error"].as_str()), (Some(false), Some("no such workspace: wsp-nobody")), "{nowhere}");
 

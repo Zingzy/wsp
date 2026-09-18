@@ -118,11 +118,19 @@ fn nearest_existing(path: &Path) -> io::Result<PathBuf> {
 /// symlinked parent of a missing leaf stays outside-root rather than not-found, so the refusal never confirms what
 /// exists there.
 pub(crate) fn resolve_inside(roots: &[PathBuf], requested: &str) -> Result<PathBuf, OpError> {
+    resolve_inside_named(roots, requested, requested)
+}
+
+/// The same, with the path a refusal names given apart from the path being resolved: a workspace's own path is
+/// resolved under that workspace's rootfs on this computer, and the person who asked for it knows it by the path
+/// they gave, not by where this computer keeps the workspace's files.
+pub(crate) fn resolve_inside_named(roots: &[PathBuf], resolving: &str, named: &str) -> Result<PathBuf, OpError> {
+    let requested = resolving;
     let lexical_roots: Vec<PathBuf> = roots.iter().map(|root| absolute(root)).collect();
     let first = lexical_roots.first().cloned().unwrap_or_else(|| PathBuf::from("/"));
     let lexical = lexical_resolve(&first, requested);
     if !lexical_roots.iter().any(|root| is_inside(root, &lexical)) {
-        return Err(outside_root(requested));
+        return Err(outside_root(named));
     }
     let real_roots = lexical_roots.iter().map(|root| realpath_or_missing(root)).collect::<io::Result<Vec<_>>>()?;
     let (real, exists) = match realpath_or_missing(&lexical)? {
@@ -133,12 +141,12 @@ pub(crate) fn resolve_inside(roots: &[PathBuf], requested: &str) -> Result<PathB
         // A root that is gone (an imported folder since removed) hides nothing, so a leaf under it is missing, not outside.
         let under_gone_root = lexical_roots.iter().zip(&real_roots).any(|(root, real)| real.is_none() && is_inside(root, &lexical));
         if !exists && under_gone_root {
-            return Err(not_found(requested));
+            return Err(not_found(named));
         }
-        return Err(outside_root(requested));
+        return Err(outside_root(named));
     }
     if !exists {
-        return Err(not_found(requested));
+        return Err(not_found(named));
     }
     Ok(real)
 }
@@ -219,6 +227,26 @@ mod tests {
         assert_eq!(code(resolve_inside(&r, "escape")), Some(DaemonErrorCode::OutsideRoot));
         assert_eq!(code(resolve_inside(&r, "escape/secret.txt")), Some(DaemonErrorCode::OutsideRoot));
         assert_eq!(code(resolve_inside(&r, "a/leak.txt")), Some(DaemonErrorCode::OutsideRoot));
+    }
+
+    /// A workspace's own path is resolved under that workspace's rootfs on this computer, and the refusal names
+    /// the path the frame gave: a person asked about a folder inside a workspace, and where this computer keeps
+    /// that workspace's files is no part of the answer.
+    #[test]
+    fn a_refusal_names_the_path_it_was_asked_about_and_not_the_one_it_resolved() {
+        let t = tree();
+        let r = roots(&[t.root.path()]);
+        let inside_the_workspace = "/root/repo/escape";
+        let resolving = t.root.path().join("escape").to_string_lossy().into_owned();
+        let refused = resolve_inside_named(&r, &resolving, inside_the_workspace).unwrap_err();
+        assert_eq!(refused.code, Some(DaemonErrorCode::OutsideRoot));
+        assert_eq!(refused.message, format!("{inside_the_workspace} resolves outside the workspace root"));
+        assert!(!refused.message.contains(&t.root.path().display().to_string()), "{}", refused.message);
+        // A path that is not there reads the same way, and the two sentences are the ones a path under this
+        // daemon's own root is refused with: the name is what differs, never the words.
+        let missing = resolve_inside_named(&r, &t.root.path().join("nowhere").to_string_lossy(), "/root/repo/nowhere").unwrap_err();
+        assert_eq!((missing.code, missing.message.as_str()), (Some(DaemonErrorCode::NotFound), "/root/repo/nowhere does not exist"));
+        assert_eq!(resolve_inside(&r, "..").unwrap_err().message, ".. resolves outside the workspace root");
     }
 
     #[test]
