@@ -5,7 +5,7 @@
 // since installing a launchd agent is not this test's business.
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -128,6 +128,9 @@ function homeWithLandedFiles(name: string): { home: string; rows: { rel: string;
     writeFileSync(path, index + 1 === rows.length ? "the person wrote this\n" : row.bytes);
   }
   writeFileSync(join(home, ".claude", "theirs.md"), "mine\n");
+  // A line the servers step wrote: a key in an agent's own file, no path under the home, and the digest of the
+  // entry wsp left under that name. Nothing on the disk stands at it and nothing is taken for it.
+  appendFileSync(at.landed, `${MCP_ID_PREFIX}claude/context7\tdeadbeef\tdeadbeef\n`);
   return { home, rows };
 }
 
@@ -716,6 +719,9 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(existsSync(join(home, ".claude"))).toBe(true);
     expect(existsSync(join(home, ".codex"))).toBe(true);
     expect(readFileSync(join(home, ".claude", "theirs.md"), "utf8")).toBe("mine\n");
+    // The list's server line named no path, so the leave took nothing for it and made nothing at its name.
+    expect(existsSync(join(home, "agents"))).toBe(false);
+    expect(swept.removed.filter(took => took.includes("agents/mcp"))).toEqual([]);
     // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
     expect(existsSync(placeDaemonPaths(home).wsp)).toBe(false);
     expect(swept.removed.at(-1)).toBe(placeDaemonPaths(home).wsp);

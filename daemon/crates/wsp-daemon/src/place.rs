@@ -584,6 +584,11 @@ mod tests {
             std::fs::write(&path, if index + 1 == rows.len() { "the person wrote this\n" } else { bytes }).unwrap();
         }
         std::fs::write(home.path().join(".claude/theirs.md"), "mine\n").unwrap();
+        // A line the servers step wrote: a key in an agent's own file, no path under the home, and the digest of
+        // the entry wsp left under that name. Nothing on the disk stands at it and nothing is taken for it.
+        let mut ledger = std::fs::read_to_string(&provision.landed).unwrap();
+        ledger.push_str("agents/mcp/claude/context7\tdeadbeef\tdeadbeef\n");
+        std::fs::write(&provision.landed, ledger).unwrap();
         (home, rows)
     }
 
@@ -623,6 +628,9 @@ mod tests {
         assert!(home.path().join(".claude").is_dir());
         assert!(home.path().join(".codex").is_dir());
         assert_eq!(std::fs::read_to_string(home.path().join(".claude/theirs.md")).unwrap(), "mine\n");
+        // The list's server line named no path, so the leave took nothing for it and made nothing at its name.
+        assert!(!home.path().join("agents").exists());
+        assert!(!swept.iter().any(|took| took.contains("agents/mcp")), "{swept:?}");
         // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
         assert!(!place_daemon_paths(home.path()).wsp.exists());
         assert!(swept.contains(&place_daemon_paths(home.path()).wsp.to_string_lossy().into_owned()));
