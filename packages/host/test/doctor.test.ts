@@ -51,6 +51,7 @@ import {
   localPrompt,
   promoteGoldens,
   placesBehindLines,
+  recipeToolsInside,
   roomLeft,
   sshDaemonPlace,
   stageDaemonBundle,
@@ -511,6 +512,50 @@ describe("stageDaemonBundle", () => {
     const half = fakeDaemonDir(join(dir, "half"), [GUEST_DAEMON_TARGETS[0]!.triple]);
     await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, half, fakeCliDir(dir))).rejects.toThrow(`wsp-daemon binary missing: ${daemonBinaryIn(half, GUEST_DAEMON_TARGETS[1]!.triple)}`);
     expect(existsSync(join(dir, "stage"))).toBe(false);
+  });
+});
+
+describe("the recipe's tools read from inside the workspace", () => {
+  /** A machine whose exec answers the PATH read with the commands this box has, the way the guest's own shell does. */
+  const machineWith = (found: readonly string[]): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      exec: async cmd => {
+        asked.push(cmd);
+        const bins = [...cmd.matchAll(/'([^']+)'/g)].map(m => m[1]!);
+        return { exitCode: 0, stdout: bins.filter(b => !found.includes(b)).map(b => `missing ${b}\n`).join(""), stderr: "" };
+      },
+    };
+  };
+  const ticks = (...ids: string[]): { ticks: { id: string }[] } => ({ ticks: ids.map(id => ({ id })) });
+
+  it("reads every ticked catalogue tool's command on the tools PATH and names the ones it answered for", async () => {
+    const machine = machineWith(["gh", "go"]);
+    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/catalog/go"))).toBe("2 answered on the PATH inside: gh, go");
+    // On the one PATH a machine's tools sit on, which is the PATH the workspace boots with: a read on any other
+    // order would answer for a different gh than the workspace's own threads run.
+    expect(machine.asked[0]).toContain(`export PATH=${TOOLS_PATH}`);
+    expect(machine.asked[0]).toContain("command -v");
+  });
+
+  it("fails naming the rows that did not answer, which is a tool the recipe installed and no workspace can run", async () => {
+    await expect(recipeToolsInside(machineWith(["go"]), ticks("tools/catalog/gh", "tools/catalog/go"))).rejects.toThrow(
+      "gh is not on the PATH inside the workspace, though the recipe installed it on the machine",
+    );
+  });
+
+  it("passes with nothing to read where the recipe ticks no catalogue tool, and reads no row the catalogue does not carry", async () => {
+    const said = "the recipe ticks no catalogue tool, so there is nothing to read inside";
+    expect(await recipeToolsInside(machineWith([]), ticks("agents/claude", "tools/brew/bat", "mcp/notion"))).toBe(said);
+    expect(await recipeToolsInside(machineWith([]), undefined)).toBe(said);
+    const machine = machineWith([]);
+    expect(machine.asked).toEqual([]);
+  });
+
+  it("a read that could not be run at all fails the step rather than passing quietly", async () => {
+    const dead = { exec: async () => ({ exitCode: 124, stdout: "", stderr: "" }) };
+    await expect(recipeToolsInside(dead, ticks("tools/catalog/gh"))).rejects.toThrow("the tools inside could not be read");
   });
 });
 

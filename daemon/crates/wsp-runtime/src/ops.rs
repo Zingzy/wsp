@@ -829,7 +829,10 @@ impl Ops {
     async fn boot(&self, mut record: Workspace) -> Result<Workspace, OpError> {
         let id = record.id.clone();
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
-        bundle::mount_computer(&self.layout, &id)?;
+        // Read at every boot and written on no record: a Homebrew installed on this computer after the create is
+        // inside the workspace at its next wake, and one taken off it is gone from the next boot.
+        let tool_roots = bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
+        bundle::mount_computer(&self.layout, &id, &tool_roots)?;
         // The copy into the rootfs before youki takes it: youki rebinds the rootfs as it pivots, so the project
         // travels inside with it, and the daemon goes on seeing it at the same path out here. A wake binds the
         // copy the stop left on disk, so everything the workspace wrote in the project is still there.
@@ -876,6 +879,7 @@ impl Ops {
             engine: engine_dir.as_deref(),
             shares: &shares,
             binds: &record.binds,
+            tool_roots: &tool_roots,
             compose_project: compose_name.as_deref(),
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
@@ -1357,6 +1361,7 @@ mod tests {
             engine: None,
             shares: &[],
             binds: &[],
+            tool_roots: &[],
             compose_project: None,
         });
         // One core of every period, and a third of the box's four gigabytes.

@@ -565,7 +565,11 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
         .await;
     show("what the box keeps of its own, from inside a workspace", code, &out, &err);
     assert_eq!(code, 0);
-    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", "0", "0", "0"], "{out}");
+    // /home holds the install roots this box has of the ones outside the overlaid trees and nothing else: the
+    // Homebrew prefix on a box the recipe's formula rows ran on, nothing on a box with none, and no other home
+    // on the box either way.
+    let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS).len().to_string();
+    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", roots.as_str(), "0", "0"], "{out}");
     // And what is not covered: the box's sudo rules are read as they are, so a script inside that types sudo
     // gets what root gets rather than a refusal from a file granting nobody anything.
     let (code, sudo, err) = w.exec(&id, "sudo -n true && echo sudo works").await;
@@ -595,6 +599,56 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
             assert_eq!(mask & (1 << bit), 0, "{set} carries {dropped}");
         }
     }
+    w.close().await;
+}
+
+/// The tools a road installed outside the trees a workspace overlays answer inside it: the box's install roots are
+/// bound in read-only at their own paths, the PATH every process inside starts with names their bin directories,
+/// and nothing inside can write the prefix. A box with no such root reads the PATH and no mount, which is the
+/// other half of the case.
+#[tokio::test]
+async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_be_written() {
+    if !live() {
+        return;
+    }
+    let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The PATH the boot hands its first process and every exec under it, which is the one every thread on this
+    // workspace carries: one order of directories for the whole workspace.
+    let (code, path, err) = w.exec(&id, "echo $PATH").await;
+    show("the PATH inside a workspace", code, &path, &err);
+    assert_eq!((code, path.trim()), (0, wsp_frames::numbers::TOOLS_PATH));
+    for root in &roots {
+        // What the box keeps under the root, read from the box before the workspace is asked: the case says
+        // afterwards that nothing inside changed it.
+        let own: u64 = fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0);
+        let (code, held, err) = w.exec(&id, &format!("ls -A {root} | wc -l; findmnt -no OPTIONS {root}")).await;
+        show(&format!("{root} inside a workspace"), code, &held, &err);
+        assert_eq!(code, 0);
+        let lines: Vec<&str> = held.lines().collect();
+        assert_eq!(lines.first().map(|n| n.trim()), Some(own.to_string().as_str()), "{root} reads differently inside: {held}");
+        assert!(lines.get(1).is_some_and(|options| options.contains("ro")), "{root} is not read-only inside: {held}");
+        // A write into the prefix is refused: an install happens on the computer, through the recipe, and what a
+        // tool writes while it runs goes under /root, which is the computer's own and read-write.
+        let (code, _, refused) = w.exec(&id, &format!("touch {root}/wsp-probe")).await;
+        assert_ne!(code, 0, "a write into {root} was taken inside");
+        assert!(refused.to_ascii_lowercase().contains("read-only"), "{root}: {refused}");
+        assert!(!Path::new(root).join("wsp-probe").exists(), "a write inside reached {root} on the box");
+        assert_eq!(fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0), own, "{root} on the box changed");
+    }
+    // And the command the bring back's pull request half needs, where this box has it: the gh a road installed
+    // under one of those roots answers inside, at the path the box has it.
+    let (code, found, err) = w.exec(&id, "command -v gh || true").await;
+    show("gh inside a workspace", code, &found, &err);
+    assert_eq!(code, 0);
+    let on_the_box = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("PATH={} command -v gh || true", wsp_frames::numbers::TOOLS_PATH))
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .unwrap_or_default();
+    assert_eq!(found.trim(), on_the_box, "gh answers differently inside a workspace than on the box");
     w.close().await;
 }
 

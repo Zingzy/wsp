@@ -10,9 +10,9 @@ import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
-import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { catalogEntry, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
+import { CATALOG_PREFIX, CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, missingCommands, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type RecipeDigest, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./assets.js";
@@ -1323,6 +1323,30 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
  * before anything is forked, so the reading a person came for is printed whether or not the rest of the run stands;
  * it dials nothing and bills nothing, since every fact on it is what that computer last reported. A host holding no
  * places, or none behind, prints nothing. */
+/** The tools the recipe ticks, read from inside the workspace this run made: one `command -v` per row, on the one
+ * PATH a machine's tools sit on. The read the spoo proof of 2026-09-18 had to be done by hand, where gh was on the
+ * box and in no workspace of it because the prefix a road installed it into was outside the trees a workspace
+ * carries. A recipe that ticks no catalogue tool has nothing to read and says so.
+ *
+ * Failing names the rows that did not answer: a tool the recipe asked for that a workspace cannot run is the whole
+ * of what this step is for. */
+export async function recipeToolsInside(machine: Pick<Machine, "exec">, recipe: Pick<RecipeDigest, "ticks"> | undefined): Promise<string> {
+  const bins = [
+    ...new Set(
+      (recipe?.ticks ?? []).flatMap(tick => {
+        if (!tick.id.startsWith(CATALOG_PREFIX)) return [];
+        const entry = catalogEntry(tick.id.slice(CATALOG_PREFIX.length));
+        return entry?.kind === "tool" && entry.bin !== undefined ? [entry.bin] : [];
+      }),
+    ),
+  ].sort();
+  if (bins.length === 0) return "the recipe ticks no catalogue tool, so there is nothing to read inside";
+  const { missing, failed } = await missingCommands(machine as Machine, bins);
+  if (failed !== undefined) throw new Error(`the tools inside could not be read (${failed}): ${bins.join(", ")}`);
+  if (missing.size > 0) throw new Error(`${[...missing].sort().join(", ")} ${missing.size === 1 ? "is" : "are"} not on the PATH inside the workspace, though the recipe installed ${missing.size === 1 ? "it" : "them"} on the machine`);
+  return `${bins.length} answered on the PATH inside: ${bins.join(", ")}`;
+}
+
 export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now()): Promise<string[]> {
   if (rt.places === undefined) return [];
   const places = await rt.places.list(now);
@@ -1465,6 +1489,8 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
       },
       () => "REST touch -> inbox.file over the preview socket (~2s watcher quiet window)",
     );
+
+    await timings.time("the recipe's tools inside", async () => recipeToolsInside(machine, await rt.golden.recipe()), note => note);
 
     socket.close();
     await timings.time(

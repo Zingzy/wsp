@@ -6,7 +6,7 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, PNPM_HOME, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
 import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
@@ -759,11 +759,10 @@ export type BrewTable = ReadonlyMap<string, BrewFormula>;
 /** Tap formulae that only build for macOS and say nothing of it in their metadata. */
 export const MACOS_ONLY_FORMULAE: ReadonlySet<string> = new Set(["felixkratz/formulae/sketchybar", "felixkratz/formulae/borders", "koekeishiya/formulae/yabai", "koekeishiya/formulae/skhd"]);
 
-const PNPM_HOME = "/root/.local/share/pnpm";
-
-/** Where the guest finds what the tools stage installs; each install line exports it so
- * it does not depend on the machine's own environment, and login shells get it from profile.d. */
-export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+/** Where the guest finds what the tools stage installs; each install line exports it so it does not depend on the
+ * machine's own environment, login shells get it from profile.d, and a workspace on a computer somebody owns boots
+ * with it. One PATH for a machine's tools, so it is the protocol's and neither side spells its own order. */
+export { TOOLS_PATH } from "@wsp/protocol";
 export const PATH_LINE = `export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`;
 /** The guest runs as root, and its exec environment names no user (measured 2026-09-05): what every road that
  * hands the guest an environment says about who is logged in. */
