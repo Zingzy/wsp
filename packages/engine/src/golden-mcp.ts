@@ -290,15 +290,19 @@ const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 /** Runners that pull the server's package down when the agent first starts it: the definition is in place, the package is not. */
 export const FETCHERS: Record<string, string> = { npx: "npx", uvx: "uv", uv: "uv" };
 
-/** Installed servers by name; then, per distinct wording, the servers whose package is fetched on first use or
- * whose runner was installed or is missing; then each skipped server with its reason. */
-function summarize(rows: readonly Pending[]): string {
+/** The servers that were already there by name, then the ones installed; then, per distinct wording, the servers
+ * whose package is fetched on first use or whose runner was installed or is missing; then each skipped server with
+ * its reason. `present` is the rows the round read as already there, and a server in it is said that way and no
+ * other, so these words never read installed one line above a row reading present. */
+function summarize(rows: readonly Pending[], present: ReadonlySet<string>): string {
   const parts: string[] = [];
-  const installed = rows.filter(r => r.outcome === "installed" && r.shorts.length === 0);
+  const already = rows.filter(r => present.has(r.id));
+  if (already.length > 0) parts.push(`${already.map(r => r.name).join(", ")} already there`);
+  const installed = rows.filter(r => r.outcome === "installed" && r.shorts.length === 0 && !present.has(r.id));
   if (installed.length > 0) parts.push(`${installed.map(r => r.name).join(", ")} installed`);
   const byNote = new Map<string, string[]>();
   for (const r of rows) {
-    if (r.outcome === "skipped" || r.shorts.length === 0) continue;
+    if (r.outcome === "skipped" || r.shorts.length === 0 || present.has(r.id)) continue;
     const key = r.shorts.join(", ");
     (byNote.get(key) ?? byNote.set(key, []).get(key)!).push(r.name);
   }
@@ -378,11 +382,12 @@ export const mcpOpening = (agents: readonly McpAgentPlan[]): string =>
  * row per kept name, per dropped name and per name set aside, uv installed where a kept server runs through it and
  * is missing, each server whose command the machine does not have named on its row, and the closing line. `report`
  * is what became of each scope, in plan order; `failure` is a sentence every kept server is skipped with, for a
- * round that never got its configs off the machine or back onto it. */
+ * round that never got its configs off the machine or back onto it; `present` is the rows the caller reads as
+ * already there, which the closing words then say the same way. */
 export async function mcpRows(
   machine: Machine,
   plan: McpPlan,
-  o: { agents: readonly McpAgentPlan[]; report?: readonly ScopeOutcome[]; failure?: string; missing: ReadonlySet<string>; stage: StageListener },
+  o: { agents: readonly McpAgentPlan[]; report?: readonly ScopeOutcome[]; failure?: string; missing: ReadonlySet<string>; present?: ReadonlySet<string>; stage: StageListener },
 ): Promise<McpResult[]> {
   const { agents, report, failure, missing, stage } = o;
   const rows: Pending[] = [];
@@ -436,7 +441,7 @@ export async function mcpRows(
     r.shorts.push(short);
     r.notes.push(`${short}; the server starts once it is installed there`);
   }
-  stage("installing-mcp", closing(summarize(rows), await freeNote(machine).catch(() => undefined)));
+  stage("installing-mcp", closing(summarize(rows, o.present ?? new Set()), await freeNote(machine).catch(() => undefined)));
   return rows.map(strip);
 }
 

@@ -98,13 +98,22 @@ const tarOfConfigs = (claude: string, codex: string): Buffer =>
 
 /** One run of the job's files and servers rounds on that computer, in the order the job runs them, with the close
  * that folds what it wrote into the list beside the job. */
-async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][] }> {
+async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][]; closing: string }> {
+  const said: string[] = [];
   const landed = await provisionFiles(g.machine, { home: g.root, lands: LANDS, pack: async () => packed(tarOfConfigs(o.claude ?? CLAUDE_TRAVELLED(["--stdio"], o.far === true), o.codex ?? CODEX_TRAVELLED)) });
-  const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true), { home: g.root, landed: landed.owned, tools: [], stage: () => {} });
+  const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true), {
+    home: g.root,
+    landed: landed.owned,
+    tools: [],
+    stage: (_which, detail) => {
+      if (detail !== undefined) said.push(detail);
+    },
+  });
   await closeAgentFiles(g.machine, g.root, oncePathsOf(LANDS));
   return {
     files: landed.rows.map(r => [r.id, r.outcome]),
     servers: servers.map(r => [r.id, r.outcome, r.note]),
+    closing: said.at(-1) ?? "",
   };
 }
 
@@ -169,6 +178,10 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     ]);
     expect(list(root).sort()).toEqual(listed);
     expect(readFileSync(join(root, ".codex/config.toml"), "utf8")).toContain('[projects."/root/repo"]');
+    // The words the round closes with say what its rows say: nothing on this run was installed.
+    expect(second.closing).toContain("gsc, context7 already there");
+    expect(second.closing).not.toContain("installed");
+    expect(second.closing).not.toContain("fetched");
 
     // This computer's copy of one server changed: that key is wsp's own by the list, so it is written again.
     const third = await run(g, { claude: CLAUDE_TRAVELLED(["--stdio", "--verbose"]) });
@@ -184,6 +197,10 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     expect(held.numStartups).toBe(42);
     expect(held.projects["/root/again"]).toEqual({ history: [] });
     expect(held.mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+    // And on a run where one server did arrive, the closing words name that one and say the other is already there.
+    expect(third.closing).toContain("context7 already there");
+    expect(third.closing).toContain("gsc: package fetched on first use by npx");
+    expect(third.closing).not.toContain("context7 installed");
     const gsc = list(root).find(l => l.startsWith(`${MCP_ID_PREFIX}claude/gsc\t`))!;
     expect(gsc).not.toBe(listed.find(l => l.startsWith(`${MCP_ID_PREFIX}claude/gsc\t`)));
     expect(list(root)).toHaveLength(2);

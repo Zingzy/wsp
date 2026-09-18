@@ -55,6 +55,11 @@ export function atHome(plan: McpPlan, home: string): McpPlan {
  * name, and what wsp owns in such a file is only what wsp itself put there. */
 export const theirServerLine = (agent: string, name: string, path: string): string => `${name} in ${path} is ${agent}'s own under that name; wsp does not write over it`;
 
+/** Why one server is set aside on a round that never got this computer's copy of the agent's file to that
+ * computer: the recipe's servers are read out of that copy, so a name that is not already in the file there is a
+ * name this run has nothing to say about, and the file stands as it is. */
+export const noCopyLine = (path: string): string => `nothing of this computer's copy of ${path} arrived this run`;
+
 /** Where the copy of one of an agent's own files sits while the job runs: under the job's own folder on that
  * computer, in the tree that travelled off this one. Nothing for a path outside the home, which no agent's is. */
 const travelledPath = (home: string, file: string): string | undefined => (file.startsWith(`${home}/`) ? `${placeProvisionPaths(home).staging}/${file.slice(home.length + 1)}` : undefined);
@@ -87,6 +92,8 @@ interface Merged {
   same: Set<string>;
   /** Row ids an agent's own definition stands under, with the file it stands in. */
   theirs: Map<string, string>;
+  /** Row ids of a scope whose copy never travelled that the file there does not define, with that file. */
+  noCopy: Map<string, string>;
   /** Row id to the file that name's definition belongs in. */
   where: Map<string, string>;
 }
@@ -141,6 +148,7 @@ export async function provisionMcp(
     const outcomes: ScopeOutcome[] = [];
     const same = new Set<string>();
     const theirs = new Map<string, string>();
+    const noCopy = new Map<string, string>();
     const where = new Map<string, string>();
     const wrote: { id: string; name: string; scope: McpScope; path: string }[] = [];
     let at = 0;
@@ -161,7 +169,10 @@ export async function provisionMcp(
             ...scope.keep.map(name => ({ name, outcome: (entryDigest(scope, standing, name) === undefined ? "missing" : "same") as McpMergeResult["outcome"] })),
             ...scope.drop.map(d => ({ name: d.name, outcome: "left" as const })),
           ];
-          for (const r of results) if (r.outcome === "same") same.add(id(r.name));
+          for (const r of results) {
+            if (r.outcome === "same") same.add(id(r.name));
+            if (r.outcome === "missing") noCopy.set(id(r.name), path);
+          }
           outcomes.push({ file: path, results });
           continue;
         }
@@ -196,7 +207,7 @@ export async function provisionMcp(
         return digest === undefined ? [] : [[w.id, digest] as const];
       }),
     );
-    return { outcomes, texts, records, same, theirs, where };
+    return { outcomes, texts, records, same, theirs, noCopy, where };
   };
 
   const missing = new Set<string>();
@@ -205,16 +216,20 @@ export async function provisionMcp(
   let failure = read === undefined ? readFailed(res) : undefined;
   if (read !== undefined) {
     const first = mergeAll(agents);
-    // A name an agent or a person has their own definition under is not wsp's to write: it joins the servers this
-    // run takes out, so its row says whose that definition is and the merge leaves the file's entry alone.
+    // Two kinds of kept name are not this run's to write, and each joins the servers it takes out so that its row
+    // says why: a name an agent or a person has their own definition under, which the merge leaves alone, and a
+    // name that is in neither the file there nor a copy of this computer's, since none arrived.
     agents = agents.map(agent => ({
       ...agent,
       scopes: agent.scopes.map(scope => {
-        const theirs = scope.keep.flatMap(name => {
-          const path = first.theirs.get(mcpRowId(agent.id, scope.project !== undefined, name));
-          return path === undefined ? [] : [{ name, reason: theirServerLine(agent.label, name, path) }];
+        const aside = scope.keep.flatMap(name => {
+          const id = mcpRowId(agent.id, scope.project !== undefined, name);
+          const theirs = first.theirs.get(id);
+          if (theirs !== undefined) return [{ name, reason: theirServerLine(agent.label, name, theirs) }];
+          const nothing = first.noCopy.get(id);
+          return nothing === undefined ? [] : [{ name, reason: noCopyLine(nothing) }];
         });
-        return theirs.length === 0 ? scope : { ...scope, keep: scope.keep.filter(name => !theirs.some(t => t.name === name)), drop: [...scope.drop, ...theirs] };
+        return aside.length === 0 ? scope : { ...scope, keep: scope.keep.filter(name => !aside.some(a => a.name === name)), drop: [...scope.drop, ...aside] };
       }),
     }));
     for (const command of await absentCommands(machine, plan, first.outcomes)) missing.add(command);
@@ -222,17 +237,20 @@ export async function provisionMcp(
     merged = mergeAll(agents);
     failure = await landConfigs(machine, own, merged.texts);
   }
+  // A server is present where its entry was already the one that travelled and the file it sits in did not arrive
+  // whole with this run: it was there as the recipe asks, so a second run installs nothing and says so. Read before
+  // the rows are built, since the words the round closes with say what the rows say; nothing is present on a round
+  // whose configs did not land, where every kept server is skipped with that reason instead.
+  const present = new Set(failure !== undefined || merged === undefined ? [] : [...merged.same].filter(id => !arrivedWhole(merged?.where.get(id))));
   const results = await mcpRows(machine, plan, {
     agents,
     missing,
+    present,
     stage: o.stage,
     ...(merged !== undefined ? { report: merged.outcomes } : {}),
     ...(failure !== undefined ? { failure } : {}),
   });
   if (failure === undefined && merged !== undefined) await appendLanding(machine, o.home, [...merged.records].map(([id, digest]) => serverLine(id, digest)));
-  // A server is present where its entry was already the one that travelled and the file it sits in did not arrive
-  // whole with this run: it was there as the recipe asks, so a second run installs nothing and says so.
-  const present = new Set([...(merged?.same ?? [])].filter(id => !arrivedWhole(merged?.where.get(id))));
   return results.map(r => {
     const outcome = r.outcome === "skipped" ? "skipped" : present.has(r.id) ? "present" : "installed";
     return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(r.note !== undefined && outcome !== "present" ? { note: r.note } : {}) };

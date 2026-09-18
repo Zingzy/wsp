@@ -11,7 +11,7 @@ import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import type { McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
-import { provisionMcp } from "../src/provision-mcp.js";
+import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
 
@@ -105,9 +105,10 @@ const read = (root: string, rel: string): string => readFileSync(join(root, rel)
 /** A packed archive as the host's own pack answers with one, with the sizes nothing here reads. */
 const packed = (tar: Buffer): PackedFiles => ({ tar, bytes: tar.length, unpacked: tar.length, skipped: [], cut: [], silenced: [], macPaths: [] });
 
-/** The claude scope over the config the landing puts there, for the run that reads whose that config is. */
+/** The claude scope over the config the landing puts there, for the run that reads whose that config is. One
+ * server of it is in the copy that travels and one is in neither that copy nor the file there. */
 const mcpPlanOn = (root: string): McpPlan => ({
-  agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }],
+  agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github", "gsc"], drop: [] }], aside: [] }],
   guestHome: root,
   rewrites: [],
   binDirs: [],
@@ -287,7 +288,12 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("github")) });
     expect(first.rows.at(-1)!.outcome).toBe("installed");
     const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {} });
-    expect(servers.map(r => r.outcome)).toEqual(["installed"]);
+    expect(servers.map(r => [r.id, r.outcome])).toEqual([
+      [`${MCP_ID_PREFIX}claude/github`, "installed"],
+      [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
+    ]);
+    // The copy did travel and names no server called that, which is what its row says.
+    expect(servers[1]!.note).toBe("not in the config that travelled");
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     const listed = readFileSync(placeProvisionPaths(root).landed, "utf8");
     expect(listed).toContain(`${MCP_ID_PREFIX}claude/github`);
@@ -309,7 +315,13 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // With nothing of this computer's beside it, the server in the agent's own file is read and not written: it is
     // there as the recipe asks, and its row says so rather than saying whose the file is.
     const again = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: new Map(), tools: [], stage: () => {} });
-    expect(again.map(r => r.outcome)).toEqual(["present"]);
+    expect(again.map(r => [r.id, r.outcome])).toEqual([
+      [`${MCP_ID_PREFIX}claude/github`, "present"],
+      [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
+    ]);
+    // A name the file there does not hold reads that nothing of this computer's arrived, not that this computer
+    // has no server by that name.
+    expect(again[1]!.note).toBe(noCopyLine(config));
     expect(again.some(r => (r.note ?? "").includes("Claude Code's own"))).toBe(false);
     expect(readFileSync(config, "utf8")).toContain("github");
   });
