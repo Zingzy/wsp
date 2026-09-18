@@ -27,12 +27,11 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
-import { FilesSurface } from "../src/files/FilesSurface.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -196,7 +195,7 @@ describe("a workspace row's menu", () => {
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.bringBack,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
@@ -293,7 +292,7 @@ describe("a workspace row's menu", () => {
       ["new-thread", WORKSPACE_WORDS.newThread, true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],
-      ["open-machine", WORKSPACE_WORDS.openMachine, true],
+      ["bring-back", WORKSPACE_WORDS.bringBack, false],
       ["export-project", WORKSPACE_WORDS.exportProject, false],
       ["rename", WORKSPACE_WORDS.rename, true],
       ["fork", WORKSPACE_WORDS.fork, false],
@@ -646,54 +645,6 @@ describe("a workspace row's name box", () => {
     expect(screen.queryAllByRole("textbox")).toHaveLength(1);
     expect(screen.getByText("fix the port list")).toBeDefined();
   });
-});
-
-describe("a Files pane row's menu", () => {
-  const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 20)));
-  const treeRow = (container: HTMLElement, path: string): HTMLElement => {
-    const row = container.querySelector("file-tree-container")?.shadowRoot?.querySelector<HTMLElement>(`[data-type='item'][data-item-path='${path}']`);
-    if (!row) throw new Error(`no tree row for ${path}`);
-    return row;
-  };
-
-  it("a file opens, shows in the diff and copies its absolute path; a folder copies its path alone", async () => {
-    resetSurfaces();
-    const writeText = clipboard();
-    provideDaemonWire(WS, fakeWire({ "fs.list": params => LEVELS[String(params["path"])] ?? new Error(`no such folder: ${String(params["path"])}`) }));
-    const { container } = render(
-      <>
-        <FilesSurface workspaceId={WS} theme="dark" />
-        <ContextMenuHost />
-      </>,
-    );
-    await waitFor(() => treeRow(container, "README.md"));
-    await settle();
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    expect(labels()).toEqual([FILE_WORDS.open, FILE_WORDS.showDiff, FILE_WORDS.copyPath]);
-    fireEvent.click(item(FILE_WORDS.copyPath));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/root/README.md"));
-
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    fireEvent.click(item(FILE_WORDS.showDiff));
-    await waitFor(() => expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBe("/root/README.md"));
-    const panel = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
-    expect(panel.surfaces.find(s => s.id === panel.activeSurfaceId)?.kind).toBe("diff");
-
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    fireEvent.click(item(FILE_WORDS.open));
-    await waitFor(() => expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.some(s => s.kind === "file" && s.relativePath === "/root/README.md")).toBe(true));
-
-    rightClick(treeRow(container, "src/"));
-    await screen.findByRole("menu");
-    expect(item(FILE_WORDS.open).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(FILE_WORDS.open)).toBe("A folder opens in the tree");
-    expect(item(FILE_WORDS.showDiff).getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(item(FILE_WORDS.copyPath));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/root/src"));
-  }, 20_000);
 });
 
 describe("the terminal surface's menu", () => {

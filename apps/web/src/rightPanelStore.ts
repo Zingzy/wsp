@@ -5,17 +5,16 @@
  * This is intentionally a shallow model: it owns an ordered set of surface
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files/machine/processes/screen remain singleton surfaces.
+ * terminal surfaces point at terminal session ids, and the diff is a
+ * singleton surface.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
- * here (terminal, browser, machine, screen) belongs to the machine, not to
- * one conversation on it.
+ * here belongs to the machine, not to one conversation on it.
  */
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "machine", "processes", "screen"] as const;
+export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -29,19 +28,7 @@ export type RightPanelSurface =
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
     }
-  | { id: "diff"; kind: "diff" }
-  | { id: "files"; kind: "files" }
-  | {
-      id: `file:${string}`;
-      kind: "file";
-      /** Workspace-relative, or absolute for a host file outside the workspace. */
-      relativePath: string;
-      revealLine: number | null;
-      revealRequestId: number;
-    }
-  | { id: "machine"; kind: "machine" }
-  | { id: "processes"; kind: "processes" }
-  | { id: "screen"; kind: "screen" };
+  | { id: "diff"; kind: "diff" };
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
 const RIGHT_PANEL_STORAGE_VERSION = 1;
@@ -53,14 +40,13 @@ export interface WorkspaceRightPanelState {
   surfaces: RightPanelSurface[];
 }
 
-type SingletonKind = Exclude<RightPanelKind, "file" | "preview" | "terminal">;
-type OpenableKind = Exclude<RightPanelKind, "file" | "terminal">;
+type SingletonKind = Exclude<RightPanelKind, "preview" | "terminal">;
+type OpenableKind = Exclude<RightPanelKind, "terminal">;
 
 interface RightPanelStoreState {
   byWorkspaceId: Record<string, WorkspaceRightPanelState>;
   open: (workspaceId: string, kind: OpenableKind) => void;
   openBrowser: (workspaceId: string, tabId: string | null) => void;
-  openFile: (workspaceId: string, relativePath: string, line?: number) => void;
   openTerminal: (workspaceId: string, terminalId: string) => void;
   splitTerminal: (
     workspaceId: string,
@@ -94,37 +80,12 @@ const EMPTY_WORKSPACE_STATE: WorkspaceRightPanelState = {
   surfaces: [],
 };
 
-const singletonSurface = (kind: SingletonKind): RightPanelSurface => {
-  switch (kind) {
-    case "diff":
-      return { id: "diff", kind };
-    case "files":
-      return { id: "files", kind };
-    case "machine":
-      return { id: "machine", kind };
-    case "processes":
-      return { id: "processes", kind };
-    case "screen":
-      return { id: "screen", kind };
-  }
-};
+const singletonSurface = (kind: SingletonKind): RightPanelSurface => ({ id: kind, kind });
 
 const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
-
-const fileSurface = (
-  relativePath: string,
-  revealLine: number | null,
-  revealRequestId: number,
-): RightPanelSurface => ({
-  id: `file:${relativePath}`,
-  kind: "file",
-  relativePath,
-  revealLine,
-  revealRequestId,
-});
 
 const terminalSurface = (terminalId: string): RightPanelSurface => ({
   id: `terminal:${terminalId}`,
@@ -167,11 +128,6 @@ const updateWorkspace = (
   return { ...byWorkspaceId, [workspaceId]: next };
 };
 
-function normalizeRevealLine(line: number | undefined): number | null {
-  if (line === undefined || !Number.isFinite(line)) return null;
-  return Math.max(1, Math.trunc(line));
-}
-
 const isKnownKind = (kind: unknown): kind is RightPanelKind =>
   typeof kind === "string" && (RIGHT_PANEL_KINDS as readonly string[]).includes(kind);
 
@@ -190,26 +146,11 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   if (!isKnownKind(kind)) return null;
   switch (kind) {
     case "diff":
-    case "files":
-    case "machine":
-    case "processes":
-    case "screen":
       return singletonSurface(kind);
     case "preview": {
       const resourceId = surface["resourceId"];
       if (resourceId !== null && typeof resourceId !== "string") return null;
       return browserSurface(resourceId);
-    }
-    case "file": {
-      const relativePath = surface["relativePath"];
-      if (typeof relativePath !== "string") return null;
-      const revealLine = surface["revealLine"];
-      const revealRequestId = surface["revealRequestId"];
-      return fileSurface(
-        relativePath,
-        typeof revealLine === "number" ? normalizeRevealLine(revealLine) : null,
-        typeof revealRequestId === "number" ? revealRequestId : 0,
-      );
     }
     case "terminal": {
       const terminalIds = isStringArray(surface["terminalIds"]) ? surface["terminalIds"] : [];
@@ -278,30 +219,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
-          }),
-        })),
-      openFile: (workspaceId, relativePath, line) =>
-        set((state) => ({
-          byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
-            // The explorer stays open beside the file: our file surface has
-            // no tree of its own, so closing the Files tab would strand it.
-            const surfaceId = `file:${relativePath}` as const;
-            const existing = current.surfaces.find(
-              (surface): surface is Extract<RightPanelSurface, { kind: "file" }> =>
-                surface.id === surfaceId && surface.kind === "file",
-            );
-            const surface = fileSurface(
-              relativePath,
-              normalizeRevealLine(line),
-              (existing?.revealRequestId ?? 0) + 1,
-            );
-            return {
-              isOpen: true,
-              activeSurfaceId: surface.id,
-              surfaces: existing
-                ? current.surfaces.map((entry) => (entry.id === surface.id ? surface : entry))
-                : [...current.surfaces, surface],
-            };
           }),
         })),
       openTerminal: (workspaceId, terminalId) =>

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The model, effort, access and project pickers inside the composer box. Each lists
+// The model, defaults and project pickers inside the composer box. Each lists
 // what the runtime's catalog says the harness's CLI takes, asked of the
 // binary on the workspace's machine once it runs; a picker whose list is
-// empty does not exist. The effort button reads "<effort> · <context>", the
-// context alone for a model that takes no effort, and its menu has a Reasoning
-// and a Context Window section, each default marked and checked until a pick;
-// the access button is the one chip named by what it sets rather than by what
-// it holds: the mode's icon, the word Permissions, then the mode's short form
-// where it has one (its label names the machine on a kept one; the menu row
-// keeps the label), and each mode its one line. No button shrinks: the row wraps
+// empty does not exist. The reasoning effort, the context window and the
+// access are one quiet button and one menu: the button reads the picked
+// effort and the picked access, each in its short form where the row has one,
+// and the menu has a Reasoning, a Context window and an Access group, each
+// default marked and checked until a pick, with each access mode's one line
+// under it. The button wears the access mode's own icon, since the mode is
+// the one pick that says what the agent may touch. No button shrinks: the row wraps
 // before any of them is cut, so every pick reads whole down to a centre column
 // of about 300 px (measured 2026-09-09); the shell keeps the column wider
 // than that beside the inline panel. The one label a person writes, the
@@ -28,21 +28,22 @@
 // off the record, its menu is the workspace's projects and other folder, which
 // opens the folder picker under the box, and a pick lands on the host's record
 // as the workspace's last project, where the runtime reads it for every road.
-import { BrainIcon, ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
+import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
-import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useWhereWord } from "../../sidebar/workspaceRows";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { useComposerDraftStore } from "./composerDraftStore";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, type PickThreads } from "./composerOptionsStore";
 import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
-import { effortPickerLabel } from "./format";
+import { defaultsPickerLabel, DEFAULTS_WORD } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
@@ -76,23 +77,51 @@ export interface ComposerPicks {
   readonly startOptions: ComposerStart;
   /** The thread has a turn on this harness, so the rail offers no other. */
   readonly pinned: boolean;
+  /** Nothing here says which agent to run: no turn has run in this workspace, nobody picked, the project
+   * remembers none and nothing is typed yet. The rail is opened the one time so the pick is made before the first
+   * send, and the first keystroke takes the offer back, since the list stands over the box it is typed in. */
+  readonly offerAgents: boolean;
+}
+
+/** The agent the project's last thread ran, where the agents here carry it: what a fresh thread opens on, so a
+ * second piece of work on a project opens where the first one left off instead of on the catalog's first row. An
+ * agent the record names that this workspace has no catalog for is dropped, since a composer pointed at one would
+ * draw no pickers at all. */
+export function rememberedAgent(project: Pick<ProjectView, "lastAgent"> | undefined, catalogs: ReadonlyArray<HarnessCatalog>): string | undefined {
+  const last = project?.lastAgent;
+  return last !== undefined && catalogs.some(entry => entry.harness === last) ? last : undefined;
+}
+
+/** The record for the workspace's own project, which is where its remembered agent is written. */
+function useProjectRecord(workspaceId: string): ProjectView | undefined {
+  const ref = useProject(workspaceId);
+  const projects = useProjects();
+  return ref === null ? undefined : projects.find(entry => entry.id === ref.id);
 }
 
 /** The composer's picks for a workspace, and the catalog they read from: the machine's once it answered, else the table's. */
 export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle): ComposerPicks {
   const latest = useLatestSession(workspaceId);
+  const catalogs = useHarnessCatalogs(workspaceId);
+  const project = useProjectRecord(workspaceId);
+  const remembered = rememberedAgent(project, catalogs);
   const kept = useComposerOptions(workspaceId);
   const rows = useThreadSessions(workspaceId, thread.threadKey);
   const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
   const picked = useMemo(() => pickedFor(kept, thread.view, pickedOn, thread.threadKey), [kept, pickedOn, thread.threadKey, thread.view]);
   const onThread = useMemo(() => threadPicks(thread.view, rows), [rows, thread.view]);
   const pinned = latest !== null && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
-  const harness = (pinned ? latest.harness : picked.harness ?? latest?.harness) ?? DEFAULT_HARNESS;
+  const harness = (pinned ? latest.harness : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
-  return { harness, catalog, model, picks, startOptions, pinned };
+  // Only where the record itself says the project has run nothing: a host whose projects list has not arrived
+  // knows no better, and opening the rail over a workspace whose last agent is about to land would be a guess.
+  // The draft is read as one flag, so the store wakes this only as the box goes from empty to typed in.
+  const typing = useComposerDraftStore(s => (s.drafts[workspaceId]?.prompt ?? "") !== "");
+  const offerAgents = !typing && project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
+  return { harness, catalog, model, picks, startOptions, pinned, offerAgents };
 }
 
 /** Asks the workspace's machine for its catalogs once it runs; the table shows until then and stays when it does not answer. */
@@ -132,26 +161,37 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
   });
 }
 
-function EffortPicker({
+/** The one quiet menu behind the composer's defaults: the agent's reasoning effort, its context window and the
+ * access it starts a turn at, three groups with the agent's own default marked in each. They were three buttons;
+ * a person reads the row for the agent, the model and the folder, and these three are what an agent already has a
+ * default for. The effort and the window belong to the thread they are picked on; the access goes onto the host's
+ * record and, where the harness takes one mid-turn, into the turn in front of the person. */
+function DefaultsPicker({
   workspaceId,
+  /** The thread an effort or a window pick belongs to: each is something the thread already runs at, so a pick here
+   * is a change to this thread and not to every thread of the workspace. */
   threadKey,
   efforts,
   contextWindows,
+  modes,
   picks,
+  /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
+  note,
+  onPickAccess,
 }: {
   workspaceId: string;
-  /** The thread an effort or a window pick belongs to: each is something the thread already runs at, so a pick here
-   * is a change to this thread and not to every thread of the workspace. */
   threadKey: string;
   efforts: HarnessOption[];
   contextWindows: HarnessOption[];
+  modes: ReadonlyArray<HarnessOption>;
   picks: ResolvedPicks;
+  note: string | null;
+  onPickAccess: (mode: string) => void;
 }) {
   const pick = useComposerOptionsStore(s => s.pick);
-  const label = effortPickerLabel(
-    efforts.find(o => o.value === picks.effort),
-    contextWindows.find(o => o.value === picks.contextWindow),
-  );
+  const access = modes.find(o => o.value === picks.permissionMode);
+  const label = defaultsPickerLabel(efforts.find(o => o.value === picks.effort), access);
+  const Icon = (picks.permissionMode !== null ? ACCESS_ICONS[picks.permissionMode] : undefined) ?? ShieldIcon;
   const onPick = (key: ComposerOptionKey) => (next: unknown) => {
     if (typeof next === "string") pick(workspaceId, key, next, threadKey);
   };
@@ -160,16 +200,17 @@ function EffortPicker({
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className={triggerClass}
-        aria-label={`Effort: ${label}`}
-        data-composer-picker="effort"
-        data-value={picks.effort ?? undefined}
+        aria-label={`${DEFAULTS_WORD}: ${label}`}
+        data-composer-picker="defaults"
+        data-effort={picks.effort ?? undefined}
         data-context-window={picks.contextWindow ?? undefined}
+        data-access={picks.permissionMode ?? undefined}
       >
-        <BrainIcon className="size-3.5 shrink-0" aria-hidden />
+        <Icon className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-56">
+      <MenuPopup align="start" side="top" className="w-72">
         {efforts.length > 0 ? (
           <MenuGroup>
             <MenuGroupLabel>Reasoning</MenuGroupLabel>
@@ -181,9 +222,25 @@ function EffortPicker({
         {efforts.length > 0 && contextWindows.length > 0 ? <MenuSeparator /> : null}
         {contextWindows.length > 0 ? (
           <MenuGroup>
-            <MenuGroupLabel>Context Window</MenuGroupLabel>
+            <MenuGroupLabel>Context window</MenuGroupLabel>
             <MenuRadioGroup value={picks.contextWindow} onValueChange={onPick("contextWindow")}>
               <OptionRows options={contextWindows} />
+            </MenuRadioGroup>
+          </MenuGroup>
+        ) : null}
+        {(efforts.length > 0 || contextWindows.length > 0) && modes.length > 0 ? <MenuSeparator /> : null}
+        {modes.length > 0 ? (
+          <MenuGroup>
+            <MenuGroupLabel>Access</MenuGroupLabel>
+            {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
+            <MenuRadioGroup
+              value={picks.permissionMode}
+              onValueChange={next => {
+                const mode = modes.find(o => o.value === next);
+                if (mode !== undefined) onPickAccess(mode.value);
+              }}
+            >
+              <OptionRows options={modes} />
             </MenuRadioGroup>
           </MenuGroup>
         ) : null}
@@ -225,60 +282,6 @@ export function useAccessPick(workspaceId: string, running: RunningTurn | null, 
     [api, movesRunningTurn, running, setPreferences, stamp, threadKey, workspaceId],
   );
   return { pick, line: note !== null && note.turnId === running?.turnId ? ACCESS_REFUSED_LINE : null };
-}
-
-/** The word the access chip leads with, and what it says with a mode behind it. Every other chip in the row is
- * named by the value it holds, which left this one reading `Default`, a word that names nothing: the one setting
- * that hands the computer over has to be findable before a person sends, not after. */
-export const PERMISSIONS_WORD = "Permissions";
-
-export function accessChipWords(mode: string | undefined): string {
-  return mode === undefined ? PERMISSIONS_WORD : `${PERMISSIONS_WORD}: ${mode}`;
-}
-
-function AccessPicker({
-  modes,
-  value,
-  note,
-  onPick,
-}: {
-  modes: ReadonlyArray<HarnessOption>;
-  value: string | null;
-  /** What a pick does to the turn running now, over the list; nothing while no turn runs and the pick only starts one. */
-  note: string | null;
-  onPick: (mode: string) => void;
-}) {
-  const current = modes.find(o => o.value === value);
-  const Icon = (value !== null ? ACCESS_ICONS[value] : undefined) ?? ShieldIcon;
-  return (
-    <Menu>
-      <MenuTrigger
-        render={<Button type="button" variant="ghost" size="xs" />}
-        className={triggerClass}
-        aria-label={accessChipWords(current?.label)}
-        data-composer-picker="permissionMode"
-        data-value={value ?? undefined}
-      >
-        <Icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="truncate">{accessChipWords(current === undefined ? undefined : current.short ?? current.label)}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-      </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-72">
-        <MenuGroup>
-          {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
-          <MenuRadioGroup
-            value={value}
-            onValueChange={next => {
-              const mode = modes.find(o => o.value === next);
-              if (mode !== undefined) onPick(mode.value);
-            }}
-          >
-            <OptionRows options={modes} />
-          </MenuRadioGroup>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
-  );
 }
 
 /** The word other folder wears in the project menu and, once one is chosen, the folder's own name on the trigger. */
@@ -356,7 +359,7 @@ export function ComposerOptionPickers({
   const project = useProject(workspaceId);
   const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useWhereWord(workspaceId);
-  const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
+  const { catalog, model, picks, pinned, offerAgents } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
   const contextWindows = contextWindowsFor(catalog, model);
@@ -368,15 +371,24 @@ export function ComposerOptionPickers({
         model={model}
         pinned={pinned}
         where={where}
+        offerAgents={offerAgents}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);
           pick(workspaceId, "model", value, thread.threadKey);
         }}
       />
-      {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
-      {catalog.permissionModes.length > 0 ? (
-        <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPick={onPickAccess} />
+      {efforts.length > 0 || contextWindows.length > 0 || catalog.permissionModes.length > 0 ? (
+        <DefaultsPicker
+          workspaceId={workspaceId}
+          threadKey={thread.threadKey}
+          efforts={efforts}
+          contextWindows={contextWindows}
+          modes={catalog.permissionModes}
+          picks={picks}
+          note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
+          onPickAccess={onPickAccess}
+        />
       ) : null}
       {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>

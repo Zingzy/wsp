@@ -612,10 +612,6 @@ if (params.get("panel") === "browser" && shown !== null && at !== null) {
   useRightPanelStore.getState().open(shown, "preview");
   useRightPanelStore.getState().openBrowser(shown, useBrowserTabs.getState().createTab(shown, parseAddress(at)));
 }
-if (params.get("panel") === "machine" && shown !== null) {
-  useRightPanelStore.setState({ byWorkspaceId: {} });
-  useRightPanelStore.getState().open(shown, "machine");
-}
 if (params.get("panel") === "terminal" && shown !== null) {
   const surfaces: GhosttyTerminalSurface[] = [];
   const create = GhosttyTerminalSurface.create.bind(GhosttyTerminalSurface);

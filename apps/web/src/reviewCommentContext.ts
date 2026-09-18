@@ -358,3 +358,17 @@ export function buildDiffReviewComment(input: {
     },
   };
 }
+
+/** What a line comment reads as in the composer: the file and the lines it is on, the diff hunk it was written
+ * against in a fenced block, and the person's own words under it. One home for the quote, so the pane that
+ * collects the comments and the composer that carries them cannot spell one two ways.
+ */
+export function reviewCommentQuote(comment: ReviewCommentContext): string {
+  const fence = comment.fenceLanguage ?? "";
+  return [`${comment.filePath} ${comment.rangeLabel}`, "```" + fence, comment.diff, "```", comment.text].join("\n");
+}
+
+/** Every comment of one pass, oldest first, as one block of text for the thread's composer. */
+export function reviewCommentsQuote(comments: ReadonlyArray<ReviewCommentContext>): string {
+  return comments.map(reviewCommentQuote).join("\n\n");
+}

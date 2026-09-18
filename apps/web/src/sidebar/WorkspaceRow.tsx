@@ -7,9 +7,9 @@
 // app's success green while the machine runs, muted otherwise and dimmed while
 // paused, by the rule in workspaceRows.ts, in a box that never moves. Line
 // two: what this workspace is made of, off the protocol's word table. Line
-// three: the branch the agent is on; the one sentence a person may be waiting
-// on takes that line while it lasts, cut at the row's own cap with the whole of
-// it on the row's hover text. No figure stands on this row: what a machine
+// three: the branch the agent is on, or what the last bring back answered about
+// it; the one sentence a person may be waiting on takes that line while it
+// lasts, cut at the row's own cap with the whole of it on the row's hover text. No figure stands on this row: what a machine
 // costs and what shape it is are facts about the computer it runs on and live
 // on that computer's row in Settings. The row's actions, the collapse
 // chevron and new thread on a live row, forget and rebuild on a dead one, show
@@ -27,7 +27,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
-import { useAbsentComputer } from "../protocol/store.js";
+import { useAbsentComputer, useBroughtBack } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
@@ -105,7 +105,8 @@ export function WorkspaceRow({
   // Whether a word can stand in the slot, read where the word itself is decided: a row that holds one keeps the
   // slot's width, and every other row keeps the glyphs' room and nothing more.
   const holdsState = holdsStateWord(project, absent);
-  const meta = workspaceMetaLine({ project, absent, outOfMemory });
+  const broughtBack = useBroughtBack(project.id);
+  const meta = workspaceMetaLine({ project, absent, outOfMemory, broughtBack });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);
   const forgetAction = actionById(actions, "forget");

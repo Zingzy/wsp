@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's three regions, the right panel's toggle, resize and picker,
-// and the banner that follows the runtime socket.
+// and the banner that follows the runtime socket. The diff worker pool is
+// stood in: it builds real Workers.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The diff pane the picker opens builds real Workers for its highlighter, which jsdom has none of.
+vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({
+  DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
+}));
+
 import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
@@ -112,7 +120,7 @@ describe("app shell", () => {
   it("gives Settings the whole region right of the sidebar, and gives the panel back on the surface it was on", async () => {
     await mountShell();
     // On a surface of its own first, so what comes back is a chosen one and not the record's default.
-    act(() => useRightPanelStore.getState().open("ws_a", "machine"));
+    act(() => useRightPanelStore.getState().open("ws_a", "diff"));
     await settle();
     expect(tabbar()).not.toBeNull();
     const before = useRightPanelStore.getState().byWorkspaceId["ws_a"];
@@ -239,31 +247,13 @@ describe("app shell", () => {
     expect(useStore.getState().preferences.sidebarWidth).toBe(220);
   });
 
-  it("opens the workspace surface from the picker", async () => {
+  it("opens the diff pane from the picker", async () => {
     await mountShell();
-    fireEvent.click(screen.getByText("Workspace", { selector: "span" }).closest("button")!);
+    fireEvent.click(screen.getByText("Diff", { selector: "span" }).closest("button")!);
     await settle();
-    expect(screen.queryByText("Open a surface")).toBeNull();
     const tab = document.querySelector('[data-active-tab="true"]');
-    expect(tab?.textContent).toContain("Workspace");
-    const content = document.querySelector("[data-right-panel-surface-content]");
-    expect(content?.textContent).toContain("m_ws_a");
-    expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]?.activeSurfaceId).toBe("machine");
-  });
-
-  it("offers the screen surface only when the status carries a display stream", async () => {
-    await mountShell();
-    const cardButton = () => screen.getByText("Screen", { selector: "span" }).closest("button");
-    expect(cardButton()).toBeNull();
-    act(() => {
-      useStore.setState(s => ({
-        statuses: {
-          ...s.statuses,
-          ws_a: { ...view("ws_a", "api"), machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1, screen: { streamUrl: "wss://screen" } },
-        },
-      }));
-    });
-    expect(cardButton()).not.toBeNull();
+    expect(tab?.textContent).toContain("Diff");
+    expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]?.activeSurfaceId).toBe("diff");
   });
 });
 

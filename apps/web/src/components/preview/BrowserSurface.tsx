@@ -14,7 +14,7 @@ import { currentAddress, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../
 import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, type Address } from "../../browser/url.js";
 import { useForwarded } from "../../protocol/store.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
-import { clockLabel } from "../machine/format.js";
+import { clockLabel } from "../../lib/timestampFormat.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";

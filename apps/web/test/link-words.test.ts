@@ -124,7 +124,7 @@ describe("the words a link gets", () => {
     // Two halves: what did not answer, then the one thing a person can do about it.
     expect(terminalPaneTitle(pane)).toBe(`Nothing has answered on ${THIS_COMPUTER}`);
     expect(terminalPaneHints(pane, null, null)).toEqual([`wsp keeps trying; look at the terminal you started wsp in on ${THIS_COMPUTER}`]);
-    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the Workspace panel says what api is doing"]);
+    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the workspace's row says what api is doing"]);
     saysNoMachine(paneOf(link, false));
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(pane);

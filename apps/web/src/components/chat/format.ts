@@ -2,8 +2,13 @@
 // Words the composer's pickers put on their buttons.
 import type { HarnessOption } from "@wsp/protocol";
 
-/** The effort button: "<effort> · <context>", effort first; one alone when the model takes no other; the picker's name when neither resolves. */
-export function effortPickerLabel(effort: HarnessOption | undefined, contextWindow: HarnessOption | undefined): string {
-  const parts = [effort?.label, contextWindow?.label].filter((label): label is string => label !== undefined);
-  return parts.length === 0 ? "Effort" : parts.join(" · ");
+/** The word the folded picker wears with nothing picked, and what its name leads with. */
+export const DEFAULTS_WORD = "Defaults";
+
+/** The one defaults button: the reasoning effort, then the access mode, each in its short form where the row has
+ * one, since the long form of a mode named after a machine crushes the model's name beside it. The context window
+ * is read in the menu alone: three words on one button left none of them readable at the narrow column. */
+export function defaultsPickerLabel(effort: HarnessOption | undefined, access: HarnessOption | undefined): string {
+  const parts = [effort, access].map(option => option?.short ?? option?.label).filter((word): word is string => word !== undefined);
+  return parts.length === 0 ? DEFAULTS_WORD : parts.join(" · ");
 }

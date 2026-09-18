@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Showing a folder pane in the right panel over a fake daemon wire: the tab
+// Showing the Diff pane in the right panel over a fake daemon wire: the tab
 // strip is a sibling above the pane, so the pane itself takes focus as it is
 // shown and up a folder (Backspace, Alt+Up) acts on the first key, with
 // nothing clicked inside it. The diff worker pool is stood in: it builds real
 // Workers, which jsdom has none of.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,25 +29,19 @@ function Panel() {
   return state ? <RightPanel workspaceId={WS} state={state} mode="inline" /> : null;
 }
 
-describe("the right panel's folder panes", () => {
-  it("hands the pane focus as its tab is shown, so up a folder acts on the first key", async () => {
+describe("the right panel's Diff pane", () => {
+  it("takes focus as it is shown, so up a folder acts on the first key", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS }));
     act(() => {
       useRootStore.getState().follow(WS, "/root/app/lib");
-      useRightPanelStore.getState().open(WS, "files");
       useRightPanelStore.getState().open(WS, "diff");
     });
     const { container } = render(<Panel />);
     await waitFor(() => expect(container.querySelector("[data-diff-surface]")).not.toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(container.querySelector("[data-diff-surface]")));
 
-    // The tab is clicked, not the pane: focus is outside the Files pane until the pane takes it. The tab button is
-    // not focused by hand here, as its tooltip would open and Base UI popups never settle under jsdom.
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
-    await waitFor(() => expect(container.querySelector("[data-files-pane]")).not.toBeNull());
-    const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;
+    const pane = container.querySelector<HTMLElement>("[data-diff-surface]")!;
     expect(pane.getAttribute("tabindex")).toBe("0");
-    await waitFor(() => expect(document.activeElement).toBe(pane));
     expect(shownFolder(container)).toBe("/root/app/lib");
 
     fireEvent.keyDown(document.activeElement!, { key: "Backspace" });

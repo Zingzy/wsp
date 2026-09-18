@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The workspace's actions, one registry: what a workspace row, the palette,
-// the Machine tab and the row's context menu offer for one machine.
-import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+// The workspace's actions, one registry: what a workspace row, the palette and
+// the row's context menu offer for one machine.
+import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, GitPullRequestArrowIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { actionRefusal, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
+  BRING_BACK_HINT,
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
   CLIENT_CANNOT_REBUILD,
@@ -28,6 +29,7 @@ import {
   rowVerb,
 } from "./format.js";
 import { absenceOf } from "../settings/places.js";
+import { WHERE_WORDS } from "../settings/format.js";
 import type { ActionEntry } from "./registry.js";
 
 /** What the enabled rules read: the workspace's phase, and the machine state, reach and reason of its status when one has arrived. */
@@ -80,8 +82,10 @@ export interface WorkspaceVerbs {
    * host wires no such road. */
   readonly restartDaemon?: ((workspaceId: string) => Promise<void>) | undefined;
   readonly openBrowser: (workspaceId: string) => void;
-  readonly openMachine: (workspaceId: string) => void;
   readonly newThread: (workspaceId: string) => void;
+  /** Pushes the agent's branch and opens its pull request; the answer lands on the row. Absent on a client whose
+   * host carries no such request. */
+  readonly bringBack?: ((workspaceId: string) => Promise<void>) | undefined;
   readonly copyText: (text: string) => Promise<void>;
   readonly rebuild?: ((workspaceId: string) => Promise<void>) | undefined;
   /** Opens the confirmation; the dialog itself asks the host. */
@@ -178,13 +182,18 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     run: (target, verbs) => verbs.openBrowser(target.id),
   },
   {
-    id: "open-machine",
-    group: "open",
-    icon: () => ServerIcon,
-    searchTerms: ["workspace pane", "workspace panel", "usage", "projects", "versions"],
-    title: () => WORKSPACE_WORDS.openMachine,
-    refusal: () => null,
-    run: (target, verbs) => verbs.openMachine(target.id),
+    id: "bring-back",
+    group: "project",
+    icon: () => GitPullRequestArrowIcon,
+    searchTerms: ["bring back", "pull request", "push the branch", "open a pull request"],
+    title: () => WORKSPACE_WORDS.bringBack,
+    rowLabel: target => rowVerb("Bring back", target.displayName),
+    buttonWord: () => WORKSPACE_WORDS.bringBack,
+    hint: () => BRING_BACK_HINT,
+    // The daemon inside the workspace is what pushes, so the machine has to be running; the runtime refuses the
+    // base branch and a workspace with nothing ahead in its own sentence, which lands in the toast.
+    refusal: (target, verbs) => (verbs.bringBack === undefined ? WHERE_WORDS.notYet : (target.absent?.sentence ?? actionRefusal(stateOf(target), "bring back"))),
+    run: (target, verbs) => verbs.bringBack?.(target.id),
   },
   {
     id: "export-project",

@@ -30,16 +30,18 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { noDiffLine } from "../actions/format.js";
+import { SEND_TO_THREAD } from "./words.js";
+import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { baseName, relativeTo } from "../files/entries.js";
 import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "../files/FolderBreadcrumbs.js";
-import { NotRunning } from "../files/FilesSurface.js";
+import { NotRunning } from "./NotRunning.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse.js";
 import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath } from "../lib/diffRendering.js";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
-import type { ReviewCommentContext } from "../reviewCommentContext.js";
+import { reviewCommentsQuote, type ReviewCommentContext } from "../reviewCommentContext.js";
 import { repoAbsence } from "../adapt/git.js";
 import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
@@ -108,6 +110,19 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const revealRequest = useDiffRevealStore(s => s.pendingByWorkspaceId[workspaceId]);
   const takeReveal = useDiffRevealStore(s => s.take);
   const [revealNote, setRevealNote] = useState<string | null>(null);
+  const setDraft = useComposerDraftStore(s => s.setDraft);
+
+  // The comments of one pass go to the thread in front of the person as one block under whatever is already
+  // typed there, and the pane keeps none: what is in the composer is what the person edits and sends. The box is
+  // not focused from here: the editor's focus reports the text it holds, which on the same tick is still the text
+  // before this write, and that report lands back on the draft and empties it.
+  const sendToThread = useCallback(() => {
+    if (comments.length === 0) return;
+    const draft = useComposerDraftStore.getState().drafts[workspaceId]?.prompt ?? "";
+    const prompt = draft === "" ? `${reviewCommentsQuote(comments)}\n\n` : `${draft}\n\n${reviewCommentsQuote(comments)}\n\n`;
+    setDraft(workspaceId, { prompt, cursor: prompt.length });
+    setComments([]);
+  }, [comments, setDraft, workspaceId]);
 
   const fetchDiff = useCallback(() => {
     if (!wire || cwd === "") return;
@@ -278,6 +293,11 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {comments.length > 0 ? (
+            <Button type="button" size="xs" variant="ghost" data-diff-send-to-thread onClick={sendToThread}>
+              {SEND_TO_THREAD}
+            </Button>
+          ) : null}
           {model && model.files.length > 0 ? (
             <DiffStatLabel additions={model.stat.additions} deletions={model.stat.deletions} className="mr-1 text-[11px]" layout="inline" />
           ) : null}

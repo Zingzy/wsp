@@ -178,7 +178,7 @@ describe("terminal as a right-panel surface", () => {
     useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
   });
 
-  it("a computer that is not answering refuses the Terminal and Processes panels in the panel itself, and asks for no pty", async () => {
+  it("a computer that is not answering refuses the Terminal panel in the panel itself, and asks for no pty", async () => {
     const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" };
     const { count } = fakeLink();
     act(() =>
@@ -194,11 +194,9 @@ describe("terminal as a right-panel surface", () => {
     const card = (key: string) => document.querySelector<HTMLElement>(`[data-surface-launch="${key}"]`)!;
     await waitFor(() => expect(card("terminal").getAttribute("data-available")).toBe("false"));
     expect(within(card("terminal")).getByText(sentence)).toBeTruthy();
-    expect(card("processes").getAttribute("data-available")).toBe("false");
-    expect(within(card("processes")).getByText(sentence)).toBeTruthy();
     // The one sentence that says what happened reads at the muted ink's own alpha; the dimming that says the card
     // is held sits on the title and the icon, which the person is not being asked to read.
-    for (const key of ["terminal", "processes"]) {
+    for (const key of ["terminal"]) {
       expect(card(key).className).not.toContain("opacity-40");
       expect(within(card(key)).getByText(sentence).className).not.toContain("opacity");
       expect(card(key).querySelector("[data-surface-card-head]")!.className).toContain("opacity-40");
@@ -605,7 +603,7 @@ describe("panes on a workspace that is not running", () => {
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
     expect(overlay()!.textContent).toContain("The workspace is not answering");
-    expect(hints()).toEqual(["Rebuild it from the Workspace panel"]);
+    expect(hints()).toEqual(["Rebuild it from the workspace's row"]);
     act(() => {
       setPane("running", {});
       wt.feedStatus("live");
@@ -644,7 +642,7 @@ describe("panes on a workspace that is not running", () => {
     expect(overlay()!.textContent).toContain("Out of memory (3.6 GB of 3.9 GB used, load 6.4)");
     expect(hints()).toEqual([
       "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
-      "Rebuild it from the Workspace panel",
+      "Rebuild it from the workspace's row",
     ]);
     act(() => {
       setPane("running", {});

@@ -15,6 +15,7 @@ import type { LegendListRef } from "@legendapp/list/react";
 import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, whoPaysLines } from "@wsp/protocol";
 import { useHarnessCatalog, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { ThreadLink } from "../ThreadLink.js";
+import { useDiffRevealStore } from "../../diffs/reveal";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
@@ -55,13 +56,22 @@ export function ChatView({
   // the transcript itself records that a turn opened one.
   const projects = useSidebarProjects();
   const opened = useMemo(() => threadsOpenedBy(projects, thread.threadKey), [projects, thread.threadKey]);
-  const openFile = useRightPanelStore(s => s.openFile);
+  const openSurface = useRightPanelStore(s => s.open);
+  const revealInDiff = useDiffRevealStore(s => s.request);
   const api = useStore(s => s.api);
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
   const cwd = view.cwd ?? undefined;
-  const onOpenFile = useCallback((path: string, line?: number) => openFile(workspaceId, path, line), [openFile, workspaceId]);
+  // A file named in the transcript is read in the Diff pane, which is the one pane that shows a file now: the
+  // reveal waits there until that pane has a diff to look in, and a file the diff does not touch is named in a line.
+  const onOpenFile = useCallback(
+    (path: string) => {
+      revealInDiff(workspaceId, path);
+      openSurface(workspaceId, "diff");
+    },
+    [openSurface, revealInDiff, workspaceId],
+  );
   // The prompt row's own options: the answer travels straight to the runtime and the row closes on the event the
   // runtime records, never on the reply here, so two clients watching one prompt end up saying the same thing.
   const onAnswerPermission = useCallback(

@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, FORGET_NEEDS_GONE, goneRefusal, goneRoadRefusal, isBilling, keepsRename, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, type BringBackResult, FORGET_NEEDS_GONE, goneRefusal, goneRoadRefusal, isBilling, keepsRename, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -15,7 +15,7 @@ export const WORKSPACE_WORDS = {
   newThread: "New thread",
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
-  openMachine: "Open the workspace pane",
+  bringBack: "Bring back",
   exportProject: "Export project",
   rename: "Rename workspace",
   theme: "Edit theme colour",
@@ -42,12 +42,6 @@ export const THREAD_WORDS = {
   rename: "Rename thread",
   copyLink: "Copy thread link",
   forget: "Forget thread",
-} as const;
-
-export const FILE_WORDS = {
-  open: "Open file",
-  showDiff: "Show in diff",
-  copyPath: "Copy path",
 } as const;
 
 export const TERMINAL_WORDS = {
@@ -92,7 +86,7 @@ export const REBUILD_HINT = "The workspace answers nothing; rebuild it from your
 
 /** What a rebuild the host refused says, wherever it was asked from. The host's own reason is not quoted: it ends
  * in whatever threw, and the line used to begin with the workspace's name and a colon. */
-export const rebuildRefusedLine = (name: string): string => `${name} was not rebuilt. The Workspace panel says what it is doing.`;
+export const rebuildRefusedLine = (name: string): string => `${name} was not rebuilt. Its row says what it is doing.`;
 
 export function phaseRefusal(state: WorkspaceState): string | null {
   switch (state) {
@@ -122,6 +116,17 @@ export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
+/** What Bring back does, on the button's hover text: the agent's branch is what leaves, and it leaves through git. */
+export const BRING_BACK_HINT = "Pushes the agent's branch and opens a pull request";
+
+/** What the row's third line says once a bring back has answered: the branch, then the pull request it opened, or
+ * why there is none beside a push that landed. "Pull request" in full, since the row has the width for it and the
+ * short form is a word only people who live in one git host read. */
+export function broughtBackRowLine(back: Pick<BringBackResult, "branch" | "pr" | "note">): string {
+  if (back.pr !== undefined) return `${back.branch} · pull request #${back.pr.number} ${back.pr.state}`;
+  return back.note === undefined ? `${back.branch} · pushed` : `${back.branch} · pushed, no pull request: ${back.note}`;
+}
+
 export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it";
 
 /** Why a forget cannot run, or null when it can. `said` is what the computer this workspace stands on says about

@@ -7,8 +7,7 @@
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { goneRefusal, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
-import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -37,8 +36,8 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     togglePhase: vi.fn(async () => {}),
     openTerminal: vi.fn(async () => {}),
     openBrowser: vi.fn(),
-    openMachine: vi.fn(),
     newThread: vi.fn(),
+    bringBack: vi.fn(async () => {}),
     copyText: vi.fn(async () => {}),
     rebuild: vi.fn(async () => {}),
     restartDaemon: vi.fn(async () => {}),
@@ -53,7 +52,7 @@ const enabled = (actions: ReturnType<typeof resolveActions>) => actions.filter(a
 const titles = (actions: ReturnType<typeof resolveActions>) => actions.map(a => a.title);
 
 describe("workspace actions", () => {
-  it("a running workspace offers pause, terminal, browser, machine, new thread, the project trips, rename and copy id; fork, rebuild and forget carry their refusal", () => {
+  it("a running workspace offers pause, terminal, browser, new thread, bring back, the project trips, rename and copy id; fork, rebuild and forget carry their refusal", () => {
     const verbs = workspaceVerbs();
     const actions = resolveActions(workspaceActions, workspace("running"), verbs);
     expect(titles(actions)).toEqual([
@@ -63,14 +62,14 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.bringBack,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "bring-back", "export-project", "rename", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
@@ -112,7 +111,7 @@ describe("workspace actions", () => {
   it("a gone workspace offers rebuild and forget and refuses the machine actions; a zombie offers rebuild alone; a client without the verbs says so", () => {
     const verbs = workspaceVerbs();
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
-    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "copy-id", "forget"]);
+    expect(enabled(gone)).toEqual(["rebuild", "rename", "copy-id", "forget"]);
     expect(actionById(gone, "new-thread").refusal).toBe("New threads wait for the rebuild");
     expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal("open a terminal"));
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
@@ -141,7 +140,7 @@ describe("workspace actions", () => {
     await actionById(actions, "new-thread").run();
     await actionById(actions, "open-terminal").run();
     await actionById(actions, "open-browser").run();
-    await actionById(actions, "open-machine").run();
+    await actionById(actions, "bring-back").run();
     await actionById(actions, "copy-id").run();
     await actionById(actions, "export-project").run();
     expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
@@ -149,7 +148,7 @@ describe("workspace actions", () => {
     expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
     expect(verbs.openTerminal).toHaveBeenCalledWith("ws_a");
     expect(verbs.openBrowser).toHaveBeenCalledWith("ws_a");
-    expect(verbs.openMachine).toHaveBeenCalledWith("ws_a");
+    expect(verbs.bringBack).toHaveBeenCalledWith("ws_a");
     expect(verbs.copyText).toHaveBeenCalledWith("m_a");
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
     await actionById(gone, "rebuild").run();
@@ -372,26 +371,6 @@ describe("thread actions", () => {
   });
 });
 
-describe("file actions", () => {
-  const fileVerbs = (): FileVerbs => ({ open: vi.fn(), revealInDiff: vi.fn(), copyText: vi.fn(async () => {}) });
-
-  it("a file opens, shows in the diff and copies its path; a folder copies its path alone", async () => {
-    const verbs = fileVerbs();
-    const file = resolveActions(fileActions, { path: "/root/src/a.ts", kind: "file" }, verbs);
-    expect(titles(file)).toEqual([FILE_WORDS.open, FILE_WORDS.showDiff, FILE_WORDS.copyPath]);
-    expect(enabled(file)).toEqual(["open", "show-diff", "copy-path"]);
-    await actionById(file, "open").run();
-    await actionById(file, "show-diff").run();
-    await actionById(file, "copy-path").run();
-    expect(verbs.open).toHaveBeenCalledWith("/root/src/a.ts");
-    expect(verbs.revealInDiff).toHaveBeenCalledWith("/root/src/a.ts");
-    expect(verbs.copyText).toHaveBeenCalledWith("/root/src/a.ts");
-    const folder = resolveActions(fileActions, { path: "/root/src", kind: "directory" }, verbs);
-    expect(enabled(folder)).toEqual(["copy-path"]);
-    expect(actionById(folder, "open").refusal).toBe("A folder opens in the tree");
-    expect(actionById(folder, "show-diff").refusal).toBe("Only a file has a diff");
-  });
-});
 
 describe("terminal actions", () => {
   const terminalVerbs = (over: Partial<TerminalVerbs> = {}): TerminalVerbs => ({
@@ -437,7 +416,7 @@ describe("menu items from actions", () => {
       ["new-thread", WORKSPACE_WORDS.newThread, "open", true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],
-      ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
+      ["bring-back", WORKSPACE_WORDS.bringBack, "project", false],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
       ["fork", WORKSPACE_WORDS.fork, "edit", false],
