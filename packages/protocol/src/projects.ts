@@ -8,7 +8,7 @@ import { THIS_COMPUTER, thisComputer } from "./format.js";
 import { HERE_PLACE_ID } from "./index.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
-import { shellQuote } from "./shell-quote.js";
+import { shellLine, shellQuote } from "./shell-quote.js";
 import { kindWords } from "./workspace-state.js";
 
 /** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
@@ -56,12 +56,15 @@ export function projectNameOf(source: ProjectSource): string {
   return last.replace(/\.git$/, "");
 }
 
-/** Where a project's checkout sits inside a workspace of it: the folder itself where the source is one on this
- * computer, worked in place, and the home every copy of the image carries where the source is a repo a computer
- * clones. The source says which, so the workspace's kind is not asked for here. */
-export function projectPathOn(source: ProjectSource, name: string): string {
+/** Where a project's checkout sits inside a workspace of it: the folder itself where the source is one the
+ * computer holding it already has, worked in place, and `<home>/<name>` where the source is a repo that computer
+ * cloned into a checkout of its own. Which home is the landing road's answer, since it is the road that knows
+ * which folder a copy can be bound at inside a workspace there without leaving the mount point on the computer
+ * itself. A road that clones nothing names none, and a repo is refused on such a computer before this is asked. */
+export function projectPathOn(source: ProjectSource, name: string, home?: string): string {
   if (source.kind === "folder") return source.path;
-  return `${GUEST_PROJECT_HOME}/${name}`;
+  if (home === undefined) throw new Error(`${name} is a repo, and that computer holds no checkout of its own to put one in`);
+  return `${home}/${name}`;
 }
 
 /** The source one word names, off the kind that word is: the shape the record keeps. A word naming a computer is
@@ -73,9 +76,6 @@ export function projectSourceOf(word: string, kind: Exclude<ReturnType<typeof so
   // person's way of writing the same repo, and neither is part of the word that command reads.
   return { kind, repo: word.replace(/^(github|gitlab)\.com\//, "").replace(/\.git$/, "") };
 }
-
-/** The folder a copy's projects are cloned under: the home a fork's own login lands in. */
-const GUEST_PROJECT_HOME = "/root";
 
 /** Why a second project on one source on one computer is refused: one source per computer is one project, and a
  * second record of it would give two names to one checkout. */
@@ -104,6 +104,25 @@ export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours and
  * project is the repo that computer can clone. */
 export const folderOnCopyRefusal = (computer: string): string =>
   `${computer} takes a repo it can clone, not a folder on this computer; give the repo's url, or add the folder here with no --on`;
+
+/** What a remove says on the computer the app runs on: the folder is the project, so nothing of it moves. */
+export const projectRemovedHereLine = (name: string): string => `${name} is no longer a project here; its code is where it was`;
+
+/** What a remove says on a computer the person owns: the folder wsp itself made there at the add goes with the
+ * record, checkout and project memory together, and nothing else on that computer is touched. */
+export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string): string =>
+  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout and its memory`;
+
+/** What a remove says for a project a provider keeps in an image: nothing runs on any machine, and the image
+ * stays where it is, since no verb deletes one yet. */
+export const projectRemovedAtProviderLine = (name: string, computer: string, snapshotId?: string): string =>
+  `${name} is no longer a project on ${computer}; ${snapshotId === undefined ? "nothing of it was held there" : `its project image ${snapshotId} stays at the provider`}`;
+
+/** Why no workspace can be made of a project recorded before its computer cloned it once at the add: there is no
+ * checkout on that computer for a copy to be taken of, and nothing clones one at a create any more. Recording it
+ * again is the road, by the word it was added with. */
+export const projectNeedsReaddLine = (name: string, computer: string, source: ProjectSource): string =>
+  `${name} was recorded before a project was cloned once on its computer, so ${computer} holds no checkout for a workspace to copy; ${shellLine(["wsp", "projects", "remove", name])}, then ${shellLine(["wsp", "add", sourceWord(source), "--on", computer])}`;
 
 /** Why a project cannot be dropped yet, with the workspaces standing on it. */
 export const projectInUseRefusal = (name: string, workspaces: readonly string[]): string =>

@@ -57,6 +57,9 @@ export interface StubBackend extends MachineBackend {
   /** The cloud provider's own numbers, mutable so a test shrinks or removes one. */
   lifecycle: Lifecycle;
   machines: StubMachine[];
+  /** Every command run on the computer itself rather than in a workspace on it, oldest first: what a computer the
+   * person owns answers, set by the test that stands one up beside `projects`. */
+  computerLog: string[];
   /** Every body PUT to an upload URL the stub minted, with the machine and guest path it was for. */
   puts: { machine: string; path: string; body: Buffer }[];
   /** What a download URL serves for a guest path; absent, an empty archive. */
@@ -126,6 +129,7 @@ export function stubBackend(mark?: string): StubBackend {
   const templates: StubBackend["templates"] = new Map();
   const promoted: StubBackend["promoted"] = [];
   const puts: StubBackend["puts"] = [];
+  const computerLog: string[] = [];
   const vaultOrigin = vaultServer(puts, () => backend.downloads);
 
   const backend: StubBackend = {
@@ -149,6 +153,7 @@ export function stubBackend(mark?: string): StubBackend {
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
     lifecycle: { budgets: { wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } } },
     machines,
+    computerLog,
     puts,
     snapshots,
     snapshotBytes: 8_000_000_000,
@@ -156,6 +161,13 @@ export function stubBackend(mark?: string): StubBackend {
     promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
     execImpl: (_m, cmd) => guestBranchAnswer(cmd) ?? { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" },
+    // One command on the computer itself, outside every workspace: recorded apart from any machine's log, since
+    // that is what it is, and answered by the same execImpl a machine's exec goes through so a test sets one
+    // answer for both. The machine handed to that answer stands for the computer and is in no listing.
+    async onComputer(cmd: string): Promise<ExecResult> {
+      computerLog.push(cmd);
+      return backend.execImpl({ id: "computer", execLog: computerLog } as StubMachine, cmd);
+    },
     async create(spec: MachineSpec): Promise<Machine> {
       if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
         throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });

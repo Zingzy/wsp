@@ -9,6 +9,7 @@
 
 import { sharesIn } from "@wsp/catalog";
 import {
+  DaemonExecReply,
   MACHINE_PUT_PART_BYTES,
   MachineAnswersReply,
   MachineBackendReply,
@@ -370,6 +371,13 @@ export class LinkBackend implements MachineBackend {
 
   capacity(): Promise<PlaceCapacity> {
     return this.ask(MachineCapacityReply, "machine.capacity");
+  }
+
+  /** One command on the computer itself, outside every workspace on it: the frame names no machine, which is what
+   * that computer's own daemon runs on itself. The road wsp's own folders on a computer are made and taken by. */
+  onComputer(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
+    const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
+    return this.ask(DaemonExecReply, "exec", { cmd, timeoutMs }, { timeoutMs: timeoutMs + LINK_MARGIN_MS });
   }
 }
 

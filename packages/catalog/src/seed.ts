@@ -86,6 +86,8 @@ export const SEED_ROWS: readonly SeedRow[] = [
       { lockfile: "package-lock.json", run: "npm ci" },
       { lockfile: "pnpm-lock.yaml", run: "pnpm install --frozen-lockfile", store: { flag: "--store-dir", dir: ".pnpm-store" } },
       { lockfile: "yarn.lock", run: "yarn install --frozen-lockfile" },
+      // The text lockfile bun writes since 1.2, before the binary one: a repo carrying both is one bun wrote today.
+      { lockfile: "bun.lock", run: "bun install --frozen-lockfile" },
       { lockfile: "bun.lockb", run: "bun install --frozen-lockfile" },
     ],
   },

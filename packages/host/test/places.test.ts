@@ -2318,14 +2318,16 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     const { dial, asked } = menuClient();
     // The computer the app runs on, named by the word its own row carries.
     expect(await addCommand(captured(), opts(home), [FOLDER], { on: "here" }, menuDeps(dial))).toBe(0);
-    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add", "places.list"]);
+    // The places listing is read before the add now, since the add's own stages land while it runs and each names
+    // the computer by its id.
+    expect(asked.map(a => a.op)).toEqual(["places.list", "places.list", "projects.add"]);
   });
 
   it("a folder with no computer named is a project here and reads no menu at all", async () => {
     const home = tmp("add-seed-here");
     const { dial, asked } = menuClient();
     expect(await addCommand(captured(), opts(home), [FOLDER], {}, menuDeps(dial))).toBe(0);
-    expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add"]);
   });
 });
 
@@ -2363,8 +2365,96 @@ describe("wsp add <owner/repo>: a repo the computer's own command line clones", 
     const io = captured();
     expect(await addCommand(io, opts(home), ["spoo-me/frontend"], { on: "spoo" }, { ...systemPlaceDeps, dial })).toBe(0);
     // It reaches the host as the word that was typed, and no menu is read: only a folder here has one.
-    expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
-    expect(asked[0]?.params).toMatchObject({ source: "spoo-me/frontend", on: "spoo" });
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add"]);
+    expect(asked[1]?.params).toMatchObject({ source: "spoo-me/frontend", on: "spoo" });
     expect(io.lines.join("\n")).toContain("frontend pr_2");
+  });
+});
+
+describe("what wsp add prints while a project lands on a computer", () => {
+  const spooRow: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString(), agents: ["claude"] };
+  const landed = {
+    id: "pr_1a2b3c4d",
+    name: "landing-906",
+    computer: "p_1",
+    source: { kind: "git" as const, url: "https://github.com/spoo-me/spoo-ts" },
+    path: "/srv/landing-906",
+    remote: "https://github.com/spoo-me/spoo-ts",
+    defaultBranch: "main",
+    memoryKey: "-srv-landing-906",
+    memoryDir: "/wsp/projects/pr_1a2b3c4d/memory",
+    checkout: "/wsp/projects/pr_1a2b3c4d/checkout",
+    createdAt: new Date(0).toISOString(),
+  };
+
+  /** A host that pushes the add's own stages while the request is in flight, which is how they land: the reply
+   * comes only once the clone and the install are over. */
+  const staging = (frames: readonly Record<string, unknown>[], notice?: string): NonNullable<Parameters<typeof addCommand>[4]>["dial"] => {
+    const sinks: ((f: Record<string, unknown>) => void)[] = [];
+    return () =>
+      Promise.resolve({
+        request: (op: string) => {
+          if (op === "places.list") return Promise.resolve({ places: [spooRow] } as never);
+          if (op === "projects.add") {
+            for (const frame of frames) for (const sink of sinks) sink(frame);
+            return Promise.resolve({ project: landed, ...(notice === undefined ? {} : { notice }) } as never);
+          }
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: (fn: (f: Record<string, unknown>) => void) => {
+          sinks.push(fn);
+          return () => {};
+        },
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+  };
+
+  const stage = (computer: string, stage: string, message: string): Record<string, unknown> => ({ type: "project.add", projectId: landed.id, computer, stage, message, elapsedMs: 1 });
+
+  const addDeps = (dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"]): Parameters<typeof addCommand>[4] => ({
+    dial,
+    now: () => 0,
+    run: fakeRunner().run,
+    platform: "linux",
+    checkKey: async () => ({ state: "taken" }),
+    ...noBoxSignIn,
+  });
+
+  it("prints each stage as it lands there, then where the project is, and says what did not travel", async () => {
+    const io = captured();
+    const dial = staging(
+      [
+        stage("p_1", "planned", "landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded."),
+        stage("p_1", "cloning", "Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout."),
+        // Another computer's add, running at the same time on the same host: none of its lines are this one's.
+        stage("p_2", "cloning", "Cloning something else."),
+        stage("p_1", "installing", "npm ci in /srv/landing-906."),
+        stage("p_1", "done", "landing-906 is on spoo, at /srv/landing-906 inside a workspace of it."),
+      ],
+      "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main",
+    );
+    expect(await addCommand(io, opts(tmp("add-stages")), ["https://github.com/spoo-me/spoo-ts"], { on: "spoo", name: "landing-906" }, addDeps(dial))).toBe(0);
+    expect(io.lines).toEqual([
+      "landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded.",
+      "Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout.",
+      "npm ci in /srv/landing-906.",
+      "landing-906 is on spoo, at /srv/landing-906 inside a workspace of it.",
+      "landing-906 pr_1a2b3c4d: https://github.com/spoo-me/spoo-ts on spoo, at /srv/landing-906 inside a workspace of it\nmake one with: wsp new 'landing-906' \"<what you are working on>\"",
+      "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main",
+    ]);
+  });
+
+  it("prints no stage at all where no computer was named, so another session's add never lands in this terminal", async () => {
+    const io = captured();
+    const folder = tmp("add-here-stages");
+    // Another session's add on a computer, arriving on this socket while a folder is recorded here.
+    const dial = staging([stage("p_1", "cloning", "Cloning somebody else's repo."), stage("p_1", "done", "theirs is on spoo.")]);
+    expect(await addCommand(io, opts(tmp("add-here")), [folder], {}, addDeps(dial))).toBe(0);
+    expect(io.lines.filter(line => line.includes("somebody else"))).toEqual([]);
+    expect(io.lines.some(line => line.includes("theirs is on spoo"))).toBe(false);
   });
 });
