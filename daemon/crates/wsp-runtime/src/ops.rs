@@ -1911,14 +1911,12 @@ mod tests {
         assert_eq!(ops.backend_facts().logins, Some(logins.display().to_string()));
     }
 
-    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given.
+    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given. The
+    /// destination is where the add's own worker reads a project's checkout inside, since a destination under one
+    /// of the computer's own trees is refused before the source is read at all.
     fn binding(source: &Path) -> MachineSpec {
         MachineSpec {
-            binds: Some(vec![Bind {
-                source: source.display().to_string(),
-                target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
-                read_only: false,
-            }]),
+            binds: Some(vec![Bind { source: source.display().to_string(), target: "/srv/spoo-landing".to_owned(), read_only: false }]),
             shares: None,
             ..asking_for(source)
         }

@@ -923,20 +923,20 @@ mod tests {
         // And a workspace that shares none carries no mount of its own.
         assert!(mounts.iter().all(|m| m["destination"] != "/root/.codex/auth.json"));
         // A folder of the computer's own, at the path the workspace reads it inside: one more mount after the
-        // profile's, read-write, so what the workspace writes in the project's memory is what the computer holds
-        // for every other workspace of that project.
-        let memory = "/root/.claude-cfg/projects/-root-wsp/memory";
-        let binds = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: false }];
+        // profile's, read-write, so what the workspace writes in the project's checkout is what the computer
+        // holds for the next piece of work on it.
+        let memory = "/srv/spoo-landing";
+        let binds = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: memory.to_owned(), read_only: false }];
         let bound = config_json(&Config { binds: &binds, ..c });
         let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap();
-        assert_eq!(folder["source"], "/wsp/projects/pr_1/memory");
+        assert_eq!(folder["source"], "/wsp/projects/pr_1/checkout");
         assert_eq!(folder["type"], "bind");
         // The same words a shared login takes: the boot makes the bind itself, and `bind_steps` is the one place
         // the propagation of everything under a rootfs is decided.
         assert_eq!(folder["options"], json!(["rbind", "rw"]));
         assert_eq!(bound["mounts"].as_array().unwrap().len(), mounts.len() + 1);
         // A bind the host asked to be read-only is mounted that way, and a workspace with no bind carries none.
-        let read_only = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: true }];
+        let read_only = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: memory.to_owned(), read_only: true }];
         let fenced = config_json(&Config { binds: &read_only, ..c });
         assert_eq!(
             fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
@@ -1077,12 +1077,9 @@ mod tests {
         let shares = vec![Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
         write_json(&path, &Workspace { shares: shares.clone(), ..record.clone() }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
-        // And the folders it was made with, which every boot mounts again: the project's memory on the computer.
-        let binds = vec![Bind {
-            source: "/wsp/projects/pr_1/memory".to_owned(),
-            target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
-            read_only: false,
-        }];
+        // And the folders it was made with, which every boot mounts again: the project's checkout on the computer.
+        let binds =
+            vec![Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: "/srv/spoo-landing".to_owned(), read_only: false }];
         write_json(&path, &Workspace { binds: binds.clone(), ..record }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().binds, binds);
     }
