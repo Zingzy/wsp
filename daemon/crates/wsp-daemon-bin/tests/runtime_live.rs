@@ -1610,6 +1610,10 @@ fn the_container_id_is_read_off_stdout_whatever_a_pull_printed_around_it() {
     assert_eq!(container_id(""), None);
 }
 
+/// How long a case gives a service in a compose stack to start listening after its engine has returned: the
+/// entrypoints of the two images take one to two seconds on a box, and a busier box is slower still.
+const SERVICE_READY: Duration = Duration::from_secs(10);
+
 fn show(title: &str, code: i64, out: &str, err: &str) {
     eprintln!("== {title} (exit {code})\n{}{}", out, if err.is_empty() { String::new() } else { format!("[stderr] {err}") });
 }
@@ -1687,10 +1691,25 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
         out.contains("a bind mount's source must sit under a project folder of this workspace (/var/tmp/demo), and / does not"),
         "{out}"
     );
-    let (code, out, err) =
-        w.exec(&id, "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3").await;
+    // The page is asked for once the service listens, not once `up -d` has returned. Measured on a box: nginx
+    // answers 1.2 to 2.0 s after its container starts, and until it does the engine's published port on the
+    // box's loopback accepts the connection and closes it with no byte, which reads exactly like a forward that
+    // dialled nothing. So this waits for a byte, and says what it waited for where none comes.
+    let get = "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3";
+    let waited = Instant::now();
+    let mut answer = w.exec(&id, get).await;
+    while answer.1.is_empty() && waited.elapsed() < SERVICE_READY {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        answer = w.exec(&id, get).await;
+    }
+    let (code, out, err) = answer;
     show("GET 127.0.0.1:18080 from inside (the published port)", code, &out, &err);
-    assert!(out.contains("hello-from-workspace"), "{out}");
+    eprintln!("the service answered its first byte {} ms after compose up returned", waited.elapsed().as_millis());
+    assert!(
+        out.contains("hello-from-workspace"),
+        "the published port sent no page in the {} s this case waits for the service inside to start listening: {out:?}",
+        SERVICE_READY.as_secs()
+    );
     let (code, out, err) = w
         .exec(&id, &format!("docker inspect --type container --format '{{{{.Name}}}}' {outside_id} 2>&1; docker stop {outside} 2>&1"))
         .await;
