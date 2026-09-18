@@ -27,6 +27,15 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
    * and reads nothing else of the computer unless it is a shared tool root. A road that installs anywhere else
    * puts its tool on the computer and out of every workspace's sight, which is what the test below reads. */
   roots: readonly string[];
+  /** The directories this road links the commands it installs into, which is a narrower question than `roots`:
+   * roots are the trees a workspace has to be able to see, coarse on purpose, and these are where a command put
+   * there by this road answers from. Read to tell a row this road installed from a row of the same name another
+   * road put somewhere else, and for nothing about visibility. Empty where the road cannot say. */
+  bins(road: R): readonly string[];
+  /** One shell test that reads whether the road's argument is already on the machine, for a road whose own
+   * reading is not the command it puts on PATH: Homebrew's prefix keeps a link per formula it installed, and a
+   * command of that name is another road's work. Absent leaves the step's own check and its command as the read. */
+  present?(road: R, bin: string): string;
   /** The one line a person reads while the install runs, for a road whose install line is not that: the brew line
    * without its su, where a release comes from. Absent, the install line is its own. */
   shown?(road: R, bin: string): string;
@@ -79,6 +88,13 @@ const pinned = (pkg: string, version: string | undefined, sep: string): string =
 const nodeGlobalVersion = (rootCmd: string, pkg: string): string => `node -p 'require(process.argv[1] + "/package.json").version' "$(${rootCmd})/"${shellQuote(pkg)}`;
 /** The second column of the line a listing prints for the package, with the leading v and a trailing colon off. */
 const listedVersion = (list: string, pkg: string): string => `${list} 2>/dev/null | awk -v p=${shellQuote(pkg)} '$1==p{sub(/^v/,"",$2); sub(/:$/,"",$2); print $2}'`;
+
+/** The directories a road links the commands it installs into, named once: what a module answers as its `bins`,
+ * and what a script row on the catalog names for the installer it carries. */
+export const LOCAL_BIN = "/usr/local/bin";
+export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
+export const CARGO_BIN = `${GUEST_HOME}/.cargo/bin`;
+export const APT_BIN = "/usr/bin";
 
 /** The pseudo step every apt row waits on: the index read once, before the first of them. */
 export const APT_INDEX = "apt-index";
@@ -143,7 +159,7 @@ export const formulaShortName = (formula: string): string => formula.slice(formu
  * under it, which is the same split the uninstall above reads. A core formula is never read by its name: the base
  * stage's node and the release road's gh are on the PATH under theirs, and a formula Homebrew never installed
  * would read present off another road's work. */
-export const formulaPresent = (formula: string): string => {
+const formulaPresent = (formula: string): string => {
   const short = formulaShortName(formula);
   const linked = `test -e ${BREW_PREFIX}/opt/${short}`;
   return formula.includes("/") ? `${linked} || command -v ${shellQuote(short)} >/dev/null 2>&1` : linked;
@@ -153,6 +169,8 @@ const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
   // A formula lands in the prefix; a tap formula with no Linux bottle takes the road to /usr/local/bin.
   roots: [BREW_PREFIX, "/usr/local/bin"],
+  bins: () => [`${BREW_PREFIX}/bin`, `${BREW_PREFIX}/sbin`, LOCAL_BIN],
+  present: r => formulaPresent(r.formula),
   after: HOMEBREW_STEP,
   fromRow: r => ({ road: "brew", formula: r.name }),
   shown: r => `brew install ${r.formula}`,
@@ -173,6 +191,7 @@ const npm: RoadModule<Road<"npm">> = {
   words: "as an npm global",
   // npm's global root under the Node the base stage unpacks into /usr/local.
   roots: ["/usr/local/lib/node_modules", "/usr/local/bin"],
+  bins: () => [LOCAL_BIN],
   after: "node",
   fromRow: r => ({ road: "npm", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `npm install -g ${r.ignoreScripts === true ? "--ignore-scripts " : ""}${pinned(r.package, versionOf(r), "@")}`,
@@ -185,7 +204,8 @@ const npm: RoadModule<Road<"npm">> = {
 /** pnpm and bun keep npm's global shape under their own verbs; bun lists its globals as a tree and keeps no root command. */
 const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
-  roots: [road === "pnpm" ? PNPM_HOME : "/root/.bun"],
+  roots: [road === "pnpm" ? PNPM_HOME : `${GUEST_HOME}/.bun`],
+  bins: () => [road === "pnpm" ? PNPM_HOME : `${GUEST_HOME}/.bun/bin`],
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `${road} add -g ${pinned(r.package, versionOf(r), "@")}`,
   uninstall: r => ({ cmd: `${road} remove -g ${r.package}` }),
@@ -199,6 +219,7 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
   words: `with ${road}`,
   // Both install a tool into an environment under the machine's home and link its command into /root/.local/bin.
   roots: [`${GUEST_HOME}/.local`],
+  bins: () => [HOME_BIN],
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `${cmd} install ${pinned(r.package, versionOf(r), "==")}`,
   uninstall: r => ({ cmd: `${cmd} uninstall ${r.package}` }),
@@ -207,9 +228,12 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
   installed: r => listedVersion(road === "uv" ? "uv tool list" : "pipx list --short", r.package),
 });
 
+const CARGO_HOME = `${GUEST_HOME}/.cargo`;
+
 const cargo: RoadModule<Road<"cargo">> = {
   words: "with cargo",
-  roots: ["/root/.cargo"],
+  roots: [CARGO_HOME],
+  bins: () => [CARGO_BIN],
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => {
     const version = versionOf(r);
@@ -221,7 +245,7 @@ const cargo: RoadModule<Road<"cargo">> = {
   installed: r => listedVersion("cargo install --list", r.package),
 };
 
-const GO_BIN = "/root/go/bin";
+const GO_BIN = `${GUEST_HOME}/go/bin`;
 
 /** The collector puts a Go binary's `path@version` in its first path; recipes saved
  * before that carried it in the label as `name (path@version)`. */
@@ -243,6 +267,7 @@ export function goBinary(module: string): string {
 const go: RoadModule<Road<"go">> = {
   words: "with go install",
   roots: [GO_BIN],
+  bins: () => [GO_BIN],
   fromRow: r => {
     const mod = goModule(r);
     return mod === undefined ? { road: "go" } : { road: "go", module: mod.path, version: r.version ?? mod.version };
@@ -314,6 +339,7 @@ const NO_RELEASE = "no GitHub release to install from";
 const release: RoadModule<Road<"release">> = {
   words: "from its release",
   roots: ["/usr/local/bin"],
+  bins: () => [LOCAL_BIN],
   shown: r => (r.repo === undefined ? NO_RELEASE : `the ${versionOf(r) ?? "latest"} release of github.com/${r.repo}`),
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
@@ -329,6 +355,7 @@ const vendor: RoadModule<Road<"vendor">> = {
   words: "from its vendor's release",
   // The cask's own prefix under /opt and the links it puts on PATH; the cask rows carry the paths themselves.
   roots: ["/opt", "/usr/local/bin"],
+  bins: () => [LOCAL_BIN],
   shown: r => r.cask.from,
   install: r => r.cask.install(r),
   uninstall: r => ({ cmd: r.cask.uninstall }),
@@ -342,6 +369,7 @@ const vendor: RoadModule<Road<"vendor">> = {
 const apt: RoadModule<Road<"apt">> = {
   words: "by apt",
   roots: ["/usr", "/etc", "/var"],
+  bins: () => [APT_BIN, "/usr/sbin", "/bin", "/sbin"],
   after: APT_INDEX,
   shown: r => `apt-get install ${r.packages.join(" ")}`,
   install: r => `${APT_ENV}\napt-get install -y -qq ${r.packages.join(" ")}`,
@@ -356,6 +384,10 @@ const script: RoadModule<Road<"script">> = {
   // A vendor's own installer: every script the catalogue carries unpacks under /usr/local or /opt, installs by apt,
   // or writes under the machine's home, which is the /root every workspace on a computer somebody owns shares.
   roots: ["/usr", "/opt", "/root"],
+  // Every script is its vendor's own and they link where they please: five of the catalogue's land in
+  // /usr/local/bin, docker's apt half in /usr/bin, rustup in the cargo home and Claude Code's installer under
+  // the machine's home, so the directories ride each script's own row and the module reads them off it.
+  bins: r => r.bins ?? [],
   install: r => r.script,
   uninstall: (_r, bin) => ({ note: `${bin} has no uninstaller; left on the machine` }),
   names: () => [],

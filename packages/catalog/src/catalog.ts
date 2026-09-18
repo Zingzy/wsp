@@ -10,7 +10,7 @@ import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
-import { APT_INDEX, roadModule } from "./road-modules.js";
+import { APT_BIN, APT_INDEX, CARGO_BIN, HOME_BIN, LOCAL_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, type KeyFiles, type SignIn } from "./signin.js";
@@ -178,7 +178,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     projectDocs: [AGENTS_MD, "CLAUDE.md"],
     // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
     firstMove: `/wsp ${SET_UP_WSP}`,
-    installRoad: { road: "script", script: GOLDEN_SETUP },
+    installRoad: { road: "script", script: GOLDEN_SETUP, bins: [HOME_BIN] },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
     mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
@@ -308,15 +308,15 @@ export const CATALOG: readonly CatalogEntry[] = [
   // stay on by default, which decides only a computer that says nothing about them; what a computer ran is weighed
   // against the used floor either way, and the npm road brings node where a ticked row walks one. pnpm goes with it:
   // its road is npm, so a floor row for it would drag node back onto every image.
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: false, after: "curl", covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]), bins: [LOCAL_BIN] }, floor: false, after: "curl", covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
   { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: false, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
-  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, after: "curl", signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
-  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
+  { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL, bins: [LOCAL_BIN] }, floor: true, after: "curl", signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
+  { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL, bins: [LOCAL_BIN] }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
   { ...tool, id: "git", name: "git", bin: "git", ...apt(123789312, "git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },
   { ...tool, id: "jq", name: "jq", bin: "jq", ...apt(1170432, "jq"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 17, images: 5, road: "unmeasured" } },
   { ...tool, id: "ripgrep", name: "ripgrep", bin: "rg", ...apt(4666368, "ripgrep"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 10, images: 4, road: "unmeasured" } },
   { ...tool, id: "build-essential", name: "C toolchain with cmake and ninja", bin: "cc", ...apt(491381760, "build-essential", "cmake", "ninja-build"), floor: true, covers: ["gcc", "g++", "make"], brings: [{ bin: "cmake", version: "cmake --version" }, { bin: "ninja", version: "ninja --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 15, images: 4, road: "unmeasured" } },
-  { ...tool, id: "fd", name: "fd", bin: "fd", installRoad: { road: "script", script: FD_INSTALL }, floor: true, after: APT_INDEX, covers: ["fd-find", "fdfind"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("apt", 3024896) },
+  { ...tool, id: "fd", name: "fd", bin: "fd", installRoad: { road: "script", script: FD_INSTALL, bins: [LOCAL_BIN] }, floor: true, after: APT_INDEX, covers: ["fd-find", "fdfind"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("apt", 3024896) },
   { ...tool, id: "sqlite3", name: "sqlite3", bin: "sqlite3", ...apt(2845696, "sqlite3"), floor: true, covers: ["sqlite"], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 5, images: 1, road: "unmeasured" } },
   { ...tool, id: "wget", name: "wget", bin: "wget", ...apt(12990464, "wget"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "zip", name: "zip and unzip", bin: "zip", ...apt(1019904, "zip", "unzip"), floor: true, brings: [{ bin: "unzip", version: "unzip -v" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 7, images: 0, road: "unmeasured" } },
@@ -329,14 +329,14 @@ export const CATALOG: readonly CatalogEntry[] = [
   // --- tools on request ---------------------------------------------------------------------------------------------
   // Half a gigabyte on every image that ticks it, and a guest whose kernel has no overlayfs cannot start it at all,
   // so it is a row a person asks for rather than one the floor puts on every image.
-  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL }, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 30, images: 3, road: "unmeasured" }, size: measured("df", 541765632) },
+  { ...tool, id: "docker", name: "Docker engine and compose", bin: "docker", installRoad: { road: "script", script: DOCKER_INSTALL, bins: [APT_BIN] }, after: APT_INDEX, covers: ["docker-compose"], brings: [{ bin: "docker compose", version: "docker compose version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 30, images: 3, road: "unmeasured" }, size: measured("df", 541765632) },
   { ...tool, id: "go", name: "Go", bin: "go", ...brew("go", 250752891), covers: ["golang"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 9, images: 4, road: "measured" } },
-  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", installRoad: { road: "script", script: RUSTUP_INSTALL }, covers: ["rustup", "rustup-init"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" }, size: measured("du", 1595346944) },
+  { ...tool, id: "rust", name: "Rust with cargo", bin: "cargo", installRoad: { road: "script", script: RUSTUP_INSTALL, bins: [CARGO_BIN] }, covers: ["rustup", "rustup-init"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 3, road: "unmeasured" }, size: measured("du", 1595346944) },
   { ...tool, id: "java", name: "Java 21", bin: "java", ...brew("openjdk@21", 613280230), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "maven", name: "Maven", bin: "mvn", ...brew("maven", 677043395), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" } },
   { ...tool, id: "gradle", name: "Gradle", bin: "gradle", ...brew("gradle", 885977407), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "measured" } },
   { ...tool, id: "bun", name: "Bun", bin: "bun", ...npm(79572992, "bun"), brings: [{ bin: "bunx", version: "bunx --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 5, images: 3, road: "unmeasured" } },
-  { ...tool, id: "yarn", name: "Yarn", bin: "yarn", installRoad: { road: "script", script: YARN_INSTALL }, after: "node", signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" }, size: measured("du", 3813376) },
+  { ...tool, id: "yarn", name: "Yarn", bin: "yarn", installRoad: { road: "script", script: YARN_INSTALL, bins: [LOCAL_BIN] }, after: "node", signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 4, road: "unmeasured" }, size: measured("du", 3813376) },
   { ...tool, id: "ruff", name: "ruff", bin: "ruff", ...uvTool(24584192, "ruff"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 3, images: 3, road: "unmeasured" } },
   { ...tool, id: "black", name: "black", bin: "black", ...uvTool(8527872, "black"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
   { ...tool, id: "mypy", name: "mypy", bin: "mypy", ...uvTool(59564032, "mypy"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 1, images: 3, road: "unmeasured" } },

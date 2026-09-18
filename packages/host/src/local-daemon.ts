@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
-import { LOOPBACK, daemonListeningLine, rootsPathIn, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
+import { LOOPBACK, daemonListeningLine, daemonVersionOf, rootsPathIn, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
 import { daemonBinaryHere } from "./assets.js";
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
@@ -53,6 +53,34 @@ export interface LocalDaemonOptions {
   tokenPath?: string;
 }
 
+/** Which daemon the binary that just listened is, off the hello it sends after the auth frame: one socket, opened
+ * with the token this start minted and closed again. The hello is the only word a binary of any age says about its
+ * own version, which is why it is read rather than a flag or a verb a stale binary would not have. A binary that
+ * listens and answers no hello inside the start bound is no daemon this host can use, and the caller stops it. */
+async function helloVersion(url: string, token: string, said: () => string): Promise<number> {
+  let link: DaemonReach | undefined;
+  try {
+    return await new Promise<number>((done, fail) => {
+      const timer = setTimeout(() => fail(new Error(`the daemon at ${url} did not answer its version within ${START_MS} ms: ${said()}`)), START_MS);
+      link = connectDaemon({
+        previewUrl: url,
+        token,
+        onEvent: e => {
+          if (e.type !== "daemon.hello") return;
+          clearTimeout(timer);
+          done(daemonVersionOf(e));
+        },
+      });
+      link.ready.catch((e: unknown) => {
+        clearTimeout(timer);
+        fail(e instanceof Error ? e : new Error(String(e)));
+      });
+    });
+  } finally {
+    link?.close();
+  }
+}
+
 /** One watch on this computer's readings, shared by every pane that asks: the link, its listeners, and the watch
  * request the first one waited on. */
 interface SharedSamples {
@@ -73,6 +101,10 @@ export class LocalDaemon {
     private readonly ownDir: string,
     private readonly minted: string,
     readonly port: number,
+    /** Which daemon this binary is, off the hello it answered the first frame with. Read at the start because the
+     * binary is staged beside the command and a host rebuilt without it runs beside an older one, whose verbs are
+     * not this wsp's; every road that runs it reads this first. */
+    readonly version: number,
     readonly root: string,
     /** The file the token is read back off where a caller named one; this daemon's own otherwise. */
     private readonly tokenPath?: string,
@@ -147,7 +179,8 @@ export class LocalDaemon {
           fail(e);
         });
       });
-      return new LocalDaemon(child, exited, ownDir, token, port, opts.root, opts.tokenPath);
+      const version = await helloVersion(`http://${LOOPBACK}:${port}`, token, () => said.join("").trim());
+      return new LocalDaemon(child, exited, ownDir, token, port, version, opts.root, opts.tokenPath);
     } catch (e) {
       await stop();
       rmSync(ownDir, { recursive: true, force: true });

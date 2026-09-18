@@ -10,10 +10,11 @@ import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
-import { catalogEntry, CLAUDE_CONFIG_DIR, formulaPresent, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-import { CATALOG_PREFIX, CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, INLINE_EXEC_MS, landBytes, missingCommands, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, BREW_ID_PREFIX, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type RecipeDigest, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
-import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
+import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
+import { absentComputer, awayMsOf, boxRoomLines, doctorComputerRowLine, hereDaemonBehindLine, HERE_PLACE_ID, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
+import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemon-binary.js";
@@ -1220,6 +1221,21 @@ export interface DoctorOptions {
    * and the clone inside the fork is part of what it proves; a run behind a proxy or on a private network names
    * one its machines can reach. */
   repo?: string;
+  /** The computer this run proves, off the places list: a computer somebody joined takes the computer road below,
+   * a cloud account the fork road, which is the only one that bills. Absent proves this computer and then every
+   * computer joined to it, and forks nothing. */
+  computer?: PlaceView;
+  /** The project a computer road's workspace is made of, by name or id, on the computer named; the first project
+   * there whose checkout stands without one. */
+  project?: string;
+  /** What the vault holds right now, read at the ask rather than copied, for the line that says which keys this
+   * computer holds by name. Absent leaves the step saying no vault was wired. */
+  vault?: () => Readonly<Record<string, string>>;
+  /** The recipe on this computer planned for a computer somebody owns, the same plan the recipe job runs, or the
+   * path a recipe would be written to where there is none: what the tools inside a workspace are read against. */
+  plan?: () => Promise<ProvisionPlan | { noRecipe: string }>;
+  /** The daemon this host runs for its own computer's workspace, for the line that says it is behind. */
+  hereDaemon?: HereDaemon;
 }
 
 /** The repo the doctor's own project clones when nobody names one: a public repo of one commit, small enough that
@@ -1234,7 +1250,7 @@ export const localPrompt = (word: string): string => `Reply with exactly this wo
  * through the harness whose binary answered here, and its reply is read. It proves the half of wsp a person with no
  * provider key has: the local backend, the turn's child process, the adapter, the transcript. A workspace this run
  * made is forgotten at the end; the one this host already holds is left where it is. */
-export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
+export async function localDoctor(rt: Runtime, io: CliIO, opts: Pick<DoctorOptions, "hereDaemon"> = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
   let made: string | undefined;
@@ -1242,6 +1258,9 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
   let madeFolder: string | undefined;
   try {
     io.log(`doctor: proving a thread on ${THIS_COMPUTER}, with no machine and nothing billing`);
+    // Before anything else: the daemon staged beside this wsp is what a copy here runs, and one that is behind is
+    // the reading a person came for whether or not the rest of the run stands.
+    for (const line of await hereDaemonLines(opts.hereDaemon)) io.log(line);
 
     const workspace = await timings.time(
       "local workspace",
@@ -1321,72 +1340,236 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
 
 /** One line per place running an older daemon than this wsp deploys, each naming the line that moves it. Read
  * before anything is forked, so the reading a person came for is printed whether or not the rest of the run stands;
- * it dials nothing and bills nothing, since every fact on it is what that computer last reported. A host holding no
- * places, or none behind, prints nothing. */
-export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now()): Promise<string[]> {
-  if (rt.places === undefined) return [];
+ * it dials nothing and bills nothing, since every fact on it is what that computer last reported. The computer the
+ * host runs on is first where the binary staged beside this wsp is behind, read off the same daemon a copy here
+ * would run. A host holding no places, or none behind, prints nothing. */
+export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now(), here?: HereDaemon): Promise<string[]> {
+  const mine = await hereDaemonLines(here);
+  if (rt.places === undefined) return mine;
   const places = await rt.places.list(now);
-  return places.flatMap(place => {
-    const word = placeDaemonBehind(place);
-    return word === undefined ? [] : [placeBehindLine(place.name, word)];
-  });
+  return [
+    ...mine,
+    ...places.flatMap(place => {
+      const word = placeDaemonBehind(place);
+      return word === undefined ? [] : [placeBehindLine(place.name, word)];
+    }),
+  ];
 }
 
-/** The commands the recipe's ticked catalogue tools answer by: the command each entry names, which is the one
- * thing a recipe row carries that a workspace can be asked for. A row filed under a manager is left out here: its
- * package name is not its command (`@openai/codex` is `codex`), and a guess would fail a workspace for a name
- * nothing installed. A formula row is asked for the other way, below. */
-function tickedCommands(recipe: Pick<RecipeDigest, "ticks"> | undefined): string[] {
-  const named = (recipe?.ticks ?? []).flatMap(tick => {
-    if (!tick.id.startsWith(CATALOG_PREFIX)) return [];
-    const entry = catalogEntry(tick.id.slice(CATALOG_PREFIX.length));
-    return entry?.kind === "tool" && entry.bin !== undefined ? [entry.bin] : [];
-  });
-  return [...new Set(named)].sort();
-}
-
-/** The formulas the recipe ticks, by their own names. What they put on PATH is not one of them: git-delta puts
- * delta, gnupg puts gpg, c-ares puts adig and ahost, and nothing a recipe carries says so, which is why they are
- * read by the prefix's own link rather than by a command. */
-function tickedFormulas(recipe: Pick<RecipeDigest, "ticks"> | undefined): string[] {
-  const named = (recipe?.ticks ?? []).flatMap(tick => (tick.id.startsWith(BREW_ID_PREFIX) ? [tick.id.slice(BREW_ID_PREFIX.length)] : []));
-  return [...new Set(named)].sort();
-}
-
-/** Which of those formulas a workspace cannot answer for, read with `formulaPresent`, one test per row on the one
- * PATH a machine's tools sit on; `failed` says why the read itself could not run. */
-async function missingFormulas(machine: Pick<Machine, "exec">, formulas: readonly string[]): Promise<{ missing: Set<string>; failed?: string }> {
-  const reads = formulas.map(formula => `if ! ( ${formulaPresent(formula)} ); then printf '%s\\n' ${shellQuote(`missing ${formula}`)}; fi`);
-  const res = await machine.exec([`export PATH=${TOOLS_PATH}`, ...reads].join("\n"), { timeoutMs: INLINE_EXEC_MS });
-  const missing = new Set(res.stdout.split("\n").flatMap(line => (line.startsWith("missing ") ? [line.slice("missing ".length).trim()] : [])));
-  return res.exitCode === 0 ? { missing } : { missing, failed: `the read exited ${res.exitCode}${res.stderr.trim() === "" ? "" : `: ${res.stderr.trim().slice(-200)}`}` };
-}
-
-/** The tools the recipe ticks, read from inside the workspace this run made: a catalogue row by its command on
- * the one PATH a machine's tools sit on, a formula by the link the prefix keeps for it. The read the spoo proof of
- * 2026-09-18 had to be done by hand, where gh and every other Homebrew row was on the box and in no workspace of
- * it, because the prefix that road installs into is outside the trees a workspace carries. A recipe that ticks
- * neither kind has nothing to read and says so.
- *
- * Failing names the rows that did not answer: a tool the recipe asked for that a workspace cannot reach is the
- * whole of what this step is for. */
-export async function recipeToolsInside(machine: Pick<Machine, "exec">, recipe: Pick<RecipeDigest, "ticks"> | undefined): Promise<string> {
-  const bins = tickedCommands(recipe);
-  const formulas = tickedFormulas(recipe);
-  const asked = [...bins, ...formulas];
-  if (asked.length === 0) return "the recipe ticks no tool this can ask a workspace for, so there is nothing to read inside";
-  const commands = bins.length === 0 ? { missing: new Set<string>() } : await missingCommands(machine as Machine, bins);
-  const brewed = formulas.length === 0 ? { missing: new Set<string>() } : await missingFormulas(machine, formulas);
-  const failed = commands.failed ?? brewed.failed;
-  if (failed !== undefined) throw new Error(`the tools inside could not be read (${failed}): ${asked.join(", ")}`);
-  const missing = [...commands.missing, ...brewed.missing].sort();
-  if (missing.length > 0) {
-    throw new Error(`${missing.join(", ")} did not answer inside the workspace, though the recipe installed ${missing.length === 1 ? "it" : "them"} on the machine`);
+/** This computer's own behind line, or none. A daemon that will not start at all is not this line's business: the
+ * roads that need it say so themselves, and a doctor run must not fail on the reading it opens with. */
+export async function hereDaemonLines(here?: HereDaemon): Promise<string[]> {
+  if (here === undefined) return [];
+  let version: number;
+  try {
+    version = await here.version();
+  } catch {
+    return [];
   }
-  return `${asked.length} answered inside: ${asked.sort().join(", ")}`;
+  return version >= DAEMON_VERSION ? [] : [hereDaemonBehindLine(version, DAEMON_VERSION, here.fix)];
 }
 
+/** What the doctor says about the vault: every variable it may hold, by name, said held or not held, and which
+ * agent reads which, in the order a turn's own reader picks them, so a person with both a token and a key set
+ * reads which one a turn takes. Never a value, and nothing is sent anywhere to check one: a key the provider
+ * refuses is what a turn's own sentence says, and this line is about what this computer holds. */
+export function vaultKeysLines(vault: () => Readonly<Record<string, string>>): string[] {
+  const held = vault();
+  const reads = CATALOG_AGENTS.map(agent => ({ name: agent.name, vars: vaultVariablesOf(agent.signIn) })).filter(a => a.vars.length > 0);
+  return [...VAULT_VARIABLES].sort().map(name => {
+    const readers = reads.flatMap(a => {
+      const at = a.vars.indexOf(name);
+      if (at === -1) return [];
+      if (a.vars.length === 1) return [`${a.name} reads it`];
+      return [at === 0 ? `${a.name} reads it first` : `${a.name} reads it after ${a.vars[0]}`];
+    });
+    return `${name} ${keyIn(held, name) === undefined ? "not held" : "held"}${readers.length === 0 ? "" : ` (${readers.join(", ")})`}`;
+  });
+}
+
+/** The variables one agent's sign-in row names, in the order a turn's own reader picks them: the token its own
+ * command mints first, then the key. Off the row and nowhere else, so an agent that declares another variable is
+ * read here without a line of its own. */
+const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
+  const key = keyEnvOf(signIn);
+  return [...(mintsToken(signIn) ? [signIn.tokenEnv] : []), ...(key === undefined ? [] : [key])];
+};
+
+/** The tools the recipe plans, read from inside the workspace this run made, by the one presence read the recipe
+ * job runs on the same planned steps: a tool that answers on the computers row and not here is the bug this step
+ * exists to catch, and one rule for both readings is what keeps them from disagreeing. The read the spoo proof of
+ * 2026-09-18 had to be done by hand, where gh and every other Homebrew row was on the box and in no workspace of
+ * it, because the prefix that road installs into is outside the trees a workspace carries.
+ *
+ * A step nothing can be asked about is not read: an index refresh answers no read of its own, and what it was for
+ * is the rows behind it. A command answering from outside its own road's directories is a note and not a failure;
+ * a row that did not answer fails the step, and where the computer's own record read that row present the line
+ * that reads the computer again is said with it. */
+export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
+  const asked = plan.steps.filter(step => presenceTests(step).length > 0);
+  if (asked.length === 0) return "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside";
+  const present = await presentSteps(machine as Machine, asked);
+  const notes = asked.flatMap(step => {
+    const note = presentElsewhere(step, present.get(step.id));
+    return note === undefined ? [] : [note];
+  });
+  const missing = asked.filter(step => !present.has(step.id));
+  if (missing.length > 0) {
+    const rows = recorded?.provision;
+    const said = missing.map(step => {
+      const row = rows?.rows.find(r => r.id === step.id);
+      const also = row?.outcome === "present" && rows?.finishedAt !== undefined ? ` (${doctorComputerRowLine(recorded!.name, rows.finishedAt)})` : "";
+      return `${step.label}${also}`;
+    });
+    throw new Error(`${said.join(", ")} did not answer inside the workspace, though the recipe installed ${missing.length === 1 ? "it" : "them"} on the machine`);
+  }
+  return `${asked.length} answered inside${notes.length === 0 ? "" : `; ${notes.join("; ")}`}`;
+}
+
+/** What a computer road needs of the runtime: the places it holds, the projects on them and the workspaces it can
+ * make, run one read inside and delete. Narrower than the whole runtime so this road is drivable against a fake. */
+export type DoctorRuntime = Pick<Runtime, "places" | "projects" | "workspaces">;
+
+/** The plan the tools step reads, or the sentence that stands in its place: a host that wired no recipe reader,
+ * and a computer whose recipe has never been written here. */
+async function planToRead(opts: DoctorOptions): Promise<ProvisionPlan | string> {
+  if (opts.plan === undefined) return "this host wired no recipe plan, so there is nothing to read inside";
+  const plan = await opts.plan();
+  return "noRecipe" in plan ? `this computer holds no recipe at ${plan.noRecipe}, so there is nothing to read inside` : plan;
+}
+
+/** The project the doctor's workspace on that computer is made of: the one `--project` names, else the first
+ * project there whose checkout stands, since a workspace is a copy of one and a project recorded before its
+ * computer cloned it once has nothing to copy. Throws the line that records it again, for that person's own first
+ * project there, and the line that adds one where the computer holds none. */
+export function doctorProject(projects: readonly ProjectView[], computer: Pick<PlaceView, "id" | "name">, named?: string): ProjectView {
+  const here = projects.filter(p => p.computer === computer.id);
+  const pick = named === undefined ? (here.find(p => p.checkout !== undefined) ?? here[0]) : here.find(p => p.id === named || p.name === named);
+  if (pick === undefined) {
+    if (named !== undefined) throw new Error(noSuchProjectLine(named, here.map(p => p.name)));
+    throw new Error(`${computer.name} holds no project, and a workspace is a copy of one; wsp add <url> --on ${computer.name} records one`);
+  }
+  if (pick.checkout === undefined) throw new Error(projectNeedsReaddLine(pick.name, computer.name, pick.source));
+  return pick;
+}
+
+/** The doctor's computer road: the computer you named, proved end to end through the product and nothing else. It
+ * answers on its link and runs the daemon this wsp deploys; the vault says which keys this computer holds; the
+ * computer says which agents stand on it; a workspace is made there of a project already on it, the recipe's tools
+ * are read from inside that workspace by the same rule the computers row reads them, and the workspace is deleted,
+ * on the way out of a failure too. Nothing is forked at a provider and nothing bills. */
+export async function computerDoctor(rt: DoctorRuntime, io: CliIO, computer: PlaceView, opts: DoctorOptions = {}, now = Date.now()): Promise<number> {
+  const timings = new Timings();
+  let failed: string | undefined;
+  let made: string | undefined;
+  try {
+    io.log(`doctor: proving ${computer.name}, a computer you added, from its link to a workspace made there and back`);
+
+    await timings.time(
+      `${computer.name} answers`,
+      async () => {
+        if (computer.present !== true) throw new Error(absentComputer(computer.name, awayMsOf(computer, now)).sentence);
+        // A computer on an older daemon than this wsp deploys is said and the run goes on: every step below it is
+        // the daemon it has, and what it cannot do is the reading a person came here for.
+        const behind = placeDaemonBehind(computer);
+        if (behind !== undefined) io.log(placeBehindLine(computer.name, behind));
+        return behind;
+      },
+      behind => behind ?? `daemon ${computer.daemonVersion ?? "unknown"}, this wsp ${DAEMON_VERSION}`,
+    );
+
+    await timings.time("the vault's keys", async () => vaultStep(io, opts.vault), note => note);
+
+    timings.add("agents there", 0, agentsStepNote(io, computer));
+
+    const workspace = await timings.time(
+      "a workspace made there",
+      async () => {
+        const project = doctorProject(await rt.projects.list(), computer, opts.project);
+        // No size: the workspace the doctor makes is the one anybody gets on that computer without asking.
+        const fresh = await rt.workspaces.create({ project: project.id, name: `doctor-${now.toString(36)}` });
+        made = fresh.id;
+        return { view: fresh, project };
+      },
+      w => `${w.view.name} on ${w.project.name}`,
+    );
+
+    await timings.time(
+      "the recipe's tools inside",
+      async () => {
+        const plan = await planToRead(opts);
+        if (typeof plan === "string") return plan;
+        return toolsInside({ exec: (cmd, o) => rt.workspaces.exec(workspace.view.id, cmd, o) }, plan, {
+          name: computer.name,
+          ...(computer.provision !== undefined ? { provision: computer.provision } : {}),
+        });
+      },
+      note => note,
+    );
+
+    await timings.time(
+      "deleted",
+      async () => {
+        await rt.workspaces.delete(made!);
+        made = undefined;
+      },
+      () => `the workspace this run made on ${computer.name} is gone`,
+    );
+  } catch (e) {
+    failed = e instanceof Error ? e.message : String(e);
+    if (made !== undefined) await rt.workspaces.delete(made).catch(() => {});
+  }
+
+  timings.print(io.log);
+  if (failed !== undefined) {
+    io.error(`\nDOCTOR FAIL: ${computer.name}: ${failed}`);
+    return 1;
+  }
+  io.log(`\nDOCTOR PASS: ${computer.name} answers, a workspace was made there, the recipe's tools answered inside it and it is gone again.`);
+  return 0;
+}
+
+/** The vault step on every road: the lines above, or the one sentence for a host that wired no vault at all. */
+function vaultStep(io: Pick<CliIO, "log">, vault?: () => Readonly<Record<string, string>>): string {
+  if (vault === undefined) return "this host wired no vault, so no turn here is handed a key";
+  const lines = vaultKeysLines(vault);
+  for (const line of lines) io.log(line);
+  // Off the lines themselves, so the tally and what a person reads above it cannot disagree.
+  return `${lines.filter(line => !line.includes("not held")).length} of ${lines.length} held`;
+}
+
+/** The agents the computer says stand on it, one line each by their catalog names; never a failure, since an agent
+ * a person has not installed there is theirs to install and not this run's to refuse. */
+function agentsStepNote(io: Pick<CliIO, "log">, computer: PlaceView): string {
+  const agents = computer.agents ?? [];
+  for (const id of agents) io.log(`${agentName(id)} on ${computer.name}`);
+  return agents.length === 0 ? "the computer reported no agent" : `${plural(agents.length, "agent")}`;
+}
+
+/** The doctor's one door: the computer a person named, else this computer and then every computer joined to it.
+ * A computer somebody joined is proved where it stands; a cloud account is forked, which bills, and so runs only
+ * when its own row is named. The word itself is resolved where it was typed, so this takes the row. */
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  const named = opts.computer;
+  if (named !== undefined) {
+    // This computer's own row takes the local road: it is already the one workspace it can be, and the projects on
+    // it are folders worked in place with no checkout of their own for a workspace to copy.
+    if (named.id === HERE_PLACE_ID) return localDoctor(rt, io, opts);
+    return named.kind === "computer" ? computerDoctor(rt, io, named, opts) : forkDoctor(rt, io, opts);
+  }
+  let code = await localDoctor(rt, io, opts);
+  const joined = ((await rt.places?.list(Date.now())) ?? []).filter(place => place.kind === "computer" && place.id !== HERE_PLACE_ID);
+  for (const place of joined) {
+    const said = await computerDoctor(rt, io, place, opts);
+    if (said !== 0) code = said;
+  }
+  return code;
+}
+
+/** The doctor's fork road: this host's own image, a machine forked from it at the provider, wsp deployed on that
+ * machine, the connection, a file coming back and the teardown. It forks a live machine and bills while it runs,
+ * which is why only a named cloud row takes it. */
+export async function forkDoctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
   let workspaceId: string | undefined;
@@ -1411,7 +1594,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
     // Before the first thing that bills: a computer on an older daemon than this wsp deploys is a fact a person
     // came here for, and a run that stops later must still have said it.
-    for (const line of await placesBehindLines(rt)) io.log(line);
+    for (const line of await placesBehindLines(rt, Date.now(), opts.hereDaemon)) io.log(line);
 
     await timings.time("image versions made durable", () => promoteGoldens(rt, io), note => note);
     await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);
@@ -1520,7 +1703,15 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
       () => "REST touch -> inbox.file over the preview socket (~2s watcher quiet window)",
     );
 
-    await timings.time("the recipe's tools inside", async () => recipeToolsInside(machine, await rt.golden.recipe()), note => note);
+    await timings.time(
+      "the recipe's tools inside",
+      async () => {
+        const plan = await planToRead(opts);
+        if (typeof plan === "string") return plan;
+        return toolsInside({ exec: (cmd, o) => rt.workspaces.exec(workspaceId!, cmd, o) }, plan);
+      },
+      note => note,
+    );
 
     socket.close();
     await timings.time(

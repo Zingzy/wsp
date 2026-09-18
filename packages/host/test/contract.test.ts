@@ -18,7 +18,7 @@ import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, ty
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
-import { cli, jsonCliIO, serve } from "../src/cli.js";
+import { cli, doctorKeyAsk, jsonCliIO, serve } from "../src/cli.js";
 import { writeHost } from "../src/hosts.js";
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
@@ -399,7 +399,7 @@ describe("the agent contract on the command line and the tool door", () => {
     }
   });
 
-  it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command and --json on a prose command are usage; a missing key is auth", async () => {
+  it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command, --json on a prose command and a word wsp doctor cannot read are usage", async () => {
     const io = captured();
     expect(await cli(["--nope"], io)).toBe(3);
     expect(io.errors).toEqual([expect.stringContaining("Unknown option '--nope'")]);
@@ -412,13 +412,31 @@ describe("the agent contract on the command line and the tool door", () => {
     const both = captured();
     expect(await cli(["init", "--yes", "--json", "--state", statePath], both)).toBe(3);
     expect(both.errors).toEqual([expect.stringContaining("Drop one of them.")]);
-    // The host holds the keys; a doctor run here has none to read, and the CLI's own off-terminal IO refuses the key
-    // prompt as auth. The IO is the CLI's, since the class is the refusal's, not the command's.
+    // The doctor's three usage roads, each read before a key is asked for. Every road but a cloud row's forks
+    // nothing and bills nothing, so a person with a computer of their own and no cloud account is asked for no
+    // key: the IO below refuses any question as auth, so its silence is the proof that nothing asked. The auth
+    // class itself is pinned end to end by the missing token file above, which is the road a person meets it on.
     const err = new PassThrough();
     const said: string[] = [];
     err.on("data", (c: Buffer) => said.push(c.toString()));
-    expect(await cli(["doctor", "--state", join(dir, "other.json")], jsonCliIO(err))).toBe(EXIT_CODES.auth);
-    expect(said.join("")).toBe("Solari API key: --json asks nothing; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.\n");
+    const fresh = join(dir, "other.json");
+    expect(await cli(["doctor", "nosuchbox", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
+    expect(await cli(["doctor", "nosuchbox", "extra", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
+    expect(await cli(["doctor", "--project", "www", "--state", fresh], jsonCliIO(err))).toBe(EXIT_CODES.usage);
+    expect(said.join("")).toContain("no place named nosuchbox");
+    expect(said.join("")).toContain("wsp doctor proves one computer, and it was given 2 words");
+    expect(said.join("")).toContain("no computer was named");
+    // Not one key question on any of the three, which off a terminal would have been the auth class and this line.
+    expect(said.join("")).not.toContain("--json asks nothing");
+  });
+
+  it("asks for a provider key on the doctor road that forks at one and on no other", () => {
+    // A cloud row's road forks a live machine and bills while it runs; every other road is this computer or a
+    // computer the person owns. A cloud row is in the places list only once its key is held, so this rule is what
+    // says which road would ask rather than a state a run can be put in.
+    expect(doctorKeyAsk({ kind: "provider" })).toEqual({ anthropic: true });
+    expect(doctorKeyAsk({ kind: "computer" })).toEqual({ anthropic: false, noSolari: "local" });
+    expect(doctorKeyAsk()).toEqual({ anthropic: false, noSolari: "local" });
   });
 
   it("the tool door answers a failure as a tool error whose structured content is the same object with the same class", async () => {

@@ -56,7 +56,7 @@ import {
   type RecipeEntry,
 } from "../src/golden-import.js";
 import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_HOME, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
-import { shellQuote } from "@wsp/protocol";
+import { HOMEBREW_PREFIX, shellQuote } from "@wsp/protocol";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -1111,6 +1111,26 @@ describe("catalog rows", () => {
     expect(t.installs.some(i => i.id === "tools/homebrew")).toBe(false);
     expect(t.skipped).toEqual([]);
     expect(t.base).toEqual([]);
+  });
+
+  it("carries its road's own presence read and the directories that road links into, so the job and the doctor read one rule", () => {
+    // A formula row: the presence read is the prefix's link, and the check after the install stays brew's own list,
+    // so the read that decides whether to install runs no brew at all and the check that proves one still does.
+    const formulae = toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" }), row({ rung: "tools", id: "tools/brew/yq", linux: "yes" })]).installs.filter(i => i.id.startsWith("tools/brew/"));
+    expect(formulae.map(i => i.id)).toEqual(["tools/brew/gh", "tools/brew/yq"]);
+    for (const step of formulae) {
+      expect(step.present, step.id).toBe(`test -e ${HOMEBREW_PREFIX}/opt/${step.id.slice("tools/brew/".length)}`);
+      expect(step.check, step.id).toContain("list --versions");
+      expect(step.bins, step.id).toEqual([`${HOMEBREW_PREFIX}/bin`, `${HOMEBREW_PREFIX}/sbin`, "/usr/local/bin"]);
+    }
+    // A brew tick the catalog covers is planned on the catalog's own road, which is node's installer: no presence
+    // read of its own, since the command it puts on PATH is the read, and the directories are that script's.
+    const covered = toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]).installs.find(i => i.id === "tools/brew/node")!;
+    expect([covered.manager, covered.bin, covered.present, covered.bins]).toEqual(["script", "node", undefined, ["/usr/local/bin"]]);
+    // And a catalog row planned on the brew road carries brew's read and brew's directories, wherever it is planned.
+    const go = toolInstallsFor([catalog("go")]).installs.at(-1)!;
+    expect(go.id).toBe("tools/catalog/go");
+    expect([go.present, go.bins]).toEqual([`test -e ${HOMEBREW_PREFIX}/opt/go`, [`${HOMEBREW_PREFIX}/bin`, `${HOMEBREW_PREFIX}/sbin`, "/usr/local/bin"]]);
   });
 
   it("a catalog tool on the Homebrew road brings Homebrew and its toolchain along, waits on them, and shares dependencies with the formulae ticked; a road a golden build has run carries no note", () => {

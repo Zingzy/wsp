@@ -73,6 +73,21 @@ describe("the copy verb as a child of this host", () => {
     );
   });
 
+  it("turns any other exit into one sentence naming the verb, so a parse error's usage text never reaches a person", async () => {
+    // What a QA persona read when the daemon staged beside the host predated the copy verb: clap answers an
+    // unrecognised subcommand with its error line and then the whole usage, forty flags long, and the host passed
+    // the last line of it through as the refusal for a second workspace.
+    const stale = runner({ exitCode: 2, stderr: "error: unrecognized subcommand 'copy'\n\nUsage: wsp-daemon [OPTIONS] --root <ROOT>\n" });
+    await expect(verbCopier(BIN, stale.run as never).make({ from: "/a", to: "/b", exclude: [], sizeLineBytes: 1 })).rejects.toThrow("the daemon's copy verb failed (exit 2); the host log has its output");
+    await expect(verbCopier(BIN, stale.run as never).make({ from: "/a", to: "/b", exclude: [], sizeLineBytes: 1 })).rejects.not.toThrow(/Usage:/);
+    // A child the deadline killed exits on a signal with nothing said at all, which is the same sentence.
+    const killed = runner({ exitCode: -1, stderr: "" });
+    await expect(verbCopier(BIN, killed.run as never).make({ from: "/a", to: "/b", exclude: [], sizeLineBytes: 1 })).rejects.toThrow("the daemon's copy verb failed (exit -1)");
+    // Exit 1 is the exit the verb documents for its own refusals, and that sentence is the person's to read.
+    const refused = runner({ exitCode: 1, stderr: "/b is already there; a copy is made at a path of its own\n" });
+    await expect(verbCopier(BIN, refused.run as never).make({ from: "/a", to: "/b", exclude: [], sizeLineBytes: 1 })).rejects.toThrow("/b is already there; a copy is made at a path of its own");
+  });
+
   it("refuses a line this host does not read rather than recording half a copy", async () => {
     const asked = runner({ stdout: JSON.stringify({ ...report, road: "rsync" }) });
     const copier = verbCopier(BIN, asked.run as never);

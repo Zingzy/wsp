@@ -9,12 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
-import { MCP_ID_PREFIX, placeProvisionPaths, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
+import { HOMEBREW_PREFIX, MCP_ID_PREFIX, placeProvisionPaths, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
 import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
 import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { presentByWhatWaits, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { presentByWhatWaits, presentElsewhere, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
 import { OLD_APPEND_MARKS, READS_PER_EXEC } from "../src/exec-detached.js";
 import { SERVER_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
@@ -126,7 +126,11 @@ describe("what a computer already satisfies", () => {
     const present = await presentSteps(shellMachine(dir), steps);
     // Dee answers, but at another version than the recipe asks for, which is the drift the recipe is there to fix;
     // Eff is not on the computer at all; the node step names nothing that can be read and is never present.
-    expect([...present].sort()).toEqual(["agents/cee", "tools/apt/bee", "tools/custom/ace"]);
+    expect([...present.keys()].sort()).toEqual(["agents/cee", "tools/apt/bee", "tools/custom/ace"]);
+    // The path the command answered from rides the same read, so nothing asks the computer a second time for it.
+    expect(present.get("tools/apt/bee")).toEqual({ path: join(dir, "bee") });
+    // A step with a check and no command of its own has no path to read: the check answered, not a command.
+    expect(present.get("tools/custom/ace")).toEqual({});
   });
 
   it("is every step of a plan the computer already answers, so a second run of that recipe installs nothing", async () => {
@@ -168,21 +172,57 @@ describe("what a computer already satisfies", () => {
     // bun answers at the version the recipe pins; wrangler answers at another, which is the drift the recipe is
     // there to fix; agent-browser is not on the computer; quiet prints nothing, so nothing says it is there;
     // cloudflared's road installs whatever it serves that day, so any version it prints is that row on the box.
-    expect([...present].sort()).toEqual(["tools/brew/cloudflared", "tools/npm/bun"]);
+    expect([...present.keys()].sort()).toEqual(["tools/brew/cloudflared", "tools/npm/bun"]);
   });
 
-  it("asks one read of a formula's row, since its check and its version read are the same brew list under su", async () => {
+  it("asks a formula's row by the prefix's own link, which runs no brew at all, and leaves brew's list as the check after an install", async () => {
     const brew = toolInstallsFor(["bat", "beads", "btop", "dust", "eza", "fzf", "gum", "yq"].map(n => row(`tools/brew/${n}`, "tools"))).installs.filter(s => s.id.startsWith("tools/brew/"));
     expect(brew).toHaveLength(READS_PER_EXEC);
-    // The two are one command: the pin read is the check with an awk after it, so asking both asks the box twice
-    // for one fact, and a read under su is about a second against the inline exec's own bound.
+    // The check and the version read are one command, the brew list under su, and neither is the presence
+    // question: the prefix keeps a link per formula it installed and that link is the answer, so the read that
+    // decides whether to install runs brew none of the times it used to run it twice.
     for (const s of brew) expect(s.pin!.read!.startsWith(s.check!), s.id).toBe(true);
     const { machine, calls } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: everyMark(cmd), stderr: "" } : undefined));
     const present = await presentSteps(machine, brew);
     expect(present.size).toBe(brew.length);
     const reads = calls.filter(c => c.includes("wsp-present"));
     expect(reads).toHaveLength(1);
-    expect(reads[0]!.split("list --versions").length - 1).toBe(brew.length);
+    expect(reads[0]!.split("list --versions").length - 1).toBe(0);
+    expect(reads[0]!.split(`test -e ${HOMEBREW_PREFIX}/opt/`).length - 1).toBe(brew.length);
+    expect(reads[0]).not.toContain("linuxbrew -c");
+  });
+
+  it("says where a command answered from when it is outside the directories its own road links into, and says nothing when it is inside them", async () => {
+    // The row this rule was filed on: on spoo the recipe's node tick is planned on the catalog's own installer,
+    // which links into /usr/local/bin, and node answers from /usr/bin, where apt put it. Both readings are true of
+    // what they read, so the row says which path answered rather than reading as the row its own road installed.
+    const step = toolInstallsFor([row("tools/brew/node", "tools")]).installs.find(i => i.id === "tools/brew/node")!;
+    const dir = scratch({ node: "echo v22.0.0" });
+    const answered = join(dir, "node");
+    const read = await presentSteps(shellMachine(dir), [step]);
+    expect(read.get(step.id)).toEqual({ path: answered });
+    expect(presentElsewhere(step, read.get(step.id))).toBe(`node answers from ${answered}, outside where its own installer puts it (/usr/local/bin)`);
+    // The same command answering from inside its road's own directories says nothing at all.
+    expect(presentElsewhere({ ...step, bins: [dir] }, read.get(step.id))).toBeUndefined();
+    // And a step whose road names no directories says nothing either, rather than a note about every path.
+    expect(presentElsewhere({ ...step, bins: undefined }, read.get(step.id))).toBeUndefined();
+  });
+
+  it("keeps that note on a present row and drops the landing's own, which says what the outcome already says", async () => {
+    const step = toolInstallsFor([row("tools/brew/node", "tools")]).installs.find(i => i.id === "tools/brew/node")!;
+    const { machine } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: "wsp-present 0 /usr/bin/node\n", stderr: "" } : undefined));
+    const rows = await provisionBox(machine, planOf([step]), () => {}, ON);
+    expect(rows).toHaveLength(1);
+    expect([rows[0]!.outcome, rows[0]!.note]).toEqual(["present", `node answers from /usr/bin/node, outside where its own installer puts it (/usr/local/bin)`]);
+    // A present row whose command answered from its own road's directory carries no note: the landing lands every
+    // present step with "already on the machine", which is what the outcome word says.
+    const inside = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: "wsp-present 0 /usr/local/bin/node\n", stderr: "" } : undefined));
+    const quiet = await provisionBox(inside.machine, planOf([step]), () => {}, ON);
+    expect([quiet[0]!.outcome, quiet[0]!.note]).toEqual(["present", undefined]);
+    // A marker with no path still reads present, which is every row whose read asked for no command.
+    const bare = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: "wsp-present 0\n", stderr: "" } : undefined));
+    const said = await provisionBox(bare.machine, planOf([step]), () => {}, ON);
+    expect([said[0]!.outcome, said[0]!.note]).toEqual(["present", undefined]);
   });
 
   it("is a step nothing can be asked about when every step waiting on it is already there, and not when one of them is missing", async () => {
@@ -228,9 +268,9 @@ describe("what a computer already satisfies", () => {
 
   it("is nothing at all when the computer answers nothing, and asks for nothing when a step says nothing that can be read", async () => {
     const dir = scratch({});
-    expect([...(await presentSteps(shellMachine(dir), [step({ id: "tools/apt/bee", label: "Bee", bin: "bee" })]))]).toEqual([]);
+    expect([...(await presentSteps(shellMachine(dir), [step({ id: "tools/apt/bee", label: "Bee", bin: "bee" })])).keys()]).toEqual([]);
     const { machine, calls } = boxMachine();
-    expect([...(await presentSteps(machine, [step({ id: "agents/node", label: "Node" })]))]).toEqual([]);
+    expect([...(await presentSteps(machine, [step({ id: "agents/node", label: "Node" })])).keys()]).toEqual([]);
     expect(calls).toEqual([]);
   });
 });

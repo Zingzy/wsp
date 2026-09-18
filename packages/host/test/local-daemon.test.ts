@@ -5,12 +5,13 @@
 // packages/wspx/scripts/daemon-binary.mjs, so a failure here is a failure of
 // the road the host takes.
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DaemonEvent, ProcInspectReply, ProcSnapshot, SysSample } from "@wsp/protocol";
+import { DAEMON_VERSION, daemonListeningLine, type DaemonEvent, type ProcInspectReply, type ProcSnapshot, type SysSample } from "@wsp/protocol";
 import { connectDaemon } from "@wsp/runtime";
 import { daemonBinaryHere } from "../src/assets.js";
 import { choosePorts } from "../src/ports.js";
@@ -34,6 +35,40 @@ function alive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** A stand-in for the daemon binary: it prints the listening line the host reads the port off, answers the auth
+ * frame, and then either sends a hello of the version a case names or nothing at all, which is the binary too old
+ * to say and the binary that is not a daemon. Written as a script so the real start road runs: a child process, its
+ * stdout read for the port, and a socket opened to it with the token the start minted. */
+function fakeDaemon(root: string, version?: number): string {
+  const bin = join(root, "fake-daemon.mjs");
+  const hello = version === undefined ? '    if (frame.op === "auth") console.error("nothing of a hello");' : `    if (frame.op === "auth") socket.send(JSON.stringify({ type: "daemon.hello", root: "/wsp", version: ${version} }));`;
+  writeFileSync(
+    bin,
+    [
+      `import ws from ${JSON.stringify(createRequire(import.meta.url).resolve("ws"))};`,
+      "const { WebSocketServer } = ws;",
+      'import { writeFileSync } from "node:fs";',
+      'const at = process.argv.indexOf("--root");',
+      'writeFileSync(process.argv[at + 1] + "/fake-daemon-pid", String(process.pid));',
+      'const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 }, () => {',
+      `  console.log(${JSON.stringify(daemonListeningLine("127.0.0.1", "PORT"))}.replace("PORT", String(wss.address().port)));`,
+      "});",
+      "wss.on('connection', socket => {",
+      "  socket.on('message', raw => {",
+      "    const frame = JSON.parse(String(raw));",
+      "    socket.send(JSON.stringify({ id: frame.id, ok: true }));",
+      hello,
+      "  });",
+      "});",
+      "",
+    ].join("\n"),
+    { mode: 0o644 },
+  );
+  const sh = join(root, "fake-daemon.sh");
+  writeFileSync(sh, `#!/bin/sh\nexec ${process.execPath} ${bin} "$@"\n`, { mode: 0o755 });
+  return sh;
 }
 
 describe("local daemon", () => {
@@ -189,6 +224,28 @@ describe("local daemon", () => {
     expect(alive(pid)).toBe(false);
     expect(readdirSync(tmpdir()).filter(name => name.startsWith("wsp-local-daemon-")).map(name => existsSync(join(tmpdir(), name, "token")) && alive(pid))).not.toContain(true);
   });
+
+  it("keeps the version off the hello the binary answered the first frame with, so every road that runs it reads what it is", async () => {
+    daemon = await LocalDaemon.start({ root, workFolder: root });
+    // The binary in this checkout is the one this wsp deploys; a staged binary older than it is the case below.
+    expect(daemon.version).toBe(DAEMON_VERSION);
+  });
+
+  it("reads the version off a binary of any age, since the hello is the one word a stale one still says", async () => {
+    const bin = fakeDaemon(root, 50);
+    daemon = await LocalDaemon.start({ root, workFolder: root, binary: bin });
+    expect(daemon.version).toBe(50);
+  });
+
+  it("stops a binary that listens and answers no hello, and refuses it in one sentence naming what it said", async () => {
+    const bin = fakeDaemon(root);
+    await expect(LocalDaemon.start({ root, workFolder: root, binary: bin })).rejects.toThrow(/did not answer its version within \d+ ms: nothing of a hello/);
+    // Nothing of it is left running: a daemon this host cannot read is no daemon it holds.
+    const pids = readdirSync(root).filter(name => name.startsWith("fake-daemon-pid"));
+    expect(pids).toHaveLength(1);
+    for (const name of pids) expect(alive(Number(readFileSync(join(root, name), "utf8").trim()))).toBe(false);
+    // The bound is the start's own, so this case waits it out.
+  }, 20_000);
 
   it("names the binary and what it said when it does not start, and leaves no child behind", async () => {
     const bin = join(root, "not-a-daemon.sh");
