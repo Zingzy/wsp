@@ -3627,6 +3627,7 @@ const DAEMON_CONTENTS = [
   "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
   "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
   "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
+  "52dc451ba47d583759687b0d9c8b5f3dc1d9f820ca25dc1e030e1268cc2b5157",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3768,7 +3769,11 @@ const DAEMON_CONTENTS = [
  * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace.
  * Version 50 adds the git road out of a workspace: a push of the branch the copy is on with a refusal to push the
  * base, the pull request opened or found through the signed-in host command line on the computer and its state read
- * back, three operations behind one trait with one module per host. */
+ * back, three operations behind one trait with one module per host.
+ * Version 51 gives a workspace on a box the box's tools and a daemon that answers for it: the box's Homebrew prefix and
+ * every install root the recipe lands outside the overlaid trees are bound read-only into the workspace's rootfs, and the
+ * place daemon serves a workspace's git, file and exec operations with the workspace's checkout as the working directory,
+ * so nothing runs a daemon inside a workspace and the init's supervisor lookup is gone. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
