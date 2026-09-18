@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, type BringBackResult, FORGET_NEEDS_GONE, goneRefusal, goneRoadRefusal, isBilling, keepsRename, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, kindWords, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -22,6 +22,7 @@ export const WORKSPACE_WORDS = {
   icon: "Change icon",
   fork: "Run a copy",
   copyId: "Copy computer id",
+  delete: "Delete workspace",
   forget: "Forget workspace",
   startDaemon: "Start the daemon",
 } as const;
@@ -120,27 +121,20 @@ export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or
 export const BRING_BACK_HINT = "Pushes the agent's branch and opens a pull request";
 
 /** What the row's third line says once a bring back has answered: the branch, then the pull request it opened, or
- * why there is none beside a push that landed. "Pull request" in full, since the row has the width for it and the
- * short form is a word only people who live in one git host read. */
+ * that there is none beside a push that landed. "Pull request" in full, since the row has the width for it and the
+ * short form is a word only people who live in one git host read. The note that says why there is none is the
+ * host's own sentence and longer than any row: it rides the row's hover text, where the whole of this line does. */
 export function broughtBackRowLine(back: Pick<BringBackResult, "branch" | "pr" | "note">): string {
   if (back.pr !== undefined) return `${back.branch} · pull request #${back.pr.number} ${back.pr.state}`;
-  return back.note === undefined ? `${back.branch} · pushed` : `${back.branch} · pushed, no pull request: ${back.note}`;
+  return back.note === undefined ? `${back.branch} · pushed` : `${back.branch} · pushed, no pull request`;
 }
 
-export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it";
+export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; make a second workspace of the same project from the plus on its row";
 
-/** Why a forget cannot run, or null when it can. `said` is what the computer this workspace stands on says about
- * itself while it is not answering, which stands in place of the state word: on the computer the app is drawn on
- * that word would be unreachable, and the part that is down is what a person can act on. */
-export function forgetRefusal(state: WorkspaceState, said?: string): string | null {
-  if (state === "gone") return null;
-  return said === undefined ? goneRoadRefusal(state, "forget") : `${FORGET_NEEDS_GONE}; ${said}`;
-}
-
-/** Why the daemon cannot be started from here, which is both the workspace whose daemon is answering and every
- * kind whose daemon runs on a machine this host does not hold the process of: one sentence, since what a person
- * needs from either is that this is not theirs to press. */
-export const NO_DAEMON_TO_START = "Only a daemon this host started offers this, and only while it is not running";
+/** What Delete takes, on the menu row's hover: the machine half in the kind's own words, which is the half a
+ * person cannot undo. The dialog says the same half and the record and the threads with it. */
+export const DELETE_HINT = (kind: WorkspaceKind): string => `Its ${kindWords(kind).onDelete.asked}`;
+export const CLIENT_CANNOT_DELETE = "This client cannot delete workspaces";
 
 /** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in
  * for this and the sentence says what did not happen and what is left to try. The link's own words are not

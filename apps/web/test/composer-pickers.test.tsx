@@ -284,7 +284,7 @@ describe("composer pickers", () => {
     // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
     expect(triggerMark?.parentElement?.tagName).toBe("SPAN");
     expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
-    expect(picker("defaults")?.textContent).toBe("High · Bypass");
+    expect(picker("defaults")?.textContent).toBe("high · bypass");
     expect(defaultsPick("effort")).toBe("high");
     expect(defaultsPick("contextWindow")).toBe("1m");
     expect(defaultsPick("access")).toBe("bypassPermissions");
@@ -303,7 +303,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
     expect(modelMenu()).toBeNull();
     // Sonnet takes no context window, and the window was never on the button anyway.
-    expect(picker("defaults")?.textContent).toBe("High · Bypass");
+    expect(picker("defaults")?.textContent).toBe("high · bypass");
     expect(defaultsPick("contextWindow")).toBeUndefined();
 
     fireEvent.click(option("claude-opus-5") ?? (await openModelMenu(), option("claude-opus-5")!));
@@ -318,7 +318,7 @@ describe("composer pickers", () => {
     expect(option("high")?.getAttribute("aria-checked")).toBe("true");
     expect(option("low")?.textContent).not.toContain("default");
     fireEvent.click(option("low")!);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("Low · Bypass"));
+    await waitFor(() => expect(picker("defaults")?.textContent).toBe("low · bypass"));
     fireEvent.click(picker("defaults")!);
     expect(option("low")?.getAttribute("aria-checked")).toBe("true");
     expect(option("high")?.getAttribute("aria-checked")).toBe("false");
@@ -414,7 +414,7 @@ describe("composer pickers", () => {
   it("sends nothing for a picker left alone, though it shows the default that will run", async () => {
     const { api, started } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("High · Bypass"));
+    await waitFor(() => expect(picker("defaults")?.textContent).toBe("high · bypass"));
     const editor = composerEditor();
     await typeInto(editor, "go");
     await press(editor, "Enter");
@@ -468,7 +468,7 @@ describe("composer pickers", () => {
     const flash = { value: "claude-flash", label: "Flash", isDefault: true, efforts: [], contextWindows: ["200k", "1m"] };
     const { api } = fixtureApi({ table: [{ ...CLAUDE, models: [flash] }] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("Bypass"));
+    await waitFor(() => expect(picker("defaults")?.textContent).toBe("bypass"));
     expect(defaultsPick("effort")).toBeUndefined();
     expect(defaultsPick("contextWindow")).toBe("1m");
     fireEvent.click(picker("defaults")!);
@@ -562,7 +562,7 @@ describe("composer pickers", () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5[1m]", effort: "low", permissionMode: "plan" };
     const { api } = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("Low · Plan"));
+    await waitFor(() => expect(picker("defaults")?.textContent).toBe("low · plan"));
     expect(defaultsPick("contextWindow")).toBe("1m");
     expect(pickerValue("model")).toBe("claude-opus-5");
     expect(defaultsPick("access")).toBe("plan");
@@ -595,7 +595,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(picker("defaults")).not.toBeNull());
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
     await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
-    expect(picker("defaults")?.textContent).toBe("High · Plan");
+    expect(picker("defaults")?.textContent).toBe("high · plan");
   });
 
   it("on a computer the person owns the defaults button wears the mode's short form and its menu row names the machine", async () => {
@@ -603,15 +603,15 @@ describe("composer pickers", () => {
     const { api } = fixtureApi({ table: [kept] });
     await setup(api);
     await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
-    expect(picker("defaults")?.textContent).toBe("High · Plan");
+    expect(picker("defaults")?.textContent).toBe("high · plan");
     fireEvent.click(picker("defaults")!);
     expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${OVER_SSH}`);
     fireEvent.click(option("bypassPermissions")!);
     await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
     // The button says the CLI's own word for the mode; whose computer it is stays in the menu row, which is where
     // the long name has the room to be read.
-    expect(picker("defaults")?.textContent).toBe("High · Bypass");
-    expect(picker("defaults")?.getAttribute("aria-label")).toBe("Defaults: High · Bypass");
+    expect(picker("defaults")?.textContent).toBe("high · bypass");
+    expect(picker("defaults")?.getAttribute("aria-label")).toBe("Defaults: high · bypass");
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {

@@ -42,8 +42,9 @@ const DIFF = { base: null, files: [{ path: "src/a.ts", patch: patch("src/a.ts", 
 const STATUS = { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" });
 const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
-/** The git mark's classes: the same box whether it names a branch or a read the machine refused. */
-const LABEL_CLASSES = ["inline-flex", "h-6", "shrink-0", "items-center", "gap-1", "px-1", "font-mono", "text-[11px]", "text-muted-foreground"];
+/** The git mark's classes: the same box whether it names a branch or a read the machine refused, and away below
+ * the width where the header has room for it. */
+const LABEL_CLASSES = ["h-6", "shrink-0", "items-center", "gap-1", "px-1", "font-mono", "text-[11px]", "text-muted-foreground", "hidden", "sm:inline-flex"];
 /** The one grammar for a sentence that fills an empty pane body: a muted mono line, centred, whatever it says. */
 const SENTENCE_CLASSES = ["flex", "flex-1", "items-center", "justify-center", "px-5", "text-center", "font-mono", "text-[11px]", "text-muted-foreground"];
 

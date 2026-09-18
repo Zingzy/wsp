@@ -783,12 +783,14 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _c, ...costs } = s.costs;
             const { [e.workspaceId]: _p, ...spending } = s.spending;
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
+            const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
             return {
               workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
               statuses,
               costs,
               spending,
               sessions,
+              broughtBack,
               forwards: s.forwards.filter(f => f.workspaceId !== e.workspaceId),
             };
           });

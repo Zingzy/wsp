@@ -15,6 +15,7 @@ import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
+import { threadFolderOf } from "../files/root.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
@@ -59,6 +60,14 @@ function withTerminals(workspaceId: string, fn: (terminals: WorkspaceTerminals) 
   return fn(terminals).then(() => undefined, () => reportTerminalRefused(workspaceId));
 }
 
+/** Where a fresh pty starts: the folder a thread of this workspace would start in, which is the project's own
+ * rather than the daemon's home. The card says a shell in this workspace, and a shell in the person's home folder
+ * is a shell in the machine and not in the work. */
+export function ptyStartFolder(workspaceId: string): { cwd?: string } {
+  const cwd = threadFolderOf(workspaceId);
+  return cwd === null ? {} : { cwd };
+}
+
 /** The drawer, shown; a workspace that never had a pty spawns one on mount. */
 export function showTerminal(workspaceId: string): Promise<void> {
   useTerminalDrawerStore.getState().setOpen(workspaceId, true);
@@ -68,28 +77,28 @@ export function showTerminal(workspaceId: string): Promise<void> {
 /** A fresh pty as its own drawer tab; the drawer opens if it was closed. */
 export function openDrawerTerminal(workspaceId: string): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open().then(tab => useTerminalDrawerStore.getState().add(workspaceId, tab.ptyId)),
+    terminals.open(ptyStartFolder(workspaceId)).then(tab => useTerminalDrawerStore.getState().add(workspaceId, tab.ptyId)),
   );
 }
 
 /** A fresh pty split into the drawer's active group. */
 export function splitDrawerTerminal(workspaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open().then(tab => useTerminalDrawerStore.getState().split(workspaceId, tab.ptyId, direction)),
+    terminals.open(ptyStartFolder(workspaceId)).then(tab => useTerminalDrawerStore.getState().split(workspaceId, tab.ptyId, direction)),
   );
 }
 
 /** A fresh pty in its own right-panel surface. */
 export function openPanelTerminal(workspaceId: string): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open().then(tab => useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId)),
+    terminals.open(ptyStartFolder(workspaceId)).then(tab => useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId)),
   );
 }
 
 /** A fresh pty split into one right-panel terminal surface. */
 export function splitPanelTerminal(workspaceId: string, surfaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
   return withTerminals(workspaceId, terminals =>
-    terminals.open().then(tab => useRightPanelStore.getState().splitTerminal(workspaceId, surfaceId, tab.ptyId, direction)),
+    terminals.open(ptyStartFolder(workspaceId)).then(tab => useRightPanelStore.getState().splitTerminal(workspaceId, surfaceId, tab.ptyId, direction)),
   );
 }
 

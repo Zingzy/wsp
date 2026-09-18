@@ -72,6 +72,7 @@ vi.mock("../ui/popover", () => {
 
 import { useStore } from "../../protocol/store";
 import { useComposerDraftStore } from "./composerDraftStore";
+import { useComposerOptionsStore } from "./composerOptionsStore";
 import { ComposerOptionPickers } from "./ComposerOptionPickers";
 import type { ChatThreadHandle, ChatThreadView } from "./useChatThread";
 
@@ -152,14 +153,15 @@ const model = () => document.querySelector<HTMLElement>('[data-composer-picker="
 afterEach(() => {
   cleanup();
   useComposerDraftStore.setState({ drafts: {} });
+  useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {}, railOffered: {} });
   useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {} });
 });
 
 describe("the composer's one defaults button", () => {
   it("reads the picked effort and the picked access, and nothing else stands in the row", () => {
     draw();
-    expect(defaults().textContent).toBe("High · Bypass");
-    expect(defaults().getAttribute("aria-label")).toBe("Defaults: High · Bypass");
+    expect(defaults().textContent).toBe("high · bypass");
+    expect(defaults().getAttribute("aria-label")).toBe("Defaults: high · bypass");
     expect([...document.querySelectorAll("[data-composer-picker]")].map(el => el.getAttribute("data-composer-picker"))).toEqual(["model", "defaults", "project"]);
   });
 
@@ -199,5 +201,28 @@ describe("the agent a fresh thread opens on", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("is made once: emptying the box again leaves the rail shut", async () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // And not on the next composer for this workspace either: the offer was made and is not made again.
+    cleanup();
+    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays open on the agent tab the person picks, so its models can be read", async () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    const rail = screen.getByRole("dialog");
+    fireEvent.click(within(rail).getByRole("tab", { name: "Codex" }));
+    // The pick is a reason to read that agent's list, not to take the list away.
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await waitFor(() => expect(model().dataset["harness"]).toBe("codex"));
+    expect(within(screen.getByRole("dialog")).getByRole("option", { name: /GPT-6 Astra/ })).toBeTruthy();
   });
 });

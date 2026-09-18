@@ -19,6 +19,10 @@ export interface ActionEntry<Target, Verbs> {
   readonly destructive?: boolean;
   /** What the palette matches beyond the title. */
   readonly searchTerms?: ReadonlyArray<string>;
+  /** Whether this object takes the action at all. An action a kind or a state can never take is not drawn: a row
+   * held with a reason a person can never clear is furniture, and five of them were most of a workspace's menu.
+   * Absent here means the action is always offered, held or not. */
+  readonly applies?: (target: Target) => boolean;
   readonly title: (target: Target) => string;
   /** The label of this action's button on the object's own row; absent for an action no row carries. */
   readonly rowLabel?: (target: Target) => string;
@@ -49,10 +53,11 @@ export interface ResolvedAction {
 /** A row button's label: the entry's row label, or its title for an entry no row carries. */
 export const rowLabelOf = (action: ResolvedAction): string => action.rowLabel ?? action.title;
 
-/** The registry's actions bound to one object: every entry of it, since a registry holds no entry a surface has to
- * hide. */
+/** The registry's actions bound to one object: every entry this object takes, so a surface draws the list it is
+ * handed and decides nothing itself. */
 export function resolveActions<Target, Verbs>(registry: ReadonlyArray<ActionEntry<Target, Verbs>>, target: Target, verbs: Verbs): ResolvedAction[] {
   return registry
+    .filter(entry => entry.applies?.(target) ?? true)
     .map(entry => ({
       id: entry.id,
       group: entry.group,
@@ -71,11 +76,18 @@ export function resolveActions<Target, Verbs>(registry: ReadonlyArray<ActionEntr
     }));
 }
 
-/** The one action with this id; a registry without it is a programming error, not a state. */
+/** The one action with this id; a list without it is a programming error, not a state. Read for an action every
+ * object takes. */
 export function actionById(actions: ReadonlyArray<ResolvedAction>, id: string): ResolvedAction {
-  const found = actions.find(action => action.id === id);
+  const found = actionIfAny(actions, id);
   if (found === undefined) throw new Error(`no action ${id}`);
   return found;
+}
+
+/** The action with this id where this object takes it at all; undefined where it does not. Read for the actions a
+ * kind or a state decides, whose surface draws nothing when they are not there. */
+export function actionIfAny(actions: ReadonlyArray<ResolvedAction>, id: string): ResolvedAction | undefined {
+  return actions.find(action => action.id === id);
 }
 
 /** The items for a menu; shortcuts resolve against the focus context the menu opens in (a terminal's menu reads the terminal's chords). */

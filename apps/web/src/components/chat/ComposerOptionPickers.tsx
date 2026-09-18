@@ -78,8 +78,8 @@ export interface ComposerPicks {
   /** The thread has a turn on this harness, so the rail offers no other. */
   readonly pinned: boolean;
   /** Nothing here says which agent to run: no turn has run in this workspace, nobody picked, the project
-   * remembers none and nothing is typed yet. The rail is opened the one time so the pick is made before the first
-   * send, and the first keystroke takes the offer back, since the list stands over the box it is typed in. */
+   * remembers none, more than one agent answers and nothing is typed yet. Read as one offer per workspace and
+   * never again, since the list stands over the box the ask is typed in. */
   readonly offerAgents: boolean;
 }
 
@@ -90,6 +90,22 @@ export interface ComposerPicks {
 export function rememberedAgent(project: Pick<ProjectView, "lastAgent"> | undefined, catalogs: ReadonlyArray<HarnessCatalog>): string | undefined {
   const last = project?.lastAgent;
   return last !== undefined && catalogs.some(entry => entry.harness === last) ? last : undefined;
+}
+
+/** The one offer: taken the first time nothing says which agent to run, and given back when the person types. It
+ * is not given back by the pick itself, which is the person reading that agent's models. The store holds the mark,
+ * so the offer does not come back when the composer is remounted by a switch of threads, nor when the box is
+ * emptied again. */
+function useRailOffer(workspaceId: string, conditions: boolean, typing: boolean): boolean {
+  const take = useComposerOptionsStore(s => s.takeRailOffer);
+  const [offering, setOffering] = useState(false);
+  useEffect(() => {
+    if (conditions && take(workspaceId)) setOffering(true);
+  }, [conditions, take, workspaceId]);
+  useEffect(() => {
+    if (typing) setOffering(false);
+  }, [typing]);
+  return offering;
 }
 
 /** The record for the workspace's own project, which is where its remembered agent is written. */
@@ -118,9 +134,11 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
   // Only where the record itself says the project has run nothing: a host whose projects list has not arrived
   // knows no better, and opening the rail over a workspace whose last agent is about to land would be a guess.
-  // The draft is read as one flag, so the store wakes this only as the box goes from empty to typed in.
+  // More than one agent, since one leaves nothing to pick. The draft is read as one flag, so the store wakes this
+  // only as the box goes from empty to typed in.
   const typing = useComposerDraftStore(s => (s.drafts[workspaceId]?.prompt ?? "") !== "");
-  const offerAgents = !typing && project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
+  const nothingSaysWhich = project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
+  const offerAgents = useRailOffer(workspaceId, !typing && nothingSaysWhich, typing);
   return { harness, catalog, model, picks, startOptions, pinned, offerAgents };
 }
 
@@ -153,7 +171,9 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
               <span className="truncate">{option.label}</span>
               {option.isDefault ? <DefaultBadge /> : null}
             </span>
-            {option.description !== undefined ? <span className="text-xs leading-4 text-muted-foreground">{option.description}</span> : null}
+            {/* The line under each access mode drops at the narrow width: with it the menu is taller than a phone's
+                viewport and its last row was cut across the middle, and the mode's own name is what the row is. */}
+            {option.description !== undefined ? <span className="hidden text-xs leading-4 text-muted-foreground sm:block">{option.description}</span> : null}
           </span>
         </span>
       </MenuRadioItem>

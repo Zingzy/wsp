@@ -3,7 +3,7 @@
 // as protocol events, routes come from a fake portReach. No daemon, no cloud.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, WorkspaceView } from "@wsp/protocol";
+import { kindWords, noPreviewRouteLine, type EventUnion, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { MOVED_WINDOW_MS } from "../src/adapt/ports.js";
@@ -113,14 +113,15 @@ describe("servers list", () => {
     expect(address().value).toBe("");
   });
 
-  it("lists each listening port with process, host:port and a live dot; port.close removes it", async () => {
+  it("lists each listening port with its process and host:port, and no dot; port.close removes it", async () => {
     const { emit } = await setup();
     emit(open(WS, 5173, 4182, "node"));
     emit(open(WS, 8080));
     const card = serverCard(5173);
     expect(card.textContent).toContain("node");
     expect(card.textContent).toContain("localhost:5173");
-    expect(card.querySelector('[data-slot="live-dot"]')).not.toBeNull();
+    // Every row here is a port that is listening, so a dot on each says nothing the row does not.
+    expect(card.querySelector('[data-slot="live-dot"]')).toBeNull();
     expect(serverCard(8080).textContent).toContain("Listening");
     emit(close(WS, 8080));
     expect(screen.queryByRole("button", { name: /localhost:8080/ })).toBeNull();
@@ -392,12 +393,34 @@ describe("framing a port", () => {
     expect(screen.queryByText(":8412 stopped listening")).toBeNull();
   });
 
-  it("a route that cannot be minted is said plainly instead of a blank frame", async () => {
-    const { emit } = await setup({ portReach: async () => { throw new Error("no preview urls on this backend"); } });
+  it("a computer that mints no route says so in the person's words, and never in the engine's", async () => {
+    const thrown = "machine m1 is on a backend without preview URLs";
+    const { emit } = await setup({ portReach: async () => { throw new Error(thrown); } });
     emit(open(WS, 5173));
     fireEvent.click(serverCard(5173));
-    await screen.findByText("no preview urls on this backend");
+    // The card names the computer and the address that does answer; what the engine threw is about its backends.
+    // The computer is named as every other surface names it: this fixture's fork runs at a provider.
+    await screen.findByText(noPreviewRouteLine(5173, kindWords("cloud").where!));
+    expect(document.body.textContent).not.toContain(thrown);
+    expect(document.body.textContent).not.toContain("backend");
+    expect(document.body.textContent).not.toMatch(/machine/i);
     expect(screen.queryByTitle(":5173")).toBeNull();
+  });
+
+  it("a workspace of this computer is framed on this computer's own address, with no route minted and no card", async () => {
+    const asked: number[] = [];
+    const { emit, view } = await setup({
+      workspaces: [{ ...workspace(WS), kind: "local" }],
+      portReach: async (_id, port) => {
+        asked.push(port);
+        throw new Error("machine m1 is on a backend without preview URLs");
+      },
+    });
+    emit(open(WS, 3111));
+    fireEvent.click(serverCard(3111));
+    await waitFor(() => expect(view.container.querySelector("iframe")?.getAttribute("src")).toBe("http://localhost:3111"));
+    expect(asked).toEqual([]);
+    expect(document.body.textContent).not.toContain("no address this pane can reach");
   });
 });
 

@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Bring back as a row action: work leaves a workspace through git, so the
-// entry pushes the agent's branch and opens its pull request, and what comes
-// back is the row's third line.
+// Two rows of the workspace registry. Bring back: work leaves a workspace
+// through git, so the entry pushes the agent's branch and opens its pull
+// request, and what comes back is the row's third line. Delete: the one road
+// out of a workspace whose machine is still there, in that kind's own words.
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceView } from "@wsp/protocol";
 import { actionById, resolveActions } from "./registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "./workspaceActions.js";
-import { BRING_BACK_HINT, broughtBackRowLine, WORKSPACE_WORDS } from "./format.js";
+import { BRING_BACK_HINT, broughtBackRowLine, DELETE_HINT, WORKSPACE_WORDS } from "./format.js";
 import { WHERE_WORDS } from "../settings/format.js";
-import { workspaceMetaLine } from "../sidebar/workspaceRows.js";
+import { workspaceMetaLine, workspaceMetaTitle } from "../sidebar/workspaceRows.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 
 const workspace = (phase: WorkspaceView["phase"]): WorkspaceView =>
@@ -57,7 +58,8 @@ describe("bring back on the workspace row", () => {
 
   it("says pull request in full on the row's third line, and what happened where there is none", () => {
     expect(broughtBackRowLine({ ...back, pr: { number: 12, url: "https://example/pr/12", state: "open", host: "github.com" } })).toBe("agent/pricing-page · pull request #12 open");
-    expect(broughtBackRowLine({ ...back, note: "no gh on this computer" })).toBe("agent/pricing-page · pushed, no pull request: no gh on this computer");
+    // The honest half reads on the row; the host's own sentence for why is longer than any row and rides the hover.
+    expect(broughtBackRowLine({ ...back, note: "no gh on this computer" })).toBe("agent/pricing-page · pushed, no pull request");
     expect(broughtBackRowLine(back)).toBe("agent/pricing-page · pushed");
   });
 
@@ -74,5 +76,44 @@ describe("bring back on the workspace row", () => {
     expect(workspaceMetaLine({ project, outOfMemory: undefined, broughtBack: answer })).toBe("agent/pricing-page · pull request #12 open");
     const asking = { ...project, threads: [{ asking: "Write out.txt in root (2 B)" }] } as unknown as SidebarProjectSnapshot;
     expect(workspaceMetaLine({ project: asking, outOfMemory: undefined, broughtBack: answer })).toBe("Write out.txt in root (2 B)");
+  });
+
+  it("puts the host's own sentence for a push with no pull request on the row's hover, never in the line", () => {
+    const project = {
+      state: "running",
+      status: null,
+      reach: null,
+      threads: [],
+      workspace: { ...workspace("running"), copy: { road: "clonefile", path: "/root-copy", branch: "agent/pricing-page" } },
+    } as unknown as SidebarProjectSnapshot;
+    const note = "no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one";
+    const pushed = { project, outOfMemory: undefined, broughtBack: { ...back, note } };
+    expect(workspaceMetaLine(pushed)).toBe("agent/pricing-page · pushed, no pull request");
+    expect(workspaceMetaTitle(pushed)).toBe(`agent/pricing-page · pushed, no pull request: ${note}`);
+    // A line that is not a bring back's carries no note behind it.
+    expect(workspaceMetaTitle({ project, outOfMemory: undefined })).toBe("agent/pricing-page");
+  });
+});
+
+const deleteEntry = (phase: WorkspaceView["phase"], over: Partial<WorkspaceVerbs> = {}) =>
+  actionById(resolveActions(workspaceActions, workspaceTarget(workspace(phase), null, []), verbs(over)), "delete");
+
+describe("delete on the workspace row", () => {
+  it("is a destructive row in the remove group whose hover says what goes with the machine", () => {
+    const action = deleteEntry("running");
+    expect(action.title).toBe(WORKSPACE_WORDS.delete);
+    expect(action.group).toBe("remove");
+    expect(action.destructive).toBe(true);
+    expect(action.rowLabel).toBe("Delete pricing page");
+    expect(action.hint).toBe(DELETE_HINT("cloud"));
+  });
+
+  it("opens the confirmation for its own workspace, and says so on a client that cannot delete", async () => {
+    const open = vi.fn();
+    const action = deleteEntry("running", { deleteWorkspace: open });
+    expect(action.refusal).toBeNull();
+    await action.run();
+    expect(open).toHaveBeenCalledWith("ws_a");
+    expect(deleteEntry("running", { deleteWorkspace: undefined }).refusal).toBe("This client cannot delete workspaces");
   });
 });

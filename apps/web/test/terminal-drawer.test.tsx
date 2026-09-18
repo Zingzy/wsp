@@ -178,6 +178,16 @@ describe("terminal as a right-panel surface", () => {
     useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
   });
 
+  it("opens its shell in the folder a thread would start in, which is the project's and not the daemon's home", async () => {
+    const { ops } = fakeLink();
+    render(<Panel />);
+    await waitFor(() => expect(document.querySelector("[data-surface-launch='terminal']")).not.toBeNull());
+    fireEvent.click(document.querySelector<HTMLElement>("[data-surface-launch='terminal']")!);
+    await waitFor(() => expect(ops.some(o => o.op === "pty.create")).toBe(true));
+    // The card says a shell in this workspace; the daemon's own home is the machine, not the work.
+    expect(ops.find(o => o.op === "pty.create")!.params["cwd"]).toBe("/root");
+  }, 20_000);
+
   it("a computer that is not answering refuses the Terminal panel in the panel itself, and asks for no pty", async () => {
     const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" };
     const { count } = fakeLink();

@@ -59,6 +59,7 @@ type FakeApi = Api & {
   nap: ReturnType<typeof vi.fn>;
   interruptSession: ReturnType<typeof vi.fn>;
   forget: ReturnType<typeof vi.fn>;
+  deleteWorkspace: ReturnType<typeof vi.fn>;
   forgetThread: ReturnType<typeof vi.fn>;
   renameSession: ReturnType<typeof vi.fn>;
   renameWorkspace: ReturnType<typeof vi.fn>;
@@ -75,6 +76,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     forget: vi.fn(async () => {}),
+    deleteWorkspace: vi.fn(async () => {}),
     // The runtime drops the thread's rows, so the next listing is short of them, as the real one is.
     forgetThread: vi.fn(async (threadId: string) => {
       for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]!.threadId === threadId) sessions.splice(i, 1);
@@ -190,8 +192,6 @@ describe("a workspace row's menu", () => {
     expect(opened.style.top).toBe("50px");
     expect(labels()).toEqual([
       WORKSPACE_WORDS.pause,
-      WORKSPACE_WORDS.rebuild,
-      WORKSPACE_WORDS.startDaemon,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -200,25 +200,21 @@ describe("a workspace row's menu", () => {
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
-      WORKSPACE_WORDS.forget,
+      WORKSPACE_WORDS.delete,
     ]);
     expect(within(opened).getAllByRole("separator")).toHaveLength(5);
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
+    expect(refusalOf(WORKSPACE_WORDS.delete)).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
     await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.rebuild));
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.startDaemon));
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.newThread));
     fireEvent.keyDown(opened, { key: "End" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.forget));
+    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.delete));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause));
     fireEvent.keyDown(opened, { key: "Escape" });
@@ -233,7 +229,7 @@ describe("a workspace row's menu", () => {
     const opened = await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.fork));
     expect(menu()).not.toBeNull();
-    for (let step = 0; step < 4; step++) fireEvent.keyDown(opened, { key: "ArrowDown" });
+    for (let step = 0; step < 2; step++) fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.openTerminal));
     fireEvent.keyDown(opened, { key: "Enter" });
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_a"]?.terminalOpen).toBe(true));
@@ -287,8 +283,6 @@ describe("a workspace row's menu", () => {
     const sent = contextMenu.mock.calls[0]![0];
     expect(sent.map(i => [i.id, i.label, i.enabled])).toEqual([
       ["phase", WORKSPACE_WORDS.pause, true],
-      ["rebuild", WORKSPACE_WORDS.rebuild, false],
-      ["start-daemon", WORKSPACE_WORDS.startDaemon, false],
       ["new-thread", WORKSPACE_WORDS.newThread, true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],
@@ -297,7 +291,7 @@ describe("a workspace row's menu", () => {
       ["rename", WORKSPACE_WORDS.rename, true],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],
-      ["forget", WORKSPACE_WORDS.forget, false],
+      ["delete", WORKSPACE_WORDS.delete, true],
     ]);
     expect(sent.find(i => i.id === "rename")).not.toHaveProperty("refusal");
     expect(sent.find(i => i.id === "open-terminal")?.accelerator).toBe("CommandOrControl+J");

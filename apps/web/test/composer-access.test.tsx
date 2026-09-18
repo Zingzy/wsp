@@ -98,8 +98,8 @@ describe("the composer's defaults button", () => {
 
     act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [THIS_MAC] } }));
     expect(accessButton()?.dataset["access"]).toBe("bypassPermissions");
-    // The button wears the CLI's own short word; the machine it names is read in the menu.
-    expect(accessButton()?.textContent).toContain("Bypass");
+    // The button wears the CLI's own short word, in the row's own casing; the machine it names is read in the menu.
+    expect(accessButton()?.textContent).toContain("bypass");
     drawn.unmount();
   });
 });

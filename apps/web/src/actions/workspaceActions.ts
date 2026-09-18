@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace's actions, one registry: what a workspace row, the palette and
-// the row's context menu offer for one machine.
+// the row's context menu offer for one machine. An entry a kind or a state
+// cannot take says so with `applies` and is not drawn at all; `refusal` is for
+// what this object could take and cannot right now.
 import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, GitPullRequestArrowIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { actionRefusal, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   BRING_BACK_HINT,
+  CLIENT_CANNOT_DELETE,
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
   CLIENT_CANNOT_REBUILD,
   CLIENT_CANNOT_RENAME_WORKSPACE,
   CLIENT_CANNOT_START_DAEMON,
+  DELETE_HINT,
   FORGET_HINT,
   NEW_THREAD_WAITS,
-  NO_DAEMON_TO_START,
   NO_WORKSPACE_FORK,
   PROJECTS_WAIT,
   REBUILD_HINT,
   WORKSPACE_WORDS,
-  forgetRefusal,
   openBrowserRefusal,
   openTerminalRefusal,
   phaseButtonWord,
@@ -90,6 +92,8 @@ export interface WorkspaceVerbs {
   readonly rebuild?: ((workspaceId: string) => Promise<void>) | undefined;
   /** Opens the confirmation; the dialog itself asks the host. */
   readonly forget?: ((workspaceId: string) => void) | undefined;
+  /** Opens the confirmation for the workspace and its machine; the dialog itself asks the host. */
+  readonly deleteWorkspace?: ((workspaceId: string) => void) | undefined;
   /** Opens the name box on the workspace's own row; the row is the only editor, as it is for a thread. */
   readonly rename?: ((workspaceId: string) => void) | undefined;
   /** Open the trip's dialog; absent on a client whose host cannot read or land folders here. */
@@ -109,9 +113,10 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
     hint: target => phaseHint(stateOf(target)),
-    // A machine wsp neither forked nor pays for takes neither verb, in the runtime's own sentence and the verb this
-    // slot's own button offers, so what is offered and what would be thrown say the same thing.
-    refusal: target => (kindWords(target.kind).driven ? phaseRefusal(stateOf(target)) : undrivenRefusal(target.displayName, machineWord(target.kind), phaseCannot(stateOf(target)))),
+    // A machine wsp neither forked nor pays for is neither paused nor woken by wsp, so the row offers neither verb
+    // rather than offering one it would refuse whatever the person did.
+    applies: target => kindWords(target.kind).driven,
+    refusal: target => phaseRefusal(stateOf(target)),
     run: (target, verbs) => verbs.togglePhase(target.id),
   },
   {
@@ -123,17 +128,10 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Rebuild", target.displayName),
     buttonWord: () => "Rebuild",
     hint: target => target.wakeRefused ?? target.reason ?? REBUILD_HINT,
-    // A rebuild forks the machine again from the image, which wsp can only do to a machine it forked. On the
-    // computer the host runs on there is nothing to fork, so the row said this one answers while every pane on it
-    // said it did not; it now says the one thing that is true of it, in the sentence every undriven verb uses.
-    refusal: (target, verbs) =>
-      !kindWords(target.kind).driven
-        ? undrivenRefusal(target.displayName, machineWord(target.kind), "be rebuilt")
-        : !dead(target)
-          ? goneRoadRefusal(stateOf(target), "rebuild")
-          : verbs.rebuild === undefined
-            ? CLIENT_CANNOT_REBUILD
-            : null,
+    // A rebuild forks the machine again from the image, which wsp can only do to a machine it forked and only once
+    // that machine is gone. On the computer the host runs on there is nothing to fork at all.
+    applies: target => kindWords(target.kind).driven && dead(target),
+    refusal: (_target, verbs) => (verbs.rebuild === undefined ? CLIENT_CANNOT_REBUILD : null),
     run: (target, verbs) => verbs.rebuild?.(target.id),
   },
   {
@@ -146,8 +144,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     buttonWord: target => target.absent?.start ?? WORKSPACE_WORDS.startDaemon,
     hint: target => target.absent?.said ?? WORKSPACE_WORDS.startDaemon,
     // Offered off the one reading, never off the kind: a reading carries the word for this button exactly where
-    // this host holds the process that is missing.
-    refusal: (target, verbs) => (target.absent?.start === undefined ? NO_DAEMON_TO_START : verbs.restartDaemon === undefined ? CLIENT_CANNOT_START_DAEMON : null),
+    // this host holds the process that is missing, and there is nothing to start anywhere else.
+    applies: target => target.absent?.start !== undefined,
+    refusal: (_target, verbs) => (verbs.restartDaemon === undefined ? CLIENT_CANNOT_START_DAEMON : null),
     run: (target, verbs) => verbs.restartDaemon?.(target.id),
   },
   {
@@ -220,6 +219,8 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     icon: () => GitForkIcon,
     searchTerms: ["fork workspace", "run a copy", "duplicate", "clone"],
     title: () => WORKSPACE_WORDS.fork,
+    // A copy of a workspace is a fork of its machine, which only a machine wsp drives has.
+    applies: target => kindWords(target.kind).driven,
     refusal: () => NO_WORKSPACE_FORK,
     run: () => {},
   },
@@ -233,6 +234,21 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     run: (target, verbs) => verbs.copyText(target.machineId),
   },
   {
+    id: "delete",
+    group: "remove",
+    icon: () => Trash2Icon,
+    destructive: true,
+    searchTerms: ["delete workspace", "remove workspace", "throw away"],
+    title: () => WORKSPACE_WORDS.delete,
+    rowLabel: target => rowVerb("Delete", target.displayName),
+    buttonWord: () => "Delete",
+    hint: target => DELETE_HINT(target.kind),
+    // A workspace whose machine is already gone has nothing to delete; its record is forgotten instead.
+    applies: target => stateOf(target) !== "gone",
+    refusal: (_target, verbs) => (verbs.deleteWorkspace === undefined ? CLIENT_CANNOT_DELETE : null),
+    run: (target, verbs) => verbs.deleteWorkspace?.(target.id),
+  },
+  {
     id: "forget",
     group: "remove",
     icon: () => Trash2Icon,
@@ -242,7 +258,10 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Forget", target.displayName),
     buttonWord: () => "Forget",
     hint: () => FORGET_HINT,
-    refusal: (target, verbs) => forgetRefusal(stateOf(target), target.absent?.said) ?? (verbs.forget === undefined ? CLIENT_CANNOT_FORGET : null),
+    // The one road for a workspace whose machine is already gone: its record leaves and nothing is asked of a
+    // computer. Every other workspace is deleted instead, which is the row above.
+    applies: target => stateOf(target) === "gone",
+    refusal: (_target, verbs) => (verbs.forget === undefined ? CLIENT_CANNOT_FORGET : null),
     run: (target, verbs) => verbs.forget?.(target.id),
   },
 ];

@@ -275,17 +275,18 @@ describe("composer checkout row", () => {
     expect(folder()).toBe("/root");
   });
 
-  it("says the same word beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
+  it("says nothing beside the locked label for a read that did not happen: a dropped wire is not a refusal", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": () => new Error("socket closed") }));
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     expect(row()?.dataset["pickable"]).toBeUndefined();
-    await waitFor(() => expect(branch()).toBe("refused"));
+    await waitFor(() => expect(branch()).toBe("unknown"));
     const slot = branchSlot()!;
-    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    // The slot keeps its height and stays empty: a state word for a read nobody made is a word about nothing.
+    expect(slot.textContent).toBe("");
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
-    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {

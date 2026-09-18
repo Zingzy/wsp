@@ -382,6 +382,9 @@ export interface Api {
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
+  /** Takes the workspace and its machine away; the row leaves on workspace.deleted. Optional so a fixture that
+   * never deletes need not fake it. */
+  deleteWorkspace?(id: string): Promise<void>;
   /** Names the workspace on the host. The name is unique there, so a name another workspace holds and a blank one are
    * refused with that reason and nothing is renamed. Optional so fixtures that never rename need not fake it; a client
    * without it offers no rename. */
@@ -625,6 +628,7 @@ export function makeApi(c: ProtocolClient): Api {
     updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
+    deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
     // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.
     bringBack: async id => BringBackResult.parse(await c.request("workspaces.bringBack", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,

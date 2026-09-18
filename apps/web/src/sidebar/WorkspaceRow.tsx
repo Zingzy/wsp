@@ -22,7 +22,7 @@ import { ChevronDownIcon, PlayIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "
 import { needsRebuild, workspaceKind, type Capabilities, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
-import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
+import { actionById, actionIfAny, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
@@ -31,7 +31,7 @@ import { useAbsentComputer, useBroughtBack } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, glyphStateClass, holdsStateWord, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, glyphStateClass, holdsStateWord, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine, workspaceMetaTitle } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
@@ -107,16 +107,22 @@ export function WorkspaceRow({
   const holdsState = holdsStateWord(project, absent);
   const broughtBack = useBroughtBack(project.id);
   const meta = workspaceMetaLine({ project, absent, outOfMemory, broughtBack });
+  const metaWhole = workspaceMetaTitle({ project, absent, outOfMemory, broughtBack });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);
-  const forgetAction = actionById(actions, "forget");
-  const rebuildAction = actionById(actions, "rebuild");
+  // The registry decides which of these a workspace of this kind in this state takes at all; the row draws the
+  // glyph for one it was handed and nothing where it was handed none.
+  const forgetAction = actionIfAny(actions, "forget");
+  const rebuildAction = actionIfAny(actions, "rebuild");
   const newThreadAction = actionById(actions, "new-thread");
-  const startDaemonAction = actionById(actions, "start-daemon");
+  const startDaemonAction = actionIfAny(actions, "start-daemon");
   // The row's line says start it, so the row's own glyph is that start while the reading carries one; the thread
   // it stands in for is a key and a menu row away, and the reading is what every surface offers this off.
-  const startable = startDaemonAction.refusal === null;
+  const startable = startDaemonAction !== undefined && startDaemonAction.refusal === null;
   const glyphAction = startable ? startDaemonAction : newThreadAction;
+  // A dead row's two glyphs are the two roads out of it; a dead workspace of a kind that takes neither keeps the
+  // live row's pair rather than an empty slot.
+  const deadGlyphs = dead && (forgetAction !== undefined || rebuildAction !== undefined);
   return (
     <>
       <SidebarMenuButton
@@ -155,14 +161,14 @@ export function WorkspaceRow({
           <span data-workspace-made-of className={cn(ROW_META_CLASS, ROW_MADE_OF_SLOT)} title={madeOf}>
             {madeOf}
           </span>
-          <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={absent?.sentence ?? meta}>
+          <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={absent?.sentence ?? metaWhole}>
             {rowLineCut(meta)}
           </span>
         </span>
       </SidebarMenuButton>
-      {dead ? (
+      {deadGlyphs ? (
         <>
-          {gone ? (
+          {gone && forgetAction !== undefined ? (
             <SidebarMenuAction
               showOnHover
               className={INNER_GLYPH_CLASS}
@@ -174,16 +180,18 @@ export function WorkspaceRow({
               <Trash2Icon />
             </SidebarMenuAction>
           ) : null}
-          <SidebarMenuAction
-            showOnHover
-            className={GLYPH_CLASS}
-            aria-label={rowLabelOf(rebuildAction)}
-            title={rebuildAction.refusal ?? rebuildAction.hint ?? undefined}
-            disabled={rebuildAsked || rebuildAction.refusal !== null}
-            onClick={() => void runAction(rebuildAction)}
-          >
-            <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
-          </SidebarMenuAction>
+          {rebuildAction !== undefined ? (
+            <SidebarMenuAction
+              showOnHover
+              className={GLYPH_CLASS}
+              aria-label={rowLabelOf(rebuildAction)}
+              title={rebuildAction.refusal ?? rebuildAction.hint ?? undefined}
+              disabled={rebuildAsked || rebuildAction.refusal !== null}
+              onClick={() => void runAction(rebuildAction)}
+            >
+              <RefreshCwIcon className={cn(rebuildAsked && "animate-spin")} />
+            </SidebarMenuAction>
+          ) : null}
         </>
       ) : (
         <>
@@ -196,7 +204,7 @@ export function WorkspaceRow({
             <TooltipTrigger render={<SidebarMenuAction showOnHover className={GLYPH_CLASS} aria-label={rowLabelOf(glyphAction)} onClick={() => void runAction(glyphAction)} />}>
               {startable ? <PlayIcon /> : <PlusIcon />}
             </TooltipTrigger>
-            <TooltipPopup side="bottom">{startable ? startDaemonAction.title : NEW_THREAD_TITLE}</TooltipPopup>
+            <TooltipPopup side="bottom">{startable ? startDaemonAction!.title : NEW_THREAD_TITLE}</TooltipPopup>
           </Tooltip>
         </>
       )}

@@ -98,6 +98,15 @@ export function workspaceMetaLine({ project, absent, outOfMemory, broughtBack }:
   return broughtBack === undefined ? branchLine(project) : broughtBackRowLine(broughtBack);
 }
 
+/** The whole of that line for the row's hover text: after a bring back that opened no pull request, the host's
+ * own sentence for why follows it. That sentence names a command line and a remote and fits no row, and the line
+ * without it would read as a push that simply stopped. */
+export function workspaceMetaTitle(input: WorkspaceMetaInput): string {
+  const line = workspaceMetaLine(input);
+  const note = input.broughtBack?.note;
+  return note === undefined || line !== broughtBackRowLine(input.broughtBack!) ? line : `${line}: ${note}`;
+}
+
 /** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the
  * oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest. The row
  * cuts it at its own cap and the whole sentence rides the row's title, as every line three does. */

@@ -213,7 +213,9 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
 
   return (
     <div
-      className="flex h-full min-w-0 flex-col bg-background"
+      // Focus is a hairline where the walk needs one and nothing on a click, as the terminal pane beside it is: a
+      // ring around the whole pane read as the pane being the thing rather than the diff in it.
+      className="flex h-full min-w-0 flex-col bg-background outline-none focus-visible:ring-1 focus-visible:ring-border focus-visible:ring-inset"
       ref={focusPaneOnShow}
       tabIndex={0}
       onKeyDown={onKeyDown}
@@ -246,14 +248,16 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               ))}
             </MenuPopup>
           </Menu>
-          <FolderBreadcrumbs workspaceId={workspaceId} className="flex-initial" />
+          {/* The path and the branch leave the header at the narrow width: the file list under it names the file
+              and the workspace's own row names the branch, and three facts on a 390 px header drew over one another. */}
+          <FolderBreadcrumbs workspaceId={workspaceId} className="hidden flex-initial sm:flex" />
           {shown.kind === "repo" ? (
-            <span className={REPO_MARK_CLASS} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
+            <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />
               <span className="max-w-40 truncate">{shown.branch}</span>
             </span>
           ) : REPO_STATE_WORDS[shown.kind].word === "" ? null : (
-            <span className={REPO_MARK_CLASS} data-diff-repo-state={shown.kind}>
+            <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-40" />
               <Tooltip>
                 <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{REPO_STATE_WORDS[shown.kind].word}</TooltipTrigger>
