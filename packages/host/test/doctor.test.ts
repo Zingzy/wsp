@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { WebSocketServer } from "ws";
-import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
+import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { noSuchProjectLine, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -51,7 +51,12 @@ import {
   localPrompt,
   promoteGoldens,
   placesBehindLines,
-  recipeToolsInside,
+  forkDoctor,
+  hereDaemonLines,
+  toolsInside,
+  vaultKeysLines,
+  computerDoctor,
+  doctorProject,
   roomLeft,
   sshDaemonPlace,
   stageDaemonBundle,
@@ -59,10 +64,11 @@ import {
   verifyNoneLeft,
   type DaemonSocket,
 } from "../src/doctor.js";
-import { catalogEntry } from "@wsp/catalog";
+import { agentName, catalogEntry, VAULT_VARIABLES } from "@wsp/catalog";
+import { daemonFixLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
-import type { CliIO } from "../src/cli.js";
+import { captured, createOn, projectOn } from "./verbs-fixture.js";
+import { commandPage, COMMANDS_FOR_HELP, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -250,8 +256,9 @@ describe("cleanOrphans", () => {
     const { backend, rt } = await account();
     const lines: string[] = [];
     const cli = { log: (l: string) => void lines.push(l), error: (l: string) => void lines.push(l), ask: noPrompt, askSecret: noPrompt };
-    // No golden and no key, so the run fails at the golden step; the storage step ran first either way.
-    expect(await doctor(rt, cli, { yes: true, statePath: "/tmp/state.json" })).toBe(1);
+    // No golden and no key, so the run fails at the golden step; the storage step ran first either way. The fork
+    // road is the one a named cloud row takes, and the only one that reads a provider's storage at all.
+    expect(await forkDoctor(rt, cli, { yes: true, statePath: "/tmp/state.json" })).toBe(1);
     expect(lines.some(l => l.includes("nothing in /tmp/state.json records them"))).toBe(true);
     expect(lines).toContain("  orphan snapshot wsp-h1-default-v9 (snap_orphan), 20.0 GB");
     expect(backend.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v1", "snap_before", "snap_other"]);
@@ -262,7 +269,7 @@ describe("cleanOrphans", () => {
     const { backend, rt } = await account();
     const lines: string[] = [];
     const cli = { log: (l: string) => void lines.push(l), error: (l: string) => void lines.push(l), ask: noPrompt, askSecret: noPrompt };
-    expect(await doctor(rt, cli, {})).toBe(1);
+    expect(await forkDoctor(rt, cli, {})).toBe(1);
     expect(backend.snapshots).toHaveLength(4);
     expect(lines.some(l => l.includes("wsp doctor --yes deletes them"))).toBe(true);
   });
@@ -308,6 +315,26 @@ describe("the doctor's line for a place behind this wsp", () => {
     expect(lines).toEqual([`spoo is behind: daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}; wsp add spoo --update puts this wsp's daemon on it`]);
     // One line per computer, and the fix half is a command a person can type.
     expect(lines[0]).toContain(placeUpdateLine("spoo"));
+  });
+
+  it("puts this computer first where the binary staged beside this wsp is behind, with the line that stages the right one", async () => {
+    // A host rebuilt without its daemon binary runs beside the one that was there before, which knows none of this
+    // wsp's verbs; the reading is this computer's own and is said before anything else the run says.
+    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" };
+    const lines = await placesBehindLines(listing([{ id: "p_1", kind: "computer", name: "spoo", default: true, daemonVersion: DAEMON_VERSION - 5 }]), Date.now(), here);
+    expect(lines[0]).toBe(`this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @zingzy/wsp stages the right one`);
+    expect(lines).toHaveLength(2);
+    // Level with this wsp, and a daemon that will not start at all, both say nothing: the roads that need it say so
+    // themselves, and the reading a run opens with must not fail on the daemon it is reading.
+    expect(await hereDaemonLines({ version: async () => DAEMON_VERSION, fix: "x" })).toEqual([]);
+    expect(await hereDaemonLines({ version: async () => Promise.reject(new Error("the daemon did not start")), fix: "x" })).toEqual([]);
+    expect(await hereDaemonLines()).toEqual([]);
+  });
+
+  it("reads the line that stages the binary off the road this wsp was installed by", async () => {
+    expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] })).toBe("npm i -g @zingzy/wsp");
+    expect(daemonFixLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" })).toBe("updating the wsp app");
+    expect(daemonFixLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] })).toBe("a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary");
   });
 
   it("says nothing where every place is level, where none has reported, and on a host holding no places at all", async () => {
@@ -517,124 +544,319 @@ describe("stageDaemonBundle", () => {
 });
 
 describe("the recipe's tools read from inside the workspace", () => {
-  /** A workspace as this step can ask it: the commands on its PATH, and the formulas the prefix inside it keeps a
-   * link for. Each read is answered by running its own test against those two, the way a shell inside would: a
-   * `command -v` read prints a line per command it cannot find, and a formula's row prints its line unless the
-   * row's own test passes, which for a core formula is the link alone and for a tap formula is the link or a
-   * command of that name. */
-  const workspaceWith = (
-    has: { commands?: readonly string[]; formulas?: readonly string[] },
-  ): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A folder with one script per command a case wants a workspace to answer, so the read runs under a real shell
+   * and decides what a shell decides. */
+  function scratch(commands: readonly string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-inside-"));
+    dirs.push(dir);
+    for (const name of commands) {
+      writeFileSync(join(dir, name), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(dir, name), 0o755);
+    }
+    return dir;
+  }
+
+  /** A workspace whose execs a real bash answers, with that folder ahead of the tools PATH the read exports. */
+  const workspaceWith = (dir: string): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
     const asked: string[] = [];
-    const commands = has.commands ?? [];
-    const formulas = has.formulas ?? [];
     return {
       asked,
       exec: async cmd => {
         asked.push(cmd);
-        if (cmd.includes("test -e ")) {
-          const rows = [...cmd.matchAll(/if ! \( (.+?) \); then printf '%s\\n' '([^']+)'; fi/g)].map(m => ({ test: m[1]!, formula: m[2]! }));
-          const passes = (row: { test: string; formula: string }): boolean => {
-            const linked = /test -e \S+\/opt\/(\S+)/.exec(row.test)?.[1];
-            if (linked !== undefined && formulas.includes(linked)) return true;
-            const named = /command -v '([^']+)'/.exec(row.test)?.[1];
-            return named !== undefined && commands.includes(named);
-          };
-          const gone = rows.filter(row => !passes(row));
-          return { exitCode: 0, stdout: gone.map(row => `missing ${row.formula}\n`).join(""), stderr: "" };
-        }
-        const bins = [...cmd.matchAll(/'([^']+)'/g)].map(m => m[1]!);
-        return { exitCode: 0, stdout: bins.filter(b => !commands.includes(b)).map(b => `missing ${b}\n`).join(""), stderr: "" };
+        const res = spawnSync("bash", ["-c", cmd.replaceAll(TOOLS_PATH, `${dir}:${TOOLS_PATH}`)], { encoding: "utf8" });
+        return { exitCode: res.status ?? -1, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
       },
     };
   };
-  const ticks = (...ids: string[]): { ticks: { id: string }[] } => ({ ticks: ids.map(id => ({ id })) });
 
-  it("reads every ticked catalogue tool's command on the tools PATH and names the ones it answered for", async () => {
-    const machine = workspaceWith({ commands: ["gh", "go"] });
-    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/catalog/go"))).toBe("2 answered inside: gh, go");
-    // On the one PATH a machine's tools sit on, which is the PATH the workspace boots with: a read on any other
-    // order would answer for a different gh than the workspace's own threads run.
+  const step = (over: Partial<ToolInstall> & Pick<ToolInstall, "id" | "label">): ToolInstall => ({ manager: "script", cmd: `install ${over.id}`, ...over });
+  /** The three shapes the step reads, and one nothing can be asked about: a formula by its road's own test, a
+   * command by the command, and an index refresh that answers no read of its own. */
+  const plan = {
+    steps: [
+      step({ id: "tools/brew/gh", label: "gh", manager: "brew", present: "true", bins: [`${HOMEBREW_PREFIX}/bin`] }),
+      step({ id: "tools/brew/node", label: "node", bin: "node", bins: ["/usr/local/bin"] }),
+      step({ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", bin: "agent-browser" }),
+      step({ id: "tools/apt-index", label: "apt index", manager: "apt" }),
+    ],
+  };
+
+  it("reads the plan's steps by the presence rule the recipe job runs, and says the path a command answered from outside its own road's directories", async () => {
+    const dir = scratch(["node", "agent-browser"]);
+    const machine = workspaceWith(dir);
+    const said = await toolsInside(machine, plan);
+    // Three steps were askable and all three answered; the fourth says nothing that can be read.
+    expect(said).toBe(`3 answered inside; node answers from ${join(dir, "node")}, outside where its own installer puts it (/usr/local/bin)`);
+    // On the one PATH a machine's tools sit on, which is the PATH the workspace boots with.
     expect(machine.asked[0]).toContain(`export PATH=${TOOLS_PATH}`);
-    expect(machine.asked[0]).toContain("command -v");
+    // The formula row is read by its road's own test and never by a command of its name, which is another road's work.
+    expect(machine.asked[0]).not.toContain("command -v 'gh'");
   });
 
   it("fails naming the rows that did not answer, which is a tool the recipe installed and no workspace can run", async () => {
-    await expect(recipeToolsInside(workspaceWith({ commands: ["go"] }), ticks("tools/catalog/gh", "tools/catalog/go"))).rejects.toThrow(
-      "gh did not answer inside the workspace, though the recipe installed it on the machine",
+    const machine = workspaceWith(scratch(["node"]));
+    await expect(toolsInside(machine, plan)).rejects.toThrow("agent-browser did not answer inside the workspace, though the recipe installed it on the machine");
+  });
+
+  it("adds the computers row's own reading to a row it found missing that the row read present, and the line that reads the computer again", async () => {
+    const machine = workspaceWith(scratch(["node"]));
+    const provision: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: "2026-09-18T10:00:00.000Z",
+      startedAt: "2026-09-18T10:00:00.000Z",
+      finishedAt: "2026-09-18T10:04:00.000Z",
+      rows: [{ id: "tools/npm/agent-browser", label: "agent-browser", outcome: "present" }],
+    };
+    await expect(toolsInside(machine, plan, { name: "spoo", provision })).rejects.toThrow(
+      "agent-browser (the computers row read it present at 2026-09-18T10:04:00.000Z; wsp add spoo --update reads it again) did not answer inside the workspace",
     );
   });
 
-  it("reads a formula by the link the prefix keeps for it, whatever the formula puts on PATH", async () => {
-    // The rows this step exists for are formulas, and a formula's own name is not the command it installs:
-    // git-delta puts delta on PATH, gnupg puts gpg, c-ares puts adig and ahost, and nothing a recipe carries says
-    // so. The prefix keeps one link per formula it installed, and that is what a workspace can be asked for.
-    const machine = workspaceWith({ formulas: ["git-delta", "go", "sketchybar"], commands: ["delta", "go"] });
-    const said = await recipeToolsInside(machine, ticks("tools/brew/git-delta", "tools/brew/go", "tools/brew/felixkratz/formulae/sketchybar"));
-    expect(said).toBe("3 answered inside: felixkratz/formulae/sketchybar, git-delta, go");
-    // A core formula is the prefix's link and nothing else, which is the road that installed it.
-    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/git-delta );`);
-    // A tap formula is linked under the name after the tap, and the bottle-less road installs a command under that
-    // same name, so its row reads either: the split the uninstall takes.
-    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/sketchybar || command -v 'sketchybar'`);
-    // Neither half runs brew itself: the one brew on a machine is the shim in the prefix, and inside a workspace
-    // that prefix is read-only and its user cannot read the folder it would start in.
-    expect(machine.asked[0]).not.toContain(`${HOMEBREW_PREFIX}/bin/brew`);
-    expect(machine.asked[0]).not.toContain("linuxbrew -c");
-    // And a formula the prefix has no link for and no command either did not answer: it is named by its own name,
-    // which is the name the recipe row carries and the person reads.
-    await expect(recipeToolsInside(workspaceWith({ formulas: ["go"] }), ticks("tools/brew/go", "tools/brew/cloudflared"))).rejects.toThrow(
-      "cloudflared did not answer inside the workspace, though the recipe installed it on the machine",
+  it("says there is nothing to read where the plan holds no step anything can be asked about, and asks the workspace nothing", async () => {
+    const machine = workspaceWith(scratch([]));
+    expect(await toolsInside(machine, { steps: [step({ id: "tools/apt-index", label: "apt index", manager: "apt" })] })).toBe(
+      "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside",
     );
-    // The bottle-less tap road installs the binary under that same name in /usr/local/bin, so a command of that
-    // name answers for a tap formula where the prefix keeps no link.
-    expect(await recipeToolsInside(workspaceWith({ commands: ["sketchybar"] }), ticks("tools/brew/felixkratz/formulae/sketchybar"))).toBe(
-      "1 answered inside: felixkratz/formulae/sketchybar",
-    );
-  });
-
-  it("does not read a core formula by its name: another road's command of that name is not the formula", async () => {
-    // node comes from the base stage's own installer into /usr/local/bin and gh from the release road, both under
-    // the name a formula of the same name would carry. A read that took a command for the formula would call a
-    // workspace green for a Homebrew row Homebrew never installed, which is the bug this step exists to catch.
-    const machine = workspaceWith({ commands: ["node", "gh"] });
-    await expect(recipeToolsInside(machine, ticks("tools/brew/node"))).rejects.toThrow(
-      "node did not answer inside the workspace, though the recipe installed it on the machine",
-    );
-    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/node );`);
-    expect(machine.asked[0]).not.toContain("command -v");
-    // The same row reads present once the prefix holds the link, which is what the formula road leaves.
-    expect(await recipeToolsInside(workspaceWith({ formulas: ["node"] }), ticks("tools/brew/node"))).toBe("1 answered inside: node");
-    // And the catalogue's own gh row is a command read, which is right: that row's entry names the command.
-    expect(await recipeToolsInside(workspaceWith({ commands: ["gh"] }), ticks("tools/catalog/gh"))).toBe("1 answered inside: gh");
-  });
-
-  it("reads both kinds of row in one step, each by its own read", async () => {
-    const machine = workspaceWith({ commands: ["gh"], formulas: ["ripgrep"] });
-    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/brew/ripgrep"))).toBe("2 answered inside: gh, ripgrep");
-    expect(machine.asked).toHaveLength(2);
-    expect(machine.asked[0]).toContain("command -v");
-    expect(machine.asked[1]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/ripgrep`);
-    // The catalogue's own ripgrep row says its command is rg, which is why a formula is never read by a command
-    // the catalogue happens to know: a recipe that ticks the formula carries no such word.
-    expect(catalogEntry("ripgrep")?.kind === "tool" ? catalogEntry("ripgrep")?.bin : undefined).toBe("rg");
-  });
-
-  it("passes with nothing to read where the recipe ticks no row this can ask for, and reads no manager row whose package is not its command", async () => {
-    const said = "the recipe ticks no tool this can ask a workspace for, so there is nothing to read inside";
-    // An npm or pnpm row's package name is not the command it installs (`@openai/codex` is `codex`), so a guess
-    // there would fail a workspace for a name nothing put on it.
-    expect(await recipeToolsInside(workspaceWith({}), ticks("agents/claude", "tools/npm/@openai/codex", "mcp/notion"))).toBe(said);
-    expect(await recipeToolsInside(workspaceWith({}), undefined)).toBe(said);
-    const machine = workspaceWith({});
+    expect(await toolsInside(machine, { steps: [] })).toContain("nothing to read inside");
     expect(machine.asked).toEqual([]);
   });
+});
 
-  it("a read that could not be run at all fails the step rather than passing quietly", async () => {
-    const dead = { exec: async () => ({ exitCode: 124, stdout: "", stderr: "" }) };
-    await expect(recipeToolsInside(dead, ticks("tools/catalog/gh"))).rejects.toThrow("the tools inside could not be read");
-    // And the formula read the same way: a workspace that would not answer is not a workspace that answered.
-    await expect(recipeToolsInside(dead, ticks("tools/brew/go"))).rejects.toThrow("the tools inside could not be read");
+describe("the doctor's line for the vault", () => {
+  it("says every variable the vault may hold by name, held or not, which agent reads which and which of two it reads first, and never a value", () => {
+    const lines = vaultKeysLines(() => ({ ANTHROPIC_API_KEY: "sk-ant-x-notreal", OPENAI_API_KEY: "" }));
+    // Every variable the catalog's own rows declare, in one order, so two runs read the same list.
+    expect(lines).toHaveLength(VAULT_VARIABLES.size);
+    expect(lines).toEqual([
+      "ANTHROPIC_API_KEY held (Claude Code reads it after CLAUDE_CODE_OAUTH_TOKEN)",
+      "CLAUDE_CODE_OAUTH_TOKEN not held (Claude Code reads it first)",
+      "GEMINI_API_KEY not held (Gemini CLI reads it)",
+      "OPENAI_API_KEY not held (Codex reads it)",
+    ]);
+    // An empty value is no key, and no line carries what a value is.
+    for (const line of lines) expect(line).not.toContain("sk-ant");
+  });
+});
+
+
+describe("the doctor's computer road", () => {
+  const computer = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], ...over });
+  const project = (over: Partial<ProjectView> = {}): ProjectView => ({
+    id: "pr_1",
+    name: "spoo-landing",
+    computer: "p_1",
+    source: { kind: "git", url: "https://github.com/Zingzy/wsp.git" },
+    path: "/srv/spoo-landing",
+    remote: "https://github.com/Zingzy/wsp.git",
+    defaultBranch: "main",
+    memoryKey: "k",
+    memoryDir: "/root/.wsp/projects/pr_1/memory",
+    createdAt: "2026-09-18T09:00:00.000Z",
+    ...over,
+  });
+
+  /** A host holding one computer, some projects on it and a workspace road that records what it was asked for. */
+  function fakeHost(o: { projects: readonly ProjectView[]; places?: readonly PlaceView[]; inside?: (cmd: string) => { exitCode: number; stdout: string; stderr: string } }) {
+    const created: { project: string; name: string; size?: unknown }[] = [];
+    const deleted: string[] = [];
+    const execs: string[] = [];
+    const rt = {
+      places: { list: async () => o.places ?? [computer()] },
+      projects: { list: async () => [...o.projects] },
+      workspaces: {
+        create: async (spec: { project: string; name: string; size?: unknown }) => {
+          created.push(spec);
+          return { id: "w_1", name: spec.name };
+        },
+        exec: async (_id: string, cmd: string) => {
+          execs.push(cmd);
+          return o.inside?.(cmd) ?? { exitCode: 0, stdout: "", stderr: "" };
+        },
+        delete: async (id: string) => void deleted.push(id),
+      },
+    } as unknown as Parameters<typeof computerDoctor>[0];
+    return { rt, created, deleted, execs };
+  }
+
+  /** The one step of a plan these cases read inside: a command the workspace answers for, or does not. */
+  const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
+  const answering = () => ({ exitCode: 0, stdout: "wsp-present 0 /usr/local/bin/agent-browser\n", stderr: "" });
+
+  it("proves the computer in order: it answers, the vault, the agents there, a workspace of a project whose checkout stands, the tools inside and the delete", async () => {
+    const host = fakeHost({ projects: [project({ id: "pr_old", name: "old-one" }), project({ checkout: "/root/.wsp/projects/pr_1/checkout" })], inside: answering });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
+    // Every step of the road, in the order the run took them.
+    expect(io.lines.filter(l => /^(spoo answers|the vault's keys|agents there|a workspace made there|the recipe's tools inside|deleted)\b/.test(l)).map(l => l.split(/\s\s+/)[0])).toEqual([
+      "spoo answers",
+      "the vault's keys",
+      "agents there",
+      "a workspace made there",
+      "the recipe's tools inside",
+      "deleted",
+    ]);
+    // The workspace is made of the project whose checkout stands, at the size anybody gets there without asking.
+    expect(host.created).toEqual([{ project: "pr_1", name: `doctor-${(7).toString(36)}` }]);
+    // The tools were read inside that workspace, on the one PATH a machine's tools sit on.
+    expect(host.execs.some(cmd => cmd.includes(`export PATH=${TOOLS_PATH}`) && cmd.includes("agent-browser"))).toBe(true);
+    expect(host.deleted).toEqual(["w_1"]);
+    // Each agent the computer reported, by its catalog name.
+    for (const id of ["claude", "codex"]) expect(io.lines).toContain(`${agentName(id)} on spoo`);
+    expect(io.lines.at(-1)).toContain("DOCTOR PASS");
+  });
+
+  it("deletes the workspace it made on the way out of a failure too", async () => {
+    const host = fakeHost({ projects: [project({ checkout: "/root/c" })], inside: () => ({ exitCode: 0, stdout: "", stderr: "" }) });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}), plan: async () => onePlan })).toBe(1);
+    expect(io.errors.join("\n")).toContain("agent-browser did not answer inside the workspace");
+    expect(host.deleted).toEqual(["w_1"]);
+  });
+
+  it("fails the workspace step with the line that records the project again where no project there has a checkout, and with the line that adds one where there is no project at all", async () => {
+    const one = fakeHost({ projects: [project()] });
+    const io = captured();
+    expect(await computerDoctor(one.rt, io, computer(), { vault: () => ({}) })).toBe(1);
+    expect(io.errors.join("\n")).toContain(projectNeedsReaddLine("spoo-landing", "spoo", { kind: "git", url: "https://github.com/Zingzy/wsp.git" }));
+    expect(one.created).toEqual([]);
+
+    const none = fakeHost({ projects: [] });
+    const empty = captured();
+    expect(await computerDoctor(none.rt, empty, computer(), { vault: () => ({}) })).toBe(1);
+    expect(empty.errors.join("\n")).toContain("spoo holds no project, and a workspace is a copy of one; wsp add <url> --on spoo records one");
+  });
+
+  it("makes its workspace of the project --project names, and refuses a word that names none there", async () => {
+    const host = fakeHost({ projects: [project({ checkout: "/root/a" }), project({ id: "pr_2", name: "www", checkout: "/root/b" })], inside: answering });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}), plan: async () => onePlan, project: "www" }, 7)).toBe(0);
+    expect(host.created[0]!.project).toBe("pr_2");
+    const wrong = captured();
+    expect(await computerDoctor(host.rt, wrong, computer(), { vault: () => ({}), project: "nope" })).toBe(1);
+    expect(wrong.errors.join("\n")).toContain(noSuchProjectLine("nope", ["spoo-landing", "www"]));
+  });
+
+  it("fails the first step in the computer's own words when it is not answering, and says a behind daemon and goes on when it is", async () => {
+    const off = fakeHost({ projects: [project({ checkout: "/root/a" })] });
+    const io = captured();
+    expect(await computerDoctor(off.rt, io, computer({ present: false, lastSeenAt: new Date(7 - 60_000).toISOString() }), { vault: () => ({}) }, 7)).toBe(1);
+    expect(io.errors.join("\n")).toContain("spoo is not answering");
+    expect(off.created).toEqual([]);
+
+    const behind = fakeHost({ projects: [project({ checkout: "/root/a" })], inside: answering });
+    const said = captured();
+    expect(await computerDoctor(behind.rt, said, computer({ daemonVersion: DAEMON_VERSION - 1 }), { vault: () => ({}), plan: async () => onePlan }, 7)).toBe(0);
+    expect(said.lines).toContain(`spoo is behind: daemon ${DAEMON_VERSION - 1}, host ${DAEMON_VERSION}; ${placeUpdateLine("spoo")} puts this wsp's daemon on it`);
+    expect(behind.created).toHaveLength(1);
+  });
+
+  it("says what stands in for the recipe on a host that wired no plan, and on a computer whose recipe was never written here", async () => {
+    const host = fakeHost({ projects: [project({ checkout: "/root/a" })] });
+    const io = captured();
+    expect(await computerDoctor(host.rt, io, computer(), { vault: () => ({}) })).toBe(0);
+    expect(io.lines.some(l => l.includes("this host wired no recipe plan, so there is nothing to read inside"))).toBe(true);
+    const noRecipe = captured();
+    expect(await computerDoctor(host.rt, noRecipe, computer(), { vault: () => ({}), plan: async () => ({ noRecipe: "/Users/dev/.wsp/recipe.json" }) })).toBe(0);
+    expect(noRecipe.lines.some(l => l.includes("this computer holds no recipe at /Users/dev/.wsp/recipe.json"))).toBe(true);
+  });
+});
+
+
+describe("which road wsp doctor takes", () => {
+  const computer = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, daemonVersion: DAEMON_VERSION, ...over });
+
+  /** A host whose local workspace answers a thread, holding the places a case names. The fork road's own first
+   * step throws here: no road that bills may run without its row being named. */
+  function fakeHost(places: readonly PlaceView[]) {
+    const created: string[] = [];
+    const rt = {
+      places: { list: async () => [...places] },
+      projects: {
+        // One project on the computer joined here, cloned once at its add, which is what a workspace there copies.
+        list: async () => [{ id: "pr_1", name: "spoo-landing", computer: "p_1", checkout: "/root/.wsp/projects/pr_1/checkout", source: { kind: "git", url: "https://github.com/Zingzy/wsp.git" } }],
+        add: async (o: { source: string }) => ({ id: "pr_local", name: "local", computer: HERE_PLACE_ID, source: { kind: "folder", path: o.source } }),
+        remove: async () => ({ said: "gone" }),
+      },
+      workspaces: {
+        list: async () => [],
+        create: async (spec: { project: string; name: string }) => {
+          created.push(spec.name);
+          return { id: `w_${created.length}`, name: spec.name };
+        },
+        exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        delete: async () => {},
+      },
+      harnesses: { list: async () => [{ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.270" }] },
+      sessions: {
+        start: async (_id: string, o: { prompt: string }) => ({ finished: Promise.resolve({ status: "completed", text: o.prompt.split(": ").at(-1) }) }),
+      },
+      // The fork road's own steps: a run that reaches the image is a run that named a cloud row, and no case here
+      // may fork or bill, so the step that reads the image says which road ran.
+      golden: {
+        promote: async () => undefined,
+        storage: async () => undefined,
+        orphans: async () => undefined,
+        get: async () => {
+          throw new Error("the fork road ran, and nothing named its row");
+        },
+      },
+    } as unknown as Runtime;
+    return { rt, created };
+  }
+
+  it("with no word proves this computer and then every computer joined to it, and forks nothing", async () => {
+    const host = fakeHost([computer({ id: HERE_PLACE_ID, name: "this computer", kind: "computer", takesForks: false }), computer(), { id: "solari", kind: "provider", name: "solari", default: false }]);
+    const io = captured();
+    expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] }) })).toBe(0);
+    // The local road first, in its own words, then the computer joined to it; the cloud row is not touched.
+    expect(io.lines.some(l => l.includes(`proving a thread on ${THIS_COMPUTER}`))).toBe(true);
+    expect(io.lines.some(l => l.includes("proving spoo, a computer you added"))).toBe(true);
+    expect(io.lines.some(l => l.toLowerCase().includes("forked from it"))).toBe(false);
+    // This computer's own row is never proved as a computer you added: it is already the workspace it is.
+    expect(io.lines.filter(l => l.includes("a computer you added"))).toHaveLength(1);
+  });
+
+  it("with this computer's own row named takes the local road, since its projects are folders worked in place", async () => {
+    const host = fakeHost([]);
+    const io = captured();
+    expect(await doctor(host.rt, io, { computer: computer({ id: HERE_PLACE_ID, name: "this computer", takesForks: false }), vault: () => ({}) })).toBe(0);
+    expect(io.lines.some(l => l.includes(`proving a thread on ${THIS_COMPUTER}`))).toBe(true);
+    expect(io.lines.some(l => l.includes("a computer you added"))).toBe(false);
+  });
+
+  it("with a cloud row named takes the fork road, which is the one that bills", async () => {
+    const host = fakeHost([]);
+    const io = captured();
+    expect(await doctor(host.rt, io, { computer: { id: "solari", kind: "provider", name: "solari", default: false } })).toBe(1);
+    expect(io.errors.join("\n")).toContain("the fork road ran, and nothing named its row");
+  });
+});
+
+
+describe("the words wsp doctor says about itself", () => {
+  const row = COMMANDS_FOR_HELP["doctor"]!;
+
+  it("names the computer it takes, what each road does and which one bills, on its usage, its about and its terminal-only line", () => {
+    expect(row.usage).toBe("wsp doctor [<computer>] [--project <name>] [--local] [--yes]");
+    expect(row.about).toBe(
+      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer gets a short-lived workspace made there and the recipe's tools read inside it; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
+    );
+    // The line a person reads when they aim this at a host somewhere else: what it does here is what it says.
+    expect(row.cliOnly).toBe("runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
+  });
+
+  it("carries a row of its own for the two flags that shape which road it takes", () => {
+    const says = (name: string): string | undefined => SHARED_FLAGS.find(f => f.name === name && f.on.includes("doctor"))?.says;
+    expect(says("local")).toBe("prove this computer alone: a thread here and its reply, with no machine, no key, nothing forked and nothing billed");
+    expect(says("project")).toBe("the project the doctor's workspace is made of, by name, on the computer named; the first project there whose checkout stands when absent");
+    // And the flag rows are in the page a person reads for this line.
+    for (const flag of ["--local", "--project", "--yes"]) expect(commandPage("doctor", row)).toContain(flag);
   });
 });
 

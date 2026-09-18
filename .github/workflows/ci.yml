@@ -68,6 +68,10 @@ jobs:
       - name: Build
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Tests
+        # The step above staged this runner's daemon binary, so the case that reads its version against the
+        # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
+        env:
+          WSP_REQUIRE_DAEMON: "1"
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
       - name: Types
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit

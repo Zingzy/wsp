@@ -67,8 +67,10 @@ export type InstallRoad =
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
   | { road: "apt"; packages: readonly string[]; pin?: ToolPin }
   /** A vendor installer as the stage runs it. The script is fixed text and takes no version from outside; `version`
-   * is the one its own text fixes (a checksummed release, a tagged checkout), absent when it takes the current one. */
-  | { road: "script"; script: string; version?: string; pin?: ToolPin };
+   * is the one its own text fixes (a checksummed release, a tagged checkout), absent when it takes the current one.
+   * `bins` names the directories this script links its commands into, which no two of them share: the row carries
+   * them because the road cannot know, and a script that says none is read as saying nothing. */
+  | { road: "script"; script: string; version?: string; pin?: ToolPin; bins?: readonly string[] };
 
 export type RoadName = InstallRoad["road"];
 export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor", "apt", "script"];

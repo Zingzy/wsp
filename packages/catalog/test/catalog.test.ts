@@ -416,6 +416,23 @@ describe("catalog", () => {
     expect(BREW_PREFIX.startsWith(`${SHARED_TOOL_ROOTS[0]}/`)).toBe(true);
   });
 
+  it("names the directories each vendor's own installer links its commands into, on the script row that carries it", () => {
+    // Five of the catalogue's scripts link into /usr/local/bin and three do not, so one directory on the road
+    // module would put a false note on every box's rust, docker and Claude Code rows. The directories sit on each
+    // script's own row and the module reads them off it.
+    const scriptBins = (id: string): readonly string[] | undefined => {
+      const road = (catalogEntry(id) as ToolEntry | AgentEntry | undefined)?.installRoad;
+      return road?.road === "script" ? road.bins : undefined;
+    };
+    for (const id of ["node", "uv", "python", "fd", "yarn"]) expect(scriptBins(id), id).toEqual(["/usr/local/bin"]);
+    expect(scriptBins("docker")).toEqual(["/usr/bin"]);
+    expect(scriptBins("rust")).toEqual([`${GUEST_HOME}/.cargo/bin`]);
+    // Claude Code's own installer writes into the machine's home, not into /usr/local/bin.
+    expect(scriptBins("claude")).toEqual([`${GUEST_HOME}/.local/bin`]);
+    // A script whose row names none says nothing, which is a row that gets no note rather than a wrong one.
+    expect(scriptBins("hermes")).toBeUndefined();
+  });
+
   it("gives every road a step: how long it may run, whether a run that hit the limit is tried once more, and the lines that clock its network reads", () => {
     expect(Object.keys(ROAD_STEPS).sort()).toEqual([...ROADS].sort());
     // A dead read fails in about a minute and is tried once more, on every road whose tool takes the knobs from its environment.

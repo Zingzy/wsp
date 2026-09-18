@@ -5,7 +5,8 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { plural, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { ROAD_MODULES } from "@wsp/catalog";
+import { plural, presentElsewhereLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, type SkippedPath, type ToolInstall } from "./golden-import.js";
@@ -70,19 +71,25 @@ export function provisionCountsOf(plan: ProvisionPlan): { tool: number; file: nu
  * read, since an id is a custom row's own free text and can carry the space this line is read back on. */
 const PRESENT = "wsp-present";
 
-/** The tests one step must pass to count as already there: its own check where it carries one, its command on the
- * tools PATH where it names one, and its road's version read where the version is the question the others cannot
- * answer, which is a step that pins a version and a step that says nothing else to read at all. A package a person
- * named by its own package name is the second case: it carries no command and no check, and its road's version read
- * is the whole of what its computer can be asked.
+/** The tests one step must pass to count as already there: its road's own presence read where the road has one
+ * and its check otherwise, its command on the tools PATH where it names one, and its road's version read where the
+ * version is the question the others cannot answer, which is a step that pins a version and a step that says
+ * nothing else to read at all. A package a person named by its own package name is the second case: it carries no
+ * command and no check, and its road's version read is the whole of what its computer can be asked.
+ *
+ * The road's read comes first because a check is worded for after an install and a presence read is not the same
+ * question: a formula's check is `brew list --versions`, which the prefix's own link answers without running brew
+ * at all. Read by the job and by the doctor, on the same planned steps, so a computer cannot read green on one
+ * surface and red on the other.
  *
  * One read per step, since a read is about a second and a page of them has the inline exec's bound to answer
  * inside: a formula's check and its version read are the same `brew list` under `su`, and a page of eight rows
  * asked twice each is sixteen of them against twenty seconds, whose exec failing reads nothing present and
  * installs all eight again. */
-function presenceTests(step: ToolInstall): string[] {
+export function presenceTests(step: ToolInstall): string[] {
   const tests: string[] = [];
-  if (step.check !== undefined) tests.push(`( ${step.check} ) >/dev/null 2>&1`);
+  const own = step.present ?? step.check;
+  if (own !== undefined) tests.push(`( ${own} ) >/dev/null 2>&1`);
   if (step.bin !== undefined) tests.push(`command -v ${shellQuote(step.bin)} >/dev/null 2>&1`);
   const version = step.pin?.read;
   if (version !== undefined && (step.asks !== undefined || tests.length === 0)) {
@@ -92,20 +99,40 @@ function presenceTests(step: ToolInstall): string[] {
   return tests;
 }
 
+/** What one step's presence read said beyond that the step is there: the path its command answered from, where the
+ * read asked for a command at all. Read to tell a row its own road installed from a row of the same name another
+ * road put somewhere else. */
+export interface PresentRead {
+  path?: string;
+}
+
 /** The steps the computer already satisfies, by the rule above, read on the tools PATH, a page of reads to an exec
- * by the one paging rule every batched read here takes. A page that could not be made says nothing is present in
- * it, which installs those steps again rather than skipping one that is not there. */
-export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Set<string>> {
+ * by the one paging rule every batched read here takes, each with what its read said about it. A page that could
+ * not be made says nothing is present in it, which installs those steps again rather than skipping one that is not
+ * there. */
+export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Map<string, PresentRead>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
     return tests.length === 0 ? [] : [{ step, tests }];
   });
-  const present = new Set<string>();
-  const pages = await pagedReads(machine, asked, (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s\\n' ${at}; fi`, `export PATH=${TOOLS_PATH}`);
+  const present = new Map<string, PresentRead>();
+  // The path rides the marker line where the step names a command, since the read has already found it and a
+  // second exec for it would be a page of reads again.
+  const pages = await pagedReads(
+    machine,
+    asked,
+    (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s %s\\n' ${at} "${row.step.bin === undefined ? "" : `$(command -v ${shellQuote(row.step.bin)} 2>/dev/null)`}"; fi`,
+    `export PATH=${TOOLS_PATH}`,
+  );
   for (const { rows, res } of pages) {
     if (res.exitCode !== 0) continue;
     const marked = markersOf(res.stdout, PRESENT);
-    for (const [at, row] of rows.entries()) if (marked.has(String(at))) present.add(row.step.id);
+    for (const [at, row] of rows.entries()) {
+      const said = marked.get(String(at));
+      if (said === undefined) continue;
+      const path = said.trim();
+      present.set(row.step.id, path === "" ? {} : { path });
+    }
   }
   return present;
 }
@@ -123,15 +150,30 @@ export function presentByWhatWaits(steps: readonly ToolInstall[], present: Reado
   return out;
 }
 
-/** One step's outcome as a row of the job: a step the computer already had reads present and says no more, since
- * the outcome is the whole of it. */
-function rowOf(result: ToolResult, present: ReadonlySet<string>): PlaceProvisionRow {
-  const outcome = result.outcome === "installed" && present.has(result.id) ? "present" : result.outcome;
+/** The note a present row carries where the command answered from outside the directories its own road links
+ * into: the path is a fact the read already has, and naming the road that did answer would be a guess, since
+ * several roads link into /usr/local/bin. A step whose road names no directories, or whose command answered from
+ * one of them, says nothing. */
+export function presentElsewhere(step: ToolInstall, read: PresentRead | undefined): string | undefined {
+  const bins = step.bins ?? [];
+  const path = read?.path;
+  if (path === undefined || step.bin === undefined || bins.length === 0) return undefined;
+  if (bins.some(dir => path.startsWith(`${dir}/`))) return undefined;
+  return presentElsewhereLine(step.bin, path, ROAD_MODULES[step.manager].words, bins);
+}
+
+/** One step's outcome as a row of the job: a step the computer already had reads present and carries the one note
+ * its read has to say, which is a command answering from outside its own road's directories. The landing's own
+ * note for such a step says it was already there, which the outcome says, so it is dropped as it always was. */
+function rowOf(result: ToolResult, present: ReadonlyMap<string, PresentRead>, step?: ToolInstall): PlaceProvisionRow {
+  const read = present.get(result.id);
+  const outcome = result.outcome === "installed" && read !== undefined ? "present" : result.outcome;
+  const note = outcome === "present" ? (step === undefined ? undefined : presentElsewhere(step, read)) : result.note;
   return {
     id: result.id,
     label: result.label,
     outcome,
-    ...(result.note !== undefined && outcome !== "present" ? { note: result.note } : {}),
+    ...(note !== undefined ? { note } : {}),
     ...(result.ms !== undefined ? { ms: result.ms } : {}),
   };
 }
@@ -178,7 +220,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   }, { caches: "keep" });
   stage(base.line);
   const read = await presentSteps(machine, plan.steps);
-  const present = new Set([...read, ...presentByWhatWaits(plan.steps, read)]);
+  // The steps nothing can be asked about carry no read of their own: what says they are there is the rows behind them.
+  const present = new Map<string, PresentRead>([...read, ...[...presentByWhatWaits(plan.steps, new Set(read.keys()))].map(id => [id, {}] as [string, PresentRead])]);
+  const stepOf = new Map(plan.steps.map(step => [step.id, step]));
   /** What each row read as the loop reached it, by step id, so a row the checks corrected after the loop is said
    * again rather than standing in the log on that computer as it first read. */
   const said = new Map<string, string>();
@@ -190,10 +234,10 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     },
     "installing-tools",
     {
-      present,
+      present: new Set(present.keys()),
       caches: "keep",
       onTool: result => {
-        const row = rowOf(result, present);
+        const row = rowOf(result, present, stepOf.get(result.id));
         said.set(result.id, rowLine(row));
         done++;
         stage(rowLine(row), at(), row);
@@ -204,7 +248,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   // whose check then failed is failed, and copying it at the moment the loop said it left the answer reading
   // installed while the loop's tally read it failed. The record takes this array whole when the job is done.
   for (const result of tools.tools) {
-    const row = rowOf(result, present);
+    const row = rowOf(result, present, stepOf.get(result.id));
     rows.push(row);
     if (said.get(result.id) !== rowLine(row)) stage(rowLine(row));
   }

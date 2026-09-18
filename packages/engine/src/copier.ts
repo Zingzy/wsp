@@ -6,7 +6,7 @@
 // clonefile call on the directory, which is why the copy lives in the daemon's
 // code and this module is the road to it. One interface, the real road and the
 // stand-in tests drive, so nothing above here knows there is a child process.
-import { CopyReport, type CopyAsk, type CopyRoad } from "@wsp/protocol";
+import { copyVerbFailedLine, CopyReport, type CopyAsk, type CopyRoad } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 
 export interface Copier {
@@ -35,11 +35,19 @@ const argvFor = (ask: CopyAsk): string[] => [
 ];
 
 /** The daemon binary's verb as a child of this host: argv, never a shell line, so a folder with a space or a
- * quote in its name is one word. The refusal a person reads is the verb's own last line, since the verb knows why
- * it could not copy and this side would only be guessing. */
+ * quote in its name is one word. The refusal a person reads is the verb's own last line on the exit the verb
+ * documents for a refusal, exit 1, since the verb knows why it could not copy and this side would only be
+ * guessing. Every other exit is a failure the verb never worded: a parse error exits 2 and prints its whole usage
+ * text, and a killed child exits on a signal with nothing at all, neither of which is a sentence about a copy. */
 export function verbCopier(binary: string, run: typeof runChild = runChild): Copier {
-  const line = (res: { stderr: string; stdout: string }): string => {
+  const line = (res: { exitCode: number; stderr: string; stdout: string }): string => {
     const said = res.stderr.trim() || res.stdout.trim();
+    if (res.exitCode !== 1) {
+      // The output goes to the host's log, where somebody looking at a copy that failed can read it, and never to
+      // the person, who asked for a workspace and not for a program's usage.
+      if (said !== "") console.warn(`${binary} copy: ${said}`);
+      return copyVerbFailedLine(res.exitCode);
+    }
     return said.split("\n").at(-1) ?? "the copy failed and said nothing";
   };
   return {
