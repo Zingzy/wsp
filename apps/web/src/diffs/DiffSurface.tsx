@@ -37,6 +37,7 @@ import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "../files/Folde
 import { NotRunning } from "./NotRunning.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
+import { useLinkWord } from "../terminal/paneWords.js";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse.js";
 import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath } from "../lib/diffRendering.js";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
@@ -90,6 +91,7 @@ export function diffPanelOptions(theme: "light" | "dark", renderMode: DiffRender
 
 export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const wire = useDaemonWire(workspaceId);
+  const linkWord = useLinkWord(workspaceId);
   const root = useRoot(workspaceId);
   const cwd = root ?? "";
   const pinned = usePinned(workspaceId);
@@ -124,6 +126,8 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setComments([]);
   }, [comments, setDraft, workspaceId]);
 
+  // The link's word is a dependency for the rule useLinkWord carries: a pane reopened at load reads over a link
+  // that is not up yet, and that first failed read is not this header's last word.
   const fetchDiff = useCallback(() => {
     if (!wire || cwd === "") return;
     let gone = false;
@@ -152,7 +156,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     return () => {
       gone = true;
     };
-  }, [wire, cwd, scope]);
+  }, [wire, cwd, scope, linkWord]);
 
   useEffect(() => fetchDiff(), [fetchDiff]);
   // A new scope or folder is a new set of files; stale collapse keys would pin

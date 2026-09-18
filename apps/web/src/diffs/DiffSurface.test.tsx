@@ -45,6 +45,7 @@ import { useComposerDraftStore } from "../components/chat/composerDraftStore";
 import { useRootStore } from "../files/root";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire";
 import { useStore } from "../protocol/store";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link";
 import { reviewCommentsQuote } from "../reviewCommentContext";
 import { DiffSurface } from "./DiffSurface";
 import { useDiffStore } from "./store";
@@ -127,5 +128,43 @@ describe("a comment on a diff line", () => {
       { id: "c1", sectionId: "s", sectionTitle: "Working tree", filePath: "src/a.ts", startIndex: 0, endIndex: 0, rangeLabel: "+1", text: "name this one", diff: "@@ -1,1 +1,1 @@\n+two", fenceLanguage: "diff" },
     ]);
     expect(useComposerDraftStore.getState().drafts[WS]!.prompt).toBe(`${quoted}\n\n`);
+  });
+});
+
+describe("the Diff header's branch", () => {
+  it("is asked again when the link changes its word, so a read made before the link was up is not the header's last word", async () => {
+    // The wire is handed out before the link's first status lands, and the panel reopens the panes it had, so a
+    // Diff pane restored at load reads over a link that is not up yet. Asked once, that failure stood as the
+    // header's word until a scope change, a folder change or a refresh by hand.
+    let up = false;
+    const late = {
+      request: async (op: string) => {
+        if (!up) throw new Error("daemon unreachable");
+        return op === "git.diff" ? DIFF : op === "git.status" ? STATUS : {};
+      },
+      onEvent: () => () => {},
+    } as unknown as TerminalWire;
+    provideDaemonWire(WS, late);
+    const terminals = new WorkspaceTerminals(late);
+    provideTerminals(WS, terminals);
+
+    render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(document.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+    up = true;
+    act(() => terminals.feedStatus("live"));
+    await waitFor(() => expect(document.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo"));
+    expect(document.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root");
+    expect(document.querySelector("[data-diff-repo-state]")?.textContent).toBe("agent/pricing-page");
+    provideTerminals(WS, null);
+  });
+
+  it("keeps its room while a comment is held, where the path leaves the header", async () => {
+    render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(document.querySelector("[data-comment-on-a-line]")).not.toBeNull());
+    expect(document.querySelector("[data-folder-crumbs]")).not.toBeNull();
+    fireEvent.click(document.querySelector("[data-comment-on-a-line]")!);
+    await waitFor(() => expect(screen.queryByText(SEND_TO_THREAD)).not.toBeNull());
+    expect(document.querySelector("[data-folder-crumbs]")).toBeNull();
+    expect(document.querySelector("[data-diff-repo-state]")?.textContent).toBe("agent/pricing-page");
   });
 });
