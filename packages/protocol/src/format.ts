@@ -3483,13 +3483,13 @@ export const PLACE_INSTALL = {
 
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
 export const PLACES_WORDS = {
-  section: "Where agents run",
+  section: "Computers",
   columns: ["Computer", "Size", "Disk free", "Workspaces"],
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
   sheet: {
     title: "Add a computer",
-    description: `A computer you own runs threads for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
+    description: `A computer you own runs workspaces for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
     /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
      * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
      * the next one needs this host awake. */

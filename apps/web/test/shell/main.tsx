@@ -52,7 +52,7 @@
 // folder home on ws_a; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
-// ?places=1 fills the Where agents run table with four computers, one of them
+// ?places=1 fills the Computers table with four computers, one of them
 // away with the longest name the spec draws; ?init=building puts the init job
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
@@ -515,7 +515,7 @@ const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
-// ?places=1 fills the Where agents run table with the worst row the spec draws, a computer away with a long name
+// ?places=1 fills the Computers table with the worst row the spec draws, a computer away with a long name
 // beside this Mac and a provider, so the table's four columns and its menu cell can be measured at every window.
 if (params.get("places") === "1") {
   useStore.setState({

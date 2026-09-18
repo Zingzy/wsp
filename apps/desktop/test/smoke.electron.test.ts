@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
-import { SETTINGS_WORDS, THEME_WORDS, versionFact } from "../../web/src/settings/format.js";
+import { SETTINGS_WORDS, versionFact } from "../../web/src/settings/format.js";
 import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
@@ -372,27 +372,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await refused(url)).toBe(true);
   });
 
-  it("the window's theme source follows the page: the record's system once the page has read it, light after a Light pick on the settings page, and light again on a reload from a dark pin", async () => {
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI, WSP_LABS: "1" }, seedGolden);
+  it("the window's theme source follows the page, which draws the side this computer is set to", async () => {
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
     const win = await windowAt(launched.app, APP_URL);
     await bootOf(win);
     const source = () => launched!.app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
-    // The page's first word is the record's default; the pin before it is not a fact the page can be asked about.
+    // The one value the page ever says, whatever a pin before it was: no screen picks a side, so the frame and the
+    // page cannot draw two.
     await vi.waitFor(async () => expect(await source()).toBe("system"));
-    // The chord reaches the shell once the store is ready, which the sidebar's empty state says; the page is on screen
-    // before the pick, so the click waits on a fact and not on a guess about React's timing.
-    await win.waitForSelector("text=No workspaces yet");
-    await win.keyboard.press("Meta+,");
-    await win.waitForSelector("[data-settings-page]");
-    await win.getByRole("radio", { name: THEME_WORDS.light, exact: true }).click();
-    await vi.waitFor(async () => expect(await source()).toBe("light"));
-    expect(await win.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
-    // Pinned dark again by hand, a reload has to say light on its own: the record on the host, and the page's cache before it.
     await launched.app.evaluate(({ nativeTheme }) => {
       nativeTheme.themeSource = "dark";
     });
     await win.reload();
-    await vi.waitFor(async () => expect(await source()).toBe("light"));
+    await vi.waitFor(async () => expect(await source()).toBe("system"));
   });
 
   it("photographs its own page for a workspace and hands the picture back to the page", async () => {
@@ -538,17 +530,15 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-sheet-dark.png"), "#101010"));
     await win.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
-    // The page follows the record's theme and tells the shell, so the light side is picked where the record is written:
-    // the settings page. The main's colour changing is the paint; the class alone is not.
+    // The page draws the side this computer is set to, so the light side comes from the computer's own scheme and
+    // from no pick on any screen. The inset's colour changing is the paint; the class alone is not.
     const insetColour = (): Promise<string> => win.evaluate(() => getComputedStyle(document.querySelector("[data-slot=sidebar-inset]")!).backgroundColor);
     const darkInset = await insetColour();
-    await win.keyboard.press("Meta+,");
-    await win.waitForSelector("[data-settings-page]");
-    await win.getByRole("radio", { name: THEME_WORDS.light, exact: true }).click();
+    await app.evaluate(({ nativeTheme }) => {
+      nativeTheme.themeSource = "light";
+    });
     await win.waitForFunction(() => !document.documentElement.classList.contains("dark"));
     await vi.waitFor(async () => expect(await insetColour()).not.toBe(darkInset));
-    await win.keyboard.press("Meta+,");
-    await win.waitForSelector("[data-settings-page]", { state: "detached" });
     await win.waitForTimeout(500);
     await rest();
     shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-row-light.png"), "#ffffff"));

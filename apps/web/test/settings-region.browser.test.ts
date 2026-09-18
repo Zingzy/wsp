@@ -2,7 +2,7 @@
 // The three rules of round three, measured in a real Chromium at both allowed
 // windows and in both themes, since jsdom lays nothing out: Settings takes the
 // whole region right of the sidebar and hands the right panel back as it was;
-// the Where agents run table gives its name column away rather than scrolling
+// the Computers table gives its name column away rather than scrolling
 // sideways; every value in the workspace pane ends 20 px from the panel's edge,
 // clear of the scroll bar; and a side sheet is as tall as what it holds, top
 // edge 16 px in, never past the window less 32 px. Runs only when asked for

@@ -35,6 +35,7 @@ import {
   PlaceDoorView,
   PlaceSpend,
   PlaceStageEvent,
+  PlaceUpdateReply,
   PlaceView,
   ProjectView,
   placeAddSheetWord,
@@ -398,6 +399,10 @@ export interface Api {
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** Puts this wsp's daemon on the computer where that computer runs an older one, then runs the recipe on it
+   * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
+   * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
+  placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -723,6 +728,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
+    // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
+    placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

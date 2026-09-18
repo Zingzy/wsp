@@ -203,7 +203,7 @@ describe("what the sheet that adds a computer says about reaching it and about a
     // row names it by, and no road between is given a noun.
     expect(PLACE_CONNECTS).toBe("connects to this Mac over your network, or from outside it once you sign in");
     expect(PLACES_WORDS.sheet.description).toBe(
-      "A computer you own runs threads for your wsp. It connects to this Mac over your network, or from outside it once you sign in. You open nothing on it.",
+      "A computer you own runs workspaces for your wsp. It connects to this Mac over your network, or from outside it once you sign in. You open nothing on it.",
     );
     // Connects, never dials: a first-time person does not know what dialling a Mac is.
     for (const said of [PLACES_WORDS.sheet.description, PLACES_WORDS.sheet.whileAsleep]) expect(said).not.toMatch(/dial/i);

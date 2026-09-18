@@ -52,7 +52,7 @@ describe("hostsMenuItems", () => {
   });
 });
 
-describe("what the Where agents run table says about a computer", () => {
+describe("what the Computers table says about a computer", () => {
   const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, engine: "none", takesForks: true, ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");
 

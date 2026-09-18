@@ -132,7 +132,6 @@ interface State {
   /** Whether the Add a computer sheet stands open over the Settings page. */
   addComputerOpen: boolean;
   /** Whether the Connect a provider sheet stands open over the Settings page. */
-  connectProviderOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
   /** The thread of the selected workspace the centre is on, which the page's address names too; null until a pick
@@ -218,12 +217,13 @@ interface State {
   /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
   openAddComputer(): void;
   closeAddComputer(): void;
-  /** The same for Connect a provider, so a person who types it into the palette lands where the button leads. */
-  openConnectProvider(): void;
-  closeConnectProvider(): void;
   /** Asks the host to dial one computer once and takes the row it answers with, so every surface reading that row
    * says the same thing about it. Answers the whole of what came back for the slot that asked. */
   dialPlace(placeId: string): Promise<PlaceDial>;
+  /** Puts this wsp's daemon on one computer and runs the recipe there again, and writes the job it answers with
+   * onto that row, so the word in the row's state slot is the job's own. A refusal is the host's own sentence in
+   * the window's one toast. */
+  updatePlace(placeId: string): Promise<void>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -449,7 +449,6 @@ export const useStore = create<State>((set, get) => {
     projectsRead: false,
     placesRead: false,
     addComputerOpen: false,
-    connectProviderOpen: false,
     selectedId: null,
     selectedThreadId: null,
     freshThread: false,
@@ -500,8 +499,8 @@ export const useStore = create<State>((set, get) => {
       writeAddress({ workspaceId, threadId });
     },
     openSettings() { set({ settingsOpen: true }); },
-    closeSettings() { set({ settingsOpen: false, addComputerOpen: false, connectProviderOpen: false }); },
-    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen, connectProviderOpen: s.settingsOpen ? false : s.connectProviderOpen })); },
+    closeSettings() { set({ settingsOpen: false, addComputerOpen: false }); },
+    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
     async setPreferences(patch) {
       const api = get().api;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
@@ -741,14 +740,25 @@ export const useStore = create<State>((set, get) => {
     closeConnect() { set({ connectOpen: false }); },
     openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },
     closeAddComputer() { set({ addComputerOpen: false }); },
-    openConnectProvider() { set({ settingsOpen: true, connectProviderOpen: true }); },
-    closeConnectProvider() { set({ connectProviderOpen: false }); },
     async dialPlace(placeId) {
       const api = get().api;
       if (api?.dialPlace === undefined) throw new Error(WHERE_WORDS.cannotDial);
       const answer = await api.dialPlace(placeId);
       set(s => ({ places: s.places.map(p => (p.id === answer.place.id ? answer.place : p)) }));
       return answer;
+    },
+    async updatePlace(placeId) {
+      const api = get().api;
+      if (api?.placesUpdate === undefined) return;
+      try {
+        const answer = await api.placesUpdate(placeId);
+        // The job as the reply carries it, onto the row the word is read off: the state slot says what is being
+        // put on that computer and then what stands, with no second reading of the same job here.
+        if (answer.provision !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, provision: answer.provision } : p)) }));
+        if (answer.said !== undefined) set({ toast: answer.said });
+      } catch (e) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+      }
     },
     applyWorkspace(workspace) {
       set(s => ({
@@ -1041,7 +1051,6 @@ export function useSpending(id: string | null): boolean {
 export function useReady(): boolean { return useStore(s => s.ready); }
 export function usePreferences(): Preferences { return useStore(s => s.preferences); }
 /** Whether this host offers the surfaces still being worked on; the record's one field, read by every surface that hides. */
-export function useLabs(): boolean { return useStore(s => s.preferences.labs); }
 export function useSettingsOpen(): boolean { return useStore(s => s.settingsOpen); }
 export function useForwards(): PortForward[] { return useStore(s => s.forwards); }
 /** Whether localhost:port on this computer is a page of that workspace to open: a printed link, not a sign-in callback. */
@@ -1128,4 +1137,3 @@ export function useFirstRun(): boolean {
   return useStore(s => s.ready && s.projectsRead && s.projects.length === 0 && s.workspaces.length === 0);
 }
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }
-export function useConnectProviderOpen(): boolean { return useStore(s => s.connectProviderOpen); }
