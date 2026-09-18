@@ -6,7 +6,7 @@
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
 import { ROAD_MODULES } from "@wsp/catalog";
-import { plural, presentElsewhereLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { agentOfRow, plural, presentElsewhereLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, type SkippedPath, type ToolInstall } from "./golden-import.js";
@@ -15,7 +15,7 @@ import { installTools, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackedFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
-import { closeAgentFiles, landedFiles, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
+import { closeAgentFiles, oncePathsOf, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
 import { provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
@@ -42,6 +42,7 @@ export type ProvisionStage = (detail: string, at?: { label: string; index: numbe
 export function provisionPlanOf(imp: GoldenImport, recipeAt: string): ProvisionPlan {
   const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) });
   const files = imp.files;
+  const once = onceDests(imp);
   return {
     recipeAt,
     steps: [...agents, ...imp.tools],
@@ -49,9 +50,21 @@ export function provisionPlanOf(imp: GoldenImport, recipeAt: string): ProvisionP
       ...(imp.skippedAgents ?? []).map(a => ({ id: a.id, label: a.name, note: a.note })),
       ...(imp.skippedTools ?? []).map(t => ({ id: t.id, label: t.label, note: t.note })),
     ],
-    ...(files !== undefined && files.lands.length > 0 ? { files: { lands: oncePerDest(files.lands), pack: files.pack } } : {}),
+    ...(files !== undefined && files.lands.length > 0 ? { files: { lands: oncePerDest(files.lands).map(l => (once.has(l.dest) ? { ...l, once: true as const } : l)), pack: files.pack } } : {}),
     ...(imp.mcp !== undefined ? { mcp: imp.mcp } : {}),
   };
+}
+
+/** Which of the recipe's destinations land once rather than on every run: the file an agent keeps its own MCP
+ * servers in, and a path on an agent's own row the recipe marks volatile, which is a file that agent rewrites as it
+ * runs. From the first landing on, what is in such a file is the agent's, and what the recipe has to say about it is
+ * its server keys. A login's own file is not one of them: a token this computer refreshed is still the recipe's to
+ * carry to that computer. */
+function onceDests(imp: GoldenImport): Set<string> {
+  const home = imp.mcp?.guestHome;
+  const configs = (imp.mcp?.agents ?? []).flatMap(a => a.scopes.flatMap(s => s.files)).flatMap(f => (home !== undefined && f.startsWith(`${home}/`) ? [f.slice(home.length + 1)] : []));
+  const rewritten = (imp.recipe?.files ?? []).flatMap(f => (f.volatile === true && agentOfRow(f) !== undefined ? [f.dest] : []));
+  return new Set([...configs, ...rewritten]);
 }
 
 /** One entry per destination, the first row that named it: a file the recipe names on more than one row (an
@@ -253,26 +266,23 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     if (said.get(result.id) !== rowLine(row)) stage(rowLine(row));
   }
   let skippedFiles: SkippedPath[] = [];
-  /** What this run itself landed in the agents' homes there; what stands there from before is read on the box. */
-  let thisRun: OwnedPaths = new Map();
+  /** What this run itself landed in the agents' homes there, so a server already in a file that arrived whole with
+   * it reads as a server it put there. Whose each key in those files is comes off the list beside the job. */
+  let landedNow: OwnedPaths = new Map();
   if (plan.files !== undefined) {
     const files = plan.files;
     stage(`${FILES_LABEL}: ${plural(files.lands.length, "path")}`, round(FILES_LABEL));
     const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack });
     skippedFiles = landed.skipped;
-    thisRun = landed.owned;
+    landedNow = landed.owned;
     for (const row of landed.rows) say(row, round(FILES_LABEL));
     done++;
   }
   if (plan.mcp !== undefined) {
     stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`, round(MCP_LABEL));
-    // What wsp owns in the agents' homes there: what the list beside the job says it still owns, and what this
-    // run landed on top of it. Read off that computer and not off this run, so a round whose files never got off
-    // this Mac still leaves the configs wsp wrote there as wsp's rather than calling them the person's.
-    const owned: OwnedPaths = new Map([...(await landedFiles(machine, on.home)), ...thisRun]);
     const servers = await provisionMcp(machine, plan.mcp, {
       home: on.home,
-      owned,
+      landed: landedNow,
       tools: tools.tools,
       stage: (_which, detail) => {
         if (detail !== undefined) stage(detail, round(MCP_LABEL));
@@ -285,7 +295,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   // knows its own copy from a file the person has written since and the tree that travelled is gone from the box.
   // Every job closes, whether or not this recipe carries a file of the person's: the close is also where the job's
   // own folder there is swept, and a recipe with no files leaves the list exactly as it was.
-  await closeAgentFiles(machine, on.home);
+  await closeAgentFiles(machine, on.home, oncePathsOf(plan.files?.lands ?? []));
   // After everything, so the document on the computer names what did not land. The floor's rows ride with the
   // tools: what a person reads there is what the recipe asked for and what is missing, floor rows included.
   const result: ImportResult = {

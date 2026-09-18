@@ -9,14 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
-import { HOMEBREW_PREFIX, MCP_ID_PREFIX, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
+import { HOMEBREW_PREFIX, MCP_ID_PREFIX, placeProvisionPaths, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
 import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
 import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { presentByWhatWaits, presentElsewhere, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
 import { OLD_APPEND_MARKS, READS_PER_EXEC } from "../src/exec-detached.js";
-import { OWN_MARK } from "../src/provision-files.js";
+import { SERVER_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
@@ -466,9 +466,23 @@ describe("the person's own files and their servers, on the same run", () => {
     ]);
     // The machine context still lands: a computer with its tools on and no word of why is worse than the failure.
     expect(calls.some(c => c.includes("echo WSP_CTX"))).toBe(true);
-    // Whose the files on that computer are is asked of the computer, not answered off this run: the list beside
-    // the job is read even where nothing was packed, so a config wsp wrote there before is still wsp's.
-    expect(calls.some(c => c.includes(OWN_MARK))).toBe(true);
+    // Whose a server in an agent's own file is comes off the list beside the job, which is read even where nothing
+    // was packed, so a key wsp wrote there before is still wsp's.
+    expect(calls.some(c => c.includes(SERVER_MARK))).toBe(true);
+  });
+
+  it("reads the list's keys and both copies of the agents' own files between the landing and the close, and writes down the keys it merged", async () => {
+    const { machine, calls } = boxMachine();
+    await provisionBox(machine, withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
+    const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
+    // The copy that travelled is read out of the job's own folder beside the agent's own file, in one read.
+    const read = calls.find(c => c.includes("wsp_mcp_read"))!;
+    expect(read).toContain("/root/.claude-cfg/.claude.json");
+    expect(read).toContain(`${placeProvisionPaths("/root").staging}/.claude-cfg/.claude.json`);
+    expect(at("wsp-land")).toBeLessThan(at("wsp_mcp_read"));
+    expect(at(SERVER_MARK)).toBeGreaterThan(at("wsp-land"));
+    // The close is last of the three, so the keys the servers step wrote are in the list it folds together.
+    expect(at(OLD_APPEND_MARKS)).toBeGreaterThan(at(SERVER_MARK));
   });
 
   it("asks the computer nothing about files or servers when the recipe names none, and closes its own folder there all the same", async () => {
