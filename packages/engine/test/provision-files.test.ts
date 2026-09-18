@@ -6,12 +6,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { placeProvisionPaths } from "@wsp/protocol";
+import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { agentStateFile, closeAgentFiles, filesRows, landAgentFiles, landedFiles, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import type { McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
-import { provisionMcp, theirConfigLine } from "../src/provision-mcp.js";
+import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
 
@@ -105,9 +105,10 @@ const read = (root: string, rel: string): string => readFileSync(join(root, rel)
 /** A packed archive as the host's own pack answers with one, with the sizes nothing here reads. */
 const packed = (tar: Buffer): PackedFiles => ({ tar, bytes: tar.length, unpacked: tar.length, skipped: [], cut: [], silenced: [], macPaths: [] });
 
-/** The claude scope over the config the landing puts there, for the run that reads whose that config is. */
+/** The claude scope over the config the landing puts there, for the run that reads whose that config is. One
+ * server of it is in the copy that travels and one is in neither that copy nor the file there. */
 const mcpPlanOn = (root: string): McpPlan => ({
-  agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }],
+  agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github", "gsc"], drop: [] }], aside: [] }],
   guestHome: root,
   rewrites: [],
   binDirs: [],
@@ -227,16 +228,77 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(read(root, ODD)).toBe("the same skill, rewritten\n");
   });
 
-  it("reads what wsp owns there off the list and the bytes, so a round whose files never left this computer says the failure and nothing about whose the files are", async () => {
+  it("lands the file an agent keeps for itself only where it is missing, leaves what is in it after that, and keeps no line for it in the list", async () => {
+    const { root, machine } = box();
+    const at = placeProvisionPaths(root);
+    const lands: ProvisionLanding[] = [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true }, ...LANDS];
+    const tar = (config: string): Buffer => tarOf([file(".claude-cfg/.claude.json", config), file(".claude-cfg/CLAUDE.md", "his standing rules\n")]);
+    // A line an older run left for that path, from before it landed once: the close takes it out, since the bytes
+    // there are its agent's from the first landing on.
+    mkdirSync(at.dir, { recursive: true });
+    writeFileSync(at.landed, ".claude-cfg/.claude.json\tdead\tdead\n");
+
+    const first = await landAgentFiles(machine, { home: root, tar: tar("{}\n"), lands });
+    expect(first.rows[0]!.outcome).toBe("installed");
+    expect(first.owned.get(`${root}/.claude-cfg/.claude.json`)).toBe("installed");
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
+    expect(readFileSync(at.landed, "utf8")).not.toContain(".claude.json");
+
+    // The agent writes its own file, as it does at every launch: the landing leaves it, whatever this computer's
+    // copy of it says now, and the row says it is there rather than that wsp put it there.
+    write(root, ".claude-cfg/.claude.json", '{ "numStartups": 3 }\n');
+    const again = await landAgentFiles(machine, { home: root, tar: tar('{ "mcpServers": {} }\n'), lands });
+    expect(again.rows[0]!.outcome).toBe("present");
+    expect(again.rows[0]!.note).toBeUndefined();
+    expect(read(root, ".claude-cfg/.claude.json")).toBe('{ "numStartups": 3 }\n');
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
+    expect(readFileSync(at.landed, "utf8")).not.toContain(".claude.json");
+  });
+
+  it("closes a round that landed only keys, and carries a key's line through as the servers step wrote it", async () => {
+    const { root, machine } = box();
+    const at = placeProvisionPaths(root);
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    const keys = [`${MCP_ID_PREFIX}claude/github\td1\td1`, `${MCP_ID_PREFIX}codex/context7\td2\td2`];
+    await appendLanding(machine, root, keys);
+    await closeAgentFiles(machine, root);
+    const listed = (): string[] => readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "");
+    expect(listed().filter(l => l.startsWith(MCP_ID_PREFIX))).toEqual(keys);
+    // A path this round landed carries the bytes that travelled for it and the bytes standing there now.
+    const md = listed().find(l => l.startsWith(".claude-cfg/CLAUDE.md\t"))!.split("\t");
+    expect(md[1]).toMatch(/^[0-9a-f]{64}$/);
+    expect(md[2]).toBe(md[1]);
+    // The list is read back as the digest per key, which is what says whose a server in an agent's own file is.
+    expect(await landedServers(machine, root)).toEqual(new Map([[`${MCP_ID_PREFIX}claude/github`, "d1"], [`${MCP_ID_PREFIX}codex/context7`, "d2"]]));
+
+    // A round that landed no file of the person's at all still closes, and the keys it wrote are in the list.
+    await appendLanding(machine, root, [`${MCP_ID_PREFIX}claude/gsc\td3\td3`]);
+    await closeAgentFiles(machine, root);
+    expect([...(await landedServers(machine, root)).keys()].sort()).toEqual([`${MCP_ID_PREFIX}claude/github`, `${MCP_ID_PREFIX}claude/gsc`, `${MCP_ID_PREFIX}codex/context7`]);
+  });
+
+  it("reads a round whose files never left this computer as one that put nothing there, and leaves the servers in the agents' own files as they are", async () => {
     const { root, machine } = box();
     const config = `${root}/.claude-cfg/.claude.json`;
-    const lands: ProvisionLanding[] = [...LANDS, { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json" }];
+    const lands: ProvisionLanding[] = [...LANDS, { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true }];
     const tar = (server: string): Buffer => tarOf([file(".claude-cfg/.claude.json", `${JSON.stringify({ mcpServers: { [server]: { command: "npx" } } }, null, 2)}\n`)]);
 
-    // The first run lands the config, and the list beside the job records what it left there.
+    // The first run lands the config, since no agent has run there yet, and the servers step writes down the key
+    // it merged into it.
     const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("github")) });
     expect(first.rows.at(-1)!.outcome).toBe("installed");
-    await closeAgentFiles(machine, root);
+    const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {} });
+    expect(servers.map(r => [r.id, r.outcome])).toEqual([
+      [`${MCP_ID_PREFIX}claude/github`, "installed"],
+      [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
+    ]);
+    // The copy did travel and names no server called that, which is what its row says.
+    expect(servers[1]!.note).toBe("not in the config that travelled");
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
+    const listed = readFileSync(placeProvisionPaths(root).landed, "utf8");
+    expect(listed).toContain(`${MCP_ID_PREFIX}claude/github`);
+    // The file itself is not in the list: what wsp owns in a file its agent keeps is the keys it wrote in it.
+    expect(listed).not.toContain(".claude-cfg/.claude.json\t");
 
     // The second run never gets the files off this computer: every path says why, and the round claims nothing.
     const failed = await provisionFiles(machine, { home: root, lands, pack: () => Promise.reject(new Error("Keychain: user cancelled")) });
@@ -245,24 +307,23 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect([...failed.owned]).toEqual([]);
 
     // The job closes the round whether it landed anything or not: a round with no landing leaves the list as it
-    // was, so what wsp left on that computer is still written down.
-    const listed = readFileSync(placeProvisionPaths(root).landed, "utf8");
-    expect(listed).toContain(".claude-cfg/.claude.json");
-    await closeAgentFiles(machine, root);
+    // was, so the keys wsp wrote on that computer are still written down.
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
     expect(readFileSync(placeProvisionPaths(root).landed, "utf8")).toBe(listed);
+    expect((await landedServers(machine, root)).get(`${MCP_ID_PREFIX}claude/github`)).toMatch(/^[0-9a-f]{64}$/);
 
-    // What wsp owns there is still read off that computer, so the config it wrote reads as its own.
-    const owned = await landedFiles(machine, root);
-    expect(owned.get(config)).toBe("present");
-    const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, owned, tools: [], stage: () => {} });
-    expect(servers.map(r => r.outcome)).toEqual(["present"]);
-    expect(servers.some(r => (r.note ?? "").includes("is Claude Code's own"))).toBe(false);
-    expect(servers.some(r => r.note === theirConfigLine("Claude Code", config))).toBe(false);
-
-    // The third run has a new copy of it on this computer: the one on that computer is wsp's own and is replaced.
-    const third = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("gsc")) });
-    expect(third.rows.at(-1)!.outcome).toBe("installed");
-    expect(read(root, ".claude-cfg/.claude.json")).toContain("gsc");
+    // With nothing of this computer's beside it, the server in the agent's own file is read and not written: it is
+    // there as the recipe asks, and its row says so rather than saying whose the file is.
+    const again = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: new Map(), tools: [], stage: () => {} });
+    expect(again.map(r => [r.id, r.outcome])).toEqual([
+      [`${MCP_ID_PREFIX}claude/github`, "present"],
+      [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
+    ]);
+    // A name the file there does not hold reads that nothing of this computer's arrived, not that this computer
+    // has no server by that name.
+    expect(again[1]!.note).toBe(noCopyLine(config));
+    expect(again.some(r => (r.note ?? "").includes("Claude Code's own"))).toBe(false);
+    expect(readFileSync(config, "utf8")).toContain("github");
   });
 
   it("sweeps the markers the job's own log left in wsp's folder there, and keeps the files a person reads", async () => {
