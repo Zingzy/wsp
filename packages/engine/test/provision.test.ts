@@ -14,7 +14,8 @@ import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
 import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { presentByWhatWaits, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { OLD_APPEND_MARKS, READS_PER_EXEC } from "../src/exec-detached.js";
 import { OWN_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -170,6 +171,20 @@ describe("what a computer already satisfies", () => {
     expect([...present].sort()).toEqual(["tools/brew/cloudflared", "tools/npm/bun"]);
   });
 
+  it("asks one read of a formula's row, since its check and its version read are the same brew list under su", async () => {
+    const brew = toolInstallsFor(["bat", "beads", "btop", "dust", "eza", "fzf", "gum", "yq"].map(n => row(`tools/brew/${n}`, "tools"))).installs.filter(s => s.id.startsWith("tools/brew/"));
+    expect(brew).toHaveLength(READS_PER_EXEC);
+    // The two are one command: the pin read is the check with an awk after it, so asking both asks the box twice
+    // for one fact, and a read under su is about a second against the inline exec's own bound.
+    for (const s of brew) expect(s.pin!.read!.startsWith(s.check!), s.id).toBe(true);
+    const { machine, calls } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: everyMark(cmd), stderr: "" } : undefined));
+    const present = await presentSteps(machine, brew);
+    expect(present.size).toBe(brew.length);
+    const reads = calls.filter(c => c.includes("wsp-present"));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.split("list --versions").length - 1).toBe(brew.length);
+  });
+
   it("is a step nothing can be asked about when every step waiting on it is already there, and not when one of them is missing", async () => {
     const steps = [
       step({ id: "tools/apt-index", label: "apt index", manager: "apt" }),
@@ -201,8 +216,10 @@ describe("what a computer already satisfies", () => {
   it("is the apt index of a real plan and no other step of it, since every other step says a command, a check or a version", async () => {
     // Two apt rows of the catalog: the plan reads the index once, before the first row that waits on it.
     const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools: toolInstallsFor([row("tools/catalog/ffmpeg", "tools"), row("tools/catalog/ruby", "tools")]).installs }, "2026-09-17T10:00:00.000Z");
-    const untested = plan.steps.filter(s => s.check === undefined && s.bin === undefined && s.pin?.read === undefined);
-    expect(untested.map(s => s.label)).toEqual(["apt index"]);
+    // Through the rule itself rather than a second copy of it here: on a computer where every step's own read
+    // answers, the apt index is the one step the dependents rule has anything to say about.
+    const byWhatWaits = presentByWhatWaits(plan.steps, new Set(plan.steps.map(s => s.id)));
+    expect([...byWhatWaits].map(id => plan.steps.find(s => s.id === id)!.label)).toEqual(["apt index"]);
     const { machine, calls } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: marksFor(cmd, ["ffmpeg", "ruby", "bundle", "gem"]), stderr: "" } : undefined));
     const rows = await provisionBox(machine, plan, () => {}, ON);
     expect(rows.every(r => r.outcome === "present")).toBe(true);
@@ -414,9 +431,12 @@ describe("the person's own files and their servers, on the same run", () => {
     expect(calls.some(c => c.includes(OWN_MARK))).toBe(true);
   });
 
-  it("asks the computer nothing about files or servers when the recipe names none", async () => {
+  it("asks the computer nothing about files or servers when the recipe names none, and closes its own folder there all the same", async () => {
     const { machine, calls } = boxMachine();
     await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
     expect(calls.some(c => c.includes("wsp-land") || c.includes("wsp_mcp_read"))).toBe(false);
+    // The close is where the job's own folder on that computer is swept, so it runs whether or not this recipe
+    // carries a file of the person's; with no landing it leaves the list exactly as it was.
+    expect(calls.some(c => c.includes(OLD_APPEND_MARKS))).toBe(true);
   });
 });

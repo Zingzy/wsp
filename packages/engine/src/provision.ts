@@ -71,15 +71,22 @@ export function provisionCountsOf(plan: ProvisionPlan): { tool: number; file: nu
 const PRESENT = "wsp-present";
 
 /** The tests one step must pass to count as already there: its own check where it carries one, its command on the
- * tools PATH where it names one, and its road's version read where it has one, against the version it asks for or
- * for any version at all where it asks for none. A package a person named by its own package name is the last case:
- * it carries no command and no check, and the version read is the whole of what its computer can be asked. */
+ * tools PATH where it names one, and its road's version read where the version is the question the others cannot
+ * answer, which is a step that pins a version and a step that says nothing else to read at all. A package a person
+ * named by its own package name is the second case: it carries no command and no check, and its road's version read
+ * is the whole of what its computer can be asked.
+ *
+ * One read per step, since a read is about a second and a page of them has the inline exec's bound to answer
+ * inside: a formula's check and its version read are the same `brew list` under `su`, and a page of eight rows
+ * asked twice each is sixteen of them against twenty seconds, whose exec failing reads nothing present and
+ * installs all eight again. */
 function presenceTests(step: ToolInstall): string[] {
   const tests: string[] = [];
   if (step.check !== undefined) tests.push(`( ${step.check} ) >/dev/null 2>&1`);
   if (step.bin !== undefined) tests.push(`command -v ${shellQuote(step.bin)} >/dev/null 2>&1`);
-  if (step.pin?.read !== undefined) {
-    const read = `"$( ( ${step.pin.read} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )"`;
+  const version = step.pin?.read;
+  if (version !== undefined && (step.asks !== undefined || tests.length === 0)) {
+    const read = `"$( ( ${version} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )"`;
     tests.push(step.asks === undefined ? `[ -n ${read} ]` : `[ ${read} = ${shellQuote(step.asks)} ]`);
   }
   return tests;
@@ -232,7 +239,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   }
   // What wsp owns in the agents' homes there, written down once the servers are in their configs, so the next run
   // knows its own copy from a file the person has written since and the tree that travelled is gone from the box.
-  if (plan.files !== undefined) await closeAgentFiles(machine, on.home);
+  // Every job closes, whether or not this recipe carries a file of the person's: the close is also where the job's
+  // own folder there is swept, and a recipe with no files leaves the list exactly as it was.
+  await closeAgentFiles(machine, on.home);
   // After everything, so the document on the computer names what did not land. The floor's rows ride with the
   // tools: what a person reads there is what the recipe asked for and what is missing, floor rows included.
   const result: ImportResult = {
