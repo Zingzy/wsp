@@ -5,6 +5,7 @@
 //! verifying are ed25519-dalek's; the bytes they cover are the protocol's.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -165,16 +166,40 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
 /// The ownership read as this computer runs it: the one script text the engine renders, through a plain sh. Handed
 /// in rather than run from inside the sweep so a case can read the script that was run and when it was run.
 pub(crate) fn sh_stdout(script: &str) -> String {
-    std::process::Command::new(SH)
-        .arg("-c")
-        .arg(script)
-        .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-        .unwrap_or_default()
+    sh_stdout_within(script, Duration::from_millis(u64::from(numbers::EXEC_TIMEOUT_DEFAULT_MS)))
 }
 
 /// By its own path: the script is POSIX sh, and a daemon under a service unit holds almost no PATH to find one on.
 const SH: &str = "/bin/sh";
+
+/// The same read under a bound, which every run of ours has: the script hashes a file per line of the list, and one
+/// of those files on a mount that has stopped answering would otherwise hang the leave for as long as the mount
+/// does, with the link's host waiting on a reply that never comes. Past the bound the process this started is
+/// killed by the pid it was started with and the read answers nothing, which keeps every file of the person's.
+fn sh_stdout_within(script: &str, within: Duration) -> String {
+    let child = std::process::Command::new(SH)
+        .arg("-c")
+        .arg(script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(child) = child else { return String::new() };
+    let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap_or(-1));
+    let (said, wait) = std::sync::mpsc::channel();
+    // stdout is read as it comes and not after the wait: a list long enough to fill the pipe would stop a child
+    // that nothing is reading from, and a child that never exits is the one thing this bound is here for.
+    let reading = std::thread::spawn(move || {
+        let read = child.wait_with_output().map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+        let _ = said.send(read.unwrap_or_default());
+    });
+    let answer = wait.recv_timeout(within);
+    if answer.is_err() && pid.as_raw() > 0 {
+        let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+    }
+    let _ = reading.join();
+    answer.unwrap_or_default()
+}
 
 /// Takes wsp off this computer and answers what went: first every file wsp itself landed in the agents' homes here
 /// whose bytes are still the ones wsp left, read by the one ownership script, then the paths the protocol names, in
@@ -650,6 +675,22 @@ mod tests {
         sweep_place_home(home.path(), &watched);
         assert!(!ledger.exists());
         assert!(!home.path().join(&rows[0].0).exists());
+    }
+
+    #[test]
+    fn a_read_that_would_not_return_is_killed_at_its_bound_and_answers_nothing() {
+        // What a file on a mount that has stopped answering does to the read that hashes it: the sweep waits for
+        // the bound and no longer, and a leave over the link answers its host rather than hanging inside it.
+        let started = std::time::Instant::now();
+        let said = sh_stdout_within("printf 'wsp-own\t.claude/settings.json\n'; while :; do sleep 1; done", Duration::from_millis(300));
+        assert_eq!(said, "", "a read that ran past its bound answered with what it had printed so far");
+        assert!(started.elapsed() < Duration::from_secs(5), "the bound was not what ended the read: {:?}", started.elapsed());
+        // A read that answers inside the bound is the whole of what it printed.
+        assert_eq!(
+            sh_stdout_within("printf 'wsp-own\t.claude/settings.json\n'", Duration::from_secs(5)),
+            "wsp-own\t.claude/settings.json\n"
+        );
+        assert_eq!(sh_stdout_within("exit 7", Duration::from_secs(5)), "");
     }
 
     #[test]

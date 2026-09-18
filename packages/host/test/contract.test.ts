@@ -375,6 +375,28 @@ describe("the agent contract on the command line and the tool door", () => {
     });
     expect(code).toBe(1);
     expect(io.errors).toEqual([]);
+
+    // The tool door carries the same answer with isError on it: a caller reading the structured content gets the
+    // push's own fields, not a failure object, since the branch is on the remote whatever the other half said.
+    const server = mcpServer(statePath, { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "contract-bring-back", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    try {
+      const answer = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
+      expect(answer.isError).toBe(true);
+      expect(answer.structuredContent).toEqual({ branch: "work", base: "main", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"], refused: prRefusal });
+      expect((answer.content as { text?: string }[]).map(part => part.text ?? "").join("")).toContain(prRefusal!);
+      // The note is the other half's other answer and is no error: the pull request waits and nothing failed.
+      prRefusal = undefined;
+      const noted = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
+      expect(noted.isError).not.toBe(true);
+      expect(noted.structuredContent).toMatchObject({ branch: "work", pr: { number: 3 } });
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command and --json on a prose command are usage; a missing key is auth", async () => {

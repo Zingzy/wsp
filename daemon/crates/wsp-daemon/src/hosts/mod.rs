@@ -261,13 +261,9 @@ mod tests {
     async fn a_gh_that_is_there_and_not_signed_in_reads_as_a_gh_that_is_not_there() {
         let ask = Ask { cwd: Path::new("/private/tmp/proof/repo"), remote_url: "git@github.com:o/r.git", branch: "work" };
         // Looking one up and opening one answer alike, and the open never reaches its create.
-        for runner in [
-            Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]),
-            Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]),
-        ] {
-            let found = find(&runner, &ask).await.unwrap_err();
-            assert_eq!((found.code, found.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
-        }
+        let looked = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]);
+        let found = find(&looked, &ask).await.unwrap_err();
+        assert_eq!((found.code, found.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
         let runner = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID), (4, "", SIGN_IN_SAID)]);
         let opened = open(&runner, &ask, "main", None, None).await.unwrap_err();
         assert_eq!((opened.code, opened.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));

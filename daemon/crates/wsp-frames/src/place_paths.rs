@@ -59,31 +59,20 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
 
 /// What the job that puts the recipe on a computer the person owns keeps there, as the protocol's
 /// placeProvisionPaths lays it out: all of it under the one folder wsp already owns on that computer, so a
-/// workspace there never sees it and one sweep takes the lot.
+/// workspace there never sees it and one sweep takes the lot. The two the daemon reads and no more: the folder a
+/// leave takes whole, and the list inside it the leave reads first. What the job itself writes under that folder
+/// is the host's to name, and a path here that nothing reads is a path nothing holds to the protocol's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaceProvisionPaths {
     pub dir: PathBuf,
-    pub run_dir: PathBuf,
-    pub log: PathBuf,
-    pub result: PathBuf,
-    pub staging: PathBuf,
     /// What wsp put in the agents' homes there and what it left there, so a leave and a later run tell wsp's own
     /// copy from a file the person has since written.
     pub landed: PathBuf,
-    pub landing: PathBuf,
 }
 
 pub fn place_provision_paths(home: &Path) -> PlaceProvisionPaths {
     let dir = place_daemon_paths(home).wsp.join("provision");
-    PlaceProvisionPaths {
-        run_dir: dir.join("run"),
-        log: dir.join("log"),
-        result: dir.join("result.json"),
-        staging: dir.join("files"),
-        landed: dir.join("landed"),
-        landing: dir.join("landing"),
-        dir,
-    }
+    PlaceProvisionPaths { landed: dir.join("landed"), dir }
 }
 
 /// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them: the parts first,
@@ -147,11 +136,6 @@ mod tests {
         let at = place_provision_paths(Path::new("/h/"));
         assert_eq!(at.dir, PathBuf::from("/h/.wsp/provision"));
         assert_eq!(at.landed, PathBuf::from("/h/.wsp/provision/landed"));
-        assert_eq!(at.landing, PathBuf::from("/h/.wsp/provision/landing"));
-        assert_eq!(at.staging, PathBuf::from("/h/.wsp/provision/files"));
-        assert_eq!(at.result, PathBuf::from("/h/.wsp/provision/result.json"));
-        assert_eq!(at.log, PathBuf::from("/h/.wsp/provision/log"));
-        assert_eq!(at.run_dir, PathBuf::from("/h/.wsp/provision/run"));
         assert_eq!(at, place_provision_paths(Path::new("/h")));
     }
 }
