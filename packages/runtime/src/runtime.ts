@@ -97,6 +97,7 @@ import {
   type UnreadStore,
   type VaultOptions,
   type WspError,
+  type WorkspaceHooks,
   type WorkspacePhase as EnginePhase,
   retentionPlan,
   rollback as rollbackGolden,
@@ -221,7 +222,7 @@ import { nextPortBase } from "./ports.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor } from "./devices.js";
-import { makePlaceDoor, PlaceForksNowhereError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
+import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
@@ -2677,6 +2678,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (e.type === "place.present") void image.keepCurrent(e.placeId);
       else if (e.type === "place.removed") copyRows.delete(e.placeId);
     });
+    // The recipe job on a computer holds the road a copy is built over, so the ask at its link answered nothing
+    // about its image: the job's own end is when the image there can be read at all, which is the moment the
+    // tally beside it is written.
+    bus.on("place.stage", e => {
+      if (e.type !== "place.stage" || e.step !== "provision" || e.placeId === undefined) return;
+      if (e.state === "done" || e.state === "failed") void image.keepCurrent(e.placeId);
+    });
     // A build on that computer is making its requests over the link that just went: the ones that may be asked
     // again are waiting on it, so the stage they are in says what it is waiting for and says its own line again
     // once the computer opens a socket.
@@ -3788,37 +3796,52 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace, generation: (live.get(record.id)?.generation ?? -1) + 1 };
+    const at = backendFor(record);
+    /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
+     * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
+     * pause is the stop of its machine there. So it gets none of the four hooks, a nap reads nothing off it and
+     * stores nothing, a wake puts nothing back, and a stamp or a refusal an earlier nap wrote on its record is
+     * about a vault it never had and goes. */
+    const vaulted = keepsImages(at);
+    if (!vaulted) {
+      delete record.vaultedAt;
+      delete record.vaultRefused;
+    }
     entry.ws = new Workspace(
       machine,
       {
         goldenSnapshot: record.golden,
         // A kind that declares no lifecycle has its nap and wake refused before the engine is asked, so it never wakes.
-        wakeAttempts: backendFor(record).lifecycle?.budgets.wakeAttempts ?? 0,
+        wakeAttempts: at.lifecycle?.budgets.wakeAttempts ?? 0,
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
-        vaultImport: async (m, payload) => {
-          await importInto(m, payload, "/");
-        },
-        stashVault: async m => {
-          try {
-            await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
-            record.vaultedAt = new Date(clock.now()).toISOString();
-            delete record.vaultRefused;
-          } catch (e) {
-            const why = e instanceof Error ? e.message : String(e);
-            // The record carries it, and the record alone: the files stay unbacked until a nap stores one, so the
-            // verdict stands on the pane's own backup line rather than passing through one nap's status.
-            record.vaultRefused = why;
-            console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
-          }
-        },
-        restoreVault: async m => {
-          const payload = await store.getBlob(VAULTS, record.id);
-          if (payload !== undefined) await importInto(m, payload, "/");
-        },
+        ...(vaulted
+          ? ({
+              vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
+              vaultImport: async (m, payload) => {
+                await importInto(m, payload, "/");
+              },
+              stashVault: async m => {
+                try {
+                  await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
+                  record.vaultedAt = new Date(clock.now()).toISOString();
+                  delete record.vaultRefused;
+                } catch (e) {
+                  const why = e instanceof Error ? e.message : String(e);
+                  // The record carries it, and the record alone: the files stay unbacked until a nap stores one, so the
+                  // verdict stands on the pane's own backup line rather than passing through one nap's status.
+                  record.vaultRefused = why;
+                  console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
+                }
+              },
+              restoreVault: async m => {
+                const payload = await store.getBlob(VAULTS, record.id);
+                if (payload !== undefined) await importInto(m, payload, "/");
+              },
+            } satisfies Pick<WorkspaceHooks, "vaultExport" | "vaultImport" | "stashVault" | "restoreVault">)
+          : {}),
         // The backend settles its own moves under its own budgets; the runtime sends each once, hands the resume
         // the person's stop, and says on the row that a resume the backend gave up on is being read about.
         move: (m, move) =>
@@ -7583,9 +7606,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (record === undefined || copyIsCurrent(record, built.copy)) return;
         }
       } catch (e) {
-        // A place that runs no workspaces has no copy to keep, and a link that went is not a build to show. Every
-        // other failure is the row's to say until the next build there takes the row over.
-        if (e instanceof PlaceForksNowhereError || isPlaceAbsent(e) || away()) return;
+        // A place that runs no workspaces has no copy to keep, and a link that went is not a build to show. A
+        // computer whose recipe is running is no build either: nothing was asked of its image, the job's own end
+        // asks again, and a row here would read as a build that stopped. Every other failure is the row's to say
+        // until the next build there takes the row over.
+        if (e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || away()) return;
         copyRows.set(place, copyStoppedLine(e instanceof Error ? e.message : String(e)));
       }
     },
