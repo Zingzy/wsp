@@ -836,6 +836,10 @@ export const IMAGE_NO_VAULT = "no sign-ins held; cut the next version to hold th
 export const IMAGE_PASSPHRASE_ENV = "WSP_IMAGE_PASSPHRASE";
 /** What a host that has sealed nothing says. Named apart from the attachment lines beside it: those are pictures. */
 export const NO_SEALED_IMAGE = "no image yet; run wsp init to build one";
+/** The same where a road needed the image to fork and there is none. */
+export const NO_IMAGE_YET = "no image yet; run wsp init";
+/** And where that road was an add carrying a person's own files onto a computer that keeps an image. */
+export const NO_IMAGE_FOR_SEED = `${NO_IMAGE_YET}; the seed lands inside a copy of your image, so there is nowhere for it to go yet`;
 
 /** Whether a copy stands on the record as it is now: built at the record's hash, which is the whole of it. The
  * version is the place's own manifest number and says nothing about which record the copy came from, so a second

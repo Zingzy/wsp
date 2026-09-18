@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { addedProjectLine, defaultSeedChoice, kindForComputer, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
+import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -938,16 +938,31 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
       }
       seed = choice;
     }
-    const { project } = await client.request<{ project: ProjectView }>("projects.add", {
-      source,
-      ...(flags.on !== undefined ? { on: flags.on } : {}),
-      ...(flags.name !== undefined ? { name: flags.name } : {}),
-      ...(flags.base !== undefined ? { base: flags.base } : {}),
-      ...(seed !== undefined ? { seed } : {}),
-    });
-    // The computer by the name this wsp holds for it, off the same list every table reads.
+    // The computer by the name this wsp holds for it, off the same list every table reads; read before the add,
+    // since the stages below land while it runs and each names the computer by its id.
     const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
-    io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), hostPlatform()));
+    const onId = places.find(p => p.id === onComputer || p.name === onComputer)?.id;
+    // The add's own stages as they land on that computer: a clone, a seed and an install take minutes there, and
+    // a person watching a line that says nothing cannot tell a slow clone from a wedged one.
+    const off = client.onFrame(frame => {
+      const stage = ProjectAddEvent.safeParse(frame);
+      if (!stage.success || (onId !== undefined && stage.data.computer !== onId)) return;
+      io.log(stage.data.message);
+    });
+    await client.events();
+    try {
+      const { project, notice } = await client.request<{ project: ProjectView; notice?: string }>("projects.add", {
+        source,
+        ...(flags.on !== undefined ? { on: flags.on } : {}),
+        ...(flags.name !== undefined ? { name: flags.name } : {}),
+        ...(flags.base !== undefined ? { base: flags.base } : {}),
+        ...(seed !== undefined ? { seed } : {}),
+      });
+      io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), hostPlatform()));
+      if (notice !== undefined) io.log(notice);
+    } finally {
+      off();
+    }
     return 0;
   } finally {
     client.close();

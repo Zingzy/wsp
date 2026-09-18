@@ -687,8 +687,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
               return;
             case "projects.remove":
-              await rt.projects.remove(msg.projectId, origin);
-              send({ id: msg.id, ok: true });
+              send({ id: msg.id, ok: true, ...(await rt.projects.remove(msg.projectId, origin)) });
               return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });

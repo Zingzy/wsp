@@ -75,6 +75,11 @@ describe("the install a project's own root picks", () => {
     expect(seedInstallsFor(["pnpm-lock.yaml", "package-lock.json"]).map(i => i.install.run)).toEqual(["npm ci"]);
   });
 
+  it("takes bun's text lockfile, and a root carrying both of bun's installs once", () => {
+    expect(seedInstallsFor(["bun.lock"]).map(i => i.install.run)).toEqual(["bun install --frozen-lockfile"]);
+    expect(seedInstallsFor(["bun.lock", "bun.lockb"]).map(i => i.install.run)).toEqual(["bun install --frozen-lockfile"]);
+  });
+
   it("answers nothing for a root with no lockfile on any row", () => {
     expect(seedInstallsFor(["package.json", "README.md"])).toEqual([]);
   });
