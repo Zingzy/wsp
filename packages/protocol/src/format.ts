@@ -159,6 +159,20 @@ export const presentElsewhereLine = (bin: string, path: string, roadWords: strin
 export const doctorComputerRowLine = (name: string, finishedAt: string): string =>
   `the computers row read it present at ${finishedAt}; wsp add ${name} --update reads it again`;
 
+/** Why a doctor's computer road was refused for a row that is not a computer somebody joined: the computer the
+ * host runs on and a cloud account are proved by the terminal that typed the line, since one reads that computer's
+ * own files and the other forks a machine and bills. */
+export const doctorRowRefusal = (name: string): string =>
+  `wsp doctor proves a computer you added on the host that holds its link; ${name} is proved at the terminal that typed the line`;
+
+/** Why a second doctor on one computer is refused while the first is still going: two of them would make two
+ * workspaces there and read the same tools twice. */
+export const doctorRunningLine = (name: string): string => `the doctor is already proving ${name}; wait for it`;
+
+/** What a host that serves the op without wiring the road answers: the road is the host's own, so a runtime served
+ * without one has no computer to prove. */
+export const DOCTOR_UNSERVED = "the host that answered wired no doctor for the computers it holds";
+
 /** Why a copy on the computer the host runs on was refused: the daemon binary staged beside this wsp is older than
  * the one this wsp needs, which is what an update that rebuilt the host and not the binary leaves. Read before the
  * first copy is made, so the binary's own usage text never reaches a person as the refusal. */

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
-import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
-import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
-import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
+import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
+import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
+import { newPlaceKeyPair, type PlaceRecord } from "../src/places.js";
+import { serveRuntime, type ForwardsSource, type PlaceDoctor, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 import { abortedCall, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
@@ -10,9 +11,13 @@ import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 
 let srv: RuntimeServer | undefined;
+/** The one runtime a case here builds with records of its own, closed beside the server it was served on. */
+let doctorRt: Runtime | undefined;
 afterEach(async () => {
   await srv?.close();
   srv = undefined;
+  await doctorRt?.close();
+  doctorRt = undefined;
 });
 
 function rt() {
@@ -925,5 +930,142 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     sub.close();
     await until(() => listeners.size === 0);
     quiet.close();
+  });
+});
+
+describe("serveRuntime the doctor's computer road", () => {
+  const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, engine: "docker" as const };
+  const record: PlaceRecord = {
+    id: "p_1",
+    name: "spoo",
+    publicKey: "k",
+    joinedAt: "2026-09-18T09:00:00.000Z",
+    lastSeenAt: "2026-09-18T09:00:00.000Z",
+    report: {
+      name: "spoo",
+      platform: "linux",
+      arch: "x64",
+      os: "Ubuntu 24.04",
+      shape: { cpu: 4, memMb: 4096 },
+      login: { HOME: "/root", USER: "root", PATH: "/usr/bin" },
+      runsWorkspaces: true,
+      engine: "none",
+      daemonVersion: 54,
+      agents: [],
+      wsp: ["/usr/local/bin/wsp"],
+      dialed: "http://192.168.1.20:14621",
+    },
+  };
+
+  /** A host that holds one computer, one cloud row and its own, with the doctor's road wired or not. */
+  async function serving(doctor?: PlaceDoctor): Promise<RuntimeServer> {
+    const store = memoryStore();
+    await store.put("places", record.id, record);
+    const runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: { hostKey: newPlaceKeyPair(), provider: () => ({ id: "solari", rateUsdPerHour: 1 }), here: () => HERE, hostName: () => "zingzys-mac" },
+    });
+    doctorRt = runtime;
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret", ...(doctor === undefined ? {} : { doctor }) });
+    return srv;
+  }
+
+  /** A road that says the lines it was given through its own listeners and then answers, held open while `hold`
+   * is set so a second request meets it running. */
+  function fakeDoctor(o: { code?: number; lines?: readonly (readonly [string, "out" | "err"])[]; hold?: boolean } = {}) {
+    const listeners = new Set<(e: DoctorLineEvent) => void>();
+    const asked: { placeId: string; doctorId: string; project?: string }[] = [];
+    let release: (() => void) | undefined;
+    const doctor: PlaceDoctor = {
+      on: fn => {
+        listeners.add(fn);
+        return () => void listeners.delete(fn);
+      },
+      run: async req => {
+        asked.push(req);
+        for (const [line, stream] of o.lines ?? []) for (const fn of [...listeners]) fn({ type: "doctor.line", doctorId: req.doctorId, line, stream });
+        if (o.hold === true) await new Promise<void>(resolve => (release = resolve));
+        return { code: o.code ?? 0 };
+      },
+    };
+    return { doctor, asked, release: (): void => release?.() };
+  }
+
+  it("says every line of the road to the sockets reading events, in order and before the reply, and answers what the road exited with", async () => {
+    const { doctor, asked } = fakeDoctor({ code: 1, lines: [["spoo answers", "out"], ["DOCTOR FAIL: spoo", "err"]] });
+    const s = await serving(doctor);
+    const c = await WsClient.connect(s.port, { token: "secret" });
+    await c.request("events.subscribe");
+    const reply = await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1", project: "spoo-landing" });
+    expect(reply).toMatchObject({ ok: true, code: 1 });
+    // Both frames landed before the reply did, in the order the road said them, and neither carries a sequence:
+    // the lines are a host source's and never enter the ring a client replays from.
+    expect(c.events).toEqual([
+      { type: "doctor.line", doctorId: "d_1", line: "spoo answers", stream: "out" },
+      { type: "doctor.line", doctorId: "d_1", line: "DOCTOR FAIL: spoo", stream: "err" },
+    ]);
+    expect(asked).toEqual([{ placeId: "p_1", doctorId: "d_1", project: "spoo-landing" }]);
+    c.close();
+  });
+
+  it("replays none of them to a socket that subscribed after the road had spoken", async () => {
+    const { doctor } = fakeDoctor({ lines: [["spoo answers", "out"]] });
+    const s = await serving(doctor);
+    const c = await WsClient.connect(s.port, { token: "secret" });
+    await c.request("events.subscribe");
+    expect(await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" })).toMatchObject({ ok: true, code: 0 });
+    const late = await WsClient.connect(s.port, { token: "secret" });
+    expect((await late.request("events.subscribe")).ok).toBe(true);
+    // A round trip after the subscription, so a frame on its way would have landed by the read below.
+    expect((await late.request("places.list")).ok).toBe(true);
+    expect(late.events).toEqual([]);
+    c.close();
+    late.close();
+  });
+
+  it("a host that wired no road refuses the op in one sentence", async () => {
+    const s = await serving();
+    const c = await WsClient.connect(s.port, { token: "secret" });
+    expect(await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" })).toMatchObject({ ok: false, error: DOCTOR_UNSERVED });
+    c.close();
+  });
+
+  it("refuses a word that names no row, and the two rows this road was never for, without reaching the road", async () => {
+    const { doctor, asked } = fakeDoctor();
+    const s = await serving(doctor);
+    const c = await WsClient.connect(s.port, { token: "secret" });
+    const rows = (await c.request("places.list"))["places"] as { id: string; name: string; kind: string }[];
+    const here = rows.find(p => p.id === HERE_PLACE_ID)!;
+    const cloud = rows.find(p => p.kind === "provider")!;
+    expect(await c.request("places.doctor", { placeId: "p_nope", doctorId: "d_1" })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nope", rows.map(p => p.name)) });
+    expect(await c.request("places.doctor", { placeId: here.id, doctorId: "d_1" })).toMatchObject({ ok: false, kind: "usage", error: doctorRowRefusal(here.name) });
+    expect(await c.request("places.doctor", { placeId: cloud.id, doctorId: "d_1" })).toMatchObject({ ok: false, kind: "usage", error: doctorRowRefusal(cloud.name) });
+    expect(asked).toEqual([]);
+    c.close();
+  });
+
+  it("refuses a second road on one computer while the first is still going, and runs one after it has answered", async () => {
+    const { doctor, asked, release } = fakeDoctor({ hold: true });
+    const s = await serving(doctor);
+    const c = await WsClient.connect(s.port, { token: "secret" });
+    const first = c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" });
+    await until(() => asked.length === 1);
+    expect(await c.request("places.doctor", { placeId: "p_1", doctorId: "d_2" })).toMatchObject({ ok: false, kind: "conflict", error: doctorRunningLine("spoo") });
+    release();
+    expect(await first).toMatchObject({ ok: true, code: 0 });
+    const again = c.request("places.doctor", { placeId: "p_1", doctorId: "d_3" });
+    await until(() => asked.length === 2);
+    release();
+    expect(await again).toMatchObject({ ok: true, code: 0 });
+    c.close();
+  });
+
+  it("a socket a thread's own token let in reads none of these lines: the event names no workspace, and that is the rule that hides it", () => {
+    const runtime = rt();
+    const line: DoctorLineEvent = { type: "doctor.line", doctorId: "d_1", line: "spoo answers", stream: "out" };
+    expect(runtime.workspaces.seenBy(line, "here")).toBe(true);
+    expect(runtime.workspaces.seenBy(line, { origin: "here", by: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } })).toBe(false);
   });
 });

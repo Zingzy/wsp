@@ -235,12 +235,14 @@ so it is reachable with no port open to the world.
   wsp doctor [<computer>] [--project <name>] [--local] [--yes]
       prove a computer end to end. With no word, this computer and then every
       computer you added, forking nothing and billing nothing. With a computer's
-      name, that one: a joined computer gets a short-lived workspace made there
-      and the recipe's tools read inside it; a cloud account gets your image
-      forked, wsp put on the fork, a file coming back and the teardown, which
-      forks a live machine and bills while it runs. --local proves this computer
-      alone: a thread here and its reply, no machine, no key. --project names
-      the project the workspace is made of, by name, on the computer named
+      name, that one: a joined computer is proved by the host that computer
+      dials, which makes a short-lived workspace there and reads the recipe's
+      tools inside it, and this line prints what the host says; a cloud account
+      gets your image forked, wsp put on the fork, a file coming back and the
+      teardown, which forks a live machine and bills while it runs. --local
+      proves this computer alone: a thread here and its reply, no machine, no
+      key. --project names the project the workspace is made of, by name, on the
+      computer named
 ```
 
 ## wsp init
@@ -903,11 +905,12 @@ usage: wsp leave
 usage: wsp doctor [<computer>] [--project <name>] [--local] [--yes]
   prove a computer end to end. With no word, this computer and then every
   computer you added, forking nothing and billing nothing. With a computer's
-  name, that one: a joined computer gets a short-lived workspace made there and
-  the recipe's tools read inside it; a cloud account gets your image forked, wsp
-  put on the fork, a file coming back and the teardown, which forks a live
-  machine and bills while it runs. --local proves this computer alone: a thread
-  here and its reply, no machine, no key. --project names the project the
+  name, that one: a joined computer is proved by the host that computer dials,
+  which makes a short-lived workspace there and reads the recipe's tools inside
+  it, and this line prints what the host says; a cloud account gets your image
+  forked, wsp put on the fork, a file coming back and the teardown, which forks
+  a live machine and bills while it runs. --local proves this computer alone: a
+  thread here and its reply, no machine, no key. --project names the project the
   workspace is made of, by name, on the computer named
 
   --state      the state file: this word first, else WSP_HOME's state.json, else

@@ -51,6 +51,11 @@ export interface LocalDaemonOptions {
    * here and written there, and every later frame is checked against the file as it is then. Without one the file
    * is this daemon's own and its token lives as long as it does. */
   tokenPath?: string;
+  /** Where the binary's own stderr goes, a line at a time. It belongs in a serving host's log, which is what its
+   * stderr is; at a terminal the person asked a question of their own and what the daemon says as it starts is not
+   * the answer, so the line that started it there keeps none. The ring behind the start's failure sentence is kept
+   * either way. Without one the line goes to this process's stderr. */
+  say?: (line: string) => void;
 }
 
 /** Which daemon the binary that just listened is, off the hello it sends after the auth frame: one socket, opened
@@ -144,10 +149,24 @@ export class LocalDaemon {
     const child = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
     const said: string[] = [];
     child.stderr!.setEncoding("utf8");
+    const say = opts.say ?? ((line: string): void => void process.stderr.write(`${line}\n`));
+    // Whole lines to the sink, whatever the pipe hands over: a chunk is however much the binary had written when
+    // this process read, and a reader that keeps them is keeping lines and not reads. The ring behind the start's
+    // own failure sentence keeps the chunks as they came.
+    let rest = "";
     child.stderr!.on("data", (chunk: string) => {
       said.push(chunk);
       if (said.length > 20) said.shift();
-      process.stderr.write(chunk);
+      rest += chunk;
+      let nl: number;
+      while ((nl = rest.indexOf("\n")) !== -1) {
+        say(rest.slice(0, nl));
+        rest = rest.slice(nl + 1);
+      }
+    });
+    child.stderr!.once("end", () => {
+      if (rest !== "") say(rest);
+      rest = "";
     });
     let gone = false;
     const exited = new Promise<void>(done => child.once("exit", () => ((gone = true), done())));

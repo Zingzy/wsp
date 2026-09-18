@@ -4,9 +4,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
 import { accountHere, publicHostname } from "./relay-link.js";
@@ -69,6 +70,18 @@ export interface HostOptions {
   door?: "closed" | "open";
   /** The line said the first time the door binds, so a person reads about the firewall prompt where they asked. */
   doorLine?: (line: string) => void;
+  /** What the doctor's computer road reads on this host beside the runtime, for the places.doctor op; absent, the
+   * op is refused and no computer this host holds is proved from here. */
+  doctor?: HostDoctorReaders;
+}
+
+/** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
+ * at the ask rather than copied, and the recipe this computer holds planned for a computer somebody owns. The plan
+ * is the host's own place wiring's, so the recipe job and this road cannot read this computer two ways; a host
+ * whose wiring plans none leaves the step saying so. */
+export interface HostDoctorReaders {
+  vault(): Readonly<Record<string, string>>;
+  plan?(): Promise<ProvisionPlan | { noRecipe: string }>;
 }
 
 /** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
@@ -481,6 +494,41 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     return doorOpening;
   };
 
+  // The doctor's computer road runs on this process because this is the one holding that computer's link: a run at
+  // a terminal reads present off the map of links its own process holds, which holds none while a host serves. Its
+  // lines go to whoever subscribed as they are said, under the id the caller minted.
+  const readers = opts.doctor;
+  const doctorLines = new Set<(e: DoctorLineEvent) => void>();
+  const doctor: PlaceDoctor | undefined =
+    readers === undefined
+      ? undefined
+      : {
+          on: fn => {
+            doctorLines.add(fn);
+            return () => void doctorLines.delete(fn);
+          },
+          run: async req => {
+            const say = (line: string, stream: "out" | "err"): void => {
+              for (const fn of [...doctorLines]) fn({ type: "doctor.line", doctorId: req.doctorId, line, stream });
+            };
+            const rows = (await rt.places?.list(Date.now())) ?? [];
+            const row = rows.find(place => place.id === req.placeId);
+            if (row === undefined) throw new Error(noSuchPlaceRefusal(req.placeId, rows.map(place => place.name)));
+            const asks = (question: string): Promise<never> => Promise.reject(new Error(`${question.split("\n")[0]}: the doctor's road on a host asks nobody`));
+            const code = await computerDoctor(
+              rt,
+              { log: line => say(line, "out"), error: line => say(line, "err"), ask: asks, askSecret: asks },
+              row,
+              {
+                vault: readers.vault,
+                ...(readers.plan !== undefined ? { plan: readers.plan.bind(readers) } : {}),
+                ...(req.project !== undefined ? { project: req.project } : {}),
+              },
+            );
+            return { code };
+          },
+        };
+
   // The runtime answers upgrades of WS_PATH on the server above as well as on its own port, so a client that
   // reached the app through one forwarded port has the protocol on that same port.
   try {
@@ -501,6 +549,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // on the next read, and the read is two small files on this computer.
       account: { read: async () => accountHere(opts.statePath, wspHome()) },
       ...(opts.init !== undefined ? { init: opts.init } : {}),
+      ...(doctor !== undefined ? { doctor } : {}),
     });
   } catch (e) {
     await relay.close();

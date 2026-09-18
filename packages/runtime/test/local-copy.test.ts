@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeCopier, LocalBackend, projectStateKey } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
-import { copyPathFor, DAEMON_VERSION, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { COPY_SIZE_LINE_BYTES, createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
@@ -284,6 +284,10 @@ describe("the daemon beside this host, before the first copy", () => {
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message).toBe(`this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @zingzy/wsp stages the right one`);
     expect((refused as Error).message.toLowerCase()).not.toContain("usage:");
+    // A daemon behind this wsp is not a mistyped line and not a name somebody took: it is what the host refused,
+    // which is the class an error carrying no kind of its own reads as, and the code a create exits with.
+    expect(exitClassOf(refused)).toBe("provider");
+    expect(EXIT_CODES[exitClassOf(refused)]).toBe(1);
     // The binary was never run: the read is what the copy waits on, and the read is what started the daemon.
     expect(copier.asks).toEqual([]);
     expect(starts).toBe(1);

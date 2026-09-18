@@ -21,18 +21,18 @@ import {
   type GoldenVersion,
   type LocalWiring,
   type Machine,
+  type PlaceWiring,
   type Runtime,
   type SeedWiring,
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { type AppPorts, authority, authRefusal, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
-import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
+import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { daemonFixLine } from "./daemon-fix.js";
-import { placeProvisioner } from "./place-provision.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS, keyIn, parseEnvFile, savedEnv, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
@@ -89,8 +89,8 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
-import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
-import { startHost, workspaceRoads, type HostHandle } from "./server.js";
+import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
@@ -502,8 +502,14 @@ export function localWiring(
   startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts)),
   runDir: string = hostRunDir(join(defaultHomeIn(home), "state.json")),
   copier: Copier | undefined = copierHere(),
+  /** Where the daemon's own stderr goes as it starts. A serving host's stderr is its log, which is where those
+   * lines belong; a line at a terminal asked a question of its own and hands a sink that keeps none. */
+  say: (line: string) => void = line => void process.stderr.write(`${line}\n`),
 ): LocalWiring {
   const root = localWorkFolder(home);
+  /** Every run this wiring is reading, as the call that lets go of each. A poll on a turn left running holds the
+   * process after its last line, and a turn is not this wiring's to end: closing lets go and leaves them running. */
+  const reading = new Set<() => void>();
   // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
   // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
   const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
@@ -512,12 +518,12 @@ export function localWiring(
   // Started on the first dial and kept: a host nobody opens a pane on starts no process, binds no port on this
   // computer and writes none of the daemon's own files under the person's home.
   const daemon = startOnce(
-    () => startDaemon({ root: home, workFolder: backend.workFolder() }),
+    () => startDaemon({ root: home, workFolder: backend.workFolder(), say }),
     why => `the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${why}`,
   );
   return {
     backend,
-    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), runDir, ...o }, waiting),
+    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), runDir, reading, ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
     ...(copier !== undefined ? { copier } : {}),
@@ -549,11 +555,13 @@ export function localWiring(
     },
     close: async () => {
       shutting = true;
-      const started = daemon.held();
-      daemon.forget();
       // The turns running here are not ended: each leads a process group of its own and reads its own log off this
       // computer, so the host that comes next re-opens them and their replies still land. What this host holds open
-      // is the daemon, and that is what closing it frees.
+      // is the reading of those runs and the daemon, and that is what closing it frees.
+      for (const stop of [...reading]) stop();
+      reading.clear();
+      const started = daemon.held();
+      daemon.forget();
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -714,6 +722,10 @@ export function makeRuntime(
   /** This computer as a workspace, where the caller built the wiring itself and holds a reader off it: the doctor
    * reads the daemon beside this host through the same wiring the copy road runs it from. */
   local: LocalWiring = localWiring(homedir(), process.env, undefined, hostRunDir(statePath)),
+  /** The links this host holds to the computers a person joined, and the one planner the recipe on this computer
+   * is read through. Built here for a caller that needs none of it back; handed in by one that reads the recipe
+   * off the same planner, so the doctor and the recipe job cannot read this computer two ways. */
+  links: PlaceWiring = placeWiring(statePath, env, agents?.advertise),
 ): Runtime {
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
@@ -735,7 +747,7 @@ export function makeRuntime(
     },
     local,
     ssh: sshWiring(),
-    placeLinks: placeWiring(statePath, env, agents?.advertise),
+    placeLinks: links,
     store: jsonFileStore(statePath),
     statePath,
     adapters: HARNESS_ADAPTERS,
@@ -1051,6 +1063,9 @@ async function init(
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const { keys, env: providerEnv } =
     beside !== undefined ? { keys: keysFound(), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv), { anthropic: false, noSolari: "offer", checkSaved: true });
+  // One wiring for every runtime this run builds and for the host it serves at the end: the links and the recipe
+  // planner are the same on both roads below.
+  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
   // The first screen names where the image is built: the host's place, or the provider this run itself forks on.
   const builds = beside !== undefined ? beside.place : forksNoMachines(providerBackendFor(providerEnv).capabilities) ? undefined : wiredProviderId(providerEnv);
   if (builds !== undefined) builtOn(screen, builds);
@@ -1072,9 +1087,9 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, agentsReachOf(opts)),
+        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, agentsReachOf(opts), undefined, links),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
-        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv, links }, say),
       },
       screen,
     );
@@ -1112,7 +1127,7 @@ async function init(
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
         scan: recipe => scanTools(nodeHost(), recipe),
-        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts)),
+        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts), undefined, links),
         bundleFile: () => missingBundleFile(),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
@@ -1130,7 +1145,7 @@ async function init(
             builder,
           }),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
-        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv, links }, say),
         ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, screen, o.interactive, flags) } : {}),
       },
       screen,
@@ -1173,8 +1188,11 @@ export interface ServeOptions {
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
-  return hostFor(rt, keys, { ...opts, providerEnv }, io, opts.running);
+  // One wiring for the runtime and for the host over it, so the links this host holds and the recipe its doctor
+  // reads come from the same place.
+  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
+  return hostFor(rt, keys, { ...opts, providerEnv, links }, io, opts.running);
 }
 
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
@@ -1190,12 +1208,13 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
   // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
   // no workspace to record, and wsp add is the road. The host listens for pairing either way.
   if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
   // The road is written into the lock here and nowhere else: this is wsp up, so wsp down stops what it serves.
-  return hostFor(rt, keys, { ...opts, providerEnv, startedBy: opts.startedBy ?? "up" }, io, opts.running);
+  return hostFor(rt, keys, { ...opts, providerEnv, links, startedBy: opts.startedBy ?? "up" }, io, opts.running);
 }
 
 /** What a host with no Claude key says as it starts. A host that forks machines gives each fork the key as an env,
@@ -1225,11 +1244,15 @@ async function hostFor(
     providerEnv: ProviderEnv;
     /** Which command line road brought this host up, for the lock; absent is the app's own road. */
     startedBy?: HostStarted;
+    /** The place wiring the runtime was built with, so the doctor's road on this host reads the recipe through the
+     * planner the recipe job runs and not a second one of its own. Built here for a caller that handed none. */
+    links?: PlaceWiring;
   },
   io: CliIO,
   run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
   const address = opts.address ?? LOOPBACK;
+  const links = opts.links ?? placeWiring(opts.statePath, opts.providerEnv, opts.advertise);
   const lockPath = lockPathFor(opts.statePath);
   const started = startedByVerb(process.env) ? ("verb" as const) : opts.startedBy;
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address, ...(started !== undefined ? { startedBy: started } : {}) });
@@ -1257,6 +1280,7 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
+      doctor: hostDoctorReaders(links, opts.providerEnv),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
@@ -1640,8 +1664,17 @@ interface Command {
   host: HostFlag;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
-  run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[]): Promise<number>;
+  run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[], deps: CommandDeps): Promise<number>;
 }
+
+/** What a command of the shared parse reaches another host with. One dial, the one every verb takes, so a test
+ * hands a fake host client where a real one would be dialled. */
+export interface CommandDeps {
+  dial(statePath: string, opts: DialOpts): Promise<HostClient>;
+}
+
+/** The dial every command line takes when the caller names no other. */
+export const SYSTEM_COMMAND_DEPS: CommandDeps = { dial: dialHost };
 
 /** What a command that reads where a line is aimed works on: the state file this run names, the home holding the
  * hosts folder, the environment the run was made in and the word --host gave. One reading for the three commands
@@ -1677,8 +1710,20 @@ export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbe
   return undefined;
 }
 
+/** What the doctor's computer road reads on a serving host beside the runtime: the keys as they stand at the ask,
+ * and the recipe off the one planner that host's places wiring already holds. Written here so the recipe job and
+ * this road read this computer through one planner and no road can grow a second. */
+export function hostDoctorReaders(links: PlaceWiring, providerEnv: ProviderEnv): HostDoctorReaders {
+  const provision = links.provision;
+  return { vault: () => vaultNow(providerEnv), ...(provision !== undefined ? { plan: () => provision.plan() } : {}) };
+}
+
 /** The doctor's own usage line, read by its row and by every refusal that prints it. */
 const DOCTOR_USAGE = "wsp doctor [<computer>] [--project <name>] [--local] [--yes]";
+
+/** Set to 1, every road of the doctor prints what the loop still holds once it closed what it opened. A run that
+ * does not end after its last line is holding something, and this is what names it. */
+export const DOCTOR_HANDLES_ENV = "WSP_DOCTOR_HANDLES";
 
 /** What the doctor's roads that touch no provider load: no key, and no question about one. The local road and the
  * computer road fork nothing and bill nothing, so a person with a computer of their own and no cloud account is
@@ -1908,18 +1953,25 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     page: "dev",
     usage: DOCTOR_USAGE,
     about:
-      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer gets a short-lived workspace made there and the recipe's tools read inside it; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
+      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived workspace there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
     json: false,
     host: "refused",
     cliOnly: "runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal",
-    run: async (io, opts, values, args) => {
+    run: async (io, opts, values, args, deps) => {
       await adoptLoginPath(line => io.log(line));
       // One wiring for this computer, so the daemon the copy road would run and the one the doctor reads the
-      // version off are the same process.
-      const local = localWiring(homedir(), process.env, undefined, hostRunDir(opts.statePath));
+      // version off are the same process. Its sink keeps nothing: this is a person's screen, and what the daemon
+      // says on its own stderr as it starts is not the answer they asked for.
+      const local = localWiring(homedir(), process.env, undefined, hostRunDir(opts.statePath), undefined, () => {});
       const hereDaemon = local.hereDaemon;
       const word = args[0];
       if (args.length > 1) throw usageRefusal(`wsp doctor proves one computer, and it was given ${args.length} words: ${args.map(w => JSON.stringify(w)).join(" ")}.`, DOCTOR_USAGE);
+      // Read once, and printed at the end of every road: what is still open after a road closed what it opened is
+      // what would hold this process after its last line.
+      const showHandles = opts.env[DOCTOR_HANDLES_ENV] === "1";
+      const handles = (road: string): void => {
+        if (showHandles) io.error(`${road} left open: ${process.getActiveResourcesInfo().join(", ") || "nothing"}`);
+      };
       // The local road touches no provider, so a missing key is not asked for: it is the whole of the doctor for a
       // person whose wsp init took the local road.
       if (values.local === true) {
@@ -1930,49 +1982,74 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           return await localDoctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}) });
         } finally {
           await rt.close();
+          handles("the local road");
         }
       }
       // A project is the one a workspace on the computer named is made of, so it means nothing spread over every
       // computer this host holds: a run with no word would hand it to each of them and fail on any without it.
       if (values.project !== undefined && word === undefined) throw usageRefusal("wsp doctor --project names the project the workspace on the computer you named is made of, and no computer was named.", DOCTOR_USAGE);
-      // Which row the word names decides what this run needs, so the row is read first, off a runtime built with
-      // no key at all: a places list is records and the links this host is holding, and neither needs one. Only a
-      // cloud row's road forks and bills, and that is the one road that asks for a key.
-      const reading = await loadKeys(io, keySources(opts.providerEnv), NO_CLOUD_KEY);
+      const project = values.project === undefined ? {} : { project: values.project };
+      /** The roads this terminal walks itself: this computer, whose files and threads are here, and a cloud
+       * account, whose fork bills and whose key is asked for where a person is sitting. The runtime is this
+       * process's own and is closed on the way out, pass or fail. */
+      const terminalRoad = async (computer?: PlaceView): Promise<number> => {
+        const { keys, env } = await loadKeys(io, keySources(opts.providerEnv), doctorKeyAsk(computer));
+        // One planner for this run: the recipe the tools step reads against is the one the recipe job puts on a
+        // computer, read through the wiring this runtime holds its links with.
+        const links = placeWiring(opts.statePath, env);
+        const provision = links.provision;
+        const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local, links);
+        try {
+          return await doctor(rt, io, {
+            envs: claudeEnvs(),
+            ...(values.yes === true ? { yes: true } : {}),
+            ...(computer !== undefined ? { computer } : {}),
+            ...project,
+            ...(hereDaemon !== undefined ? { hereDaemon } : {}),
+            vault: () => vaultNow(opts.providerEnv),
+            ...(provision !== undefined ? { plan: () => provision.plan() } : {}),
+            statePath: opts.statePath,
+          });
+        } finally {
+          // The version read starts the daemon for this computer's workspace where nothing had; a run that left it
+          // standing would hold the terminal after its last line.
+          await rt.close();
+          handles(computer?.kind === "provider" ? "the cloud road" : "the local road");
+        }
+      };
+      // This computer's own host and no other: the word in the environment and the default alias name hosts that
+      // hold no link to the computers this line proves, and --host is refused on this line for the same reason.
+      const dialling = dialHere(io, opts);
+      // With no word: this computer first, on a runtime of this terminal's own and closed before anything else,
+      // then every computer joined to this one, each on the host that holds its link.
+      if (word === undefined) {
+        const here = await terminalRoad();
+        const client = await deps.dial(opts.statePath, dialling);
+        try {
+          const rows = (await client.request<{ places: PlaceView[] }>("places.list")).places;
+          const said = await doctorOverHost(client, io, rows, project);
+          return said === 0 ? here : said;
+        } finally {
+          client.close();
+          handles("the computer road");
+        }
+      }
+      // Which row the word names is read off the host that holds the links, since a computer reads present off the
+      // map of links the process it dialled is holding and a fresh runtime here holds none. A host is started for
+      // it where none serves, the way wsp add --update starts one.
+      const client = await deps.dial(opts.statePath, dialling);
       let computer: PlaceView | undefined;
-      const readRt = makeRuntime(reading.keys, opts.statePath, goldenRecipe(), reading.env);
       try {
-        computer = word === undefined ? undefined : doctorRow((await readRt.places?.list(Date.now())) ?? [], word);
+        computer = doctorRow((await client.request<{ places: PlaceView[] }>("places.list")).places, word);
+        // A computer somebody joined is proved on the host holding its link, which prints what that host says.
+        if (isJoinedComputer(computer)) return await hostDoctor(client, io, computer, project);
       } finally {
-        await readRt.close();
+        client.close();
+        // Named for the road that was walked: a word that turned out to be this computer's own row or a cloud row
+        // read the list over this socket and then took a road of the terminal's own, which says its own line.
+        if (computer !== undefined && isJoinedComputer(computer)) handles("the computer road");
       }
-      const { keys, env } = computer?.kind === "provider" ? await loadKeys(io, keySources(opts.providerEnv), doctorKeyAsk(computer)) : reading;
-      const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local);
-      try {
-        return await doctor(rt, io, {
-          envs: claudeEnvs(),
-          ...(values.yes === true ? { yes: true } : {}),
-          ...(computer !== undefined ? { computer } : {}),
-          ...(values.project !== undefined ? { project: values.project } : {}),
-          ...(hereDaemon !== undefined ? { hereDaemon } : {}),
-          vault: () => vaultNow(opts.providerEnv),
-          // The recipe beside this host's own state file, planned for a computer somebody owns by the same two
-          // readers the recipe job takes, so the doctor reads the tools inside against the plan that put them there.
-          plan: () =>
-            placeProvisioner({
-              statePath: opts.statePath,
-              home: homedir(),
-              platform: hostPlatform(),
-              collect: () => collectThisComputer(() => {}),
-              brew: () => readBrewTable(nodeHost()),
-            }).plan(),
-          statePath: opts.statePath,
-        });
-      } finally {
-        // The version read starts the daemon for this computer's workspace where nothing had; a run that left it
-        // standing would hold the terminal after its last line.
-        await rt.close();
-      }
+      return terminalRoad(computer);
     },
   },
 };
@@ -2322,6 +2399,7 @@ export async function cli(
   env: Readonly<Record<string, string | undefined>> = process.env,
   start: HostStarter | false = starterFor(run, env),
   caller: { cwd?: string; elsewhere?: boolean } = {},
+  deps: CommandDeps = SYSTEM_COMMAND_DEPS,
 ): Promise<number> {
   const starts = start === false ? {} : { start };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
@@ -2413,7 +2491,7 @@ export async function cli(
     return failed(io, json, usageRefusal(foreignFlagLine(`--${foreign.name}`, readers(foreign.name).map(w => `wsp ${w}`), `wsp ${words}`), `usage: ${command.usage}`));
   }
   try {
-    return await command.run(io, opts, values, asked.slice(words.split(" ").length));
+    return await command.run(io, opts, values, asked.slice(words.split(" ").length), deps);
   } catch (e) {
     return failed(io, json, e);
   }

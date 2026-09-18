@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -297,6 +297,46 @@ describe("a real turn's process group", () => {
     await kept.exited;
     await gone(keptPid);
   }, 20_000);
+
+  it("lets go of a run it is reading when the wiring that made it closes: the poll stops, the turn goes on and nothing about it is written", async () => {
+    const gate = join(root, "gate");
+    const reading = new Set<() => void>();
+    const factory = localExecStream({ root, runDir, reading });
+    const launched = factory(`sleep 300 & echo $! > ${join(root, "child")}; echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 300`, { env: {} });
+    const pid = await leftRunning();
+    const reader = launched.lines[Symbol.asyncIterator]();
+    expect(await reader.next()).toEqual({ value: "first", done: false });
+    // The one run this factory is reading, as the call that lets go of it.
+    expect(reading.size).toBe(1);
+
+    for (const stop of [...reading]) stop();
+    expect(reading.size).toBe(0);
+
+    writeFileSync(gate, "go\n");
+    const quiet = <T>(work: Promise<T>): Promise<T | "quiet"> => Promise.race([work, new Promise<"quiet">(resolve => setTimeout(() => resolve("quiet"), 500))]);
+    // The line landed in the log on disk and reaches nobody here: this process stopped reading, and the timer that
+    // read it is what would have held the loop open after the last line of whatever asked.
+    expect(await quiet(reader.next())).toBe("quiet");
+    expect(readFileSync(`${launched.run!}.log`, "utf8")).toContain("second");
+    // The stream never settles and the run is left exactly as it stands: ending it here would write the turn off
+    // for the process that owns it.
+    expect(await quiet(launched.exited)).toBe("quiet");
+    expect(existsSync(`${launched.run!}.exit`)).toBe(false);
+    expect(existsSync(`${launched.run!}.d`)).toBe(true);
+    expect(alive(pid)).toBe(true);
+
+    launched.kill();
+    await gone(pid);
+  }, 20_000);
+
+  it("a run that ended on its own is no longer one to let go of", async () => {
+    const reading = new Set<() => void>();
+    const factory = localExecStream({ root, runDir, reading });
+    const stream = factory("echo hi", { env: {} });
+    expect(await collect(stream.lines)).toEqual(["hi"]);
+    expect(await stream.exited).toBe(0);
+    expect(reading.size).toBe(0);
+  }, 15_000);
 
   it("teardown reaches what the turn started, not the shell alone", async () => {
     const factory = localExecStream({ root, runDir });
