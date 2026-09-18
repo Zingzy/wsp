@@ -150,7 +150,7 @@ export function WorkspaceSidebar() {
   const [trip, setTrip] = useState<ProjectTripState | null>(null);
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
-  const [forgetting, setForgetting] = useState<string | null>(null);
+  const [forgetting, setForgetting] = useState<{ workspaceId: string; act: "forget" | "delete" } | null>(null);
   /** The row whose name is being typed, by the row id every row already carries, and whether that name is on its way;
    * one row at a time whatever its kind, the row is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
@@ -201,14 +201,14 @@ export function WorkspaceSidebar() {
     for (const group of groups) void loadLanding(group.project.id);
   }, [groups, loadLanding]);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
-  const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting);
+  const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting.workspaceId);
 
   const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
   const openDialogRef = useRef(openDialog);
   openDialogRef.current = openDialog;
   useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current(null)), []);
   useEffect(() => onAddProjectRequest(() => setAddProject(Date.now())), []);
-  useEffect(() => onForgetWorkspaceRequest(({ workspaceId }) => setForgetting(workspaceId)), []);
+  useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceId, act })), []);
   useEffect(
     () =>
       onRenameWorkspaceRequest(({ workspaceId }) => {
@@ -631,6 +631,7 @@ export function WorkspaceSidebar() {
         <ForgetWorkspaceDialog
           workspace={forgetTarget.workspace}
           threads={forgetTarget.threads.length}
+          act={forgetting!.act}
           open
           onOpenChange={next => {
             if (!next) setForgetting(null);

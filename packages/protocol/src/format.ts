@@ -2323,6 +2323,14 @@ export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBa
   return portBase === undefined ? shares : `${shares}, PORT ${portBase}`;
 }
 
+/** What the browser pane says for a port it cannot open: the computer it runs on gives this pane no address, and
+ * the address that does answer is the one a terminal on that computer opens. Written here because it is the one
+ * sentence a person reads on that card; what the engine threw is the engine's own words about its backends and
+ * reaches no screen. */
+export function noPreviewRouteLine(port: number, computer: string): string {
+  return `${computer} opens no address this pane can reach for port ${port}; it answers as localhost:${port} on that computer.`;
+}
+
 /** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
  * the `wsp recipe scan` section are one section, so they carry one name. */
 export const alsoTitle = (platform: "darwin" | "linux"): string => `Also on ${thisComputer(platform)}`;

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer's picker row in a real Chromium, on a kept machine that holds
 // projects and whose harness takes an effort, so the row carries every
-// trigger it has: model, effort, access and project. At the 1200 px viewport
+// trigger it has: model, defaults and project. At the 1200 px viewport
 // with the right panel open, as it opens by default, and at the narrowest
 // centre the shell hands the row (an 1100 px viewport with the sidebar at its
 // widest and the right panel open inline, where the sidebar gives way and the
 // column sits at the shell's floor), every trigger reads
 // whole, none is cut by its own box or by the row's, and a pick of the access
-// mode whose label names the machine moves no other trigger: the access
-// trigger wears the word for what it sets with the short form behind it, and
-// its menu row the long one. A project
+// mode whose label names the machine moves no other trigger: the defaults
+// trigger wears the effort and the mode's short form, and its menu row the
+// long one. A project
 // name, the one label a person writes and no width bounds, is cut on its
 // button inside the row rather than running under the send button, and
 // reads whole in its menu row. Photographed in both themes. Runs only when
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { THIS_COMPUTER } from "@wsp/protocol";
-import { accessChipWords } from "../src/components/chat/ComposerOptionPickers";
+import { defaultsPickerLabel } from "../src/components/chat/format";
 import { SIDEBAR_MAX_WIDTH } from "../src/shell/sidebarWidth";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -99,19 +99,19 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
   /** The pick that names the machine, made from the menu as a person makes it. */
   const pickBypass = async (): Promise<string> => {
-    const trigger = "[data-composer-picker='permissionMode']";
+    const trigger = "[data-composer-picker='defaults']";
     await page!.locator(trigger).click();
     await page!.waitForSelector("[data-composer-option='bypassPermissions']");
     const row = (await page!.locator("[data-composer-option='bypassPermissions']").textContent()) ?? "";
     await page!.locator("[data-composer-option='bypassPermissions']").click();
-    await page!.waitForSelector(`${trigger}[data-value='bypassPermissions']`);
+    await page!.waitForSelector(`${trigger}[data-access='bypassPermissions']`);
     await page!.keyboard.press("Escape");
     await page!.waitForSelector("[role=menu]", { state: "detached" });
     return row;
   };
 
   const expectWhole = (row: Row, where: string): void => {
-    expect(row.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "effort", "permissionMode", "project"]);
+    expect(row.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "defaults", "project"]);
     for (const t of row.triggers) {
       expect(t.cut, `${t.picker} reads "${t.text}" cut at ${where}`).toBe(false);
       expect(t.left, `${t.picker} starts before the row at ${where}`).toBeGreaterThanOrEqual(row.group.left - 0.5);
@@ -140,7 +140,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
   ] as const;
 
   for (const width of widths) {
-    it(`at ${width.label} every trigger reads whole before and after bypass is picked, the access trigger wears the short form and its menu row the long one, and nothing else moves, in both themes`, async () => {
+    it(`at ${width.label} every trigger reads whole before and after bypass is picked, the defaults trigger wears the short form and its menu row the long one, and nothing else moves, in both themes`, async () => {
       await page!.setViewportSize({ width: width.viewport, height: 800 });
       for (const theme of ["dark", "light"] as const) {
         await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1${width.query}`);
@@ -157,15 +157,15 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
         expectWhole(before, `${width.label} before the pick in ${theme}`);
         expectWhole(after, `${width.label} after the pick in ${theme}`);
-        const access = after.triggers.find(t => t.picker === "permissionMode")!;
-        expect(access.text).toBe(accessChipWords("Bypass"));
+        const defaults = after.triggers.find(t => t.picker === "defaults")!;
+        expect(defaults.text).toBe(defaultsPickerLabel({ value: "high", label: "High" }, { value: "bypassPermissions", label: "Bypass" }));
         expect(menuRow).toContain(`Bypass on ${THIS_COMPUTER}`);
         // The pick moves nothing but the triggers after its own, and those only by the width of the word: every
         // trigger keeps its line and its height, the ones before the access pick keep their boxes, and the footer
         // keeps its height.
         const lines = (row: Row) => row.triggers.map(t => ({ picker: t.picker, top: t.top, height: t.height }));
         expect(lines(after)).toEqual(lines(before));
-        const ahead = (row: Row) => row.triggers.slice(0, row.triggers.findIndex(t => t.picker === "permissionMode"));
+        const ahead = (row: Row) => row.triggers.slice(0, row.triggers.findIndex(t => t.picker === "defaults"));
         expect(ahead(after)).toEqual(ahead(before));
         expect(after.footer.height).toBe(before.footer.height);
         expect(new Set(after.triggers.map(t => t.height))).toEqual(new Set([24]));

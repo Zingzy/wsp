@@ -27,12 +27,11 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
-import { FilesSurface } from "../src/files/FilesSurface.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -60,6 +59,7 @@ type FakeApi = Api & {
   nap: ReturnType<typeof vi.fn>;
   interruptSession: ReturnType<typeof vi.fn>;
   forget: ReturnType<typeof vi.fn>;
+  deleteWorkspace: ReturnType<typeof vi.fn>;
   forgetThread: ReturnType<typeof vi.fn>;
   renameSession: ReturnType<typeof vi.fn>;
   renameWorkspace: ReturnType<typeof vi.fn>;
@@ -76,6 +76,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     forget: vi.fn(async () => {}),
+    deleteWorkspace: vi.fn(async () => {}),
     // The runtime drops the thread's rows, so the next listing is short of them, as the real one is.
     forgetThread: vi.fn(async (threadId: string) => {
       for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]!.threadId === threadId) sessions.splice(i, 1);
@@ -191,35 +192,29 @@ describe("a workspace row's menu", () => {
     expect(opened.style.top).toBe("50px");
     expect(labels()).toEqual([
       WORKSPACE_WORDS.pause,
-      WORKSPACE_WORDS.rebuild,
-      WORKSPACE_WORDS.startDaemon,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.bringBack,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
-      WORKSPACE_WORDS.forget,
+      WORKSPACE_WORDS.delete,
     ]);
     expect(within(opened).getAllByRole("separator")).toHaveLength(5);
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
+    expect(refusalOf(WORKSPACE_WORDS.delete)).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
     await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.rebuild));
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.startDaemon));
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.newThread));
     fireEvent.keyDown(opened, { key: "End" });
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.forget));
+    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.delete));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause));
     fireEvent.keyDown(opened, { key: "Escape" });
@@ -234,7 +229,7 @@ describe("a workspace row's menu", () => {
     const opened = await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.fork));
     expect(menu()).not.toBeNull();
-    for (let step = 0; step < 4; step++) fireEvent.keyDown(opened, { key: "ArrowDown" });
+    for (let step = 0; step < 2; step++) fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.openTerminal));
     fireEvent.keyDown(opened, { key: "Enter" });
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_a"]?.terminalOpen).toBe(true));
@@ -288,17 +283,15 @@ describe("a workspace row's menu", () => {
     const sent = contextMenu.mock.calls[0]![0];
     expect(sent.map(i => [i.id, i.label, i.enabled])).toEqual([
       ["phase", WORKSPACE_WORDS.pause, true],
-      ["rebuild", WORKSPACE_WORDS.rebuild, false],
-      ["start-daemon", WORKSPACE_WORDS.startDaemon, false],
       ["new-thread", WORKSPACE_WORDS.newThread, true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],
-      ["open-machine", WORKSPACE_WORDS.openMachine, true],
+      ["bring-back", WORKSPACE_WORDS.bringBack, false],
       ["export-project", WORKSPACE_WORDS.exportProject, false],
       ["rename", WORKSPACE_WORDS.rename, true],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],
-      ["forget", WORKSPACE_WORDS.forget, false],
+      ["delete", WORKSPACE_WORDS.delete, true],
     ]);
     expect(sent.find(i => i.id === "rename")).not.toHaveProperty("refusal");
     expect(sent.find(i => i.id === "open-terminal")?.accelerator).toBe("CommandOrControl+J");
@@ -646,54 +639,6 @@ describe("a workspace row's name box", () => {
     expect(screen.queryAllByRole("textbox")).toHaveLength(1);
     expect(screen.getByText("fix the port list")).toBeDefined();
   });
-});
-
-describe("a Files pane row's menu", () => {
-  const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 20)));
-  const treeRow = (container: HTMLElement, path: string): HTMLElement => {
-    const row = container.querySelector("file-tree-container")?.shadowRoot?.querySelector<HTMLElement>(`[data-type='item'][data-item-path='${path}']`);
-    if (!row) throw new Error(`no tree row for ${path}`);
-    return row;
-  };
-
-  it("a file opens, shows in the diff and copies its absolute path; a folder copies its path alone", async () => {
-    resetSurfaces();
-    const writeText = clipboard();
-    provideDaemonWire(WS, fakeWire({ "fs.list": params => LEVELS[String(params["path"])] ?? new Error(`no such folder: ${String(params["path"])}`) }));
-    const { container } = render(
-      <>
-        <FilesSurface workspaceId={WS} theme="dark" />
-        <ContextMenuHost />
-      </>,
-    );
-    await waitFor(() => treeRow(container, "README.md"));
-    await settle();
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    expect(labels()).toEqual([FILE_WORDS.open, FILE_WORDS.showDiff, FILE_WORDS.copyPath]);
-    fireEvent.click(item(FILE_WORDS.copyPath));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/root/README.md"));
-
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    fireEvent.click(item(FILE_WORDS.showDiff));
-    await waitFor(() => expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBe("/root/README.md"));
-    const panel = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
-    expect(panel.surfaces.find(s => s.id === panel.activeSurfaceId)?.kind).toBe("diff");
-
-    rightClick(treeRow(container, "README.md"));
-    await screen.findByRole("menu");
-    fireEvent.click(item(FILE_WORDS.open));
-    await waitFor(() => expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.some(s => s.kind === "file" && s.relativePath === "/root/README.md")).toBe(true));
-
-    rightClick(treeRow(container, "src/"));
-    await screen.findByRole("menu");
-    expect(item(FILE_WORDS.open).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(FILE_WORDS.open)).toBe("A folder opens in the tree");
-    expect(item(FILE_WORDS.showDiff).getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(item(FILE_WORDS.copyPath));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("/root/src"));
-  }, 20_000);
 });
 
 describe("the terminal surface's menu", () => {

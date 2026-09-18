@@ -101,7 +101,9 @@ describe("the workspace menu the smoke expects", () => {
   it("is the workspace registry's own words in its own order, with a separator wherever the group changes", () => {
     const target = workspaceTarget(RUNNING, null, []);
     const shape = workspaceMenuShape(RUNNING);
-    const shown = workspaceActions;
+    // The rows a running workspace of this kind takes; the registry's own rule leaves out the roads out of a state
+    // it is not in, and the shape the smoke expects is the shape a person sees.
+    const shown = workspaceActions.filter(entry => entry.applies?.(target) ?? true);
     expect(shape.filter(row => row !== SEPARATOR)).toEqual(shown.map(entry => entry.title(target)));
     const groups = shown.map(entry => entry.group);
     expect(shape.filter(row => row === SEPARATOR)).toHaveLength(groups.filter((group, i) => i > 0 && groups[i - 1] !== group).length);
@@ -109,14 +111,12 @@ describe("the workspace menu the smoke expects", () => {
     // are named by key from the one table that holds them, never spelled again here.
     expect(shape).toEqual([
       WORKSPACE_WORDS.pause,
-      WORKSPACE_WORDS.rebuild,
-      WORKSPACE_WORDS.startDaemon,
       SEPARATOR,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
       SEPARATOR,
+      WORKSPACE_WORDS.bringBack,
       WORKSPACE_WORDS.exportProject,
       SEPARATOR,
       WORKSPACE_WORDS.rename,
@@ -124,15 +124,15 @@ describe("the workspace menu the smoke expects", () => {
       SEPARATOR,
       WORKSPACE_WORDS.copyId,
       SEPARATOR,
-      WORKSPACE_WORDS.forget,
+      WORKSPACE_WORDS.delete,
     ]);
   });
 
   it("follows the registry: an action added to it lands in the shape without this file or the smoke changing", () => {
-    const before = workspaceMenuShape(RUNNING);
-    const shown = workspaceActions;
-    const added = [...shown, { ...shown[0]!, id: "invented", group: "invented", title: () => "Invented" }];
     const target = workspaceTarget(RUNNING, null, []);
+    const before = workspaceMenuShape(RUNNING);
+    const shown = workspaceActions.filter(entry => entry.applies?.(target) ?? true);
+    const added = [...shown, { ...shown[0]!, id: "invented", group: "invented", applies: undefined, title: () => "Invented" }];
     const shape = contextMenuTemplate(
       added.map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true })),
       () => {},

@@ -968,6 +968,20 @@ describe("a machine that stopped answering with memory near full", () => {
   });
 });
 
+describe("the row's third line after a bring back", () => {
+  it("is drawn whole, cut by the slot's own width and by no count of characters, with the host's note on the hover", async () => {
+    await mount(fakeApi([API], [status(API)]), "api");
+    const note = "no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one";
+    act(() => useStore.setState({ broughtBack: { ws_a: { branch: "agent/readme-badge", base: "main", ahead: 1, uncommitted: 0, stat: [], note } } }));
+    const meta = () => metaOf(rowOf("api"));
+    // 44 characters, over the cap a row used to cut every line three at; the slot wears truncate and the width
+    // decides, so at a wider sidebar the whole of it reads.
+    await waitFor(() => expect(meta().textContent).toBe("agent/readme-badge · pushed, no pull request"));
+    expect(meta().className.split(" ")).toContain("truncate");
+    expect(meta().getAttribute("title")).toBe(`agent/readme-badge · pushed, no pull request: ${note}`);
+  });
+});
+
 describe("zombie machines", () => {
   it("reads as its own state with the reason on hover and a one-shot rebuild", async () => {
     const zombie = status(API, { reach: { state: "zombie" }, reason: "exec probe failed after 3 tries; slow since 12:01" });
@@ -1104,14 +1118,14 @@ describe("a thread an agent opened on another workspace", () => {
 });
 
 describe("the row's third line", () => {
-  it("is cut at the sidebar's cap with the whole sentence on the row's hover text", async () => {
-    // A sentence the runtime writes, longer than the row's room: the cut is what keeps the half a person can act
-    // on from being decided by the width.
+  it("is handed over whole for the slot's own width to cut, with the whole sentence on the row's hover text", async () => {
+    // A sentence the runtime writes, longer than the row's room: the slot truncates it at the width the person
+    // has, and the same string is the hover, so a wider sidebar reads more of it and none of it is decided here.
     const note = "putting the helper back on this machine";
     await mount(fakeApi([API], [status(API, { daemonNote: note })]), "api");
     const line = () => metaOf(rowOf("api"));
-    await waitFor(() => expect(line().textContent).toBe("putting the helper back on…"));
-    expect(line().textContent!.length).toBeLessThanOrEqual(30);
+    await waitFor(() => expect(line().textContent).toBe(note));
+    expect(line().className.split(" ")).toContain("truncate");
     expect(line().getAttribute("title")).toBe(note);
     // A line inside the room is left whole, and its title is the same words.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { daemonNote: "updating the helper" }) }));

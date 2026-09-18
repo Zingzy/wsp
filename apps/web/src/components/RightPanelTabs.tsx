@@ -1,15 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import {
-  Activity,
-  Cpu,
-  FileDiff,
-  FileIcon,
-  Files,
-  Globe2,
-  MonitorPlay,
-  Plus,
-  TerminalSquare,
-} from "lucide-react";
+import { FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -57,36 +47,21 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
-  onAddFiles: () => void;
-  onAddMachine: () => void;
-  onAddProcesses: () => void;
-  onAddScreen: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
-  filesAvailable: boolean;
-  machineAvailable: boolean;
-  /** What the Workspace panel holds for the selected workspace's kind, from the protocol's kind table: the card
-   * names what is on the panel rather than verbs a kind that wsp does not drive never offers. */
-  machinePanelWords: string;
-  processesAvailable: boolean;
-  screenAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "files" | "diff" | "machine" | "processes" | "screen";
+type SurfaceKey = "browser" | "terminal" | "diff";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   browser: "Available while the workspace is running.",
   terminal: "Available while the workspace is running.",
-  files: "Browse files once the workspace is running.",
   diff: "Review changes once the workspace is running.",
-  machine: "Available when a workspace is selected.",
-  processes: "Available while the workspace is running.",
-  screen: "Available when the workspace has a display.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -182,19 +157,10 @@ function surfaceActions(
     RightPanelTabsProps,
     | "onAddBrowser"
     | "onAddTerminal"
-    | "onAddFiles"
     | "onAddDiff"
-    | "onAddMachine"
-    | "onAddProcesses"
-    | "onAddScreen"
     | "browserAvailable"
     | "terminalAvailable"
-    | "filesAvailable"
     | "diffAvailable"
-    | "machineAvailable"
-    | "machinePanelWords"
-    | "processesAvailable"
-    | "screenAvailable"
     | "unavailableReasons"
   >,
 ): readonly SurfaceAction[] {
@@ -203,7 +169,7 @@ function surfaceActions(
     {
       key: "browser",
       label: "Browser",
-      description: "Open a local app or URL.",
+      description: "Open your dev server or a URL.",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
@@ -221,16 +187,6 @@ function surfaceActions(
       onClick: props.onAddTerminal,
     },
     {
-      key: "files",
-      label: "Files",
-      description: "Browse and read workspace files.",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: reason("files"),
-      onClick: props.onAddFiles,
-    },
-    {
       key: "diff",
       label: "Diff",
       description: "Review changes in this workspace.",
@@ -239,36 +195,6 @@ function surfaceActions(
       available: props.diffAvailable,
       disabledReason: reason("diff"),
       onClick: props.onAddDiff,
-    },
-    {
-      key: "machine",
-      label: "Workspace",
-      description: props.machinePanelWords,
-      icon: Cpu,
-      shortcut: "M",
-      available: props.machineAvailable,
-      disabledReason: reason("machine"),
-      onClick: props.onAddMachine,
-    },
-    {
-      key: "processes",
-      label: "Processes",
-      description: "What runs on the workspace; inspect and kill.",
-      icon: Activity,
-      shortcut: "P",
-      available: props.processesAvailable,
-      disabledReason: reason("processes"),
-      onClick: props.onAddProcesses,
-    },
-    {
-      key: "screen",
-      label: "Screen",
-      description: "Watch and drive the workspace's display.",
-      icon: MonitorPlay,
-      shortcut: "S",
-      available: props.screenAvailable,
-      disabledReason: reason("screen"),
-      onClick: props.onAddScreen,
     },
   ];
 }
@@ -381,7 +307,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
-            A browser, a terminal, the files or the diff in this workspace, the workspace itself, or what runs on it.
+            A browser, a terminal or the diff in this workspace.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -448,20 +374,8 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
-    case "files":
-      return "Files";
-    case "file":
-      return surface.relativePath.slice(
-        Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,
-      );
     case "terminal":
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
-    case "machine":
-      return "Workspace";
-    case "processes":
-      return "Processes";
-    case "screen":
-      return "Screen";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || !snapshot.url) return "Browser";
@@ -481,18 +395,8 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <Globe2 className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
-    case "files":
-      return <Files className="size-3 shrink-0" />;
-    case "file":
-      return <FileIcon className="size-3 shrink-0" />;
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
-    case "machine":
-      return <Cpu className="size-3 shrink-0" />;
-    case "processes":
-      return <Activity className="size-3 shrink-0" />;
-    case "screen":
-      return <MonitorPlay className="size-3 shrink-0" />;
   }
 }
 

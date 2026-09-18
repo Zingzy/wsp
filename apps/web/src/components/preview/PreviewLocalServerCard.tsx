@@ -1,5 +1,7 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/preview/PreviewLocalServerCard.tsx at 57a66608 (MIT).
-// threadRef dropped (favicons are not looked up); a live dot added after the host:port.
+// threadRef dropped (favicons are not looked up). No dot beside the address:
+// every row on this list is a port that is listening, so a dot on each of them
+// is the same word said as many times as there are rows.
 import type { PreviewableServer } from "../../adapt/view-model";
 
 import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
@@ -20,12 +22,7 @@ export function PreviewLocalServerCard({ server, onOpen }: Props) {
       <PreviewFaviconIcon />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm font-medium text-foreground">{subtitle}</span>
-        <span className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-          <span
-            aria-hidden="true"
-            data-slot="live-dot"
-            className="size-1.5 shrink-0 rounded-full bg-success"
-          />
+        <span className="truncate text-xs text-muted-foreground">
           {server.host}:{server.port}
         </span>
       </div>

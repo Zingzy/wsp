@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's browser surface: the copied chrome row over an iframe on
 // the route the runtime mints for one guest port, with the tab's path on it.
-// The servers list is the workspace's port directory; recents live in local
-// storage per workspace. The bar shows the loopback address; copy and the
-// frame keep the route and its token.
+// A workspace of this computer shares this computer's ports, so the pane
+// frames that same address rather than asking for a route no backend of this
+// computer mints; a computer that mints none says so in one sentence of the
+// protocol's, naming itself and the address that does answer. The servers
+// list is the workspace's port directory; recents live in local storage per
+// workspace. The bar shows the loopback address; copy and the frame keep the
+// route and its token.
 import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isLocalWorkspace, noPreviewRouteLine } from "@wsp/protocol";
 import { stoppedSentence, toPreviewableServers } from "../../adapt/ports.js";
 import { useStoppedPort, useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
 import { currentAddress, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
 import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, type Address } from "../../browser/url.js";
-import { useForwarded } from "../../protocol/store.js";
+import { useForwarded, useWorkspace } from "../../protocol/store.js";
+import { useComputerName } from "../../sidebar/workspaceRows.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
-import { clockLabel } from "../machine/format.js";
+import { clockLabel } from "../../lib/timestampFormat.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
@@ -41,8 +47,14 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
 
   const address = currentAddress(tab);
   const port = address?.port ?? null;
-  const { reach, refusal } = useProbedRoute(workspaceId, port, tab?.reloadNonce ?? 0);
-  const realUrl = reach.state === "ready" && address !== null ? frameSrc(reach.reach.url, address.path) : null;
+  // A workspace of this computer answers on this computer's own ports, which is the address the person's own
+  // browser opens; nothing is minted for it and nothing is probed, since there is no preview edge in between.
+  const workspace = useWorkspace(workspaceId);
+  const here = workspace !== null && isLocalWorkspace(workspace);
+  const computer = useComputerName(workspaceId);
+  const { reach, refusal } = useProbedRoute(workspaceId, here ? null : port, tab?.reloadNonce ?? 0);
+  const realUrl =
+    address === null ? null : here ? loopbackUrl(address.port, address.path) : reach.state === "ready" ? frameSrc(reach.reach.url, address.path) : null;
   const shownUrl = address !== null ? loopbackAddress(address.port, address.path) : "";
   const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
   const stopped = useStoppedPort(workspaceId, port);
@@ -137,8 +149,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         ) : reach.state === "failed" ? (
           <Empty className="flex-1">
             <EmptyHeader>
-              <EmptyTitle>:{port} has no public route</EmptyTitle>
-              <EmptyDescription>{reach.error}</EmptyDescription>
+              <EmptyTitle>{noPreviewRouteLine(port, computer)}</EmptyTitle>
             </EmptyHeader>
           </Empty>
         ) : (

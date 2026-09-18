@@ -290,12 +290,8 @@ describe("a machine that stopped answering with its memory near full", () => {
 
 describe("one copy of the rule", () => {
   const HOME = join("packages", "protocol", "src", "format.ts");
-  // Snapshot storage prints the decimal GB the provider lists and bills in; the process table's rss column has a three-digit budget.
-  const EXCEPTIONS = new Set([
-    join("packages", "host", "src", "storage.ts"),
-    join("apps", "web", "src", "components", "machine", "SnapshotStorageLine.tsx"),
-    join("apps", "web", "src", "components", "machine", "format.ts"),
-  ]);
+  // Snapshot storage prints the decimal GB the provider lists and bills in.
+  const EXCEPTIONS = new Set([join("packages", "host", "src", "storage.ts")]);
   // A byte count divided by a unit constant and closed with a unit suffix, or a table of unit suffixes.
   const RULE = /\/ ?(1024|1e9|1_000_000_000|\(1024 \* 1024\)|1024 \*\* [23]|[KMGT]I?B|[KMGT]iB)\)?[^`\n]*\} ?[KMGT]?i?B`|\[("[KMGT]?i?B?",? ?){3,}\]/;
 

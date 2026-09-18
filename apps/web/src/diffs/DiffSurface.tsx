@@ -30,16 +30,19 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { noDiffLine } from "../actions/format.js";
+import { SEND_TO_THREAD } from "./words.js";
+import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { baseName, relativeTo } from "../files/entries.js";
 import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "../files/FolderBreadcrumbs.js";
-import { NotRunning } from "../files/FilesSurface.js";
+import { NotRunning } from "./NotRunning.js";
 import { usePinned, useRoot, useRootStore } from "../files/root.js";
 import { useDaemonWire } from "../files/wire.js";
+import { useLinkWord } from "../terminal/paneWords.js";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse.js";
 import { getDiffCollapseIconClassName, resolveDiffThemeName, resolveFileDiffPath } from "../lib/diffRendering.js";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
-import type { ReviewCommentContext } from "../reviewCommentContext.js";
+import { reviewCommentsQuote, type ReviewCommentContext } from "../reviewCommentContext.js";
 import { repoAbsence } from "../adapt/git.js";
 import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
@@ -88,6 +91,7 @@ export function diffPanelOptions(theme: "light" | "dark", renderMode: DiffRender
 
 export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const wire = useDaemonWire(workspaceId);
+  const linkWord = useLinkWord(workspaceId);
   const root = useRoot(workspaceId);
   const cwd = root ?? "";
   const pinned = usePinned(workspaceId);
@@ -108,7 +112,22 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const revealRequest = useDiffRevealStore(s => s.pendingByWorkspaceId[workspaceId]);
   const takeReveal = useDiffRevealStore(s => s.take);
   const [revealNote, setRevealNote] = useState<string | null>(null);
+  const setDraft = useComposerDraftStore(s => s.setDraft);
 
+  // The comments of one pass go to the thread in front of the person as one block under whatever is already
+  // typed there, and the pane keeps none: what is in the composer is what the person edits and sends. The box is
+  // not focused from here: the editor's focus reports the text it holds, which on the same tick is still the text
+  // before this write, and that report lands back on the draft and empties it.
+  const sendToThread = useCallback(() => {
+    if (comments.length === 0) return;
+    const draft = useComposerDraftStore.getState().drafts[workspaceId]?.prompt ?? "";
+    const prompt = draft === "" ? `${reviewCommentsQuote(comments)}\n\n` : `${draft}\n\n${reviewCommentsQuote(comments)}\n\n`;
+    setDraft(workspaceId, { prompt, cursor: prompt.length });
+    setComments([]);
+  }, [comments, setDraft, workspaceId]);
+
+  // The link's word is a dependency for the rule useLinkWord carries: a pane reopened at load reads over a link
+  // that is not up yet, and that first failed read is not this header's last word.
   const fetchDiff = useCallback(() => {
     if (!wire || cwd === "") return;
     let gone = false;
@@ -137,7 +156,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     return () => {
       gone = true;
     };
-  }, [wire, cwd, scope]);
+  }, [wire, cwd, scope, linkWord]);
 
   useEffect(() => fetchDiff(), [fetchDiff]);
   // A new scope or folder is a new set of files; stale collapse keys would pin
@@ -198,7 +217,9 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
 
   return (
     <div
-      className="flex h-full min-w-0 flex-col bg-background"
+      // Focus is a hairline where the walk needs one and nothing on a click, as the terminal pane beside it is: a
+      // ring around the whole pane read as the pane being the thing rather than the diff in it.
+      className="flex h-full min-w-0 flex-col bg-background outline-none focus-visible:ring-1 focus-visible:ring-border focus-visible:ring-inset"
       ref={focusPaneOnShow}
       tabIndex={0}
       onKeyDown={onKeyDown}
@@ -213,7 +234,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Menu>
             <MenuTrigger
-              className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-6 max-w-full shrink-0 items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`Diff scope: ${scopeLabel}`}
             >
               <span className="truncate">{scopeLabel}</span>
@@ -231,14 +252,18 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               ))}
             </MenuPopup>
           </Menu>
-          <FolderBreadcrumbs workspaceId={workspaceId} className="flex-initial" />
+          {/* The path and the branch leave the header at the narrow width: the file list under it names the file
+              and the workspace's own row names the branch, and three facts on a 390 px header drew over one
+              another. The path leaves again when a comment puts Send to thread on the header: it is the one fact
+              here with no bound, and squeezed to two letters it says nothing while the branch beside it still reads. */}
+          {comments.length === 0 ? <FolderBreadcrumbs workspaceId={workspaceId} className="hidden flex-initial sm:flex" /> : null}
           {shown.kind === "repo" ? (
-            <span className={REPO_MARK_CLASS} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
+            <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />
               <span className="max-w-40 truncate">{shown.branch}</span>
             </span>
           ) : REPO_STATE_WORDS[shown.kind].word === "" ? null : (
-            <span className={REPO_MARK_CLASS} data-diff-repo-state={shown.kind}>
+            <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-40" />
               <Tooltip>
                 <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{REPO_STATE_WORDS[shown.kind].word}</TooltipTrigger>
@@ -249,12 +274,14 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </span>
           )}
           <Tooltip>
+            {/* The pin is about the folder in the crumbs beside it, and goes with them at the narrow width. */}
             <TooltipTrigger
               render={
                 <Button
                   type="button"
                   size="icon-micro"
                   variant="ghost"
+                  className="hidden sm:inline-flex"
                   aria-label={pinned ? "Follow the agent's folder" : "Stay in this folder"}
                   aria-pressed={pinned}
                   onClick={() => (pinned ? unpin(workspaceId) : pin(workspaceId, cwd))}
@@ -278,6 +305,11 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {comments.length > 0 ? (
+            <Button type="button" size="xs" variant="ghost" data-diff-send-to-thread onClick={sendToThread}>
+              {SEND_TO_THREAD}
+            </Button>
+          ) : null}
           {model && model.files.length > 0 ? (
             <DiffStatLabel additions={model.stat.additions} deletions={model.stat.deletions} className="mr-1 text-[11px]" layout="inline" />
           ) : null}
@@ -291,12 +323,15 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </Tooltip>
           {fileKeys.length > 0 ? (
             <Tooltip>
+              {/* Every file's own chevron does this one at a time; the header gives its room back at the narrow
+                  width, where the scope's own words need it. */}
               <TooltipTrigger
                 render={
                   <Button
                     type="button"
                     size="icon-sm"
                     variant="ghost"
+                    className="hidden sm:inline-flex"
                     aria-label={allCollapsed ? "Expand all files" : "Collapse all files"}
                     onClick={() => setCollapsed(toggleAllDiffFiles(fileKeys, collapsed))}
                   />
@@ -307,8 +342,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               <TooltipPopup side="top">{allCollapsed ? "Expand all files" : "Collapse all files"}</TooltipPopup>
             </Tooltip>
           ) : null}
+          {/* One diff at a time below the width a split pair can be read at, which is also the width the header
+              needs back once a comment puts Send to thread on it. */}
           <ToggleGroup
-            className="shrink-0 gap-1"
+            className="hidden shrink-0 gap-1 sm:flex"
             size="sm"
             value={[renderMode]}
             onValueChange={value => {

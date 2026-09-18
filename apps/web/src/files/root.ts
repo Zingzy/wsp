@@ -14,7 +14,7 @@ import { create } from "zustand";
 import type { ProjectRef } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";
 import { parentPath, pathSegments, type PathSegment } from "./entries.js";
-import { useDaemonRoot } from "./wire.js";
+import { getDaemonRoot, useDaemonRoot } from "./wire.js";
 
 export interface WorkspaceRoot {
   /** The thread's working directory, where its harness runs and the next turn resumes; null before any thread or pick. */
@@ -154,7 +154,23 @@ export function useThreadFolder(workspaceId: string): string | null {
   const kindFolder = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.folder);
   const project = useDefaultProject(workspaceId);
   const chosen = useChosenFolder(workspaceId);
-  return chosen ?? project?.path ?? kindFolder ?? daemonRoot;
+  return pickThreadFolder({ chosen, project: project?.path, kindFolder, daemonRoot });
+}
+
+/** The rule itself, so the hook above and the command that opens a terminal cannot answer it two ways. */
+export function pickThreadFolder(input: { chosen: string | null; project: string | undefined; kindFolder: string | undefined; daemonRoot: string | null }): string | null {
+  return input.chosen ?? input.project ?? input.kindFolder ?? input.daemonRoot;
+}
+
+/** The same folder for a caller that holds no hooks: a command reads the stores once where a component subscribes. */
+export function threadFolderOf(workspaceId: string): string | null {
+  const workspace = useStore.getState().workspaces.find(w => w.id === workspaceId);
+  return pickThreadFolder({
+    chosen: (useRootStore.getState().byWorkspaceId[workspaceId] ?? NONE).chosen,
+    project: workspace?.project?.path,
+    kindFolder: workspace?.folder,
+    daemonRoot: getDaemonRoot(workspaceId),
+  });
 }
 
 /** What the start names about its folder: the folder chosen outright as cwd, else nothing, which leaves the

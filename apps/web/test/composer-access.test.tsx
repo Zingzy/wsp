@@ -4,8 +4,8 @@
 // a fork wsp made run every action, a computer somebody owns asks first. The
 // host-wide table was read against no workspace, so it answers the models and
 // the efforts for a workspace whose own catalog is still on the way and answers
-// no access at all, and the composer draws no access button until the workspace
-// has spoken.
+// no access at all, and the composer's defaults button carries no access until
+// the workspace has spoken.
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { workspaceAccess, type HarnessCatalog, type WorkspaceView } from "@wsp/protocol";
@@ -84,9 +84,9 @@ const handle = { view, hydrated: true, busy: false, sending: false, fresh: true,
 
 const WORKSPACE: WorkspaceView = { id: WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
-const accessButton = () => document.querySelector<HTMLElement>('[data-composer-picker="permissionMode"]');
+const accessButton = () => document.querySelector<HTMLElement>('[data-composer-picker="defaults"]');
 
-describe("the composer's access button", () => {
+describe("the composer's defaults button", () => {
   afterEach(() => act(() => useStore.setState({ harnesses: [], harnessesByWorkspace: {}, workspaces: [], sessions: {} })));
 
   it("is not drawn at all until the workspace's catalog lands, and then reads what that workspace starts a thread at", () => {
@@ -94,12 +94,12 @@ describe("the composer's access button", () => {
     const drawn = render(<ComposerOptionPickers workspaceId={WS} thread={handle} onPickAccess={() => {}} onOtherFolder={() => {}} />);
     // The model button is there, so the row is drawn and it is the access one alone that is missing.
     expect(document.querySelector('[data-composer-picker="model"]')).not.toBeNull();
-    expect(accessButton()).toBeNull();
+    expect(accessButton()?.dataset["access"]).toBeUndefined();
 
     act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [THIS_MAC] } }));
-    expect(accessButton()?.dataset["value"]).toBe("bypassPermissions");
-    // The button wears the CLI's own short word; the machine it names is read in the menu.
-    expect(accessButton()?.textContent).toContain("Bypass");
+    expect(accessButton()?.dataset["access"]).toBe("bypassPermissions");
+    // The button wears the CLI's own short word, in the row's own casing; the machine it names is read in the menu.
+    expect(accessButton()?.textContent).toContain("bypass");
     drawn.unmount();
   });
 });

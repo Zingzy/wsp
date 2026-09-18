@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the app says about a computer that has stopped answering, beyond the
 // state word: where the host expects it, when it last spoke, what the last dial
-// said, and the button that dials it once more. Two surfaces read it, the
-// Workspace pane and the computer's own row in Settings, so the reading is
-// composed once in the protocol (absentRoad) and drawn here.
+// said, and the button that dials it once more. The computer's own row in
+// Settings reads it, and the reading is composed once in the protocol
+// (absentRoad) and drawn here.
 //
 // The answer to a press lands in the slot the sentence was in, so a person
 // reads one thing in one place rather than a toast that goes.
 import { useState } from "react";
-import { absentRoad, awayMsOf, placeDialRoad, type PlaceDialRoad, type PlaceView } from "@wsp/protocol";
+import { placeDialRoad, type PlaceDialRoad, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
@@ -45,22 +45,5 @@ export function DialButton({ busy, held, road, onDial }: { busy: boolean; held: 
     <Button data-k="dial" size="xs" variant="outline" disabled={busy || held} onClick={onDial}>
       {busy ? WHERE_WORDS.dialling : WHERE_WORDS.dial[road]}
     </Button>
-  );
-}
-
-/** The Workspace pane's slot: the road sentence, replaced by what the last press got, with the button beside it.
- * The prose ink and the 11 px the pane's other sentences wear, so it reads as one of them. */
-export function AbsentRoadNote({ place, now }: { place: PlaceView; now: number }) {
-  const { dial, busy, line, held, heldWhy, road: dialRoad } = useDialPlace(place);
-  const road = absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, now), dialled: place.dialled });
-  return (
-    <div className="mt-1.5 flex items-start justify-between gap-3">
-      <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground" data-k="absent-road">
-        {line ?? road.sentence}
-        {/* Why the button beside it cannot be pressed, in the slot the sentence stands in and before any click. */}
-        {line === null && heldWhy !== null ? <span data-k="dial-held"> {heldWhy}</span> : null}
-      </p>
-      {dialRoad === undefined ? null : <DialButton busy={busy} held={held} road={dialRoad} onDial={dial} />}
-    </div>
   );
 }

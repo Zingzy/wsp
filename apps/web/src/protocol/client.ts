@@ -7,6 +7,7 @@
 // to live.
 import {
   AccountView,
+  BringBackResult,
   CLOUD_SETUP_WORDS,
   DeviceView,
   HarnessCatalog,
@@ -376,9 +377,15 @@ export interface Api {
   updateImage?(id: string): Promise<UpgradeResult>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
+  /** Pushes the branch the agent made and opens its pull request through the git host's own command line, and
+   * answers what both did. Optional so a fixture with no remote need not fake it. */
+  bringBack?(id: string): Promise<BringBackResult>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
+  /** Takes the workspace and its machine away; the row leaves on workspace.deleted. Optional so a fixture that
+   * never deletes need not fake it. */
+  deleteWorkspace?(id: string): Promise<void>;
   /** Names the workspace on the host. The name is unique there, so a name another workspace holds and a blank one are
    * refused with that reason and nothing is renamed. Optional so fixtures that never rename need not fake it; a client
    * without it offers no rename. */
@@ -626,6 +633,9 @@ export function makeApi(c: ProtocolClient): Api {
     updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
+    deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
+    // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.
+    bringBack: async id => BringBackResult.parse(await c.request("workspaces.bringBack", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
     setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.

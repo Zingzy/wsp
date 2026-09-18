@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one line and the one button every pane that needs a daemon this host
-// started shows while it is not running: the terminal, the files, the
-// processes and the Live rows. The sentence is the reading's, so the row's
-// slot, the Workspace pane's State row, Settings and these panes cannot say
-// four things about one daemon, and the button is where the click was, so the
-// host's refusal lands under it rather than in the sidebar's corner.
+// started shows while it is not running: the terminal and the diff. The
+// sentence is the reading's, so the workspace's row, Settings and these panes
+// cannot say three things about one daemon, and the button is where the click
+// was, so the host's refusal lands under it rather than in the sidebar's
+// corner.
 import { useCallback, useState } from "react";
 import type { AbsentComputer } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";

@@ -188,17 +188,17 @@ describe("what a workspace's kind changes about its words", () => {
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
     // access is what a thread here runs at when nobody names one: a fork costs a rebuild and nothing else, and this
     // computer is the person's own, so both run every action; the computers somebody owns and works on ask first.
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], worksInPlace: false, agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs.", access: "bypass" });
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], worksInPlace: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs.", access: "bypass" });
     // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], worksInPlace: true, agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], worksInPlace: true, agents: false, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
     // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
     // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
     // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], worksInPlace: false, agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing.", access: "asks" });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], worksInPlace: false, agents: false, onDelete: { asked: "daemon, its unit and its login line come off the computer, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing.", access: "asks" });
     // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
     // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
     expect(agentsMayDrive("cloud")).toBe(true);
@@ -240,16 +240,18 @@ describe("what a workspace's kind changes about its words", () => {
     expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
   });
 
-  it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {
-    expect(deleteNotice(2, "cloud")).toBe("Its machine is deleted at the provider; its record and 2 threads leave this computer.");
-    expect(deleteNotice(1, "local")).toBe("Its machine is left as it is; its record and 1 thread leave this computer.");
-    // wsp puts a daemon, a user unit and a login line on a machine somebody owns, and the delete takes those off
-    // again: a sentence saying the machine is left as it is would be saying nothing happened over there.
-    expect(deleteNotice(1, "ssh")).toBe("Its daemon, its unit and its login line come off the machine, which is otherwise left as it is; its record and 1 thread leave this computer.");
-    expect(WORKSPACE_KIND_WORDS.cloud.onDelete.done("m_1")).toBe("machine m_1 is gone at the provider");
-    expect(WORKSPACE_KIND_WORDS.local.onDelete.done("local")).toBe("its machine is left as it is");
-    expect(WORKSPACE_KIND_WORDS.ssh.onDelete.done("maya@box")).toBe("its daemon, its unit and its login line come off the machine, which is otherwise left as it is");
-    // Neither sentence names the machine on a kind whose machine stays: naming it would read as the machine going.
+  it("the delete sentence says what the delete does to this kind's computer, the ssh sweep included", () => {
+    // The words a person reads on the app's Delete row and in the command line's question: computer, never
+    // machine, and the cloud, never a provider.
+    expect(deleteNotice(2, "cloud")).toBe("Its computer is deleted in the cloud; its record and 2 threads leave this computer.");
+    expect(deleteNotice(1, "local")).toBe("Its computer is left as it is; its record and 1 thread leave this computer.");
+    // wsp puts a daemon, a user unit and a login line on a computer somebody owns, and the delete takes those off
+    // again: a sentence saying the computer is left as it is would be saying nothing happened over there.
+    expect(deleteNotice(1, "ssh")).toBe("Its daemon, its unit and its login line come off the computer, which is otherwise left as it is; its record and 1 thread leave this computer.");
+    expect(WORKSPACE_KIND_WORDS.cloud.onDelete.done("m_1")).toBe("computer m_1 is gone in the cloud");
+    expect(WORKSPACE_KIND_WORDS.local.onDelete.done("local")).toBe("its computer is left as it is");
+    expect(WORKSPACE_KIND_WORDS.ssh.onDelete.done("maya@box")).toBe("its daemon, its unit and its login line come off the computer, which is otherwise left as it is");
+    // Neither sentence names the computer on a kind whose computer stays: naming it would read as the computer going.
     for (const kind of ["local", "ssh"] as const) expect(WORKSPACE_KIND_WORDS[kind].onDelete.done("m_2")).not.toContain("m_2");
   });
 

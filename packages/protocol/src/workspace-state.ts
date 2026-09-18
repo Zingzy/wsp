@@ -100,11 +100,11 @@ export interface MachineOnDelete {
 
 /** What a delete does to a machine wsp did not fork and put nothing on: nothing. Both halves of the sentence are
  * here beside the table that reads them, and each mood supplies the "its" its own line needs. */
-export const MACHINE_LEFT = "machine is left as it is";
+export const COMPUTER_LEFT = "computer is left as it is";
 
 /** What a machine somebody already owns keeps and loses: wsp puts a daemon, a user unit and a line in the login
  * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */
-const SSH_SWEPT = "daemon, its unit and its login line come off the machine, which is otherwise left as it is";
+const SSH_SWEPT = "daemon, its unit and its login line come off the computer, which is otherwise left as it is";
 
 /** What the Workspace panel holds for a computer that already existed: no spend and no version behind it, so the
  * panel is what the computer is running and how it is doing. */
@@ -127,8 +127,8 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], worksInPlace: false, agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], worksInPlace: true, agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], worksInPlace: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], worksInPlace: true, agents: false, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
   ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], worksInPlace: false, agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 

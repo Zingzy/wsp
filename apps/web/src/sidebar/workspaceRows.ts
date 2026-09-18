@@ -6,7 +6,8 @@
 // word, which reads that word off the store for the surfaces that hold a
 // workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
+import { broughtBackRowLine } from "../actions/format.js";
+import { isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { APP_PLATFORM, PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -30,8 +31,8 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
   if (!kind.daemon) return undefined;
   if (reach === "no-daemon") return "no daemon answering";
   if (reach !== "unsupported" || kind.driven || lacks === undefined) return undefined;
-  // The whole sentence is on the Workspace panel, since the instruction is at the end of it and this line cuts
-  // from the right.
+  // The whole sentence rides the row's own hover text, since the instruction is at the end of it and this line
+  // cuts from the right.
   return machineLacksShort(lacks);
 }
 
@@ -54,6 +55,9 @@ export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMe
 
 export interface WorkspaceMetaInput {
   readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach" | "threads">;
+  /** What the last bring back on this workspace answered, where one has; the row's third line reads it in place of
+   * the branch, since it says the branch and what became of it. */
+  readonly broughtBack?: BringBackResult | undefined;
   /** The one reading of a computer that is not answering; the row's third line is then its own. Absent on a
    * caller that holds no places list. */
   readonly absent?: AbsentComputer | null | undefined;
@@ -83,13 +87,24 @@ export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): 
   return project.workspace.copy?.branch ?? "";
 }
 
-/** The workspace row's third line: the one sentence a person is waiting on while there is one, else the branch the
- * agent is working on, else nothing. The sentence leads because it is the one thing on the row a person can act on
- * and the branch is there either way: a copy always carries one, so a branch that led would hide every prompt and
- * every note on this computer's rows. No figure ever stands here: what a machine costs is a fact about the computer
- * it runs on, and it lives on that computer's row in Settings. */
-export function workspaceMetaLine({ project, absent, outOfMemory }: WorkspaceMetaInput): string {
-  return metaSentences({ project, absent, outOfMemory })[0] ?? branchLine(project);
+/** The workspace row's third line: the one sentence a person is waiting on while there is one, else what the last
+ * bring back answered, else the branch the agent is working on, else nothing. The sentence leads because it is the
+ * one thing on the row a person can act on and the branch is there either way: a copy always carries one, so a
+ * branch that led would hide every prompt and every note on this computer's rows. No figure ever stands here: what
+ * a machine costs is a fact about the computer it runs on, and it lives on that computer's row in Settings. */
+export function workspaceMetaLine({ project, absent, outOfMemory, broughtBack }: WorkspaceMetaInput): string {
+  const waiting = metaSentences({ project, absent, outOfMemory })[0];
+  if (waiting !== undefined) return waiting;
+  return broughtBack === undefined ? branchLine(project) : broughtBackRowLine(broughtBack);
+}
+
+/** The whole of that line for the row's hover text: after a bring back that opened no pull request, the host's
+ * own sentence for why follows it. That sentence names a command line and a remote and fits no row, and the line
+ * without it would read as a push that simply stopped. */
+export function workspaceMetaTitle(input: WorkspaceMetaInput): string {
+  const line = workspaceMetaLine(input);
+  const note = input.broughtBack?.note;
+  return note === undefined || line !== broughtBackRowLine(input.broughtBack!) ? line : `${line}: ${note}`;
 }
 
 /** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the

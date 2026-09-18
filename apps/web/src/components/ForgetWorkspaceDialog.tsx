@@ -1,18 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one confirmation before a gone workspace is forgotten, from a sidebar row
-// or the machine tab: it names the workspace and what leaves this computer,
-// asks the host once, and shows the host's refusal in place. The row leaves on
-// workspace.deleted, which the store already applies.
+// The one confirmation before a workspace goes, on either road out: a delete,
+// which takes its machine in that kind's own words and its record with it, and
+// a forget, which is the same road for a workspace whose machine is already
+// gone. It names the workspace and what leaves, asks the host once, and shows
+// the host's refusal in place. The row leaves on workspace.deleted, which the
+// store already applies.
 import { useState } from "react";
-import { forgetNotice, type WorkspaceView } from "@wsp/protocol";
-import { CLIENT_CANNOT_FORGET } from "../actions/format.js";
+import { deleteNotice, forgetNotice, workspaceKind, type WorkspaceView } from "@wsp/protocol";
+import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "./ui/alert-dialog.js";
 import { Button, WARN_BUTTON } from "./ui/button.js";
 
-export function ForgetWorkspaceDialog({ workspace, threads, open, onOpenChange }: { workspace: WorkspaceView; threads: number; open: boolean; onOpenChange: (open: boolean) => void }) {
+/** The two roads out, each with the word on its button, the sentence under the title and the verb it asks for. */
+const ROADS = {
+  delete: { word: "Delete", busy: "Deleting\u2026", cannot: CLIENT_CANNOT_DELETE },
+  forget: { word: "Forget", busy: "Forgetting\u2026", cannot: CLIENT_CANNOT_FORGET },
+} as const;
+
+export function ForgetWorkspaceDialog({
+  workspace,
+  threads,
+  act = "forget",
+  open,
+  onOpenChange,
+}: {
+  workspace: WorkspaceView;
+  threads: number;
+  /** Which road out this dialog is for; a workspace whose machine is gone takes the forget. */
+  act?: "forget" | "delete";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const api = useStore(s => s.api);
+  const road = ROADS[act];
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -22,14 +44,15 @@ export function ForgetWorkspaceDialog({ workspace, threads, open, onOpenChange }
   };
 
   const forget = async (): Promise<void> => {
-    if (!api?.forget) {
-      setRefusal(CLIENT_CANNOT_FORGET);
+    const ask = act === "delete" ? api?.deleteWorkspace : api?.forget;
+    if (!ask) {
+      setRefusal(road.cannot);
       return;
     }
     setBusy(true);
     setRefusal(null);
     try {
-      await api.forget(workspace.id);
+      await ask(workspace.id);
       change(false);
     } catch (e) {
       setRefusal(errorText(e));
@@ -42,8 +65,10 @@ export function ForgetWorkspaceDialog({ workspace, threads, open, onOpenChange }
     <AlertDialog open={open} onOpenChange={change}>
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>Forget {workspace.name}?</AlertDialogTitle>
-          <AlertDialogDescription>{forgetNotice(threads)}</AlertDialogDescription>
+          <AlertDialogTitle>
+            {road.word} {workspace.name}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>{act === "delete" ? deleteNotice(threads, workspaceKind(workspace)) : forgetNotice(threads)}</AlertDialogDescription>
         </AlertDialogHeader>
         {refusal && (
           <p className="text-[11px] text-muted-foreground" data-k="forget-refusal">
@@ -52,8 +77,8 @@ export function ForgetWorkspaceDialog({ workspace, threads, open, onOpenChange }
         )}
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant="outline" className={WARN_BUTTON} disabled={busy} onClick={() => void forget()}>
-            {busy ? "Forgetting…" : "Forget"}
+          <Button variant="outline" className={WARN_BUTTON} disabled={busy} onClick={() => void forget()} data-k="end-workspace">
+            {busy ? road.busy : road.word}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>
