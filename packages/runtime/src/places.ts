@@ -44,6 +44,7 @@ import {
   sshRoadOf,
   placeNoDialLine,
   BackendFacts,
+  type AgentSignInState,
   type DaemonEvent,
   type DaemonResponse,
   type MachineSizeOffer,
@@ -65,6 +66,7 @@ import {
   type WorkspaceSize,
 } from "@wsp/protocol";
 import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, plainPath, provisionCountsOf, putFiles, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedLoginOf } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -308,6 +310,10 @@ export interface PlaceDoorOptions {
   relinkWaitMs?: number;
   /** How long between the writes of a linked place's last seen, so a link held for a day is not a write a second. */
   seenEveryMs?: number;
+  /** What this host holds for the agents, read at every ask as the turns read it: which variable is held decides
+   * the sign-in word a computer's row says for an agent that keeps no login of its own there. Absent is a vault
+   * holding nothing, which is what a host wired without one has. */
+  vault?: () => Readonly<Record<string, string>>;
   now?: () => number;
 }
 
@@ -347,6 +353,11 @@ export interface PlaceDoor {
   /** The name a place goes by, for the sentences a person reads; the id itself for a place this host holds no
    * record of. Answered without a read, so a refusal built while a road is running names the computer. */
   nameOf(placeId: string): string;
+  /** The sign-in word per agent on one computer, off the report it last sent and the vault this host holds: the
+   * same reading its row carries, so what a turn is handed and what the screen says cannot part ways. Answered
+   * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
+   * no record of and for a computer whose daemon lists no logins. */
+  signInsAt(placeId: string): Record<string, AgentSignInState> | undefined;
   /** Which backend that computer offers, by the id of the row it serves; nothing until it has said. What a fork
    * standing there was forked by, so a row names a real provider and not the one this host happens to be wired
    * for. Answered without a read, since every view of every workspace asks it. */
@@ -540,6 +551,34 @@ export function takenReport(report: PlaceReport): PlaceReport {
     if (folder !== undefined && !isPlainPath(folder)) delete login[name];
   }
   return { ...report, login };
+}
+
+/** What stands for each agent a computer reported, in the one word a person reads: its own login on that computer
+ * when the file that login shares is under the logins folder the computer listed, else the vault's variable for
+ * that agent when this host holds one, else nothing. Nothing at all where the report carries no logins list, which
+ * is a daemon older than that field: unknown reads as unknown and not as none.
+ *
+ * The computer knows no catalog and the host does, so the list of files goes on the wire and the words are worked
+ * out here, off the same sign-in rows the sign-in screens and the turns read. */
+export function signInsOf(
+  report: Pick<PlaceReport, "agents" | "logins">,
+  vault: Readonly<Record<string, string>>,
+): Record<string, AgentSignInState> | undefined {
+  if (report.logins === undefined) return undefined;
+  const stands = new Set(report.logins);
+  const words: Record<string, AgentSignInState> = {};
+  for (const id of report.agents) {
+    const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
+    const shared = signIn === undefined ? undefined : sharedLoginOf(signIn);
+    if (shared !== undefined && stands.has(`${shared.dir}/${shared.file}`)) {
+      words[id] = "signed-in";
+      continue;
+    }
+    const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
+    const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
+    words[id] = token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
+  }
+  return words;
 }
 
 /** How long between writes of a linked place's last seen. */
@@ -1078,6 +1117,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
+    ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
+    // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
+    // under its logins folder and what this host's vault holds. Nothing from a daemon that lists neither.
+    ...((): { signIns?: Record<string, AgentSignInState> } => {
+      const words = signInsOf(record.report, opts.vault?.() ?? {});
+      return words === undefined ? {} : { signIns: words };
+    })(),
     ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),
     // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
     // every computer on this list forks.
@@ -1289,6 +1335,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     nameOf: placeId => kept.get(placeId)?.name ?? placeId,
+
+    signInsAt: placeId => {
+      const report = kept.get(placeId)?.report;
+      return report === undefined ? undefined : signInsOf(report, opts.vault?.() ?? {});
+    },
 
     offerOf: placeId => kept.get(placeId)?.backendFacts?.offer ?? (providerIds().includes(placeId) ? placeId : undefined),
 

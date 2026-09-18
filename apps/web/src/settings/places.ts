@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, agentOfRow, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, agentOfRow, agentSignInWord, agentVersionWord, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { AGENTS_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
 import { CLOUD_NAMES, keyHeld } from "./providers.js";
@@ -218,6 +218,9 @@ export interface AgentLine {
   /** Why the sign-in is held here: the command line that runs it, built from this row's own two names. Absent on
    * this computer, whose agents are signed in where they are installed. */
   held?: string;
+  /** Whether a sign-in already stands for this agent there: its own login on that computer, or the variable this
+   * wsp's vault holds for it. The Sign in button is not drawn where one does. */
+  signedIn?: boolean;
   /** Whether the wsp tools can be handed to this agent, for the one action this computer's own rows carry. */
   takesTools?: boolean;
 }
@@ -234,16 +237,27 @@ export function hereAgentLines(setup: Pick<InitSetup, "agents"> | null): AgentLi
   }));
 }
 
-/** The agents a joined computer reported, named through the catalog, each with what the recipe job came to for it
- * where one has run and the bare word found where none has. The sign-in beside each is held: nothing on the wire
- * runs one on a computer from here, so the line names the command that does. */
+/** The agents a joined computer reported, named through the catalog: the version each answered with and the word
+ * for its sign-in, which are the two facts a person asks first, and the recipe's outcome only where that row
+ * failed, since a row that installed or was already there says nothing this line does not. A computer whose daemon
+ * reports neither reads as it did before: the recipe's word, or the bare word found. The sign-in beside each is
+ * held: nothing on the wire runs one on a computer from here, so the line names the command that does. */
 export function placeAgentLines(place: PlaceView): AgentLine[] {
-  return (place.agents ?? []).map(id => ({
-    id,
-    name: agentName(id),
-    state: outcomeWord(place.provision?.rows.find(row => agentOfRow(row) === id)) ?? AGENTS_WORDS.found,
-    held: AGENTS_WORDS.signInHeld(place.name, id),
-  }));
+  return (place.agents ?? []).map(id => {
+    const signIn = place.signIns?.[id];
+    const row = place.provision?.rows.find(r => agentOfRow(r) === id);
+    const version = place.agentVersions?.[id];
+    const said = [version === undefined ? undefined : agentVersionWord(version), signIn === undefined ? undefined : agentSignInWord(signIn), row?.outcome === "failed" ? outcomeWord(row) : undefined].filter(
+      (word): word is string => word !== undefined && word !== "",
+    );
+    return {
+      id,
+      name: agentName(id),
+      state: said.length === 0 ? (outcomeWord(row) ?? AGENTS_WORDS.found) : said.join(" · "),
+      held: AGENTS_WORDS.signInHeld(place.name, id),
+      ...(signIn === undefined || signIn === "none" ? {} : { signedIn: true }),
+    };
+  });
 }
 
 /** What the recipe put on a computer beside its agents: the person's own files in their agents' homes there and

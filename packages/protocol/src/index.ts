@@ -99,6 +99,13 @@ export function isPlainPath(path: string): boolean {
   return !path.split("/").some(part => part === "." || part === "..");
 }
 
+/** A name under a folder the reader already holds, never a path of its own: the far side joins one of these onto
+ * a folder here, so a leading slash, an empty part and a part that walks up out of it are refused at the wire
+ * rather than resolved at the other end. The one rule, read by the wire schema here and by the daemon's own. */
+export function isUnderPath(path: string): boolean {
+  return path.length > 0 && !path.startsWith("/") && !path.split("/").some(part => part === "" || part === "." || part === "..");
+}
+
 /** The host of a URL that passed isHttpUrl (with its port, without userinfo), or undefined when it does not parse: never throws. */
 export function hostOf(url: string): string | undefined {
   try {
@@ -2601,6 +2608,12 @@ export const PlaceProvision = z.object({
 });
 export type PlaceProvision = z.infer<typeof PlaceProvision>;
 
+/** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
+ * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
+ * out by the host from the computer's report and the vault, since the computer knows no catalog. */
+export const AgentSignInState = z.enum(["signed-in", "vault-key", "none"]);
+export type AgentSignInState = z.infer<typeof AgentSignInState>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2622,6 +2635,11 @@ export const PlaceView = z.object({
   daemonVersion: z.number().int().optional(),
   /** The catalog ids of the agents that computer found on itself, as it last reported them. */
   agents: z.array(z.string()).optional(),
+  /** What each of those agents answered its own version flag with, as that computer last reported it. */
+  agentVersions: z.record(z.string()).optional(),
+  /** One word per reported agent for whether a turn there needs a sign-in first. Absent on a computer whose daemon
+   * is older than the logins list the word is read from, which is unknown rather than none. */
+  signIns: z.record(AgentSignInState).optional(),
   /** Where that computer keeps the logins every workspace on it shares, off what its backend last said. What the
    * sign-in on that computer points the tool's own store at, and what a create there shares in. Absent on a
    * computer that has not said yet and on a provider, which holds no file of this person's. */
@@ -4122,6 +4140,13 @@ export const PlaceReport = z.object({
   /** The catalog ids of the agents found on that computer's own login PATH, for the line the person reads as it
    * joins. Capped because it lands in a sentence, not in a list a person scrolls. */
   agents: z.array(z.string().max(32)).max(32),
+  /** What each of those agents answered its own version flag with, by the same catalog id: the first line of
+   * `<bin> --version`, as the computer said it. Absent on a computer whose agents have not been read yet. */
+  agentVersions: z.record(z.string().max(64)).optional(),
+  /** The files under that computer's logins directory, each named under it: what a sign-in there wrote and every
+   * workspace on it shares. Absent from a report a daemon older than this field sent, which is unknown and not
+   * none; a name that walks out of that folder is refused, since the host joins it onto a folder of its own. */
+  logins: z.array(z.string().max(200).refine(isUnderPath, "a name under a folder")).max(64).optional(),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });

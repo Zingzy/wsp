@@ -8,8 +8,13 @@ describe("buildEnv", () => {
     expect(env).toEqual({ PATH: "/usr/bin", HOME: "/Users/z", CODEX_HOME: "/root/.codex" });
   });
 
-  it("sets the API key the vault handed it, and nothing when it handed none", () => {
-    expect(buildEnv({ home: "/root/.codex", apiKey: "sk-x-fake-openai" }).OPENAI_API_KEY).toBe("sk-x-fake-openai");
+  it("sets the API key the vault handed it under both names, and neither when it handed none", () => {
+    // CODEX_API_KEY is the variable this CLI's own login reads; OPENAI_API_KEY is the catalog's name for the key
+    // and what a provider a person configured with env_key reads. A turn that got no key is set neither.
+    const env = buildEnv({ home: "/root/.codex", apiKey: "sk-x-fake-openai" });
+    expect(env.CODEX_API_KEY).toBe("sk-x-fake-openai");
+    expect(env.OPENAI_API_KEY).toBe("sk-x-fake-openai");
+    expect(buildEnv({ home: "/root/.codex" }).CODEX_API_KEY).toBeUndefined();
     expect(buildEnv({ home: "/root/.codex" }).OPENAI_API_KEY).toBeUndefined();
   });
 

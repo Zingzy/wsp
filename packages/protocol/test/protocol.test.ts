@@ -170,6 +170,67 @@ describe("a copy of the image beside the record", () => {
   });
 });
 
+describe("what a computer says about its agents, and what a person reads off it", () => {
+  const report = {
+    name: "spoo",
+    platform: "linux" as const,
+    arch: "x64",
+    os: "Linux 6.8.0",
+    shape: { cpu: 4, memMb: 4096 },
+    login: { HOME: "/root", USER: "root", PATH: "/usr/bin" },
+    runsWorkspaces: true,
+    engine: "none" as const,
+    daemonVersion: 54,
+    wsp: ["/usr/bin/wsp"],
+    agents: ["claude", "codex"],
+    dialed: "https://relay.example.com",
+  };
+
+  it("a report carries each agent's version line and the files under the logins folder, and no name that walks out of it", () => {
+    const said = { ...report, agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, logins: ["codex/auth.json"] };
+    expect(wire.PlaceReport.parse(said)).toEqual(said);
+    // A daemon older than these two fields sends neither, which reads as unknown rather than as none.
+    expect(wire.PlaceReport.parse(report).logins).toBeUndefined();
+    expect(wire.PlaceReport.safeParse({ ...said, logins: ["../../root/.ssh/id_ed25519"] }).success).toBe(false);
+    expect(wire.PlaceReport.safeParse({ ...said, logins: ["/wsp/logins/codex/auth.json"] }).success).toBe(false);
+    expect(wire.PlaceReport.safeParse({ ...said, agentVersions: 17 }).success).toBe(false);
+    expect(wire.PlaceReport.safeParse({ ...said, agentVersions: { claude: "x".repeat(65) } }).success).toBe(false);
+  });
+
+  it("a computer's row carries those versions and the one word the host worked out per agent", () => {
+    const row = { id: "p_1", kind: "computer" as const, name: "spoo", default: false, agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
+    expect(wire.PlaceView.parse(row)).toEqual(row);
+    expect(wire.PlaceView.safeParse({ ...row, signIns: { codex: "maybe" } }).success).toBe(false);
+  });
+
+  it("the version is the number an agent printed, whichever way it worded the line", () => {
+    expect(wire.agentVersionWord("codex-cli 0.153.0")).toBe("0.153.0");
+    expect(wire.agentVersionWord("2.1.270 (Claude Code)")).toBe("2.1.270");
+    // Nothing of that shape in the line: the computer's own words stand rather than a guess at a number.
+    expect(wire.agentVersionWord(" nightly ")).toBe("nightly");
+  });
+
+  it("the agents cell names each agent, its version and its sign-in, and says nothing for a row that reported none", () => {
+    const row = { agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
+    expect(wire.agentsCell(row)).toBe("claude 2.1.270 key from the vault · codex 0.153.0 not signed in");
+    expect(wire.agentsCell({ agents: ["codex"], signIns: { codex: "signed-in" } })).toBe("codex signed in");
+    expect(wire.agentsCell({})).toBe("");
+    expect(wire.agentSignInWord("signed-in")).toBe("signed in");
+  });
+
+  it("a key the provider turned down is said as a refused key, with what the provider said about it", () => {
+    const login = "codex login --device-auth";
+    expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "invalid_api_key", login)).toBe(
+      `Codex's provider refused the OPENAI_API_KEY this wsp's vault holds (invalid_api_key); put a working key in the vault (wsp init, or the .env in the wsp home), or sign Codex in where this workspace runs with ${login}`,
+    );
+    expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "", login)).toBe(
+      `Codex's provider refused the OPENAI_API_KEY this wsp's vault holds; put a working key in the vault (wsp init, or the .env in the wsp home), or sign Codex in where this workspace runs with ${login}`,
+    );
+    // The provider's reason is a clause in somebody else's sentence, so it is cut before it becomes a paragraph.
+    expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "x".repeat(200), login)).toContain(`(${"x".repeat(80)})`);
+  });
+});
+
 describe("the recipe's pins", () => {
   it("a recipe row and a digest tick carry one pin shape, the version with the sum where a road hashed one, beside the tick's road and install lines", () => {
     const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -361,6 +361,20 @@ describe("the table wsp places prints", () => {
     // Once it is over the same column says what stands.
     const over = computerLines([{ ...rows[1]!, provision: { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } }], "darwin");
     expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 tool ready");
+  });
+
+  it("says on the computers table which agents stand on a computer, at which version and signed in how", () => {
+    const spoo = { ...rows[1]!, agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
+    const printed = computerLines([spoo, rows[0]!, rows[2]!], "darwin");
+    const header = printed[0]!;
+    expect(header).toContain("AGENTS");
+    const column = (line: string): string => line.slice(header.indexOf("AGENTS")).trim();
+    // The cell is the protocol's own, so this table and the app's row cannot say it two ways.
+    expect(column(printed[1]!)).toBe(agentsCell(spoo));
+    expect(column(printed[1]!)).toBe("claude 2.1.270 key from the vault · codex 0.153.0 not signed in");
+    // This computer reports no agent of its own on this row, and neither does a cloud account.
+    expect(column(printed[2]!)).toBe("");
+    expect(column(printed[3]!)).toBe("");
   });
 
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {

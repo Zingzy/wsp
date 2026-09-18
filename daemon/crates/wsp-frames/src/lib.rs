@@ -45,4 +45,4 @@ pub use reply::{
     ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
-pub use validate::{is_http_url, is_plain_path, RelayPort};
+pub use validate::{is_http_url, is_plain_path, is_under_path, RelayPort};

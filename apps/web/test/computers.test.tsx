@@ -619,6 +619,28 @@ describe("a computer's own row", () => {
     expect(document.querySelector("[data-k='agents-block']")?.textContent).not.toContain("GitHub CLI");
   });
 
+  it("draws the sign-in beside the agent that has none there, and nothing beside the one that is signed in", async () => {
+    const spoo: PlaceView = {
+      ...laptop,
+      present: true,
+      name: "spoo",
+      agents: ["claude", "codex"],
+      agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" },
+      signIns: { claude: "vault-key", codex: "none" },
+    };
+    useStore.setState({ api: fakeApi().api, places: [here, spoo] });
+    render(<Computers setup={SETUP} now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    expect(agentRows()).toEqual([
+      { agent: "claude", name: "Claude Code", state: "2.1.270 · key from the vault", action: undefined },
+      { agent: "codex", name: "Codex", state: "0.153.0 · not signed in", action: AGENTS_WORDS.signIn },
+    ]);
+    // A held control for a finished thing is one more thing to read past, so the signed-in line carries none.
+    expect(document.querySelector("[data-agent='claude'] [data-k='agent-sign-in']")).toBeNull();
+    expect(document.querySelector("[data-agent='codex'] [data-k='agent-sign-in']")?.hasAttribute("data-held")).toBe(true);
+  });
+
   it("reads found on a joined computer no recipe has run on, since that is all the computer said", async () => {
     useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true }] });
     render(<Computers setup={SETUP} now={NOW} />);

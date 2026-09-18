@@ -3,14 +3,27 @@
 // every adapter through the runtime, read at each launch and never copied, so
 // a token minted after the host started is in the next turn. Nothing of it is
 // on a machine.
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { HarnessAdapterContext, HarnessAdapterFactory } from "../src/runtime.js";
+import { LocalBackend } from "@wsp/engine";
+import type { HarnessAdapterContext, HarnessAdapterFactory, LocalWiring } from "../src/runtime.js";
 import { createRuntime } from "../src/runtime.js";
 import { secretsOf } from "../src/adapters.js";
+import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend, createOn } from "./stub-backend.js";
+import { stubBackend, createOn, tempRepo, testPlatform } from "./stub-backend.js";
 import type { TurnResult } from "@wsp/protocol";
+
+/** A folder with a first commit in it, which is what a project on this computer is made of. */
+function repoAt(): string {
+  const at = tempRepo();
+  execFileSync("git", ["-C", at, "commit", "-q", "--allow-empty", "-m", "first"], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" } });
+  return at;
+}
 
 const TOKEN = "sk-ant-oat01-TESTONLY";
 const OPENAI = "sk-x-fake-openai";
@@ -56,14 +69,61 @@ describe("the vault a turn launches with", () => {
     for (const ctx of contexts) expect(ctx.vault).toEqual({});
   });
 
+  it("reads a login on the computer the app runs on off that agent's own store there, and never on a fork", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-login-"));
+    const codexHome = join(root, ".codex");
+    mkdirSync(codexHome, { recursive: true });
+    const { factory, contexts } = recording();
+    const local: LocalWiring = {
+      backend: new LocalBackend({ root }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+      home: id => join(root, `.${id}`),
+      homeDir: root,
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, local });
+    const folder = repoAt();
+    const project = await rt.projects.add({ source: folder });
+    const here = await rt.workspaces.create({ project: project.id, name: "here" });
+    await (await rt.sessions.start(here.id, { prompt: "one" })).finished;
+    // Nothing under the home Codex reads on this computer, so a key the vault holds is the turn's to run on.
+    expect(contexts.at(-1)!.loginStands("codex")).toBe(false);
+
+    writeFileSync(join(codexHome, "auth.json"), "{}");
+    await (await rt.sessions.start(here.id, { prompt: "two" })).finished;
+    expect(contexts.at(-1)!.loginStands("codex")).toBe(true);
+    // Claude Code keeps no shared login file at all, so there is never one of its own to stand here.
+    expect(contexts.at(-1)!.loginStands("claude")).toBe(false);
+
+    // An image never carries a sign-in, so a fork at a provider always takes the vault's key.
+    const cloud = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory } });
+    const fork = await createOn(cloud, { golden: "snap_g", name: "x" });
+    await (await cloud.sessions.start(fork.id, { prompt: "one" })).finished;
+    expect(contexts.at(-1)!.loginStands("codex")).toBe(false);
+    for (const at of [root, folder]) rmSync(at, { recursive: true, force: true });
+  });
+
   it("hands each agent the variables its own catalog row declares, from one record, and its token in place of its key", () => {
     const record = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN, ANTHROPIC_API_KEY: "sk-ant-x", OPENAI_API_KEY: OPENAI, SOLARI_API_KEY: "slr_live_x" };
     // An API key beside the token would win inside Claude Code and bill the key on every turn, so the vault hands
     // the token alone where it holds one.
     expect(secretsOf(record, "claude")).toEqual({ oauthToken: TOKEN });
-    expect(secretsOf({ ANTHROPIC_API_KEY: "sk-ant-x" }, "claude")).toEqual({ apiKey: "sk-ant-x" });
-    expect(secretsOf(record, "codex")).toEqual({ apiKey: OPENAI });
+    // The key comes back with the variable it travels under, since the sentence for a key the provider turns down
+    // has to name it.
+    expect(secretsOf(record, "codex")).toEqual({ apiKey: OPENAI, keyEnv: "OPENAI_API_KEY" });
+    expect(secretsOf({ ANTHROPIC_API_KEY: "sk-ant-x" }, "claude")).toEqual({ apiKey: "sk-ant-x", keyEnv: "ANTHROPIC_API_KEY" });
     expect(secretsOf({}, "claude")).toEqual({});
     expect(secretsOf({}, "codex")).toEqual({});
+  });
+
+  it("holds the key back where a login of that agent's own already stands, since the key would outrank it", () => {
+    const record = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN, OPENAI_API_KEY: OPENAI };
+    // Codex reads a key in its environment ahead of the login under its home, so a key handed on a computer the
+    // person signed Codex in on would bill the key and leave that sign-in unused.
+    expect(secretsOf(record, "codex", true)).toEqual({});
+    expect(secretsOf(record, "codex", false)).toEqual({ apiKey: OPENAI, keyEnv: "OPENAI_API_KEY" });
+    // The token is not a key and no login on a machine stands against it: Claude Code keeps none there at all.
+    expect(secretsOf(record, "claude", true)).toEqual({ oauthToken: TOKEN });
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
+import { codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createCodexAdapter, type CodexSession } from "../src/adapter.js";
 
@@ -179,6 +179,21 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     // The cause rides the result, as it does on the other CLI: a turn refused for want of a sign-in did no work.
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: FAILED_THREAD_ID, exitCode: 1, sawResult: true });
+  });
+
+  it("a 401 on a turn that was handed the vault's key is said as a refused key, with the provider's own reason", async () => {
+    const withKey = (exec: ScriptedExec) => createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, apiKey: "sk-ant-x-not-a-key", keyEnv: "OPENAI_API_KEY" });
+    const said = '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized: token expired)"}';
+    const refused = await withKey(scriptedExec([started, said, '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: token expired"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(refused).toMatchObject({ status: "failed", error: codexKeyRefusedLine("OPENAI_API_KEY", "token expired", LOGIN), refusal: "sign-in" });
+
+    // A status the CLI said nothing after still names the key: what is wrong with it is the provider's to say.
+    const bare = await withKey(scriptedExec([started, '{"type":"turn.failed","error":{"message":"401 Unauthorized"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(bare).toMatchObject({ status: "failed", error: codexKeyRefusedLine("OPENAI_API_KEY", "", LOGIN), refusal: "sign-in" });
+
+    // No key was handed, so nothing was refused: the turn ran with no credential at all and the line says so.
+    const none = await adapterOver(scriptedExec([started, '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: token expired"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(none).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
   });
 
   it("a fatal error event followed by an exit with no turn.failed keeps that event's message, not the stderr tail", async () => {
