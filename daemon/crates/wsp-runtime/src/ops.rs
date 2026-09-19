@@ -858,23 +858,10 @@ impl Ops {
             Vec::new()
         } else {
             let mut held = self.points_of_others(&id)?;
-            held.extend(record.made_points.iter().cloned());
+            held.extend(points_of(&self.layout, &id)?);
             held
         };
-        let mut shares = Vec::new();
-        let mut made_points = Vec::new();
-        for share in &record.shares {
-            if !Path::new(&share.source).is_file() {
-                continue;
-            }
-            let at = bundle::inside(&self.layout.rootfs(&id), &share.target)?;
-            let stood = at.exists();
-            bundle::empty_file(&at)?;
-            if point_is_ours(&share.target, stood, &held) {
-                made_points.push(share.target.clone());
-            }
-            shares.push(share.clone());
-        }
+        let (shares, made_points) = make_points(&self.layout, &id, &record.shares, &held)?;
         record.made_points = made_points;
         // The folders of the computer's own this workspace was made with, bound where it reads them: made here
         // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
@@ -913,6 +900,13 @@ impl Ops {
         let pid = self.runtime.init_pid(&id)?.ok_or_else(|| OpError::plain(format!("workspace {id} was created without an init")))?;
         record.init = runtime::identity_of(pid)?;
         bundle::write_json(&self.layout.record(&id), &record)?;
+        // The record carries the points now, so the claim's own file has nothing left to answer for.
+        let points = self.layout.points(&id);
+        match fs::remove_file(&points) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(OpError::plain(format!("{}: {e}", points.display()))),
+        }
         let network = self.net.up(&id, pid).await?;
         // The same inode the container has bound, so the line lands inside.
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, Some(network.gateway))?;
@@ -950,7 +944,7 @@ impl Ops {
         bundle::unmount_under(&self.layout.rootfs(&record.id))?;
         // After the unmount, so what goes is the empty file on the computer's own disk and never a mount: a
         // workspace asleep is one nothing holds a login open for, and the wake makes its points again.
-        self.take_off_points(&record.id, &record.made_points)?;
+        take_off_points(&self.layout, &record.id, &points_of(&self.layout, &record.id)?)?;
         Ok(())
     }
 
@@ -1030,8 +1024,7 @@ impl Ops {
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
         bundle::unmount_under(&self.layout.rootfs(id))?;
-        let made_points = record.as_ref().map(|record| record.made_points.clone()).unwrap_or_default();
-        self.take_off_points(id, &made_points)?;
+        take_off_points(&self.layout, id, &points_of(&self.layout, id)?)?;
         // After the unmount, and the way it was made: a snapshot is a subvolume the kernel takes away, a copied
         // tree is a tree. The copy is the workspace's own, so it goes with it.
         if let Some(made) = record.and_then(|record| record.copy) {
@@ -1119,36 +1112,81 @@ impl Ops {
     fn points_of_others(&self, id: &str) -> Result<Vec<String>, OpError> {
         Ok(records_under(&self.layout)?.into_iter().filter(|record| record.id != id).flat_map(|record| record.made_points).collect())
     }
+}
 
-    /// The empty files this workspace's boot made on the computer's own disk, taken off now that its mounts are
-    /// down: a file share lands at the agent's own path inside, and under the computer's own home that path is the
-    /// computer's, where the tool running on the computer itself would read the empty file as its login.
-    ///
-    /// Two rules hold it to this workspace's own leavings. A point another workspace here still has bound stays,
-    /// read off the records as the sweep reads them, since one workspace's stop may not unlink a mount point
-    /// another is holding. And only an empty file goes: a sign-in made on the computer itself since the boot wrote
-    /// the person's own login into that file, and it is theirs. The folder the point sits in stays, as the leave
-    /// leaves ~/.codex and ~/.claude-cfg: those are the agents' own to make and to keep.
-    fn take_off_points(&self, id: &str, points: &[String]) -> Result<(), OpError> {
-        if points.is_empty() {
-            return Ok(());
+/// The mount points one workspace put on the computer's own disk, wherever they are written down: the record's
+/// list where a record stands, the claim's own file where a boot wrote one and no record has taken it over yet,
+/// and both together where both stand, which is a wake that failed after making a point its standing record does
+/// not name. One reader, so the boot, the remove and the open's sweep of claims nobody finished all answer for
+/// the same points; a name in it that answers nothing costs the take-off below nothing.
+fn points_of(layout: &Layout, id: &str) -> Result<Vec<String>, OpError> {
+    let mut points = bundle::read_record(&layout.record(id))?.map(|record| record.made_points).unwrap_or_default();
+    for point in bundle::read_points(&layout.points(id))? {
+        if !points.contains(&point) {
+            points.push(point);
         }
-        let running = running_ids(&self.layout)?;
-        let bound: Vec<String> = records_under(&self.layout)?
-            .into_iter()
-            .filter(|record| record.id != id && running.contains(&record.id))
-            .flat_map(|record| record.shares.into_iter().map(|share| share.target))
-            .collect();
-        for point in points {
-            if bound.iter().any(|target| target == point) {
-                continue;
-            }
-            if fs::metadata(point).is_ok_and(|held| held.is_file() && held.len() == 0) {
-                fs::remove_file(point).map_err(|e| OpError::plain(format!("{point}: {e}")))?;
-            }
-        }
-        Ok(())
     }
+    Ok(points)
+}
+
+/// The empty files a workspace's boot made on the computer's own disk, taken off now that its mounts are down: a
+/// file share lands at the agent's own path inside, and under the computer's own home that path is the computer's,
+/// where the tool running on the computer itself would read the empty file as its login.
+///
+/// Two rules hold it to that workspace's own leavings. A point another workspace here still has bound stays, read
+/// off the records as the sweep reads them, since one workspace's stop may not unlink a mount point another is
+/// holding. And only an empty file goes: a sign-in made on the computer itself since the boot wrote the person's
+/// own login into that file, and it is theirs. The folder the point sits in stays, as the leave leaves ~/.codex
+/// and ~/.claude-cfg: those are the agents' own to make and to keep.
+///
+/// Over the layout and not over the ops, since the open's sweep of unfinished claims runs before there are any.
+fn take_off_points(layout: &Layout, id: &str, points: &[String]) -> Result<(), OpError> {
+    if points.is_empty() {
+        return Ok(());
+    }
+    let running = running_ids(layout)?;
+    let bound: Vec<String> = records_under(layout)?
+        .into_iter()
+        .filter(|record| record.id != id && running.contains(&record.id))
+        .flat_map(|record| record.shares.into_iter().map(|share| share.target))
+        .collect();
+    for point in points {
+        if bound.iter().any(|target| target == point) {
+            continue;
+        }
+        if fs::metadata(point).is_ok_and(|held| held.is_file() && held.len() == 0) {
+            fs::remove_file(point).map_err(|e| OpError::plain(format!("{point}: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
+/// The mount point each of a workspace's file shares needs inside, made where nothing carries one, and the ones
+/// of wsp's own among them named under the claim as they are made: the shares to write into the config, and the
+/// points to write into the record.
+///
+/// A name goes into the claim's file before the file it names is made, and the file is rewritten at every name.
+/// A boot that refuses partway through this loop, on a target that is no path inside a workspace or a disk with
+/// nothing left, has already put the earlier points on the computer's own home, and until the record is written
+/// the claim's file is the only thing that can name them for the remove and the open's sweep. Naming one that
+/// this boot then failed to make costs them nothing: what the take-off removes is an empty file that stands.
+fn make_points(layout: &Layout, id: &str, wanted: &[Share], held: &[String]) -> Result<(Vec<Share>, Vec<String>), OpError> {
+    let mut shares = Vec::new();
+    let mut made_points = Vec::new();
+    for share in wanted {
+        if !Path::new(&share.source).is_file() {
+            continue;
+        }
+        let at = bundle::inside(&layout.rootfs(id), &share.target)?;
+        let stood = at.exists();
+        if point_is_ours(&share.target, stood, held) {
+            made_points.push(share.target.clone());
+            bundle::write_json(&layout.points(id), &made_points)?;
+        }
+        bundle::empty_file(&at)?;
+        shares.push(share.clone());
+    }
+    Ok((shares, made_points))
 }
 
 /// Whether a mount point a boot has just made for a file share is that workspace's to take off when it goes: one
@@ -1243,6 +1281,9 @@ fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
             // through that bind and then answer EBUSY on the mount point itself, which refuses the open rather
             // than clearing it.
             bundle::unmount_under(&layout.rootfs(&id))?;
+            // After the unmount and before the claim goes, since the claim's own file is the only thing naming
+            // what that create put on the computer's own home and it goes with the directory below.
+            take_off_points(layout, &id, &points_of(layout, &id)?)?;
             let path = entry.path();
             fs::remove_dir_all(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
             swept.claims.push(id);
@@ -2056,7 +2097,7 @@ mod tests {
     #[test]
     fn a_shared_mount_point_stands_while_another_workspace_holds_it_and_goes_with_the_last() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        drop(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
         let layout = Layout::new(dir.path());
         // The point as a boot leaves it on the computer's own disk: empty, with the login bound over it inside.
         let point = dir.path().join("home/.codex/auth.json");
@@ -2075,12 +2116,12 @@ mod tests {
             bundle::write_json(&layout.record(&record.id), record).unwrap();
         }
         // The first stops: the second runs with the same login bound, so the point stands.
-        ops.take_off_points("wsp-one", &one.made_points).unwrap();
+        take_off_points(&layout, "wsp-one", &one.made_points).unwrap();
         assert!(point.is_file(), "a stop unlinked a mount point another workspace still had bound");
         // The second goes while the first is asleep: nothing here holds it any more, so the empty file goes.
         one.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
         bundle::write_json(&layout.record("wsp-one"), &one).unwrap();
-        ops.take_off_points("wsp-two", &two.made_points).unwrap();
+        take_off_points(&layout, "wsp-two", &two.made_points).unwrap();
         assert!(!point.exists(), "the last workspace holding the mount point left it on the computer's home");
         // The folder stays: ~/.codex is the agent's own to make and to keep, whatever wsp put inside it.
         assert!(point.parent().unwrap().is_dir());
@@ -2091,18 +2132,137 @@ mod tests {
     #[test]
     fn a_login_written_on_the_computer_since_the_boot_stays_when_the_workspace_goes() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        drop(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        let layout = Layout::new(dir.path());
         let point = dir.path().join("home/.codex/auth.json");
         fs::create_dir_all(point.parent().unwrap()).unwrap();
         fs::write(&point, b"{\"tokens\":\"the person's own\"}\n").unwrap();
-        ops.take_off_points("wsp-one", &[point.display().to_string()]).unwrap();
+        take_off_points(&layout, "wsp-one", &[point.display().to_string()]).unwrap();
         assert!(point.is_file(), "a stop took off a login the person had written");
         // A record that made no point of its own asks the disk nothing, which is every workspace before this rule
         // and every one whose shares land in its own upper.
-        ops.take_off_points("wsp-one", &[]).unwrap();
+        take_off_points(&layout, "wsp-one", &[]).unwrap();
         // And a point that is already gone, which is a remove after the stop that took it off, is no refusal.
         fs::remove_file(&point).unwrap();
-        ops.take_off_points("wsp-one", &[point.display().to_string()]).unwrap();
+        take_off_points(&layout, "wsp-one", &[point.display().to_string()]).unwrap();
+    }
+
+    /// One reader over both the places a point is written down, so the boot, the remove and the open's sweep all
+    /// answer for the same points however far the create that made them got.
+    #[test]
+    fn the_points_are_the_records_and_the_claims_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        // Neither: a claim under which no boot has written a point yet names none.
+        fs::create_dir_all(layout.workspace("wsp-one")).unwrap();
+        assert!(points_of(&layout, "wsp-one").unwrap().is_empty());
+        // The claim's own file alone: the boot made the point and the create died before the record.
+        let claimed = "/home/one/.codex/auth.json".to_owned();
+        bundle::write_json(&layout.points("wsp-one"), &vec![claimed.clone()]).unwrap();
+        assert_eq!(points_of(&layout, "wsp-one").unwrap(), [claimed.as_str()]);
+        // The record alone: the boot finished, which is what takes the claim's file away.
+        let recorded = "/home/two/.codex/auth.json".to_owned();
+        let mut record = awake("wsp-two", None);
+        record.made_points = vec![recorded.clone()];
+        fs::create_dir_all(layout.workspace("wsp-two")).unwrap();
+        bundle::write_json(&layout.record("wsp-two"), &record).unwrap();
+        assert_eq!(points_of(&layout, "wsp-two").unwrap(), [recorded.as_str()]);
+        // Both: a wake that made a point its standing record does not name and failed before writing it down.
+        let woken = "/home/two/.claude/.credentials.json".to_owned();
+        bundle::write_json(&layout.points("wsp-two"), &vec![woken.clone()]).unwrap();
+        assert_eq!(points_of(&layout, "wsp-two").unwrap(), [recorded.as_str(), woken.as_str()]);
+        // And a point both places name is one point: the take-off is asked for it once.
+        bundle::write_json(&layout.points("wsp-two"), &vec![recorded.clone()]).unwrap();
+        assert_eq!(points_of(&layout, "wsp-two").unwrap(), [recorded.as_str()]);
+    }
+
+    /// A boot that refuses partway through its shares has put the earlier points on the computer's own home
+    /// already, so each point is named under the claim before the file it names is made. The second share here
+    /// cannot have its mount point made, a file standing where its folder would go, and the first share's point
+    /// is named all the same. What the remove and the open's sweep take off is what the reader answers, which
+    /// the case below drives all the way to the unlink.
+    #[test]
+    fn a_boot_that_refuses_inside_the_shares_loop_leaves_the_points_it_made_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        let id = "wsp-halfway";
+        fs::create_dir_all(layout.workspace(id)).unwrap();
+        let login = |name: &str| {
+            let source = layout.logins().join(name);
+            fs::create_dir_all(source.parent().unwrap()).unwrap();
+            fs::write(&source, b"{}").unwrap();
+            source.display().to_string()
+        };
+        // Paths under the computer's own home, which is what makes a point one to take off, and under a name no
+        // computer holds anything at: the take-off reads the computer's path, never the one under the rootfs.
+        let first = "/root/.wsp-share-proof/one.json".to_owned();
+        let second = "/root/.wsp-share-proof/two/two.json".to_owned();
+        let shares =
+            vec![Share { source: login("one.json"), target: first.clone() }, Share { source: login("two.json"), target: second.clone() }];
+        let under = bundle::inside(&layout.rootfs(id), "/root/.wsp-share-proof").unwrap();
+        fs::create_dir_all(&under).unwrap();
+        fs::write(under.join("two"), b"a file where the second share's folder would go").unwrap();
+
+        let refused = make_points(&layout, id, &shares, &[]).unwrap_err();
+        assert!(refused.message.contains("two"), "{refused:?}");
+        // The first share's point was made before the refusal, and the claim names it: that is what the remove
+        // and the open's sweep take off. The second is named and was never made, which costs them nothing, since
+        // what the take-off removes is an empty file that stands.
+        assert!(under.join("one.json").is_file());
+        assert_eq!(bundle::read_points(&layout.points(id)).unwrap(), [first.as_str(), second.as_str()]);
+        assert_eq!(points_of(&layout, id).unwrap(), [first.as_str(), second.as_str()]);
+    }
+
+    /// The create that fails between the mount point and its record: the claim names the point, so the open's
+    /// sweep of claims nobody finished takes the point off the computer's own home with the claim.
+    #[test]
+    fn the_open_takes_off_the_points_a_create_claimed_and_never_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wsp");
+        let layout = Layout::new(&root);
+        drop(Ops::open(&root, PathBuf::from("/bin/true")).unwrap());
+        // The empty file the boot left on the computer's own home for the login to be bound over.
+        let point = dir.path().join("home/.codex/auth.json");
+        fs::create_dir_all(point.parent().unwrap()).unwrap();
+        fs::write(&point, b"").unwrap();
+        // The claim as the create left it: the directory it took first, the points its boot made, no record.
+        fs::create_dir_all(layout.workspace("wsp-halfway")).unwrap();
+        bundle::write_json(&layout.points("wsp-halfway"), &vec![point.display().to_string()]).unwrap();
+
+        let again = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        assert!(!point.exists(), "the open left the mount point of a create that never finished on the computer's home");
+        // The folder stays, as it does for a workspace that went the whole way: it is the agent's own.
+        assert!(point.parent().unwrap().is_dir());
+        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-halfway".to_owned()]);
+        assert!(!layout.workspace("wsp-halfway").exists());
+    }
+
+    /// The same create answered before the next open: its own remove, which is what the create runs when the boot
+    /// it was in the middle of refuses, reads the claim's points as a record's and takes them off.
+    ///
+    /// Root and the live flag, as the mount cases are: a remove takes the workspace's network down on its way,
+    /// and the nftables read that ends with is refused to anything without the capability a box's daemon runs
+    /// with. The open's sweep above is the road this create's leavings are answered by wherever the remove is
+    /// refused, and the create drops the remove's own refusal already.
+    #[tokio::test]
+    async fn a_remove_of_a_claim_with_no_record_takes_its_points_off() {
+        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wsp");
+        let ops = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(&root);
+        let point = dir.path().join("home/.codex/auth.json");
+        fs::create_dir_all(point.parent().unwrap()).unwrap();
+        fs::write(&point, b"").unwrap();
+        fs::create_dir_all(layout.workspace("wsp-halfway")).unwrap();
+        bundle::write_json(&layout.points("wsp-halfway"), &vec![point.display().to_string()]).unwrap();
+
+        ops.remove("wsp-halfway", None).await.unwrap();
+        assert!(!point.exists(), "the remove of a create that never wrote a record left its mount point on the computer's home");
+        assert!(point.parent().unwrap().is_dir());
+        assert!(!layout.workspace("wsp-halfway").exists());
     }
 
     #[test]
