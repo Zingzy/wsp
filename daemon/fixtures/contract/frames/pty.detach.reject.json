@@ -1,16 +1,16 @@
 [
   {
     "id": 1,
-    "op": "pty.attach"
+    "op": "pty.detach"
   },
   {
     "id": 1,
-    "op": "pty.attach",
+    "op": "pty.detach",
     "ptyId": 1
   },
   {
     "id": 1,
-    "op": "pty.attach",
+    "op": "pty.detach",
     "ptyId": "pty_1",
     "machineId": 1
   }

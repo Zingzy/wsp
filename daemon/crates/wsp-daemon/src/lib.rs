@@ -219,7 +219,15 @@ pub(crate) struct Ctx {
     #[cfg(target_os = "linux")]
     pub(crate) runtime_refusal: Option<String>,
     authed: Mutex<HashMap<u64, Outbound>>,
+    /// The door this daemon holds inside each workspace it runs, by workspace: the accept loop and the socket
+    /// file it binds, which sits in that workspace's own wsp folder and so inside that workspace alone.
+    workspace_doors: Mutex<HashMap<String, WorkspaceDoor>>,
     keys: AtomicU64,
+}
+
+/// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends.
+pub(crate) struct WorkspaceDoor {
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl Ctx {
@@ -258,12 +266,65 @@ impl Ctx {
             #[cfg(target_os = "linux")]
             runtime_refusal,
             authed: Mutex::new(HashMap::new()),
+            workspace_doors: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
         })
     }
 
     pub(crate) fn log(&self, line: &str) {
         (self.log)(line);
+    }
+
+    /// One workspace of this computer's is working, so its quiet clock starts over: what a pty inside it says on
+    /// every keystroke and every chunk it prints. Nothing on a daemon that runs no workspace.
+    pub(crate) fn workspace_touched(&self, machine: &str) {
+        #[cfg(target_os = "linux")]
+        if let Some(runtime) = &self.runtime {
+            runtime.touched(machine);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = machine;
+    }
+
+    /// Whether this daemon is a computer's own rather than one inside a machine, which is what the guest roads
+    /// table reads: the same fact the workspace runtime is opened on.
+    pub(crate) fn is_place(&self) -> bool {
+        self.options.place_file.is_some()
+    }
+
+    /// The door inside one workspace, on the path the runtime names for it: a file in the folder of that
+    /// workspace's own that is mounted over the wsp folder inside it. The file itself is the gate, since it is in
+    /// that workspace's mount namespace and in no other's, and a process inside reaches the two guest ops through
+    /// it and no more. A door already held for this workspace is replaced, which is what a boot after a daemon
+    /// restart finds.
+    pub(crate) fn open_workspace_door(self: &Arc<Self>, id: &str, at: &Path) {
+        let at = at.to_path_buf();
+        let listener = match relay::listen_open_socket(&at) {
+            Ok(listener) => listener,
+            Err(e) => return self.log(&format!("workspace {id} has no door inside it: {}: {e}", at.display())),
+        };
+        // Root on this computer owns it and nothing else here may open it; inside, the workspace's own root is
+        // the only one that can see it at all.
+        if let Err(e) = std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o600)) {
+            return self.log(&format!("workspace {id} has no door inside it: {}: {e}", at.display()));
+        }
+        let ctx = Arc::clone(self);
+        let workspace = id.to_owned();
+        let task = tokio::spawn(door::serve_workspace(listener, ctx, workspace));
+        let held = WorkspaceDoor { task };
+        if let Some(old) = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), held) {
+            old.task.abort();
+        }
+    }
+
+    /// The door goes with the workspace it was inside: this ends the loop, and the file it was bound on is the
+    /// runtime's to take off, since the folder it sits in is the workspace's own and a workspace may be stopped
+    /// by something other than the daemon that bound it.
+    pub(crate) fn close_workspace_door(&self, id: &str) {
+        let held = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        if let Some(door) = held {
+            door.task.abort();
+        }
     }
 
     /// What this machine's own two modules are built from; the kind picks which modules those are.
@@ -300,11 +361,8 @@ impl Ctx {
         // An exited pty's pid can be reused by a stranger; only live shells carry the label. Weak, since the sampler
         // lives inside the context it reads.
         let ctx = Arc::downgrade(self);
-        let ptys: proc::PtyPids = Arc::new(move || {
-            ctx.upgrade().map_or_else(Vec::new, |ctx| {
-                ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list().into_iter().filter(|p| !p.exited).map(|p| (p.pid, p.id)).collect()
-            })
-        });
+        let ptys: proc::PtyPids =
+            Arc::new(move || ctx.upgrade().map_or_else(Vec::new, |ctx| ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).labels()));
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
             ptys,
@@ -368,6 +426,11 @@ impl Daemon {
         if let Some(runtime) = &ctx.runtime {
             if let Err(e) = runtime.restore().await {
                 ctx.log(&format!("workspace forwards not restored: {e}"));
+            }
+            // From here the runtime names every boot and every stop, and every workspace already running is named
+            // now, so a daemon that restarted under them holds a door inside each.
+            if let Err(e) = runtime.watch(Arc::new(WorkspaceDoors(Arc::downgrade(&ctx)))) {
+                ctx.log(&format!("workspaces have no doors inside them: {e}"));
             }
         }
         Ok(Daemon { listener, open_socket, ctx })
@@ -452,6 +515,26 @@ fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::O
         Err(e) => {
             log(&format!("workspace runtime not served: {}: {e}", root.display()));
             (None, None)
+        }
+    }
+}
+
+/// The daemon's own hook on the workspaces this computer runs: a door inside each one as it boots, and the door
+/// away as it stops. Weak, since the runtime it is handed to lives on the context that holds it.
+#[cfg(target_os = "linux")]
+struct WorkspaceDoors(std::sync::Weak<Ctx>);
+
+#[cfg(target_os = "linux")]
+impl wsp_runtime::ops::Watches for WorkspaceDoors {
+    fn booted(&self, id: &str, socket: &Path) {
+        if let Some(ctx) = self.0.upgrade() {
+            ctx.open_workspace_door(id, socket);
+        }
+    }
+
+    fn stopped(&self, id: &str) {
+        if let Some(ctx) = self.0.upgrade() {
+            ctx.close_workspace_door(id);
         }
     }
 }

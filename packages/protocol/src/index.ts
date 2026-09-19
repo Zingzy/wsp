@@ -3031,6 +3031,12 @@ export const GuestKind = z.enum(["mcp", "cli"]);
 export type GuestKind = z.infer<typeof GuestKind>;
 
 export const DaemonRequest = z.discriminatedUnion("op", [
+  /** machineId, on these seven and on no other op of this road: the workspace the pty belongs to, on a daemon
+   * that runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of
+   * the computer holding it opens the shell inside that workspace's namespaces, in the folder the frame names,
+   * which is absolute and is asked for, since that daemon has no working directory inside a workspace. Without
+   * one the pty is the daemon's own computer's, which is every machine wsp forked; every later op on that pty
+   * names the same workspace, and one that names another, or none, is answered no such pty. */
   z.object({
     id: reqId,
     op: z.literal("pty.create"),
@@ -3039,12 +3045,17 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     shell: z.string().optional(),
     cwd: z.string().optional(),
     env: z.record(z.string()).optional(),
+    machineId: z.string().optional(),
   }),
-  z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.write"), ptyId: z.string(), data: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.resize"), ptyId: z.string(), cols: z.number(), rows: z.number() }),
-  z.object({ id: reqId, op: z.literal("pty.kill"), ptyId: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.list") }),
+  z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string(), machineId: z.string().optional() }),
+  /** This socket's listeners off that pty, the mirror of pty.attach: a pane that closed stops the bytes of its
+   * own pty on a socket that many panes share. */
+  z.object({ id: reqId, op: z.literal("pty.detach"), ptyId: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.write"), ptyId: z.string(), data: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.resize"), ptyId: z.string(), cols: z.number(), rows: z.number(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.kill"), ptyId: z.string(), machineId: z.string().optional() }),
+  /** With a workspace named, that workspace's ptys alone; without one, this daemon's own alone. */
+  z.object({ id: reqId, op: z.literal("pty.list"), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("ports.watch") }),
   z.object({ id: reqId, op: z.literal("manifest.get") }),
   z.object({
@@ -3689,6 +3700,7 @@ const DAEMON_CONTENTS = [
   "863d552bfaeeff40212778a4f175bf821f8ff5cdd7829e6922866bf70dcdbe5e",
   "376bdbce753a06ef57dfdda1e50f1cb761a728538dd85851db285168e4d1e568",
   "c1d414a8d13ee7070d1df56f82b7230bb53bed51b8b2d43c4bc39a864c5b5489",
+  "cec7af13cc254d8325bf77409aedc4daeb072d5dc0413b58aaf45f8428698721",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3858,7 +3870,11 @@ const DAEMON_CONTENTS = [
  * file for the next open to refuse, which takes a dead create's torn claim away instead.
  * Version 58 writes the process manifest to a sibling and renames it into place through the same writer every file the
  * runtime crate writes takes, so a daemon that dies inside the write leaves the manifest it had or none, never a torn
- * one the next start refuses. */
+ * one the next start refuses.
+ * Version 59 binds a socket in each running workspace's own wsp folder that answers a guest's ping, open and send and no
+ * other op, so a process inside a box workspace reaches the host's guest door without a token of the box's, writes the
+ * wsp word into the workspace's own upper, and opens a shell inside a workspace's namespaces for the terminal pane, held
+ * beside the daemon's own ptys and answered to no other workspace. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4076,11 +4092,16 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     turnToken: z.string().optional(),
     argv: z.array(z.string()),
     cwd: z.string(),
+    /** The workspace the session was opened inside, on a daemon that runs workspaces: the listener the session
+     * arrived on is what names it, never anything the guest said, so a session of one workspace can never read as
+     * another's. Absent on a daemon inside a machine, where the machine is the one this host dialled. */
+    machineId: z.string().optional(),
   }),
-  /** One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down. */
-  z.object({ type: z.literal("guest.message"), session: z.string(), message: z.unknown() }),
+  /** One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down.
+   * The workspace is the opened frame's, as on every frame a place daemon relays for a session. */
+  z.object({ type: z.literal("guest.message"), session: z.string(), message: z.unknown(), machineId: z.string().optional() }),
   /** The session ended; this reaches whichever side did not end it. */
-  z.object({ type: z.literal("guest.closed"), session: z.string(), error: z.string().optional() }),
+  z.object({ type: z.literal("guest.closed"), session: z.string(), error: z.string().optional(), machineId: z.string().optional() }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 

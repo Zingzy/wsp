@@ -29,6 +29,16 @@ export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
 export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
 export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
+/** The socket a process inside a workspace on a computer somebody owns reaches its host over. The daemon of that
+ * computer binds one per workspace in that workspace's own wsp folder, which is bound over the folder above
+ * inside it, so the file is in that workspace's view and in no other's and nowhere on the computer's own. The file
+ * itself is the gate and no token rides this road; a fork has no such socket and dials the port instead. */
+export const GUEST_DAEMON_SOCKET_PATH = `${GUEST_WSP_HOME}/daemon.sock`;
+/** The whole of the wsp a machine carries at GUEST_WSP_PATH: two lines handing the line to the binary named, which
+ * opens a session on the daemon that serves this machine. The fork's deploy writes it onto the binary its bundle
+ * left, and the workspace runtime writes it into a workspace's own upper onto the init already bound inside; one
+ * text, so the word means the same thing on both roads. */
+export const guestWspShim = (binary: string): string => `#!/bin/sh\nexec ${binary} wsp "$@"\n`;
 
 /** The computer's own system directories a workspace on a computer somebody owns reads through an overlay of its
  * own: its /usr is the box's /usr, and what it writes there the box does not have. A directory outside these and

@@ -32,6 +32,7 @@ pub mod nft;
 #[cfg(target_os = "linux")]
 pub mod ops;
 pub mod profile;
+pub mod pty;
 #[cfg(target_os = "linux")]
 pub mod runtime;
 pub mod size;

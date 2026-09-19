@@ -10,7 +10,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -67,6 +67,13 @@ impl Layout {
     /// by a stop as the uppers are, so a wake reads back what the daemon inside wrote.
     pub fn wsp_home(&self, id: &str) -> PathBuf {
         self.workspace(id).join("wsp-home")
+    }
+    /// The socket the computer's own daemon binds inside one workspace, in that folder and so in that
+    /// workspace's view alone. Named here rather than where it is bound: the daemon binds what this hands it and
+    /// the stop takes the same path off, so a stopped workspace holds no socket of a daemon that may not even be
+    /// the one that bound it.
+    pub fn guest_socket(&self, id: &str) -> PathBuf {
+        self.wsp_home(id).join(guest_socket_name())
     }
     /// An empty directory of the workspace's own, bound over a path inside it that the computer's own directory
     /// holds something at: the engine's data under /var/lib. One directory per path, since what the workspace
@@ -427,6 +434,15 @@ pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> 
 const SKELETON: [&str; 15] =
     ["usr", "etc", "opt", "var", "srv", "root", "home", "tmp", "run", "proc", "sys", "dev", "mnt", "media", "boot"];
 
+/// What that socket is called in the workspace's own wsp folder: the last part of the path a process inside
+/// dials it by, so the two halves of that path are never spelled apart.
+fn guest_socket_name() -> &'static str {
+    Path::new(wsp_frames::numbers::GUEST_DAEMON_SOCKET_PATH)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .expect("the guest socket path names a file")
+}
+
 /// The two a boot empties: every distribution expects /run and /tmp empty at boot, since what is in them is pid
 /// files and sockets of processes that are gone. They are plain directories of the workspace's own on the
 /// daemon's disk rather than a tmpfs, which is what keeps the box's own engine socket at /run/docker.sock out of
@@ -587,6 +603,29 @@ fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
         Err(e) => return Err(at(&path)(e)),
     }
     fs::write(&path, resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV))).map_err(at(&path))
+}
+
+/// The wsp a process inside a workspace runs, written into the workspace's own upper at `GUEST_WSP_PATH`: two
+/// lines onto the init this workspace already carries read-only, which is the same binary the daemon out here is.
+/// The computer's own wsp, where it has one at all, is a command under the wsp folder every workspace covers, so
+/// a workspace that was not given this word has none.
+///
+/// Written through the merged view, as the resolv.conf above is, and a link the computer keeps at that path is
+/// removed first: an absolute link under a rootfs is resolved by the kernel against this process's own root, so a
+/// write that followed one would land on the computer's own file instead.
+pub fn write_wsp_shim_inside(rootfs: &Path) -> Result<(), Error> {
+    let path = inside(rootfs, wsp_frames::numbers::GUEST_WSP_PATH)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(at(dir))?;
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(held) if held.file_type().is_symlink() => fs::remove_file(&path).map_err(at(&path))?,
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(at(&path)(e)),
+    }
+    fs::write(&path, wsp_frames::guest_wsp_shim(profile::INIT_PATH)).map_err(at(&path))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).map_err(at(&path))
 }
 
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
@@ -1165,6 +1204,19 @@ mod tests {
         assert!(!steps[1].2.contains(MsFlags::MS_SHARED) && !steps[1].2.contains(MsFlags::MS_PRIVATE));
     }
 
+    /// The socket a process inside a workspace dials its host over, as this computer keeps it: in that
+    /// workspace's own wsp folder, which is what is mounted over the wsp home inside it, under the name the
+    /// contract pins for the path there. One name, so the daemon binds and the stop sweeps the same file.
+    #[test]
+    fn the_socket_inside_a_workspace_is_the_file_a_process_there_dials() {
+        let layout = Layout::new(Path::new("/wsp"));
+        assert_eq!(layout.guest_socket("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home/daemon.sock"));
+        assert_eq!(layout.guest_socket("wsp-a").parent(), Some(layout.wsp_home("wsp-a").as_path()));
+        let inside = Path::new(wsp_frames::numbers::GUEST_DAEMON_SOCKET_PATH);
+        assert_eq!(layout.guest_socket("wsp-a").file_name(), inside.file_name());
+        assert_eq!(inside.parent(), Some(Path::new(GUEST_WSP_HOME)));
+    }
+
     /// What a workspace's /etc/resolv.conf is after the boot writes it, on a rootfs made by hand: the link the
     /// box keeps there on every computer that runs systemd-resolved is gone, a regular file stands in its place,
     /// and what it holds is a nameserver a workspace can reach. No mount and no root: this is the write the boot
@@ -1193,6 +1245,38 @@ mod tests {
         fs::create_dir_all(bare.join("etc")).unwrap();
         write_resolv_inside(&bare).unwrap();
         assert!(fs::read_to_string(bare.join(RESOLV_INSIDE)).unwrap().contains("nameserver "));
+    }
+
+    /// The word a process inside runs, written on a rootfs made by hand: two lines onto the init already bound
+    /// inside, the text the contract fixture pins, and a link the computer keeps at that path removed first, as
+    /// the resolv.conf above is, so nothing of this write lands on the computer itself.
+    #[test]
+    fn the_workspaces_own_wsp_is_the_shim_onto_its_init_where_the_computer_keeps_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = dir.path().join("rootfs");
+        let at = rootfs.join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/'));
+        let elsewhere = dir.path().join("the-computers-own-wsp");
+        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        fs::write(&elsewhere, "the computer's own").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &at).unwrap();
+
+        write_wsp_shim_inside(&rootfs).unwrap();
+        let held = fs::symlink_metadata(&at).unwrap();
+        assert!(held.file_type().is_file(), "the workspace's wsp is not a regular file");
+        assert_eq!(held.permissions().mode() & 0o777, 0o755);
+        assert_eq!(fs::read_to_string(&at).unwrap(), wsp_frames::guest_wsp_shim(profile::INIT_PATH));
+        assert!(fs::read_to_string(&at).unwrap().contains("/sbin/wsp-init"));
+        // What the link pointed at is untouched: a link in the computer's own /usr/local/bin cannot point this
+        // write out of the rootfs.
+        assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "the computer's own");
+        // Written again at every boot, as the resolv.conf is, over what the last boot left.
+        write_wsp_shim_inside(&rootfs).unwrap();
+        assert_eq!(fs::read_to_string(&at).unwrap(), wsp_frames::guest_wsp_shim(profile::INIT_PATH));
+        // And on a rootfs with no such folder yet, which is a workspace whose upper holds nothing there.
+        let bare = dir.path().join("bare");
+        fs::create_dir_all(&bare).unwrap();
+        write_wsp_shim_inside(&bare).unwrap();
+        assert!(bare.join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/')).is_file());
     }
 
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and

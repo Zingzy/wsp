@@ -8,11 +8,13 @@
 //! namespaces and cgroup and none of the linux section the filter lives in, so the exec loads it itself, through
 //! the executor that runs the command.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -31,6 +33,17 @@ use tokio::process::Command;
 use wsp_frames::numbers;
 
 use crate::bundle::{Init, Layout};
+use crate::profile;
+
+/// How long the daemon waits for the tenant to hand its pty master back over the console socket. The tenant is
+/// cloned, pivots and opens the pty from the workspace's own /dev/pts, which is milliseconds; past this the
+/// workspace could not give a terminal and the pane is told rather than left waiting.
+const CONSOLE_WAIT: Duration = Duration::from_secs(30);
+/// How often the file the library writes the broker's pid into is read while the terminal is opening.
+const PID_POLL: Duration = Duration::from_millis(5);
+/// How long a helper that gave no terminal is read for once it is ended: what it printed is already written, so
+/// this is the pipe draining and nothing more.
+const HELPER_LAST_WORDS: Duration = Duration::from_secs(2);
 
 /// The exit code a helper answers for a failure of its own, apart from the command it ran; its stderr says why,
 /// behind `HELPER_PREFIX`.
@@ -124,17 +137,103 @@ pub struct Exec {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    /// One of the two streams filled the output cap and what came after it is gone. Read by whoever asked, since
+    /// a diff cut here and a diff cut by a pane's own budget are the same thing to the person reading it.
+    pub truncated: bool,
+}
+
+/// What one pty inside a workspace is opened with: the size the pane holds, the folder the shell starts in,
+/// which is absolute and the caller's to name, the command it runs, and what its environment carries beyond the
+/// workspace's own.
+#[derive(Debug, Clone)]
+pub struct PtyInside {
+    pub cols: u16,
+    pub rows: u16,
+    pub cwd: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+/// A shell running inside a workspace on a pty of that workspace's own: the two ends of the road into it, the
+/// helper that holds the exec, which is waited on for the exit as an exec's is, and what resizes the terminal.
+/// The pipes are taken once, by whoever pumps them.
+pub struct PtyInsideRunning {
+    pipes: Option<(tokio::process::ChildStdin, tokio::process::ChildStdout)>,
+    pub helper: tokio::process::Child,
+    size: PtyInsideSize,
+}
+
+/// What resizes one pty inside a workspace, and nothing else: the broker's pid on this computer and the file it
+/// reads a size from. Its own thing, so one task may wait on the helper for the exit while another resizes.
+pub struct PtyInsideSize {
+    pid: u32,
+    file: PathBuf,
+}
+
+impl PtyInsideSize {
+    /// The broker's pid on this computer: what the window-change signal goes to, what the mode probe reads and
+    /// what the proc sampler labels a row of this computer's own process list with.
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// The size the pane holds now: written where the broker inside reads it, then the window-change signal that
+    /// tells it to, which is the one thing that reaches a process whose pipes carry a person's keystrokes.
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), Error> {
+        fs::write(&self.file, crate::pty::size_line(cols, rows)).map_err(io_at(&self.file))?;
+        kill(Pid::from_raw(self.pid as i32), Signal::SIGWINCH).map_err(|e| Error::Container(format!("the pty was not resized: {e}")))
+    }
+}
+
+/// The size file is the workspace's own and goes with the pty it was written for.
+impl Drop for PtyInsideSize {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.file);
+    }
+}
+
+impl PtyInsideRunning {
+    /// What a person types goes in the first and what the shell prints comes out of the second; nothing after
+    /// the first caller, since two readers of one pipe would each get half the bytes.
+    pub fn pipes(&mut self) -> Option<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
+        self.pipes.take()
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.size.pid()
+    }
+
+    /// The helper to wait on for the exit and the size road, taken apart: one task waits on that child for the
+    /// life of the shell, and a resize cannot wait behind it.
+    pub fn apart(self) -> (tokio::process::Child, PtyInsideSize) {
+        (self.helper, self.size)
+    }
+
+    /// What the helper and the broker inside printed, with the helper ended so its stderr reads to the end: the
+    /// sentence a terminal that gave nothing is explained by, since the library writes the broker's pid the
+    /// moment the tenant is made and the kernel may still refuse that tenant's filter after it. Ends the pty, so
+    /// it is asked once something has already gone wrong.
+    pub async fn said(&mut self) -> String {
+        helper_said(&mut self.helper).await
+    }
+
+    /// The size the pane holds now, on the road above.
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), Error> {
+        self.size.resize(cols, rows)
+    }
 }
 
 pub struct Runtime {
     layout: Layout,
     exe: PathBuf,
+    /// A number no other pty of this run has, so two panes on one workspace never name one console socket.
+    ptys: AtomicU64,
 }
 
 impl Runtime {
     /// `exe` is this binary, which the helpers run and the workspaces boot as their init.
     pub fn new(root: &Path, exe: PathBuf) -> Runtime {
-        Runtime { layout: Layout::new(root), exe }
+        Runtime { layout: Layout::new(root), exe, ptys: AtomicU64::new(1) }
     }
 
     pub fn exe(&self) -> &Path {
@@ -188,17 +287,17 @@ impl Runtime {
                 }
                 drop(feed);
             };
-            let ((), (), (), status) = tokio::join!(write, read_into(out, &stdout), read_into(err, &stderr), child.wait());
-            status
+            let ((), cut_out, cut_err, status) = tokio::join!(write, read_into(out, &stdout), read_into(err, &stderr), child.wait());
+            (status, cut_out || cut_err)
         };
-        let status = match tokio::time::timeout(timeout + HELPER_MARGIN, run).await {
-            Ok(status) => status.map_err(|e| Error::Helper { verb: "exec", detail: e.to_string() })?.code(),
+        let (status, truncated) = match tokio::time::timeout(timeout + HELPER_MARGIN, run).await {
+            Ok((status, truncated)) => (status.map_err(|e| Error::Helper { verb: "exec", detail: e.to_string() })?.code(), truncated),
             Err(_) => {
                 if let Some(group) = pid.and_then(|p| i32::try_from(p).ok()) {
                     let _ = killpg(Pid::from_raw(group), Signal::SIGKILL);
                 }
                 let _ = child.start_kill();
-                None
+                (None, false)
             }
         };
         let stdout = String::from_utf8_lossy(&stdout.into_inner().unwrap_or_else(|e| e.into_inner())).into_owned();
@@ -208,7 +307,78 @@ impl Runtime {
                 return Err(Error::Helper { verb: "exec", detail: detail.to_owned() });
             }
         }
-        Ok(Exec { exit_code: status.unwrap_or(numbers::EXEC_DEADLINE_EXIT), stdout, stderr })
+        Ok(Exec { exit_code: status.unwrap_or(numbers::EXEC_DEADLINE_EXIT), stdout, stderr, truncated })
+    }
+
+    /// A shell inside the workspace, on a pty the workspace itself opens. The exec is a plain exec in every way
+    /// the library sees: a tenant with no terminal and no console socket, running this binary's own pty broker
+    /// inside, which opens the pair from the workspace's own /dev/ptmx and is the wire between that master and
+    /// this exec's pipes. What comes back is those pipes, the broker's pid on this computer, which a resize is
+    /// signalled to, and the helper to wait on for the exit.
+    pub async fn pty(&self, id: &str, opts: &PtyInside) -> Result<PtyInsideRunning, Error> {
+        let at = self.ptys.fetch_add(1, Ordering::Relaxed);
+        // The size is read inside, so the file is written in the folder of the workspace's own that is mounted
+        // over the wsp home inside it: one name, spelled on this side as a path on the computer's disk and on
+        // that side as the path the workspace sees.
+        let name = format!("pty-{at}.size");
+        let size_file = self.layout.wsp_home(id).join(&name);
+        let ask = crate::pty::Ask {
+            cols: opts.cols,
+            rows: opts.rows,
+            cwd: PathBuf::from(&opts.cwd),
+            size_file: PathBuf::from(format!("{}/{name}", numbers::GUEST_WSP_HOME)),
+            env: opts.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            argv: opts.args.clone(),
+        };
+        if let Some(dir) = size_file.parent() {
+            fs::create_dir_all(dir).map_err(io_at(dir))?;
+        }
+        fs::write(&size_file, crate::pty::size_line(opts.cols, opts.rows)).map_err(io_at(&size_file))?;
+        let pid_file = self.layout.workspace(id).join(format!("pty-{at}.pid"));
+        let _ = fs::remove_file(&pid_file);
+        let line = crate::pty::helper_argv(self.layout.root(), id, &pid_file, &crate::pty::broker_line(profile::INIT_PATH, &ask));
+        let started = crate::pty::start(&self.exe, &line).map_err(|e| Error::Helper { verb: "pty", detail: e.to_string() });
+        let (mut helper, input, output) = match started {
+            Ok(started) => started,
+            Err(e) => {
+                let _ = fs::remove_file(&size_file);
+                return Err(e);
+            }
+        };
+        let named = self.broker_pid(&pid_file, &mut helper).await;
+        let _ = fs::remove_file(&pid_file);
+        match named {
+            Ok(pid) => Ok(PtyInsideRunning { pipes: Some((input, output)), helper, size: PtyInsideSize { pid, file: size_file } }),
+            Err(e) => {
+                let _ = fs::remove_file(&size_file);
+                let _ = helper.start_kill();
+                Err(e)
+            }
+        }
+    }
+
+    /// The broker's pid on this computer, off the file the library writes the moment the tenant is made. Three
+    /// things are raced: that file, the helper's own end, and the wait. A helper that ended before a terminal
+    /// stood is the whole of the answer, since an exec the kernel or the library refuses is refused before the
+    /// command runs, and the refusal names what the helper said.
+    async fn broker_pid(&self, pid_file: &Path, helper: &mut tokio::process::Child) -> Result<u32, Error> {
+        let named = async {
+            loop {
+                if let Some(pid) = fs::read_to_string(pid_file).ok().and_then(|held| held.trim().parse::<u32>().ok()) {
+                    return pid;
+                }
+                tokio::time::sleep(PID_POLL).await;
+            }
+        };
+        let why = tokio::select! {
+            pid = named => return Ok(pid),
+            ended = helper.wait() => match ended {
+                Ok(status) => format!("the helper ended {status} before the workspace opened a terminal"),
+                Err(e) => format!("the helper could not be waited for: {e}"),
+            },
+            () = tokio::time::sleep(CONSOLE_WAIT) => format!("the workspace opened no terminal in {} s", CONSOLE_WAIT.as_secs()),
+        };
+        Err(Error::Helper { verb: "pty", detail: format!("{why}; {}", helper_said(helper).await) })
     }
 
     /// SIGKILL to every process in the cgroup, then youki's delete once they have left and the init is reaped: the
@@ -504,18 +674,22 @@ fn joined(e: tokio::task::JoinError) -> Error {
     Error::Helper { verb: "blocking", detail: e.to_string() }
 }
 
-/// One reader per stream, into a buffer capped at the protocol's exec output cap.
-async fn read_into<R: AsyncRead + Unpin>(pipe: Option<R>, out: &Mutex<Vec<u8>>) {
-    let Some(mut pipe) = pipe else { return };
+/// One reader per stream, into a buffer capped at the protocol's exec output cap; true where the cap was reached
+/// and bytes were dropped, which is what the caller answers `truncated` off.
+async fn read_into<R: AsyncRead + Unpin>(pipe: Option<R>, out: &Mutex<Vec<u8>>) -> bool {
+    let Some(mut pipe) = pipe else { return false };
     let mut buf = vec![0u8; 16 * 1024];
+    let mut cut = false;
     while let Ok(n) = pipe.read(&mut buf).await {
         if n == 0 {
             break;
         }
         let mut held = out.lock().unwrap_or_else(|e| e.into_inner());
         let room = numbers::EXEC_OUTPUT_MAX.saturating_sub(held.len());
+        cut = cut || n > room;
         held.extend_from_slice(&buf[..n.min(room)]);
     }
+    cut
 }
 
 /// In the helper process: youki's create for the bundle, detached, on the plain cgroup manager. The network
@@ -550,30 +724,38 @@ pub fn helper_create(root: &Path, id: &str) -> Result<(), Error> {
 /// In the helper process: the command as a tenant of the workspace behind its seccomp filter, its stdio inherited
 /// from this process, waited for; past the deadline its group is killed and the answer is 124. Answers the exit
 /// code to exit with.
-pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Duration) -> Result<i32, Error> {
+pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Option<Duration>, pid_file: Option<PathBuf>) -> Result<i32, Error> {
     let layout = Layout::new(root);
     let fence = Fenced::read(&layout.config(id))?;
     let tenant = ContainerBuilder::new(id.to_owned(), SyscallType::default())
         .with_root_path(layout.state())
         .map_err(container)?
         .with_executor(fence)
+        .with_pid_file(pid_file)
+        .map_err(container)?
         .as_tenant()
         .with_container_args(args)
         .with_detach(false)
         .build()
         .map_err(container)?;
     let pid = Pid::from_raw(tenant.as_raw());
-    let deadline = std::thread::spawn(move || {
-        std::thread::sleep(timeout);
-        // The tenant is its own session, so its group is what its children share.
-        let _ = killpg(pid, Signal::SIGKILL);
-        let _ = kill(pid, Signal::SIGKILL);
+    // A person's shell has no deadline; every other command inside carries the exec road's own.
+    let deadline = timeout.map(|timeout| {
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            // The tenant is its own session, so its group is what its children share.
+            let _ = killpg(pid, Signal::SIGKILL);
+            let _ = kill(pid, Signal::SIGKILL);
+        })
     });
     let code = loop {
         match waitpid(pid, None) {
             Ok(WaitStatus::Exited(_, code)) => break code,
             Ok(WaitStatus::Signaled(_, signal, _)) => {
-                break if deadline.is_finished() { numbers::EXEC_DEADLINE_EXIT } else { 128 + signal as i32 };
+                break match deadline.as_ref().is_some_and(std::thread::JoinHandle::is_finished) {
+                    true => numbers::EXEC_DEADLINE_EXIT,
+                    false => 128 + signal as i32,
+                };
             }
             Ok(_) | Err(nix::Error::EINTR) => continue,
             Err(e) => return Err(Error::Container(format!("waiting for the tenant: {e}"))),
@@ -581,6 +763,28 @@ pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Duration) 
     };
     remove_stale_notify_sockets(&layout.state_of(id));
     Ok(code)
+}
+
+/// How the helper stands and what it said, for the sentence a pane is given when no terminal came back: whether
+/// it ended and with what, and whatever it printed on the pipe a refusal of the workspace's own lands on. One
+/// still running is ended here, since its stderr reads to the end only once it is gone.
+async fn helper_said(helper: &mut tokio::process::Child) -> String {
+    let ended = match helper.try_wait() {
+        Ok(Some(status)) => format!("the helper ended {status}"),
+        Ok(None) => {
+            let _ = helper.start_kill();
+            "the helper was still running".to_owned()
+        }
+        Err(e) => format!("the helper's state is unreadable: {e}"),
+    };
+    let mut said = String::new();
+    if let Some(mut pipe) = helper.stderr.take() {
+        let _ = tokio::time::timeout(HELPER_LAST_WORDS, pipe.read_to_string(&mut said)).await;
+    }
+    match said.trim() {
+        "" => format!("{ended} and printed nothing"),
+        printed => format!("{ended} and printed: {printed}"),
+    }
 }
 
 /// The workspace's seccomp filter, read off its config.json and carried into the tenant process, where it is loaded
@@ -651,6 +855,45 @@ pub fn helper_failure_line(e: &Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flag `Exec.truncated` rides on, read where it is set: true only where bytes were dropped. At the cap
+    /// less one byte nothing was, at the cap itself nothing was either, and one byte past it something was.
+    #[tokio::test]
+    async fn a_read_says_it_cut_only_where_bytes_were_dropped() {
+        let read = async |bytes: usize| -> (bool, usize) {
+            let held = vec![b'a'; bytes];
+            let out = Mutex::new(Vec::new());
+            let cut = read_into(Some(&held[..]), &out).await;
+            (cut, out.into_inner().unwrap_or_else(|e| e.into_inner()).len())
+        };
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX - 1).await, (false, numbers::EXEC_OUTPUT_MAX - 1));
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX).await, (false, numbers::EXEC_OUTPUT_MAX));
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX + 1).await, (true, numbers::EXEC_OUTPUT_MAX));
+        // A stream that says nothing at all is nothing cut.
+        assert_eq!(read(0).await, (false, 0));
+    }
+
+    /// What an exec past the output cap does to the command that printed it: nothing. The reader keeps the cap's
+    /// worth and goes on reading to the end, so the command is never handed a closed pipe, prints no complaint of
+    /// its own and exits as it meant to. A diff inside past the cap is this: cut in the answer, quiet at the far
+    /// end, and said to be cut by the flag rather than by a broken pipe in somebody's stderr.
+    #[tokio::test]
+    async fn a_read_past_the_cap_keeps_draining_so_the_command_ends_quietly() {
+        let line = "a line of a file that is about to be large";
+        let lines = numbers::EXEC_OUTPUT_MAX / line.len() + 1000;
+        let mut cmd = Command::new("awk");
+        cmd.arg(format!("BEGIN {{ for (i = 0; i < {lines}; i++) print \"{line}\" }}"));
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().expect("awk is on this computer");
+        let (out, err) = (Mutex::new(Vec::new()), Mutex::new(Vec::new()));
+        let (cut_out, cut_err, ended) =
+            tokio::join!(read_into(child.stdout.take(), &out), read_into(child.stderr.take(), &err), child.wait());
+        assert!(cut_out, "the cap was not reached");
+        assert!(!cut_err);
+        assert_eq!(out.into_inner().unwrap_or_else(|e| e.into_inner()).len(), numbers::EXEC_OUTPUT_MAX);
+        assert!(err.into_inner().unwrap_or_else(|e| e.into_inner()).is_empty(), "the command printed a complaint of its own");
+        assert!(ended.unwrap().success(), "the command was cut off rather than left to finish");
+    }
 
     #[test]
     fn a_workspace_with_no_state_directory_is_gone() {
@@ -892,7 +1135,7 @@ mod tests {
         assert_eq!(Fenced::read(&config).unwrap_err().to_string(), NOTIFY_REFUSAL);
         // The helper road: no youki state exists under this root, so a refusal that reads as anything but the
         // notify sentence would be youki's, asked after the read.
-        let refused = helper_exec(dir.path(), "wsp-n", vec!["true".to_owned()], Duration::from_secs(1)).unwrap_err();
+        let refused = helper_exec(dir.path(), "wsp-n", vec!["true".to_owned()], Some(Duration::from_secs(1)), None).unwrap_err();
         assert_eq!(helper_failure_line(&refused), format!("wsp-runtime: {NOTIFY_REFUSAL}"));
     }
 

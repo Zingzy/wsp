@@ -14,7 +14,7 @@ use std::time::Duration;
 use wsp_frames::numbers;
 use wsp_runtime::ops::Ops;
 
-use super::{GitResult, Runs, GIT_ENV};
+use super::{Asked, GitResult, Runs, GIT_ENV};
 use crate::paths::OpError;
 
 /// One workspace of this computer's, and how long a command in it may run: the daemon's own exec ceiling rather
@@ -23,11 +23,21 @@ use crate::paths::OpError;
 pub(crate) struct Inside {
     runtime: Arc<Ops>,
     machine: String,
+    asked: Asked,
 }
 
 impl Inside {
-    pub(crate) fn new(runtime: Arc<Ops>, machine: &str) -> Inside {
-        Inside { runtime, machine: machine.to_owned() }
+    pub(crate) fn new(runtime: Arc<Ops>, machine: &str, asked: Asked) -> Inside {
+        Inside { runtime, machine: machine.to_owned(), asked }
+    }
+
+    /// One command inside, on the road the frame asked for.
+    async fn ran(&self, line: &str, input: Option<Vec<u8>>) -> Result<wsp_runtime::runtime::Exec, OpError> {
+        let done = match self.asked {
+            Asked::Read => self.runtime.read_in(&self.machine, line, input, DEADLINE).await,
+            Asked::Work => self.runtime.exec_in(&self.machine, line, input, DEADLINE).await,
+        };
+        done.map_err(crate::ops::from_runtime)
     }
 }
 
@@ -43,12 +53,9 @@ impl Runs for Inside {
         input: Option<&[u8]>,
         max_bytes: Option<usize>,
     ) -> Result<GitResult, OpError> {
-        let done = self.runtime.exec_in(&self.machine, &line(cwd, program, args), input.map(<[u8]>::to_vec), DEADLINE).await;
-        let done = done.map_err(crate::ops::from_runtime)?;
-        // The cap is the diff pane's byte budget, spent on what came back rather than by killing a process this
-        // daemon does not hold: an exec inside answers whole or not at all.
+        let done = self.ran(&line(cwd, program, args), input.map(<[u8]>::to_vec)).await?;
         let mut stdout = done.stdout.into_bytes();
-        let truncated = max_bytes.is_some_and(|cap| stdout.len() > cap);
+        let truncated = was_cut(stdout.len(), max_bytes, done.truncated);
         if let Some(cap) = max_bytes.filter(|cap| stdout.len() > *cap) {
             stdout.truncate(cap);
         }
@@ -57,9 +64,16 @@ impl Runs for Inside {
 
     async fn on_path(&self, program: &str) -> Result<bool, OpError> {
         let read = format!("command -v {} >/dev/null 2>&1", quoted(program));
-        let done = self.runtime.exec_in(&self.machine, &read, None, DEADLINE).await.map_err(crate::ops::from_runtime)?;
-        Ok(done.exit_code == 0)
+        Ok(self.ran(&read, None).await?.exit_code == 0)
     }
+}
+
+/// Whether what came back was cut, by either cap it passed. The caller's is the pane's byte budget, spent on
+/// what arrived rather than by killing a process this daemon does not hold: an exec inside answers whole or not
+/// at all. The exec road inside has a cap of its own under it, and what that road dropped is dropped whatever the
+/// caller's budget says, so the person reading is told either way.
+fn was_cut(bytes: usize, max_bytes: Option<usize>, runtime_said: bool) -> bool {
+    runtime_said || max_bytes.is_some_and(|cap| bytes > cap)
 }
 
 /// The one line an exec inside runs: the work score every shell of ours starts at, the git environment, the
@@ -80,6 +94,20 @@ fn quoted(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// At exactly the caller's cap nothing of its own was dropped, so what says the answer is cut is the road
+    /// underneath saying it dropped something.
+    #[test]
+    fn what_came_back_reads_cut_at_the_cap_only_where_the_road_under_it_cut() {
+        let cap = numbers::GIT_DIFF_CAP_BYTES;
+        assert!(!was_cut(cap, Some(cap), false));
+        assert!(was_cut(cap, Some(cap), true));
+        assert!(was_cut(cap + 1, Some(cap), false));
+        assert!(!was_cut(cap - 1, Some(cap), false));
+        // A read with no budget of its own, which is every git call but the diff, is cut only by that road.
+        assert!(!was_cut(cap + 1, None, false));
+        assert!(was_cut(0, None, true));
+    }
 
     #[test]
     fn the_line_carries_the_work_score_the_git_environment_the_folder_and_the_program_execed() {

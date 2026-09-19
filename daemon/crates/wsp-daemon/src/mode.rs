@@ -120,6 +120,7 @@ impl ModeWatcher {
         if let Some(last) = &entry.last {
             listener.out.send_event(&event(pty_id, last));
         }
+        entry.listeners.retain(|l| l.key != listener.key);
         entry.listeners.push(listener);
         if !entry.polling {
             entry.polling = true;

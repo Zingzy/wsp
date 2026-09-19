@@ -48,6 +48,11 @@ pub const OFFER: &str = "runtime";
 pub const HOSTNAME_MAX: usize = 63;
 /// The environment every exec carries ahead of its command, as every wsp guest exec does.
 pub const EXEC_ENV: &str = "export HOME=/root USER=root";
+/// What a terminal inside a workspace says it is, the one the daemon's own ptys name.
+const TERM: &str = "xterm-256color";
+/// The shell a pane opens inside a workspace where the frame names none: the workspace's own bash, by name and
+/// not by path, since the PATH inside is what says which bash that is.
+const SHELL_INSIDE: &str = "bash";
 /// The label every workspace wears, so a listing is only ours.
 pub const WSP_LABEL: &str = "wsp";
 /// The label a workspace's own name rides on, which the host stamps at the create: what the refusal of a create
@@ -197,6 +202,15 @@ pub fn plain_copy_line(root: &Path, filesystem: Option<&str>, ms: u64) -> String
     format!("copied plainly in {seconds} s: {why}")
 }
 
+/// What the daemon serving this computer is told as its workspaces come and go: one that has booted, with the
+/// path inside it to bind its door on, and one that has stopped. The daemon binds that door on the first and
+/// takes the listener away on the second; the file itself goes with the stop here, whichever daemon bound it,
+/// since the folder it sits in is the workspace's own. Nothing here knows what is on the other end of this.
+pub trait Watches: Send + Sync {
+    fn booted(&self, id: &str, socket: &Path);
+    fn stopped(&self, id: &str);
+}
+
 pub struct Ops {
     layout: Layout,
     runtime: Runtime,
@@ -212,6 +226,8 @@ pub struct Ops {
     stopped: Vec<String>,
     net_swept: net::Swept,
     unfinished: Unfinished,
+    /// Who is told as workspaces boot and stop; none until the daemon that serves this computer says so.
+    watcher: std::sync::Mutex<Option<Arc<dyn Watches>>>,
 }
 
 /// What the open took away of creates that never finished: a copy still being made and a claimed run directory
@@ -283,6 +299,7 @@ impl Ops {
             stopped,
             net_swept,
             unfinished,
+            watcher: std::sync::Mutex::new(None),
         })
     }
 
@@ -334,6 +351,25 @@ impl Ops {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
+    }
+
+    /// The daemon takes the workspaces over from here: every boot and every stop after this is told as it
+    /// happens, and every workspace already running is named booted now, so a daemon that restarted under them
+    /// stands where one that booted them would.
+    pub fn watch(&self, watcher: Arc<dyn Watches>) -> Result<(), OpError> {
+        *self.watcher.lock().unwrap_or_else(|held| held.into_inner()) = Some(Arc::clone(&watcher));
+        for id in running_ids(&self.layout)? {
+            watcher.booted(&id, &self.layout.guest_socket(&id));
+        }
+        Ok(())
+    }
+
+    /// One word to whoever is watching; nothing where nobody is.
+    fn told(&self, say: impl FnOnce(&dyn Watches)) {
+        let held = self.watcher.lock().unwrap_or_else(|held| held.into_inner()).clone();
+        if let Some(watcher) = held {
+            say(watcher.as_ref());
+        }
     }
 
     /// The workspaces found stopped at open, their init gone.
@@ -940,6 +976,11 @@ impl Ops {
         if record.engine {
             self.join_ports(&record).await;
         }
+        // The wsp a process inside runs, written into the workspace's own upper onto the init already bound in
+        // read-only: the computer's own wsp is under a folder this workspace covers, so without this the word is
+        // missing inside. Written at every boot, as the workspace's resolv.conf is.
+        bundle::write_wsp_shim_inside(&self.layout.rootfs(&id))?;
+        self.told(|watcher| watcher.booted(&id, &self.layout.guest_socket(&id)));
         Ok(record)
     }
 
@@ -949,6 +990,10 @@ impl Ops {
     /// while it sleeps. The upper directories, the copy, the record and the network record stay: they are what
     /// the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
+        self.told(|watcher| watcher.stopped(&record.id));
+        // The door inside goes with the workspace: the listener is the daemon's to drop and the file is this
+        // folder's, so a workspace that is stopped holds no socket even where the daemon that bound it is gone.
+        let _ = fs::remove_file(self.layout.guest_socket(&record.id));
         self.stop_engine(&record.id).await;
         self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
@@ -972,8 +1017,7 @@ impl Ops {
     /// serves it is this one and a workspace that runs is a workspace that answers.
     async fn exec(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
         self.net.touched(&record.id);
-        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
-        let done = self.runtime.exec(&record.id, &args, stdin, timeout).await?;
+        let done = self.inside(record, cmd, stdin, timeout).await?;
         Ok(ExecResult { exit_code: done.exit_code, stdout: done.stdout, stderr: done.stderr })
     }
 
@@ -1025,6 +1069,8 @@ impl Ops {
     /// and every container, network and volume it made on the engine, before its rootfs those containers may bind
     /// goes. An engine that does not answer leaves them, and the workspace goes all the same.
     async fn remove(&self, id: &str, init: Option<&Init>) -> Result<(), OpError> {
+        self.told(|watcher| watcher.stopped(id));
+        let _ = fs::remove_file(self.layout.guest_socket(id));
         self.stop_engine(id).await;
         let record = bundle::read_record(&self.layout.record(id))?;
         if record.as_ref().is_some_and(|record| record.engine) {
@@ -1093,12 +1139,65 @@ impl Ops {
         Ok(self.layout.rootfs(&record.id))
     }
 
+    /// A shell inside a running workspace, on a pty of that workspace's own, for the terminal pane of a machine
+    /// this computer holds. The folder is the caller's and absolute, which is the one refusal the daemon's own
+    /// switch answers before it reaches this; the environment is the workspace's own with the terminal named, as
+    /// a thread's is.
+    pub async fn pty_in(
+        &self,
+        id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: &str,
+        shell: Option<&str>,
+    ) -> Result<runtime::PtyInsideRunning, OpError> {
+        let record = self.running(id)?;
+        let mut env = BTreeMap::from([
+            ("HOME".to_owned(), "/root".to_owned()),
+            ("USER".to_owned(), "root".to_owned()),
+            ("TERM".to_owned(), TERM.to_owned()),
+        ]);
+        if record.engine {
+            env.insert("COMPOSE_PROJECT_NAME".to_owned(), compose_project(&record.id));
+        }
+        // A login shell, as a person's terminal on any other machine opens: the workspace's own profile and the
+        // person's own rc file, which are the computer's home bound inside.
+        let args = match shell {
+            Some(shell) => vec![shell.to_owned()],
+            None => vec![SHELL_INSIDE.to_owned(), "-l".to_owned()],
+        };
+        let opts = runtime::PtyInside { cols, rows, cwd: cwd.to_owned(), args, env };
+        self.runtime.pty(id, &opts).await.map_err(|e| OpError::plain(e.to_string()))
+    }
+
     /// One command inside a running workspace, for the halves of this daemon that serve a workspace's own work:
     /// the git road runs here rather than on the computer, since a checkout's hooks and config are agent-written
-    /// and belong inside the workspace's namespaces, its cgroup and its covers.
-    pub async fn exec_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
+    /// and belong inside the workspace's namespaces, its cgroup and its covers. Work, so the workspace's quiet
+    /// clock starts over: somebody asked for this.
+    pub async fn exec_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
         let record = self.running(id)?;
-        self.exec(&record, cmd, stdin, timeout).await
+        self.net.touched(&record.id);
+        self.inside(&record, cmd, stdin, timeout).await
+    }
+
+    /// The same command, read rather than run: a pane asking a workspace what its files and its checkout hold
+    /// leaves the quiet clock where it was, however often it asks. A workspace nobody is working in is one this
+    /// computer may stop, and a person with a pane open is not working in it.
+    pub async fn read_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
+        let record = self.running(id)?;
+        self.inside(&record, cmd, stdin, timeout).await
+    }
+
+    /// The workspace is working: its quiet clock starts over. The one road the halves of this daemon that are
+    /// not an exec take to say so, the pty's keystrokes and its output among them.
+    pub fn touched(&self, id: &str) {
+        self.net.touched(id);
+    }
+
+    /// One command inside, with neither the clock nor the machine op's shape: what both roads above share.
+    async fn inside(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
+        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
+        Ok(self.runtime.exec(&record.id, &args, stdin, timeout).await?)
     }
 
     fn record(&self, id: &str) -> Result<Workspace, OpError> {
@@ -1539,6 +1638,47 @@ mod tests {
             binds: Vec::new(),
             made_points: Vec::new(),
         }
+    }
+
+    /// What the daemon serving this computer is told, as a case can read it back.
+    #[derive(Default)]
+    struct Heard(std::sync::Mutex<Vec<String>>);
+
+    impl Heard {
+        fn said(&self) -> Vec<String> {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).clone()
+        }
+    }
+
+    impl Watches for Heard {
+        fn booted(&self, id: &str, socket: &Path) {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("booted {id} {}", socket.display()));
+        }
+
+        fn stopped(&self, id: &str) {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("stopped {id}"));
+        }
+    }
+
+    /// A daemon that restarted under running workspaces stands where one that booted them would: every workspace
+    /// still running is named as it takes them over, with the folder of its own that is mounted over the wsp
+    /// folder inside it, and one that is stopped is not. What a boot and a stop say after that is the live
+    /// case's, since neither runs without the kernel.
+    #[test]
+    fn taking_the_workspaces_over_names_every_one_of_them_that_is_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let running = runtime::identity_of(std::process::id() as i32).unwrap();
+        for (id, init) in [("wsp-awake", running), ("wsp-asleep", Init { pid: i32::MAX, started: 0, boot_id: String::new() })] {
+            let mut record = awake(id, None);
+            record.init = init;
+            fs::create_dir_all(layout.workspace(id)).unwrap();
+            bundle::write_json(&layout.record(id), &record).unwrap();
+        }
+        let heard = Arc::new(Heard::default());
+        ops.watch(Arc::clone(&heard) as Arc<dyn Watches>).unwrap();
+        assert_eq!(heard.said(), [format!("booted wsp-awake {}", layout.guest_socket("wsp-awake").display())]);
     }
 
     /// A workspace here runs no daemon of its own: it boots one process that holds it up, nothing supervises a

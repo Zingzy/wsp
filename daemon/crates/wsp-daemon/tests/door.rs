@@ -1172,3 +1172,34 @@ async fn answers_a_plain_http_request_426_upgrade_required_which_is_what_the_sta
     let mut c = authed(&d).await;
     assert_eq!(c.request("ping", json!({})).await["ok"], true);
 }
+
+/// A second attach on one socket replaces the first, and a detach takes that socket's listeners off while every
+/// other socket keeps reading. On the road a workspace's pane takes, every pane of a computer rides one socket to
+/// its daemon, so an attach that added a second listener would print every byte twice and a closed tab would keep
+/// its pty's bytes riding that socket for the pty's life.
+#[tokio::test]
+async fn a_second_attach_on_one_socket_prints_each_byte_once_and_a_detach_stops_that_socket_alone() {
+    let d = start(None).await;
+    let mut a = authed(&d).await;
+    let pty_id = bash_pty(&mut a).await;
+    let mut b = authed(&d).await;
+    assert_eq!(b.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    // The same socket attaches again, as a reload of the app does over a link it shares with its other panes.
+    assert_eq!(a.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert_eq!(a.request("pty.write", json!({ "ptyId": pty_id, "data": "echo ONCE-$((20+3))\n" })).await["ok"], true);
+    assert!(a.wait_text("ONCE-23", WAIT).await, "{:?}", a.pty_text());
+    a.listen(Duration::from_millis(300)).await;
+    assert_eq!(a.pty_text().matches("ONCE-23").count(), 1, "the shell's answer reached this socket twice: {:?}", a.pty_text());
+
+    // Detached, this socket hears no more of that pty; the other socket hears every byte.
+    assert_eq!(a.request("pty.detach", json!({ "ptyId": pty_id })).await["ok"], true);
+    let before = a.pty_text();
+    assert_eq!(b.request("pty.write", json!({ "ptyId": pty_id, "data": "echo AFTER-DETACH\n" })).await["ok"], true);
+    assert!(b.wait_text("AFTER-DETACH", WAIT).await, "{:?}", b.pty_text());
+    a.listen(Duration::from_millis(300)).await;
+    assert_eq!(a.pty_text(), before, "a detached socket was still sent the pty's bytes");
+    // A pty nobody opened is named, as every other pty op names one.
+    assert_eq!(a.request("pty.detach", json!({ "ptyId": "pty_9" })).await["error"], "no such pty: pty_9");
+    a.every_event_parses();
+    b.every_event_parses();
+}

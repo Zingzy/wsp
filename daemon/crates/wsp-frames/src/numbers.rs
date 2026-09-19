@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 58;
+pub const DAEMON_VERSION: u32 = 59;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -23,6 +23,11 @@ pub const GUEST_DAEMON_DIR: &str = "/root/wsp-daemon";
 /// the whole line to the daemon binary beside them. Here so the two halves of the contract cannot spell it apart.
 /// The binary's own path is not pinned: it sits in the bundle under one folder per chip.
 pub const GUEST_WSP_PATH: &str = "/usr/local/bin/wsp";
+/// The socket a process inside a workspace on a computer somebody owns reaches its host over. The daemon of that
+/// computer binds one per workspace in that workspace's own wsp folder, which is bound over the folder above
+/// inside it, so the file is in that workspace's view and in no other's and nowhere on the computer's own. The
+/// file itself is the gate and no token rides this road; a fork has no such socket and dials the port instead.
+pub const GUEST_DAEMON_SOCKET_PATH: &str = "/root/.wsp/daemon.sock";
 pub const DAEMON_ROOTS_PATH: &str = "/root/.wsp/roots";
 pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
 pub const XDG_OPEN_PATH: &str = "/usr/local/bin/xdg-open";
@@ -127,6 +132,7 @@ mod tests {
             DEFAULT_LOG_DIR,
             DAEMON_ROOTS_PATH,
             OPEN_SOCKET_PATH,
+            GUEST_DAEMON_SOCKET_PATH,
         ] {
             assert!(path.starts_with(&format!("{GUEST_WSP_HOME}/")), "{path} is not under {GUEST_WSP_HOME}");
         }

@@ -12,13 +12,19 @@ use std::path::Path;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::net::{TcpStream, UnixStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use wsp_frames::{numbers, words, GuestKind};
 
-pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// The socket this session speaks over, whichever road it took: the machine's own loopback port, or the socket
+/// the daemon of the computer this workspace sits on put inside it.
+pub type Socket<S> = WebSocketStream<S>;
+
+/// What a dial over the workspace's own socket carries: nothing of the sort a URL needs, since a unix socket has
+/// no address and the framing wants one all the same.
+const INSIDE_URL: &str = "ws://workspace/";
 
 /// What the launch tells a turn about itself: the thread's token, and the turn it is running inside.
 const HOST_TOKEN_ENV: &str = "WSP_HOST_TOKEN";
@@ -40,7 +46,7 @@ pub struct Streams<'a> {
 }
 
 /// Runs one guest line on this process's own streams and answers with the code it should exit.
-pub fn run(line: &[String], env: &dyn Fn(&str) -> Option<String>, daemon: SocketAddr, token_path: &Path) -> i32 {
+pub fn run(line: &[String], env: &dyn Fn(&str) -> Option<String>, daemon: SocketAddr, token_path: &Path, socket_path: &Path) -> i32 {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(e) => {
@@ -52,7 +58,7 @@ pub fn run(line: &[String], env: &dyn Fn(&str) -> Option<String>, daemon: Socket
     let mut out = tokio::io::stdout();
     let mut err = tokio::io::stderr();
     let mut streams = Streams { input: &mut input, out: &mut out, err: &mut err };
-    runtime.block_on(session(line, env, daemon, token_path, &mut streams))
+    runtime.block_on(session(line, env, daemon, token_path, socket_path, &mut streams))
 }
 
 /// One session start to end. `env` is read rather than taken from this process so a case hands in the launch it
@@ -62,11 +68,36 @@ pub async fn session(
     env: &dyn Fn(&str) -> Option<String>,
     daemon: SocketAddr,
     token_path: &Path,
+    socket_path: &Path,
     streams: &mut Streams<'_>,
 ) -> i32 {
-    let Some(mut ws) = dial(daemon, token_path).await else {
+    // One dial rule: inside a workspace on a computer somebody owns the daemon that serves this machine put a
+    // socket of this workspace's own here, and the file is the whole of the gate; on a machine wsp forked there
+    // is none, and the road is that machine's own loopback port with its token.
+    if socket_path.exists() {
+        let Ok(inside) = UnixStream::connect(socket_path).await else {
+            return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
+        };
+        let Ok((ws, _)) = tokio_tungstenite::client_async(INSIDE_URL, inside).await else {
+            return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
+        };
+        return speak(ws, line, env, daemon, streams).await;
+    }
+    let Some(ws) = dial(daemon, token_path).await else {
         return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
     };
+    speak(ws, line, env, daemon, streams).await
+}
+
+/// The session itself, once the socket stands: the open frame, its reply, then the pump for the kind of line this
+/// is. The same words either road, since a session is a session whichever socket carried it.
+async fn speak<S: AsyncRead + AsyncWrite + Unpin>(
+    mut ws: Socket<S>,
+    line: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+    daemon: SocketAddr,
+    streams: &mut Streams<'_>,
+) -> i32 {
     let kind = if line == [MCP_WORD] { GuestKind::Mcp } else { GuestKind::Cli };
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     let mut open = json!({
@@ -100,7 +131,7 @@ pub async fn session(
 /// not take the line, nothing when the session is open. A socket that ends here answers as a daemon that is gone.
 const OPEN_ID: u64 = 2;
 
-async fn opened(ws: &mut Socket) -> Option<String> {
+async fn opened<S: AsyncRead + AsyncWrite + Unpin>(ws: &mut Socket<S>) -> Option<String> {
     loop {
         let Some(frame) = next_frame(ws).await else { return Some(SOCKET_ENDED.to_owned()) };
         if frame.get("id").and_then(Value::as_u64) != Some(OPEN_ID) {
@@ -118,7 +149,7 @@ const SOCKET_ENDED: &str = "this machine's wsp daemon ended the connection";
 
 /// The socket, authed with the daemon's own token off its file; nothing when the daemon is not there or would not
 /// take the token, which the caller says in one sentence.
-async fn dial(daemon: SocketAddr, token_path: &Path) -> Option<Socket> {
+async fn dial(daemon: SocketAddr, token_path: &Path) -> Option<Socket<MaybeTlsStream<TcpStream>>> {
     let token = std::fs::read_to_string(token_path).ok()?;
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{daemon}/")).await.ok()?;
     let auth = json!({ "id": 1, "op": "auth", "token": token.trim() });
@@ -128,7 +159,7 @@ async fn dial(daemon: SocketAddr, token_path: &Path) -> Option<Socket> {
 }
 
 /// The next text frame as JSON; nothing once the socket is done.
-pub(crate) async fn next_frame(ws: &mut Socket) -> Option<Value> {
+pub(crate) async fn next_frame<S: AsyncRead + AsyncWrite + Unpin>(ws: &mut Socket<S>) -> Option<Value> {
     loop {
         match ws.next().await {
             Some(Ok(Message::Text(t))) => return serde_json::from_str(&t).ok(),

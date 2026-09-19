@@ -54,14 +54,38 @@ pub(crate) enum RuntimeVerb {
         id: String,
     },
     /// A command inside a workspace as a tenant, this process's stdio as the command's; exits with its code, 124
-    /// past the deadline.
+    /// past the deadline. Without a deadline it runs until it ends, which is what a person's shell does, and the
+    /// pid file is where the tenant's pid on this computer is written the moment it is made.
     Exec {
         #[arg(long, value_name = "dir")]
         root: PathBuf,
         #[arg(long)]
         id: String,
         #[arg(long, value_name = "n")]
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
+        #[arg(long, value_name = "file")]
+        pid_file: Option<PathBuf>,
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
+    /// The terminal a workspace's pane runs on, run inside that workspace as the command of a plain exec: the pty
+    /// is opened there, the shell put on its slave, and this process is the wire between that pty and the exec's
+    /// own pipes. Not a verb anything on a computer runs: the daemon spells this line, and the binary that
+    /// answers it is the one bound inside every workspace as its init.
+    Pty {
+        #[arg(long, value_name = "n")]
+        cols: u16,
+        #[arg(long, value_name = "n")]
+        rows: u16,
+        /// The folder the shell starts in, as the workspace sees it.
+        #[arg(long, value_name = "dir")]
+        cwd: PathBuf,
+        /// Where the size of the pane is read at every window-change signal.
+        #[arg(long, value_name = "file")]
+        size_file: PathBuf,
+        /// One name=value the shell carries beyond the workspace's own environment, once per name.
+        #[arg(long, value_name = "name=value")]
+        env: Vec<String>,
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
@@ -146,19 +170,30 @@ pub(crate) fn run(verb: Verb) -> i32 {
     match verb {
         Verb::Runtime { verb: RuntimeVerb::Ask { frame, root } } => linux::ask(&root, &frame),
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
-        Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, cmd } } => linux::exec(&root, &id, cmd, timeout_ms),
+        Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, pid_file, cmd } } => {
+            linux::exec(&root, &id, cmd, timeout_ms, pid_file)
+        }
+        Verb::Runtime { verb: RuntimeVerb::Pty { cols, rows, cwd, size_file, env, cmd } } => {
+            linux::pty(cols, rows, cwd, size_file, &env, cmd)
+        }
         Verb::Runtime { verb: RuntimeVerb::Init { cmd } } => linux::init(&cmd),
         Verb::Copy { verb } => copy(verb),
         Verb::Wsp { line } => {
             let daemon = SocketAddr::from((Ipv4Addr::LOCALHOST, numbers::DEFAULT_PORT));
-            wsp_guest::run(&line, &|name| std::env::var(name).ok(), daemon, Path::new(numbers::DEFAULT_TOKEN_PATH))
+            wsp_guest::run(
+                &line,
+                &|name| std::env::var(name).ok(),
+                daemon,
+                Path::new(numbers::DEFAULT_TOKEN_PATH),
+                Path::new(numbers::GUEST_DAEMON_SOCKET_PATH),
+            )
         }
     }
 }
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
 
     use wsp_runtime::runtime::{helper_create, helper_exec, helper_failure_line, HELPER_FAILED};
@@ -218,15 +253,28 @@ mod linux {
         }
     }
 
-    pub(super) fn exec(root: &Path, id: &str, cmd: Vec<String>, timeout_ms: u64) -> i32 {
+    pub(super) fn exec(root: &Path, id: &str, cmd: Vec<String>, timeout_ms: Option<u64>, pid_file: Option<PathBuf>) -> i32 {
         crate::score::for_workspace();
-        match helper_exec(root, id, cmd, Duration::from_millis(timeout_ms)) {
+        match helper_exec(root, id, cmd, timeout_ms.map(Duration::from_millis), pid_file) {
             Ok(code) => code,
             Err(e) => {
                 eprintln!("{}", helper_failure_line(&e));
                 HELPER_FAILED
             }
         }
+    }
+
+    /// Inside the workspace: the pty, the shell on it, and the wire between that pty and this process's pipes.
+    pub(super) fn pty(cols: u16, rows: u16, cwd: PathBuf, size_file: PathBuf, env: &[String], cmd: Vec<String>) -> i32 {
+        let ask = wsp_runtime::pty::Ask {
+            cols,
+            rows,
+            cwd,
+            size_file,
+            env: env.iter().filter_map(|pair| pair.split_once('=')).map(|(k, v)| (k.to_owned(), v.to_owned())).collect(),
+            argv: cmd,
+        };
+        wsp_runtime::pty::run(&ask)
     }
 
     pub(super) fn init(cmd: &[String]) -> i32 {
@@ -236,7 +284,7 @@ mod linux {
 
 #[cfg(not(target_os = "linux"))]
 mod linux {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     const NOT_HERE: &str = "workspaces run on Linux alone";
 
@@ -250,8 +298,13 @@ mod linux {
         1
     }
 
-    pub(super) fn exec(_root: &Path, _id: &str, _cmd: Vec<String>, _timeout_ms: u64) -> i32 {
+    pub(super) fn exec(_root: &Path, _id: &str, _cmd: Vec<String>, _timeout_ms: Option<u64>, _pid_file: Option<PathBuf>) -> i32 {
         eprintln!("runtime exec: {NOT_HERE}");
+        1
+    }
+
+    pub(super) fn pty(_cols: u16, _rows: u16, _cwd: PathBuf, _size_file: PathBuf, _env: &[String], _cmd: Vec<String>) -> i32 {
+        eprintln!("runtime pty: {NOT_HERE}");
         1
     }
 

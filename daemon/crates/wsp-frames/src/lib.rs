@@ -18,6 +18,7 @@ mod place_paths;
 mod reply;
 mod request;
 mod shell;
+mod shim;
 mod validate;
 pub mod words;
 
@@ -49,4 +50,5 @@ pub use reply::{
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;
+pub use shim::guest_wsp_shim;
 pub use validate::{is_http_url, is_plain_path, is_under_path, RelayPort};

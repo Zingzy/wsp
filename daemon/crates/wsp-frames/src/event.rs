@@ -115,6 +115,11 @@ pub enum DaemonEvent {
     #[serde(rename = "guest.opened", rename_all = "camelCase")]
     GuestOpened {
         session: String,
+        /// The workspace the session was opened inside, on a daemon that runs workspaces: the listener the frame
+        /// arrived on is what names it, never anything the guest said. Absent on a daemon inside a machine, where
+        /// the machine is the one the host dialled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
         /// The run of the daemon that named this session. Session names start from the beginning on every run, so
         /// this and the name together are what a host tells a session it already holds from a session of the same
         /// name on a machine that was rebuilt under it.
@@ -127,14 +132,22 @@ pub enum DaemonEvent {
         cwd: String,
     },
     /// One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down.
-    #[serde(rename = "guest.message")]
-    GuestMessage { session: String, message: serde_json::Value },
+    /// The workspace is the opened frame's, as on every frame a place daemon relays for a session.
+    #[serde(rename = "guest.message", rename_all = "camelCase")]
+    GuestMessage {
+        session: String,
+        message: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     /// The session ended; this goes to whichever side did not end it.
-    #[serde(rename = "guest.closed")]
+    #[serde(rename = "guest.closed", rename_all = "camelCase")]
     GuestClosed {
         session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
 }
 

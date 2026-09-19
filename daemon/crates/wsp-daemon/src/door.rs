@@ -187,6 +187,32 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
     serve_authed(ws, &ctx, conn, rx, None).await;
 }
 
+/// The door inside one workspace: every socket accepted on that workspace's own unix socket, each served with no
+/// auth frame and no token. The file is the gate, and what the socket may ask for is the roads table's, which
+/// answers a process inside its own two guest ops and refuses it everything else.
+pub(crate) async fn serve_workspace(listener: tokio::net::UnixListener, ctx: Arc<Ctx>, workspace: String) {
+    loop {
+        let Ok((stream, _)) = listener.accept().await else { return };
+        let (ctx, workspace) = (Arc::clone(&ctx), workspace.clone());
+        tokio::spawn(serve_inside(stream, ctx, workspace));
+    }
+}
+
+/// One socket inside a workspace: the handshake, then the same loop every authed socket runs. Nothing is checked
+/// at this door, since nothing but that workspace can see the file it was opened on; the socket is never added to
+/// the authed list, so what the daemon pushes to every authed socket, the URLs it reads off this computer's own
+/// ptys among it, reaches nothing inside a workspace.
+async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: String) {
+    let config = WebSocketConfig::default().max_message_size(Some(MESSAGE_MAX_BYTES)).max_frame_size(Some(MESSAGE_MAX_BYTES));
+    let deadline = Instant::now() + ctx.auth_deadline;
+    let Ok(Ok(ws)) = timeout_at(deadline, tokio_tungstenite::accept_async_with_config(stream, Some(config))).await else {
+        return;
+    };
+    let (tx, rx) = mpsc::unbounded_channel();
+    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace)));
+    serve_authed(ws, &ctx, conn, rx, None).await;
+}
+
 /// How a served socket ended: the peer went, the link carried nothing for the quiet span, or a leave was answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ended {
@@ -211,7 +237,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let key = conn.key;
-    if conn.scope.is_none() {
+    if conn.scope.is_none() && !matches!(conn.road, Road::Workspace(_)) {
         ctx.add_authed(key, conn.out.clone());
     }
     let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
@@ -301,4 +327,70 @@ async fn refuse(mut ws: Socket, reason: &str, pre: &PreAuth) {
         }
     };
     let _ = timeout(CLOSE_WAIT, drain).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Options;
+    use serde_json::{json, Value};
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::net::UnixStream;
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    /// The next text frame, or nothing within the wait.
+    async fn frame(ws: &mut WebSocketStream<UnixStream>) -> Option<Value> {
+        match timeout(WAIT, ws.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => serde_json::from_str(&t).ok(),
+            _ => None,
+        }
+    }
+
+    /// A socket inside a workspace: the door takes it with no auth frame, answers the hello, serves the guest's
+    /// own ops, and is not one of the sockets the daemon pushes to. What the roads table refuses there is proved
+    /// in the switch's own cases; what is proved here is the door.
+    #[tokio::test]
+    async fn a_workspace_door_serves_a_socket_that_sent_no_auth_frame_and_hears_nothing_broadcast() {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "t").unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.root = Some(home.path().to_path_buf());
+        options.manifest_path = Some(home.path().join("manifest.json"));
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let at = home.path().join("daemon.sock");
+        ctx.open_workspace_door("wsp-a", &at);
+        assert_eq!(std::fs::metadata(&at).unwrap().permissions().mode() & 0o777, 0o600);
+
+        let (mut ws, _) = tokio_tungstenite::client_async("ws://workspace/", UnixStream::connect(&at).await.unwrap()).await.unwrap();
+        let hello = frame(&mut ws).await.expect("the door says hello with no auth frame");
+        assert_eq!(hello["type"], "daemon.hello");
+        ws.send(Message::text(json!({"id": 1, "op": "guest.open", "kind": "cli", "token": "t", "argv": [], "cwd": "/root"}).to_string()))
+            .await
+            .unwrap();
+        let opened = frame(&mut ws).await.unwrap();
+        assert_eq!(opened["ok"], json!(true), "{opened}");
+
+        // A socket of the computer's own hears what the daemon pushes to every authed socket; the one inside a
+        // workspace hears none of it, since the URLs read off this computer's ptys are not that workspace's.
+        let (tx, mut authed) = mpsc::unbounded_channel();
+        ctx.add_authed(ctx.next_key(), crate::Outbound(tx));
+        ctx.broadcast(&DaemonEvent::LocalhostUrl { port: wsp_frames::RelayPort::new(8123).unwrap() });
+        let heard = timeout(WAIT, authed.recv()).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(heard.text()).unwrap()["type"], "localhost.url");
+        assert!(timeout(Duration::from_millis(200), ws.next()).await.is_err(), "a socket inside a workspace was pushed to");
+
+        // And the door goes with the workspace: the loop ends, so a dial finds nothing to answer it. The file it
+        // was bound on is the workspace's own folder's and the runtime takes it off with the workspace, since a
+        // workspace may be stopped by something other than the daemon that bound this.
+        ctx.close_workspace_door("wsp-a");
+        let refused = async {
+            while UnixStream::connect(&at).await.is_ok() {
+                tokio::task::yield_now().await;
+            }
+        };
+        assert!(timeout(WAIT, refused).await.is_ok(), "the door still answers after the workspace stopped");
+    }
 }

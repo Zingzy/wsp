@@ -5,12 +5,12 @@
 
 use futures_util::SinkExt;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::{closed, message, next_frame, Socket, Streams};
 
-pub(crate) async fn pump(mut ws: Socket, streams: &mut Streams<'_>) -> i32 {
+pub(crate) async fn pump<S: AsyncRead + AsyncWrite + Unpin>(mut ws: Socket<S>, streams: &mut Streams<'_>) -> i32 {
     // Bytes read but not yet a whole line. The read is fill_buf and not read_line because this waits on the socket
     // at the same time, and a read_line a frame cancels loses whatever half line it had taken.
     let mut held: Vec<u8> = Vec::new();
