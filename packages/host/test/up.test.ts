@@ -3,9 +3,9 @@ import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
+import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EXIT_CODES, PERSON_HOME_ENV, type ExecStream } from "@wsp/protocol";
+import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
@@ -326,6 +326,26 @@ describe("wsp up", () => {
     vi.stubEnv("WSP_HOME", home);
     await answered(await started([]));
     expect(readFileSync(currentHomePointer(user), "utf8").trim()).toBe(home);
+  });
+
+  it("a state file a newer wsp wrote is refused once, before the runtime whose own readers would meet it again", async () => {
+    // The #942 proof read the refusal twice in one host's log, once bare and once behind the cost tracker's line
+    // with the whole error and its stack under it. One reader meets it now, and the log holds one sentence.
+    const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
+    stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const lines: string[] = [];
+      await expect(up(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+      // Whatever a reader built behind this start would have said lands on the log a moment after the throw.
+      await new Promise(done => setTimeout(done, 50));
+      expect(warned.mock.calls.flat().map(a => String(a)).join("\n")).not.toContain("was written by a newer wsp");
+      expect(lines.join("\n")).not.toContain("was written by a newer wsp");
+      // Nothing bound and nothing took the lock, so there is nothing for wsp down to stop.
+      expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {

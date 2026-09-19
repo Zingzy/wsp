@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 import { fmtDuration } from "@wsp/protocol";
 import { hostLogPath, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { httpProbe, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
+import { httpProbe, logSince, logSize, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
 /** Starts a host serving this state file on this computer and answers with its lock once it answers on its port. */
 export interface HostStarter {
@@ -33,6 +33,12 @@ export const startingHostLine = (statePath: string, logPath: string): string => 
 
 /** A child that took the wait and never served: one refusal naming the file it was started for. */
 export const noHostAnsweredLine = (statePath: string, waitMs: number): string => `no host answered for ${statePath} within ${fmtDuration(waitMs)}`;
+
+/** A child that ended before it served and said nothing about why: the person still needs the file it was started
+ * for, how it ended and where to read it. A child that did say something is handed those words instead, since a
+ * host refusing the state it was given has already written the sentence the person needs. */
+export const hostExitedLine = (statePath: string, ended: number | string, logPath: string): string =>
+  `the host for ${statePath} exited with ${ended} before it served; its log is ${logPath}`;
 
 /** Why a line starts no host of its own: this computer's own manager is registered to serve that state file, and
  * a host of whatever build happened to be on the line would read those records and write them back in its own
@@ -61,11 +67,15 @@ export function hostStarter(deps: StartDeps): HostStarter {
     if (owned !== undefined) throw new Error(owned);
     const logPath = hostLogPath(statePath);
     mkdirSync(dirname(logPath), { recursive: true });
+    // Where this child's own lines begin: the log is one file appended to across days, so everything already in it
+    // was written for somebody else's start and is no part of this one's answer.
+    const wrote = logSize(logPath);
     const log = openSync(logPath, "a");
+    let child: ReturnType<typeof nodeSpawn>;
     try {
       // Free ports on purpose: another host, the app's or a service, often holds the default on this computer, and
       // every client dials the address the lock records rather than a number written down anywhere.
-      const child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", "0", "--ws-port", "0"], {
+      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", "0", "--ws-port", "0"], {
         detached: true,
         stdio: ["ignore", log, log],
         env: { ...deps.env, [STARTED_BY_ENV]: "verb" },
@@ -74,12 +84,26 @@ export function hostStarter(deps: StartDeps): HostStarter {
     } finally {
       closeSync(log);
     }
+    // A detached child is still this process's child while this process lives, so its exit lands here.
+    let ended: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    const gone = new Promise<void>(done =>
+      child.once("exit", (code, signal) => {
+        ended = { code, signal };
+        done();
+      }),
+    );
     say(startingHostLine(statePath, logPath));
     // Two verbs starting at once need no coordination: the second child's lock is refused and it dies, and this
     // wait sees the first child's lock.
-    const lock = await untilServing(statePath, deps.waitMs, deps.answers);
-    if (lock === undefined) throw new Error([noHostAnsweredLine(statePath, deps.waitMs), ...logTail(logPath)].join("\n"));
-    return lock;
+    const lock = await untilServing(statePath, deps.waitMs, deps.answers, undefined, gone);
+    if (lock !== undefined) return lock;
+    // A host that exited refusing the state it was given is not a host that failed to start: it has said why, and
+    // what it said is the answer, read at once and with nothing of the wait or of an older start around it.
+    if (ended !== undefined) {
+      const said = logSince(logPath, wrote);
+      throw new Error(said.length > 0 ? said.join("\n") : hostExitedLine(statePath, ended.code ?? ended.signal ?? "no code", logPath));
+    }
+    throw new Error([noHostAnsweredLine(statePath, deps.waitMs), ...logTail(logPath)].join("\n"));
   };
 }
 

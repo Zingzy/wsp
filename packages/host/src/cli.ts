@@ -25,6 +25,7 @@ import {
   type Runtime,
   type SeedWiring,
   type SshWiring,
+  type Store,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
@@ -727,6 +728,9 @@ export function makeRuntime(
    * is read through. Built here for a caller that needs none of it back; handed in by one that reads the recipe
    * off the same planner, so the doctor and the recipe job cannot read this computer two ways. */
   links: PlaceWiring = placeWiring(statePath, env, agents?.advertise),
+  /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
+   * read is refused at every collection read, and a caller that met that refusal has said so already. */
+  store: Store = jsonFileStore(statePath, stateWriterHere()),
 ): Runtime {
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
@@ -751,7 +755,7 @@ export function makeRuntime(
     placeLinks: links,
     // The build this host is, written into the state file at every save, so a host that meets a record it cannot
     // read says which wsp on this computer wrote it.
-    store: jsonFileStore(statePath, stateWriterHere()),
+    store,
     statePath,
     adapters: HARNESS_ADAPTERS,
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
@@ -1198,6 +1202,17 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, { ...opts, providerEnv, links }, io, opts.running);
 }
 
+/** The state file read once, before anything else on this host reads it: a file written in a shape this build does
+ * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
+ * their own work, where one of them warns with the whole error and its stack behind a line of its own. Read here and
+ * the refusal is this start's, thrown once and printed once, and the store is handed on so the file is not read
+ * twice over. */
+async function readOnce(statePath: string): Promise<Store> {
+  const store = jsonFileStore(statePath, stateWriterHere());
+  await store.keys("workspaces");
+  return store;
+}
+
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
  * computer's included. One reading, asked by wsp up and by the desktop's first launch; what each does with the
  * answer is its own, since the app has onboarding screens to open and the command line records this computer and
@@ -1212,7 +1227,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
   const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, await readOnce(opts.statePath));
   // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
   // no workspace to record, and wsp add is the road. The host listens for pairing either way.
   if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
