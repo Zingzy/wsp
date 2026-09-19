@@ -135,21 +135,21 @@ describe("the pair wsp up binds", () => {
   it("takes the pair as asked and says nothing when both ports are free", async () => {
     const out = io();
     expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(), listener: node, states: [] })).toEqual({
-      port: 4401,
-      wsPort: 4411,
+      ports: { port: 4401, wsPort: 4411 },
     });
     expect([out.lines, out.errors]).toEqual([[], []]);
   });
 
-  it("steps over a taken pair nobody named and says which pair it serves and who held the one it left", async () => {
-    // Priya typed wsp up with no flags on a Mac whose default pair was held, and read the bind's own error.
+  it("the port step chooses in silence and hands the step on", async () => {
+    // Priya typed wsp up with no flags on a Mac whose default pair was held, and read the bind's own error; the
+    // step is the caller's to say once a host serves, since every refusal a start throws comes after this.
     const out = io();
     expect(await pickUpPorts(out, { port: 4400, wsPort: 4410, named: false, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4410), listener: node, states: [] })).toEqual({
-      port: 4401,
-      wsPort: 4411,
+      ports: { port: 4401, wsPort: 4411 },
+      moved: { port: 4410, holder: { command: "node", pid: 62569 } },
     });
-    expect(out.lines).toEqual([portsPickedLine({ port: 4401, wsPort: 4411 }, 4410, { command: "node", pid: 62569 })]);
-    expect(out.errors).toEqual([]);
+    expect(portsPickedLine({ port: 4401, wsPort: 4411 }, 4410, { command: "node", pid: 62569 })).toContain("Serving on 4401 and 4411");
+    expect([out.lines, out.errors]).toEqual([[], []]);
   });
 
   it("refuses a port a person named with who holds it and the free pair to type, and hands back no pair to bind", async () => {

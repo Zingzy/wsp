@@ -53,8 +53,11 @@ export async function portHolder(port: number, probes: PortProbes = {}): Promise
   return (probes.listener ?? listenerOf)(port);
 }
 
-/** The pair a run binds, or the port that stops it: `moved` names the port a pick stepped over and its holder. */
-export type PortsChosen = { ports: AppPorts; moved?: { port: number; holder: PortHolder } } | { taken: { port: number; holder: PortHolder } };
+/** A pair a run may bind: `moved` names the port the pick stepped over and its holder, where it stepped. */
+export type PortsPicked = { ports: AppPorts; moved?: { port: number; holder: PortHolder } };
+
+/** The pair a run binds, or the port that stops it. */
+export type PortsChosen = PortsPicked | { taken: { port: number; holder: PortHolder } };
 
 /** Which pair a run binds: the one asked for when both ports are free; the next pair with both free when a pair
  * nobody named is taken; the taken port and its holder when a person named the pair, or when no pair inside the
