@@ -669,8 +669,7 @@ describe("a pause and a resume the provider does not answer", () => {
 
   it("a pause the provider refuses is not retried, and an odd millisecond left in the budget is no reason to fail before the call", async () => {
     const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: new Response(JSON.stringify({ error: "upstream request timeout" }), { status: 400 }), [STATE]: reads("running") });
-    // A clock that does not move and an odd budget: the first attempt's half is 19.5ms on every run, which the
-    // timer refuses unless the cap is made whole, so the refusal below is the only thing this case can read.
+    // The timer refuses the 19.5ms this budget leaves the first attempt unless the cap is made whole.
     const m = await machine(f, { budgets: { pauseMs: 39 }, clock: { now: () => 0, sleep: async () => {} } });
     const err = await m.pause().catch(e => e as unknown);
     expect((err as Error).message).toBe("upstream request timeout");
@@ -768,7 +767,7 @@ describe("the cap the caller puts on one call", () => {
   it("the cap a fetch is given is a whole number of milliseconds inside the timer's range", () => {
     expect(fetchCapMs(19.5)).toBe(20);
     expect(fetchCapMs(30_000)).toBe(30_000);
-    expect(fetchCapMs(2 ** 32)).toBe(4_294_967_295);
+    expect(fetchCapMs(2 ** 32)).toBe(2_147_483_647);
     expect(fetchCapMs(-1)).toBe(0);
   });
 });

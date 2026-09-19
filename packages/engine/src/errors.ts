@@ -95,10 +95,8 @@ export function isCapped(e: unknown): boolean {
   return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "TimeoutError";
 }
 
-/** The largest delay AbortSignal.timeout takes: past it the call is refused with a range error rather than capped.
- * Node also runs anything past a signed 32-bit millisecond as one millisecond, and the longest cap a backend here
- * hands a fetch is four minutes, so neither bound is in reach of a real call. */
-const TIMER_CAP_MS = 4_294_967_295;
+/** The longest delay node's timer waits out: it accepts a cap up to 4294967295 but fires anything over a signed 32-bit millisecond after one, so the bound a cap is held at is this one and not the one the call is taken at. */
+const TIMER_CAP_MS = 2_147_483_647;
 
 /** The cap one fetch is given, as a whole number of milliseconds inside the timer's range. A budget split across two
  * attempts leaves half a millisecond whenever an odd number of them is left, and AbortSignal.timeout refuses a delay
