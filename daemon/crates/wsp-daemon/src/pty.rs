@@ -189,11 +189,11 @@ impl Scrollback {
     }
 }
 
-/// Where one pty was opened and how it is driven. A pty of this computer's own is a master this process holds,
-/// with a child to kill; one inside a workspace this computer runs is a broker behind an exec's pipes, resized by
-/// the size road the runtime hands back and killed by ending that broker. The two differ in nothing else: the
-/// same scrollback, the same listeners, the same frames.
-enum Road {
+/// What holds one pty open, and so how it is resized and ended. A pty of this computer's own is a master this
+/// process holds, with a child to kill; one inside a workspace this computer runs is a broker behind an exec's
+/// pipes, resized by the size road the runtime hands back and ended by ending that broker. The two differ in
+/// nothing else: the same scrollback, the same listeners, the same frames.
+enum Held {
     Here {
         master: Box<dyn MasterPty + Send>,
         killer: Box<dyn ChildKiller + Send + Sync>,
@@ -237,7 +237,7 @@ pub(crate) struct Session {
     /// The way in and the way it is held: both go with the exit, so an exited pty holds its scrollback and
     /// nothing else until pty.kill, as node-pty closes its master 200 ms after the exit.
     input: Option<Typed>,
-    road: Option<Road>,
+    held: Option<Held>,
 }
 
 fn pty_thread<F: FnOnce() + Send + 'static>(name: &str, f: F) -> io::Result<()> {
@@ -321,7 +321,7 @@ impl Session {
             listeners: Vec::new(),
             exit_listeners: Vec::new(),
             input: Some(Typed::Here(input)),
-            road: Some(Road::Here { master: pair.master, killer }),
+            held: Some(Held::Here { master: pair.master, killer }),
         };
         Ok((session, Spawned { id, pid, data, exit }))
     }
@@ -358,13 +358,13 @@ impl Session {
     }
 
     pub(crate) fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
-        let road = self.road.as_ref().ok_or_else(|| io::Error::other(format!("{} has exited", self.id)))?;
-        match road {
-            Road::Here { master, .. } => {
+        let held = self.held.as_ref().ok_or_else(|| io::Error::other(format!("{} has exited", self.id)))?;
+        match held {
+            Held::Here { master, .. } => {
                 master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(io::Error::other)?
             }
             #[cfg(target_os = "linux")]
-            Road::Inside(size) => size.resize(cols, rows).map_err(io::Error::other)?,
+            Held::Inside(size) => size.resize(cols, rows).map_err(io::Error::other)?,
         }
         self.cols = cols;
         self.rows = rows;
@@ -373,14 +373,14 @@ impl Session {
 
     fn kill(&mut self) {
         self.listeners.clear();
-        match &mut self.road {
-            Some(Road::Here { killer, .. }) => {
+        match &mut self.held {
+            Some(Held::Here { killer, .. }) => {
                 let _ = killer.kill();
             }
             // The broker inside holds the master, so ending it closes that terminal and the kernel hangs the
             // shell on it up, as it does for a person's terminal that goes.
             #[cfg(target_os = "linux")]
-            Some(Road::Inside(size)) => {
+            Some(Held::Inside(size)) => {
                 let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(size.pid() as i32), nix::sys::signal::Signal::SIGKILL);
             }
             None => {}
@@ -449,7 +449,7 @@ fn spawn_inside(
         listeners: Vec::new(),
         exit_listeners: Vec::new(),
         input: Some(Typed::Inside(input_tx)),
-        road: Some(Road::Inside(size)),
+        held: Some(Held::Inside(size)),
     };
     (session, Spawned { id, pid, data, exit })
 }
@@ -593,7 +593,7 @@ pub(crate) async fn pump(ctx: Arc<Ctx>, spawned: Spawned) {
     if let Some(session) = ptys.get_mut(&id) {
         session.exited = Some(exit);
         session.input = None;
-        session.road = None;
+        session.held = None;
         let frame = frame_text(&exit_event(&id, exit));
         session.exit_listeners.retain(|l| l.out.send_text(&frame));
     }

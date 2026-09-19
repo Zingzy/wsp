@@ -360,8 +360,8 @@ mod tests {
         options.root = Some(home.path().to_path_buf());
         options.manifest_path = Some(home.path().join("manifest.json"));
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
-        ctx.open_workspace_door("wsp-a", home.path());
         let at = home.path().join("daemon.sock");
+        ctx.open_workspace_door("wsp-a", &at);
         assert_eq!(std::fs::metadata(&at).unwrap().permissions().mode() & 0o777, 0o600);
 
         let (mut ws, _) = tokio_tungstenite::client_async("ws://workspace/", UnixStream::connect(&at).await.unwrap()).await.unwrap();

@@ -856,6 +856,45 @@ pub fn helper_failure_line(e: &Error) -> String {
 mod tests {
     use super::*;
 
+    /// The flag `Exec.truncated` rides on, read where it is set: true only where bytes were dropped. At the cap
+    /// less one byte nothing was, at the cap itself nothing was either, and one byte past it something was.
+    #[tokio::test]
+    async fn a_read_says_it_cut_only_where_bytes_were_dropped() {
+        let read = async |bytes: usize| -> (bool, usize) {
+            let held = vec![b'a'; bytes];
+            let out = Mutex::new(Vec::new());
+            let cut = read_into(Some(&held[..]), &out).await;
+            (cut, out.into_inner().unwrap_or_else(|e| e.into_inner()).len())
+        };
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX - 1).await, (false, numbers::EXEC_OUTPUT_MAX - 1));
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX).await, (false, numbers::EXEC_OUTPUT_MAX));
+        assert_eq!(read(numbers::EXEC_OUTPUT_MAX + 1).await, (true, numbers::EXEC_OUTPUT_MAX));
+        // A stream that says nothing at all is nothing cut.
+        assert_eq!(read(0).await, (false, 0));
+    }
+
+    /// What an exec past the output cap does to the command that printed it: nothing. The reader keeps the cap's
+    /// worth and goes on reading to the end, so the command is never handed a closed pipe, prints no complaint of
+    /// its own and exits as it meant to. A diff inside past the cap is this: cut in the answer, quiet at the far
+    /// end, and said to be cut by the flag rather than by a broken pipe in somebody's stderr.
+    #[tokio::test]
+    async fn a_read_past_the_cap_keeps_draining_so_the_command_ends_quietly() {
+        let line = "a line of a file that is about to be large";
+        let lines = numbers::EXEC_OUTPUT_MAX / line.len() + 1000;
+        let mut cmd = Command::new("awk");
+        cmd.arg(format!("BEGIN {{ for (i = 0; i < {lines}; i++) print \"{line}\" }}"));
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().expect("awk is on this computer");
+        let (out, err) = (Mutex::new(Vec::new()), Mutex::new(Vec::new()));
+        let (cut_out, cut_err, ended) =
+            tokio::join!(read_into(child.stdout.take(), &out), read_into(child.stderr.take(), &err), child.wait());
+        assert!(cut_out, "the cap was not reached");
+        assert!(!cut_err);
+        assert_eq!(out.into_inner().unwrap_or_else(|e| e.into_inner()).len(), numbers::EXEC_OUTPUT_MAX);
+        assert!(err.into_inner().unwrap_or_else(|e| e.into_inner()).is_empty(), "the command printed a complaint of its own");
+        assert!(ended.unwrap().success(), "the command was cut off rather than left to finish");
+    }
+
     #[test]
     fn a_workspace_with_no_state_directory_is_gone() {
         let dir = tempfile::tempdir().unwrap();

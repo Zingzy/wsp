@@ -54,11 +54,8 @@ impl Runs for Inside {
         max_bytes: Option<usize>,
     ) -> Result<GitResult, OpError> {
         let done = self.ran(&line(cwd, program, args), input.map(<[u8]>::to_vec)).await?;
-        // The cap is the diff pane's byte budget, spent on what came back rather than by killing a process this
-        // daemon does not hold: an exec inside answers whole or not at all. The exec road has a cap of its own
-        // under this one, so what it cut is cut here too and the person reading is told either way.
         let mut stdout = done.stdout.into_bytes();
-        let truncated = done.truncated || max_bytes.is_some_and(|cap| stdout.len() > cap);
+        let truncated = was_cut(stdout.len(), max_bytes, done.truncated);
         if let Some(cap) = max_bytes.filter(|cap| stdout.len() > *cap) {
             stdout.truncate(cap);
         }
@@ -69,6 +66,14 @@ impl Runs for Inside {
         let read = format!("command -v {} >/dev/null 2>&1", quoted(program));
         Ok(self.ran(&read, None).await?.exit_code == 0)
     }
+}
+
+/// Whether what came back was cut, by either cap it passed. The caller's is the pane's byte budget, spent on
+/// what arrived rather than by killing a process this daemon does not hold: an exec inside answers whole or not
+/// at all. The exec road inside has a cap of its own under it, and what that road dropped is dropped whatever the
+/// caller's budget says, so the person reading is told either way.
+fn was_cut(bytes: usize, max_bytes: Option<usize>, runtime_said: bool) -> bool {
+    runtime_said || max_bytes.is_some_and(|cap| bytes > cap)
 }
 
 /// The one line an exec inside runs: the work score every shell of ours starts at, the git environment, the
@@ -89,6 +94,20 @@ fn quoted(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// At exactly the caller's cap nothing of its own was dropped, so what says the answer is cut is the road
+    /// underneath saying it dropped something.
+    #[test]
+    fn what_came_back_reads_cut_at_the_cap_only_where_the_road_under_it_cut() {
+        let cap = numbers::GIT_DIFF_CAP_BYTES;
+        assert!(!was_cut(cap, Some(cap), false));
+        assert!(was_cut(cap, Some(cap), true));
+        assert!(was_cut(cap + 1, Some(cap), false));
+        assert!(!was_cut(cap - 1, Some(cap), false));
+        // A read with no budget of its own, which is every git call but the diff, is cut only by that road.
+        assert!(!was_cut(cap + 1, None, false));
+        assert!(was_cut(0, None, true));
+    }
 
     #[test]
     fn the_line_carries_the_work_score_the_git_environment_the_folder_and_the_program_execed() {

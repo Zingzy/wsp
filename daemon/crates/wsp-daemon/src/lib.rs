@@ -293,12 +293,13 @@ impl Ctx {
         self.options.place_file.is_some()
     }
 
-    /// The door inside one workspace, bound in the folder of that workspace's own that is mounted over the wsp
-    /// folder inside it. The file itself is the gate: it is in that workspace's mount namespace and in no other's,
-    /// and a process inside reaches the two guest ops through it and no more. A door already held for this
-    /// workspace is replaced, which is what a boot after a daemon restart finds.
-    pub(crate) fn open_workspace_door(self: &Arc<Self>, id: &str, wsp_home: &Path) {
-        let at = wsp_home.join(workspace_door_name());
+    /// The door inside one workspace, on the path the runtime names for it: a file in the folder of that
+    /// workspace's own that is mounted over the wsp folder inside it. The file itself is the gate, since it is in
+    /// that workspace's mount namespace and in no other's, and a process inside reaches the two guest ops through
+    /// it and no more. A door already held for this workspace is replaced, which is what a boot after a daemon
+    /// restart finds.
+    pub(crate) fn open_workspace_door(self: &Arc<Self>, id: &str, at: &Path) {
+        let at = at.to_path_buf();
         let listener = match relay::listen_open_socket(&at) {
             Ok(listener) => listener,
             Err(e) => return self.log(&format!("workspace {id} has no door inside it: {}: {e}", at.display())),
@@ -519,12 +520,6 @@ fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::O
     }
 }
 
-/// What the workspace door's socket file is called in the workspace's own wsp folder: the last part of the path
-/// a process inside dials, so the two halves of that path are never spelled apart.
-fn workspace_door_name() -> &'static str {
-    Path::new(numbers::GUEST_DAEMON_SOCKET_PATH).file_name().and_then(std::ffi::OsStr::to_str).expect("the guest socket path names a file")
-}
-
 /// The daemon's own hook on the workspaces this computer runs: a door inside each one as it boots, and the door
 /// away as it stops. Weak, since the runtime it is handed to lives on the context that holds it.
 #[cfg(target_os = "linux")]
@@ -532,9 +527,9 @@ struct WorkspaceDoors(std::sync::Weak<Ctx>);
 
 #[cfg(target_os = "linux")]
 impl wsp_runtime::ops::Watches for WorkspaceDoors {
-    fn booted(&self, id: &str, wsp_home: &Path) {
+    fn booted(&self, id: &str, socket: &Path) {
         if let Some(ctx) = self.0.upgrade() {
-            ctx.open_workspace_door(id, wsp_home);
+            ctx.open_workspace_door(id, socket);
         }
     }
 

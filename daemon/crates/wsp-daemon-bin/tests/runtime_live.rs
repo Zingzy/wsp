@@ -2799,17 +2799,20 @@ async fn the_computers_daemon_answers_a_workspaces_pane_and_leaves_its_quiet_clo
     assert_eq!(pane.pty_text(&pty), before, "a pane that stopped reading was still sent the pty's bytes");
 
     // The quiet clock: a pane reading this workspace's checkout leaves it where it was, and a person typing into
-    // the pane starts it over. The reading is the runtime's own, off the machine op this computer answers.
+    // the pane starts it over. Read off the daemon that serves the workspace, since the clock is that daemon's
+    // own reading of what the workspace is doing and the frames above rode the same socket.
     tokio::time::sleep(Duration::from_secs(2)).await;
-    let quiet = w.quiet_ms(&id).await;
+    let quiet = quiet_ms(&mut second, &id).await;
     assert!(quiet >= 1_000, "the clock did not run while nothing happened: {quiet}");
     let read = second.request("git.status", json!({ "cwd": "/root", "machineId": &id })).await;
     assert_eq!(read["ok"], json!(false), "the workspace's home is no checkout: {read}");
-    let after_read = w.quiet_ms(&id).await;
+    let after_read = quiet_ms(&mut second, &id).await;
     assert!(after_read >= quiet, "a pane reading the workspace started its clock over: {quiet} then {after_read}");
+    // The write, then the shell's answer to it, then the reading: the keystroke touches the clock as it is
+    // served and the chunk the shell prints touches it again, so the figure is read behind both.
     second.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "echo typed-$((20+3))\n" })).await;
     assert!(second.printed_within(&pty, "typed-23", Duration::from_secs(30)).await, "{:?}", second.pty_text(&pty));
-    let typed_at = w.quiet_ms(&id).await;
+    let typed_at = quiet_ms(&mut second, &id).await;
     assert!(typed_at < 1_000, "typing into the pane left the workspace reading quiet: {typed_at}");
 
     // And the pty ends: the shell is gone, the broker with it, and nothing of either is left in the workspace's
@@ -2892,6 +2895,14 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
     w.close().await;
 }
 
+/// How long this computer's daemon has seen that workspace do nothing, off the reading it answers for one
+/// workspace: the clock is the daemon's own, so it is read through the socket the frames ride and not through
+/// another opening of the same root.
+async fn quiet_ms(client: &mut FrameClient, id: &str) -> u64 {
+    let read = client.ok("machine.metrics", json!({ "machineId": id })).await;
+    read["reading"]["quietForMs"].as_u64().unwrap_or_else(|| panic!("no quiet figure in {read}"))
+}
+
 /// One socket inside a workspace, dialled from this computer the way a process inside dials it: the file is the
 /// whole of the gate, so nothing is sent before the frames themselves.
 struct InsideSocket {
@@ -2961,9 +2972,11 @@ async fn a_diff_inside_past_the_cap_reads_cut() {
     assert_eq!((code, said.as_str()), (0, ""));
     let small = client.ok("git.diff", json!({ "cwd": repo, "scope": "staged", "machineId": &id })).await;
     assert_eq!(small["truncated"], json!(false), "{small}");
-    // Three megabytes of it, which is past the diff's own two and past the exec road's under it.
+    // Three megabytes of it, past the diff's own two and past the exec road's under it. Written by one process
+    // with nothing reading behind it: a producer whose reader closes early would print a broken pipe of its own,
+    // which is the shell's own complaint and no part of what the cut reads.
     let (code, _, said) = w
-        .exec(&id, &format!("set -e; cd {repo}; yes 'a line of a file that is about to be large' | head -c 3000000 > big.txt; git add -A"))
+        .exec(&id, &format!("set -e; cd {repo}; awk 'BEGIN{{ for (i = 0; i < 70000; i++) print \"a line of a file that is about to be large\" }}' > big.txt; git add -A"))
         .await;
     assert_eq!((code, said.as_str()), (0, ""));
     let cut = client.ok("git.diff", json!({ "cwd": repo, "scope": "staged", "machineId": &id })).await;

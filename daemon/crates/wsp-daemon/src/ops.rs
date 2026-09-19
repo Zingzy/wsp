@@ -464,7 +464,7 @@ async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str, asked: git::Ask
         return Ok((Runner::Here(git::here::Here::new()), at.clone(), at));
     };
     if !Path::new(requested).is_absolute() {
-        return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{requested} is not an absolute path inside {machine}")));
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, not_absolute(requested, machine)));
     }
     workspace_road(ctx, machine, requested, asked).await
 }
@@ -524,6 +524,13 @@ async fn pty_inside(
     answer::<Empty>(id, Err(no_such_workspace(machine)))
 }
 
+/// What a path for a workspace that is not absolute is refused with, wherever a frame names one: this daemon has
+/// no working directory inside a workspace, so a folder there is the frame's to give whole. One sentence, read by
+/// the files and git road and by the pane's.
+fn not_absolute(at: &str, machine: &str) -> String {
+    format!("{at} is not an absolute path inside {machine}")
+}
+
 /// What a pty for a workspace with no folder named is refused with: the frame says which workspace, and the host
 /// fills the folder in from the workspace's own checkout before it sends one.
 fn no_folder(machine: &str) -> String {
@@ -546,8 +553,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 // which every workspace here has bound in, so it is a bad request before anything is looked up.
                 let Some(cwd) = cwd else { return refuse(id, DaemonErrorCode::BadRequest, no_folder(&machine)) };
                 if !Path::new(&cwd).is_absolute() {
-                    let said = format!("{cwd} is not an absolute path inside {machine}");
-                    return refuse(id, DaemonErrorCode::BadRequest, said);
+                    return refuse(id, DaemonErrorCode::BadRequest, not_absolute(&cwd, &machine));
                 }
                 return pty_inside(ctx, id, &machine, cols, rows, shell, cwd).await;
             }

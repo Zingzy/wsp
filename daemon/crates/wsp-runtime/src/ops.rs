@@ -203,11 +203,11 @@ pub fn plain_copy_line(root: &Path, filesystem: Option<&str>, ms: u64) -> String
 }
 
 /// What the daemon serving this computer is told as its workspaces come and go: one that has booted, with the
-/// folder of its own that is mounted over the wsp folder inside it, and one that has stopped. The daemon binds
-/// its door inside a workspace on the first and takes it away on the second; nothing here knows what is on the
-/// other end of this.
+/// path inside it to bind its door on, and one that has stopped. The daemon binds that door on the first and
+/// takes the listener away on the second; the file itself goes with the stop here, whichever daemon bound it,
+/// since the folder it sits in is the workspace's own. Nothing here knows what is on the other end of this.
 pub trait Watches: Send + Sync {
-    fn booted(&self, id: &str, wsp_home: &Path);
+    fn booted(&self, id: &str, socket: &Path);
     fn stopped(&self, id: &str);
 }
 
@@ -359,7 +359,7 @@ impl Ops {
     pub fn watch(&self, watcher: Arc<dyn Watches>) -> Result<(), OpError> {
         *self.watcher.lock().unwrap_or_else(|held| held.into_inner()) = Some(Arc::clone(&watcher));
         for id in running_ids(&self.layout)? {
-            watcher.booted(&id, &self.layout.wsp_home(&id));
+            watcher.booted(&id, &self.layout.guest_socket(&id));
         }
         Ok(())
     }
@@ -980,7 +980,7 @@ impl Ops {
         // read-only: the computer's own wsp is under a folder this workspace covers, so without this the word is
         // missing inside. Written at every boot, as the workspace's resolv.conf is.
         bundle::write_wsp_shim_inside(&self.layout.rootfs(&id))?;
-        self.told(|watcher| watcher.booted(&id, &self.layout.wsp_home(&id)));
+        self.told(|watcher| watcher.booted(&id, &self.layout.guest_socket(&id)));
         Ok(record)
     }
 
@@ -991,6 +991,9 @@ impl Ops {
     /// the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
         self.told(|watcher| watcher.stopped(&record.id));
+        // The door inside goes with the workspace: the listener is the daemon's to drop and the file is this
+        // folder's, so a workspace that is stopped holds no socket even where the daemon that bound it is gone.
+        let _ = fs::remove_file(self.layout.guest_socket(&record.id));
         self.stop_engine(&record.id).await;
         self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
@@ -1067,6 +1070,7 @@ impl Ops {
     /// goes. An engine that does not answer leaves them, and the workspace goes all the same.
     async fn remove(&self, id: &str, init: Option<&Init>) -> Result<(), OpError> {
         self.told(|watcher| watcher.stopped(id));
+        let _ = fs::remove_file(self.layout.guest_socket(id));
         self.stop_engine(id).await;
         let record = bundle::read_record(&self.layout.record(id))?;
         if record.as_ref().is_some_and(|record| record.engine) {
@@ -1136,8 +1140,9 @@ impl Ops {
     }
 
     /// A shell inside a running workspace, on a pty of that workspace's own, for the terminal pane of a machine
-    /// this computer holds. The folder is the caller's and absolute, since this daemon has no working directory
-    /// inside a workspace; the environment is the workspace's own with the terminal named, as a thread's is.
+    /// this computer holds. The folder is the caller's and absolute, which is the one refusal the daemon's own
+    /// switch answers before it reaches this; the environment is the workspace's own with the terminal named, as
+    /// a thread's is.
     pub async fn pty_in(
         &self,
         id: &str,
@@ -1147,9 +1152,6 @@ impl Ops {
         shell: Option<&str>,
     ) -> Result<runtime::PtyInsideRunning, OpError> {
         let record = self.running(id)?;
-        if !Path::new(cwd).is_absolute() {
-            return Err(OpError::plain(format!("{cwd} is not an absolute path inside {id}")));
-        }
         let mut env = BTreeMap::from([
             ("HOME".to_owned(), "/root".to_owned()),
             ("USER".to_owned(), "root".to_owned()),
@@ -1649,8 +1651,8 @@ mod tests {
     }
 
     impl Watches for Heard {
-        fn booted(&self, id: &str, wsp_home: &Path) {
-            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("booted {id} {}", wsp_home.display()));
+        fn booted(&self, id: &str, socket: &Path) {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("booted {id} {}", socket.display()));
         }
 
         fn stopped(&self, id: &str) {
@@ -1676,7 +1678,7 @@ mod tests {
         }
         let heard = Arc::new(Heard::default());
         ops.watch(Arc::clone(&heard) as Arc<dyn Watches>).unwrap();
-        assert_eq!(heard.said(), [format!("booted wsp-awake {}", layout.wsp_home("wsp-awake").display())]);
+        assert_eq!(heard.said(), [format!("booted wsp-awake {}", layout.guest_socket("wsp-awake").display())]);
     }
 
     /// A workspace here runs no daemon of its own: it boots one process that holds it up, nothing supervises a

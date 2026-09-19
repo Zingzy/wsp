@@ -68,6 +68,13 @@ impl Layout {
     pub fn wsp_home(&self, id: &str) -> PathBuf {
         self.workspace(id).join("wsp-home")
     }
+    /// The socket the computer's own daemon binds inside one workspace, in that folder and so in that
+    /// workspace's view alone. Named here rather than where it is bound: the daemon binds what this hands it and
+    /// the stop takes the same path off, so a stopped workspace holds no socket of a daemon that may not even be
+    /// the one that bound it.
+    pub fn guest_socket(&self, id: &str) -> PathBuf {
+        self.wsp_home(id).join(guest_socket_name())
+    }
     /// An empty directory of the workspace's own, bound over a path inside it that the computer's own directory
     /// holds something at: the engine's data under /var/lib. One directory per path, since what the workspace
     /// writes at one of them is not what it writes at another.
@@ -426,6 +433,15 @@ pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> 
 /// above, the ones youki mounts the kernel's own filesystems at, and the ones a login expects to be there.
 const SKELETON: [&str; 15] =
     ["usr", "etc", "opt", "var", "srv", "root", "home", "tmp", "run", "proc", "sys", "dev", "mnt", "media", "boot"];
+
+/// What that socket is called in the workspace's own wsp folder: the last part of the path a process inside
+/// dials it by, so the two halves of that path are never spelled apart.
+fn guest_socket_name() -> &'static str {
+    Path::new(wsp_frames::numbers::GUEST_DAEMON_SOCKET_PATH)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .expect("the guest socket path names a file")
+}
 
 /// The two a boot empties: every distribution expects /run and /tmp empty at boot, since what is in them is pid
 /// files and sockets of processes that are gone. They are plain directories of the workspace's own on the
@@ -1186,6 +1202,19 @@ mod tests {
         assert_eq!(steps[1].1, target);
         assert_eq!(steps[1].2, MsFlags::MS_SLAVE | MsFlags::MS_REC);
         assert!(!steps[1].2.contains(MsFlags::MS_SHARED) && !steps[1].2.contains(MsFlags::MS_PRIVATE));
+    }
+
+    /// The socket a process inside a workspace dials its host over, as this computer keeps it: in that
+    /// workspace's own wsp folder, which is what is mounted over the wsp home inside it, under the name the
+    /// contract pins for the path there. One name, so the daemon binds and the stop sweeps the same file.
+    #[test]
+    fn the_socket_inside_a_workspace_is_the_file_a_process_there_dials() {
+        let layout = Layout::new(Path::new("/wsp"));
+        assert_eq!(layout.guest_socket("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home/daemon.sock"));
+        assert_eq!(layout.guest_socket("wsp-a").parent(), Some(layout.wsp_home("wsp-a").as_path()));
+        let inside = Path::new(wsp_frames::numbers::GUEST_DAEMON_SOCKET_PATH);
+        assert_eq!(layout.guest_socket("wsp-a").file_name(), inside.file_name());
+        assert_eq!(inside.parent(), Some(Path::new(GUEST_WSP_HOME)));
     }
 
     /// What a workspace's /etc/resolv.conf is after the boot writes it, on a rootfs made by hand: the link the

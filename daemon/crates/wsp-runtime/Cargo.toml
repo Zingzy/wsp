@@ -24,12 +24,12 @@ tempfile = "3"
 libc = "0.2"
 # The pty the pane's broker opens is POSIX and so is every call it makes, so the module builds here too and its
 # cases run on the computer the work is done on rather than on a box alone.
-nix = { version = "0.31", default-features = false, features = ["process", "signal", "term"] }
+nix = { version = "0.31", default-features = false, features = ["poll", "process", "signal", "term"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libcontainer = { version = "0.7.0", default-features = false, features = ["v2", "libseccomp"] }
 libcgroups = { version = "0.7.0", default-features = false, features = ["v2"] }
-nix = { version = "0.31", default-features = false, features = ["fs", "ioctl", "mount", "process", "sched", "signal", "term", "user"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "ioctl", "mount", "poll", "process", "sched", "signal", "term", "user"] }
 xattr = "1"
 netlink-sys = "0.8"
 netlink-packet-core = "0.8"

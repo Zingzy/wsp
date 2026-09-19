@@ -117,7 +117,7 @@ pub use inside::run;
 mod inside {
     use std::fs;
     use std::io::{self, ErrorKind, Read, Write};
-    use std::os::fd::{AsRawFd, OwnedFd};
+    use std::os::fd::{AsFd, AsRawFd, OwnedFd};
     use std::os::unix::process::{CommandExt, ExitStatusExt};
     use std::process::{Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -149,9 +149,29 @@ mod inside {
 
     /// Set by the window-change signal and read by the pump, which is all a handler may do.
     static RESIZED: AtomicBool = AtomicBool::new(false);
+    /// The same for a child that ended: the pump asks the shell itself whether it was that one.
+    static A_CHILD_WENT: AtomicBool = AtomicBool::new(false);
 
     extern "C" fn window_changed(_: i32) {
         RESIZED.store(true, Ordering::Relaxed);
+    }
+
+    extern "C" fn child_went(_: i32) {
+        A_CHILD_WENT.store(true, Ordering::Relaxed);
+    }
+
+    /// How long the pump waits on the terminal before asking whether the shell is still there. A signal cuts the
+    /// wait short, so this is the backstop and not the answer's speed.
+    const CHILD_TICK: u16 = 200;
+    /// And how long it waits for more once the shell has gone: what the terminal still holds is that shell's
+    /// last bytes, and a span with nothing in it is the end of them.
+    const DRAIN_TICK: u16 = 100;
+
+    /// Whether the terminal has something to read within the wait. Anything that cuts the wait short, a signal
+    /// among it, reads as nothing this time round, since what the caller does next is ask after the shell.
+    fn readable(master: &OwnedFd, within: u16) -> bool {
+        let mut fds = [nix::poll::PollFd::new(master.as_fd(), nix::poll::PollFlags::POLLIN)];
+        nix::poll::poll(&mut fds, within).is_ok_and(|ready| ready > 0)
     }
 
     fn winsize(cols: u16, rows: u16) -> Winsize {
@@ -214,20 +234,43 @@ mod inside {
         let mut shell = shell_on(&slave, ask)?;
         // And the last copy this process holds, the one the pair was opened with.
         drop(slave);
+        // Neither handler restarts the call it cut, so the pump below reads a signal as a turn of its loop.
+        //
+        // Safe: each handler touches one atomic and nothing else.
         let action = SigAction::new(SigHandler::Handler(window_changed), SaFlags::empty(), SigSet::empty());
-        // Safe: the handler touches one atomic and nothing else.
         unsafe { sigaction(Signal::SIGWINCH, &action) }?;
+        let ended = SigAction::new(SigHandler::Handler(child_went), SaFlags::empty(), SigSet::empty());
+        unsafe { sigaction(Signal::SIGCHLD, &ended) }?;
 
         let typed = fs::File::from(master.try_clone()?);
         std::thread::spawn(move || to_shell(typed));
         let mut printed = fs::File::from(master.try_clone()?);
         let mut out = io::stdout();
         let mut buf = [0u8; 8 * 1024];
+        // The pty is over when the shell is, and not when the terminal reads its end: a shell that left a job of
+        // its own running behind it, `sleep 900 &` and then `exit`, leaves that job holding the slave, and a
+        // pump that waited on the terminal would hold the pane's tab open for as long as the job runs. So the
+        // wait is short and the shell itself is asked, which is what a pane on any other machine reads.
+        let mut gone = None;
         loop {
             if RESIZED.swap(false, Ordering::Relaxed) {
                 if let Some((cols, rows)) = fs::read_to_string(&ask.size_file).ok().as_deref().and_then(size_of) {
                     let _ = set_size(&master, cols, rows);
                 }
+            }
+            if !readable(&master, if gone.is_some() { DRAIN_TICK } else { CHILD_TICK }) {
+                // Nothing to read this time round. Once the shell has gone that is the last of what it printed;
+                // until then it is the moment to ask whether it is still there.
+                if gone.is_some() {
+                    break;
+                }
+                A_CHILD_WENT.store(false, Ordering::Relaxed);
+                match shell.try_wait() {
+                    Ok(Some(status)) => gone = Some(status),
+                    Ok(None) => {}
+                    Err(_) => break,
+                }
+                continue;
             }
             match printed.read(&mut buf) {
                 // The road closing, either way a kernel says it: end of file, or the last slave gone.
@@ -246,7 +289,10 @@ mod inside {
         }
         // The shell's own status is what this process exits with, so the helper on the computer carries it and
         // the pane reads the code the person's shell ended on.
-        let ended = shell.wait()?;
+        let ended = match gone {
+            Some(status) => status,
+            None => shell.wait()?,
+        };
         let _ = fs::remove_file(&ask.size_file);
         Ok(ended.code().unwrap_or_else(|| 128 + ended.signal().unwrap_or(0)))
     }
@@ -388,6 +434,28 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("the broker ends with the shell on its slave, rather than waiting on a terminal nothing holds");
         assert_eq!(code, 7, "the broker exits with the shell's own code");
+    }
+
+    /// And the shell is what the pty waits on, not the terminal: a shell that leaves a job of its own running
+    /// leaves that job holding the slave, so the terminal reads no end at all. The pane's tab would stand open
+    /// for as long as the job runs, which is not what a pane on any other machine does.
+    #[test]
+    fn the_broker_ends_when_the_shell_does_even_with_a_job_still_holding_the_slave() {
+        let dir = tempfile::tempdir().unwrap();
+        let ask = Ask {
+            cols: 80,
+            rows: 24,
+            cwd: PathBuf::from("/"),
+            size_file: dir.path().join("pty-2.size"),
+            env: Vec::new(),
+            argv: vec!["/bin/sh".to_owned(), "-c".to_owned(), "sleep 5 & printf 'and gone\n'; exit 9".to_owned()],
+        };
+        let (told, ended) = std::sync::mpsc::channel();
+        std::thread::spawn(move || told.send(run(&ask)));
+        let code = ended
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("the broker ends with the shell, rather than with the last job holding its terminal");
+        assert_eq!(code, 9, "the broker exits with the shell's own code");
     }
 
     /// Why the pipes are taken as the helper starts and never after: a wait on a child drops that child's stdin
