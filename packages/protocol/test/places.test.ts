@@ -475,6 +475,7 @@ describe("the recipe on a computer you own", () => {
       staging: "/root/.wsp/provision/files",
       landed: "/root/.wsp/provision/landed",
       landing: "/root/.wsp/provision/landing",
+      asked: "/root/.wsp/provision/asked",
     });
     for (const path of Object.values(at)) expect(path.startsWith(`${placeDaemonPaths("/root").wsp}/`)).toBe(true);
   });
