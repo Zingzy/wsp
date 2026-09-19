@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -139,6 +139,29 @@ describe("what a computer is called in a row", () => {
     const here = { ...project, id: "pr_2", name: "wsp", computer: HERE_PLACE_ID, source: { kind: "folder" as const, path: "/Users/dev/wsp" }, path: "/Users/dev/wsp" };
     expect(addedProjectLine(here, new Map(), "darwin")).toContain("on this Mac, at /Users/dev/wsp");
     expect(addedProjectLine(here, new Map(), "linux")).toContain("on this computer, at /Users/dev/wsp");
+    // The add's own stage says that one sentence and no other: a caller holding the computer's word already,
+    // which is the road the landing takes, reads the same line off it.
+    expect(addedProjectOn(project, "hetzner")).toBe(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin"));
+  });
+
+  it("the line the add starts with says what is being recorded and from where, and counts nothing it carries", () => {
+    const folder: ProjectSource = { kind: "folder", path: "/Users/dev/spoo-landing" };
+    // A seed travels with it, so what travels is the seeding's own line in the menu's counts and this one says
+    // none of it: a count of ticked files here read as the whole of a seed carrying a memory folder too.
+    expect(addingProjectLine("spoo-landing", folder, true)).toBe("spoo-landing from /Users/dev/spoo-landing.");
+    // Nothing of the person's folder goes with a repo the computer clones itself, which nothing else says.
+    expect(addingProjectLine("spoo-ts", { kind: "git", url: "https://github.com/dev/spoo.git" }, false)).toBe("spoo-ts from https://github.com/dev/spoo.git, nothing seeded.");
+  });
+
+  it("the remove on a computer you own names the memory kept there only where a folder of it stands", () => {
+    expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", true)).toBe(
+      "spoo-landing is no longer a project on spoo; the folder wsp kept for it there, /wsp/projects/pr_1, is gone with its checkout, and the memory its agent keeps on that computer stays",
+    );
+    // No agent ever ran there, so there is no memory on that computer to say anything about and the sentence
+    // ends at the checkout rather than naming a folder that is not there.
+    expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", false)).toBe(
+      "spoo-landing is no longer a project on spoo; the folder wsp kept for it there, /wsp/projects/pr_1, is gone with its checkout",
+    );
   });
 });
 

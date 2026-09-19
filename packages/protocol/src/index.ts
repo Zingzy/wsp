@@ -457,13 +457,16 @@ export const ProjectView = z.object({
   seeded: z
     .object({
       files: z.number().int(),
+      /** The bytes of the files that were ticked, which is the sum the menu showed; never the archive's own size,
+       * which is bigger and is nobody's question. */
       bytes: z.number().int(),
-      memory: z.boolean(),
+      /** What the memory did, in one word: landed on that computer, kept because the agent there already had its
+       * own for this project and no memory is ever written over, or none travelled at all. */
+      memory: z.enum(["landed", "kept", "none"]),
+      /** How many files the memory folder held, the menu's own count; absent where none travelled. */
+      memoryFiles: z.number().int().optional(),
       commits: z.number().int(),
       at: z.string(),
-      /** The seed carried memory and the computer already kept some at the agent's path, so what stands there
-       * was left alone and the seed's memory was not landed. */
-      memoryKept: z.boolean().optional(),
     })
     .optional(),
   /** What the install ran and how long it took, once; absent where no catalog row named an install for this repo. */
@@ -3864,8 +3867,11 @@ export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The shape the records in a state file are written in. Any change to the schema of a stored record cuts this
  * number, so a host at the older number refuses the file instead of reading a record in a form it does not know:
- * several builds of wsp name one state file on a computer, and the one that wrote it last decides what is in it. */
-export const STATE_SHAPE = 1;
+ * several builds of wsp name one state file on a computer, and the one that wrote it last decides what is in it.
+ * 2 since a project's seeded row changed whole: one word for what its memory did where it held two flags, the
+ * memory folder's own file count beside it, and `bytes` now the sum the menu showed for the ticked files where it
+ * was the size of the archive they travelled in, which is bigger, so the two numbers do not compare. */
+export const STATE_SHAPE = 2;
 
 /** What a save records about the wsp that wrote the file, apart from the records themselves: the shape those
  * records are in, the build that wrote them and when. A file with none was written before this record existed. */
@@ -5217,7 +5223,7 @@ export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug,
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
-export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedCommitsLostLine, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
+export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";

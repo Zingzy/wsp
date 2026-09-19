@@ -56,6 +56,7 @@ import {
 } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
@@ -3298,8 +3299,11 @@ describe("a project on a computer you joined", () => {
     expect(place.killed).toHaveLength(1);
     // The remove runs one command on the computer itself, over the same link, and says what went.
     const { said } = await runtime!.projects.remove(project.id);
-    expect(ran.filter(cmd => cmd.startsWith("rm -rf"))).toEqual([`rm -rf '/wsp/projects/${project.id}'`]);
-    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout, and the memory its agent keeps on that computer stays`);
+    // That one command reads whether the agent there kept memory for this project and then takes wsp's own
+    // folder; this computer answered nothing, so the sentence ends at the checkout rather than naming a folder
+    // that is not there.
+    expect(ran.filter(cmd => cmd.includes("rm -rf"))).toEqual([removeScript({ dir: `/wsp/projects/${project.id}`, memoryDir: project.memoryDir })]);
+    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout`);
     expect(await runtime!.projects.list()).toEqual([]);
   });
 

@@ -111,6 +111,17 @@ describe("the shape a state file was written in", () => {
     expect(await store.keys("workspaces")).toEqual(["a", "b"]);
   });
 
+  it("is 2 on this build, since the seeded record changed shape, and a file at 3 is refused", async () => {
+    // The number every save writes, pinned: a record's schema changed, so a host that reads the older number
+    // meets a file it cannot read and says so instead of reading a record in a form it does not know.
+    expect(STATE_SHAPE).toBe(2);
+    const path = join(dir, "shape-three.json");
+    const wrote: StateShape = { shape: 3, wsp: "0.4.0", daemon: DAEMON_VERSION, bin: "/Users/z/.local/bin/wsp", at: "2026-09-19T08:00:00.000Z" };
+    writeFileSync(path, JSON.stringify({ projects: { p: { id: "p" } }, [STATE_SHAPE_KEY]: wrote }, null, 2));
+    const store = jsonFileStore(path, writer);
+    await expect(store.get("projects", "p")).rejects.toThrow(stateWrittenByNewerLine(path, wrote));
+  });
+
   it("a store with no file behind it carries none, since the document is about a file another build could write", async () => {
     const store = memoryStore();
     await store.put("workspaces", "a", { id: "a" });

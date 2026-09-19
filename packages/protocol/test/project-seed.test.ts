@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { claudeMemoryDir, claudeProjectKey, defaultSeedChoice, type SeedFile, type SeedPlan, seedChoiceFrom, seedRowWords, seedSummaryLines } from "../src/index.js";
+import { claudeMemoryDir, claudeProjectKey, defaultSeedChoice, type SeedFile, type SeedPlan, seedChoiceFrom, seedCommitsLandedLine, seedingLine, seedRowWords, seedSummaryLines } from "../src/index.js";
 
 const file = (path: string, kind: SeedFile["kind"], bytes: number, row?: { id: string; name: string }): SeedFile => ({
   path,
@@ -112,5 +112,26 @@ describe("what the person is told would travel", () => {
 
   it("says no files travel where nothing is ticked, and nothing about a folder with no edits", () => {
     expect(seedSummaryLines({ ...PLAN, uncommitted: 0, memory: null, unpushed: null }, { files: [], memory: false, commits: false })).toEqual(["no files travel"]);
+  });
+});
+
+describe("what the seeding stage says as the files go and once they have landed", () => {
+  it("names the files, the memory and the commits in the menu's own counts, and where they came from", () => {
+    expect(seedingLine(PLAN, defaultSeedChoice(PLAN))).toBe(
+      "Seeding 2 files (8 KB), Claude Code memory (5 files, 27 KB), 2 commits the remote does not have, from /Users/dev/spoo-landing.",
+    );
+    // A memory folder is no file of the seed's: the menu counts it on a row of its own and so does this line,
+    // so a seed of nothing but the memory reads as nought files here and as one file there.
+    expect(seedingLine({ ...PLAN, unpushed: null, memory: { key: "-Users-dev-spoo-landing", files: 1, bytes: 69 } }, { files: [], memory: true, commits: false })).toBe(
+      "Seeding 0 files, Claude Code memory (1 file, 69 B), from /Users/dev/spoo-landing.",
+    );
+    // Nothing ticked at all still says where it came from.
+    expect(seedingLine({ ...PLAN, memory: null, unpushed: null }, { files: [], memory: false, commits: false })).toBe("Seeding 0 files, from /Users/dev/spoo-landing.");
+  });
+
+  it("says what the commits did, off the count the computer's own git read back", () => {
+    expect(seedCommitsLandedLine(1)).toBe("1 commit landed");
+    expect(seedCommitsLandedLine(2)).toBe("2 commits landed");
+    expect(seedCommitsLandedLine(0)).toBe("no commits to land");
   });
 });

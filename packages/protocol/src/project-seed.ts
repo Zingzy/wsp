@@ -73,11 +73,34 @@ export function seedRowWords(file: SeedFile): string {
   return "not in the catalogue";
 }
 
+/** The bytes a seed's ticked files come to, which is the number the menu shows and the number the record keeps:
+ * the files the person ticked and nothing else, so the row they read and the record they can read back later say
+ * one thing. The archive those files travel in is bigger, and its size is nobody's question. */
+export function seedBytes(plan: SeedPlan, choice: SeedChoice): number {
+  return plan.files.filter(f => choice.files.includes(f.path)).reduce((sum, f) => sum + f.bytes, 0);
+}
+
+/** What the seeding says as the person's files go to that computer: the same counts the menu showed them, in the
+ * same order, and the folder they came from. The memory folder is counted on a row of its own, as it is on the
+ * menu, so a seed of nothing but memory reads as nought files here too. */
+export function seedingLine(plan: SeedPlan, choice: SeedChoice): string {
+  const files = plan.files.filter(f => choice.files.includes(f.path)).length;
+  const parts = [files === 0 ? "0 files" : `${plural(files, "file")} (${fmtBytes(seedBytes(plan, choice))})`];
+  if (choice.memory && plan.memory !== null) parts.push(`Claude Code memory (${plural(plan.memory.files, "file")}, ${fmtBytes(plan.memory.bytes)})`);
+  if (choice.commits && plan.unpushed !== null) parts.push(`${plural(plan.unpushed.commits, "commit")} the remote does not have`);
+  return `Seeding ${parts.join(", ")}, from ${plan.source}.`;
+}
+
+/** What the seeding says once the computer's own git has answered, where the seed carried commits at all: the
+ * count read back off the checkout there, which is nought where that clone already had the person's work. A
+ * patch git refused says so in its own sentence and is not said twice. */
+export const seedCommitsLandedLine = (commits: number): string => (commits === 0 ? "no commits to land" : `${plural(commits, "commit")} landed`);
+
 /** What the person is told a seed would carry, before anything leaves this computer: the ticked paths with their
  * bytes, the memory folder, the patch, and the edits that stay here. One line each, in that order. */
 export function seedSummaryLines(plan: SeedPlan, choice: SeedChoice): string[] {
   const ticked = plan.files.filter(f => choice.files.includes(f.path));
-  const bytes = ticked.reduce((sum, f) => sum + f.bytes, 0);
+  const bytes = seedBytes(plan, choice);
   const lines = [ticked.length === 0 ? "no files travel" : `${plural(ticked.length, "file")}, ${fmtBytes(bytes)}: ${ticked.map(f => f.path).join(", ")}`];
   if (choice.memory && plan.memory !== null) lines.push(`Claude Code memory, ${plural(plan.memory.files, "file")}, ${fmtBytes(plan.memory.bytes)}`);
   if (choice.commits && plan.unpushed !== null) lines.push(`${plural(plan.unpushed.commits, "commit")} the remote does not have, as a patch from ${plan.unpushed.base.slice(0, 7)}`);
