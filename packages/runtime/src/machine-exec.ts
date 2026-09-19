@@ -54,6 +54,11 @@ export interface MachineExecOptions {
   now?: () => number;
   /** What every wait runs on, the poll's and the launch retry's; tests hand in one that moves the clock. */
   sleep?: (ms: number) => Promise<void>;
+  /** Every run this process is reading, each as the call that stops reading it. A poll of a run holds the event
+   * loop until that run ends, so a process that is done with its work has to let go of the ones still going: the
+   * turns themselves go on running on their machines, and whatever opens them next reads their logs from the
+   * first byte. The wiring that made this factory owns the set and empties it when it closes. */
+  reading?: Set<() => void>;
 }
 
 /** The two limits a turn runs under on every kind of machine, and what ends one: the wall since it started, else the
@@ -150,6 +155,35 @@ const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS
  * under the turn's own. */
 export type TurnWaiting = () => boolean;
 
+/** What a reader that has let go of a run waits on: nothing settles it, so the stream it handed out ends for
+ * nobody and the run is left exactly as it is. Ending the stream here would settle a turn this process has merely
+ * stopped reading, and its own owner would read it as over. */
+const never = (): Promise<never> => new Promise<never>(() => {});
+
+/** The poll's own wait, and the one call that cuts it short. The timer belongs to the reader, so a reader that
+ * lets go of a run frees it where it stands rather than at the end of the poll it was in; a caller that handed in
+ * a clock of its own waits on that instead, and the wake ends that wait the same way. */
+function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => Promise<void>; wake: () => void } {
+  let woken: (() => void) | undefined;
+  const nap = (ms: number): Promise<void> =>
+    new Promise<void>(resolve => {
+      let done = false;
+      const settle = (): void => {
+        if (done) return;
+        done = true;
+        woken = undefined;
+        resolve();
+      };
+      const timer = sleep === undefined ? setTimeout(settle, ms) : undefined;
+      if (sleep !== undefined) void sleep(ms).then(settle);
+      woken = () => {
+        if (timer !== undefined) clearTimeout(timer);
+        settle();
+      };
+    });
+  return { nap, wake: () => woken?.() };
+}
+
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}, isWaiting?: TurnWaiting): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
   const idleMs = opts.idleMs ?? TURN_IDLE_MS;
@@ -187,6 +221,16 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
     let killed = false;
     let inputClosed = false;
+    /** Set when this process lets go of the run: the poll ends where it stands, nothing is reaped and no exit is
+     * written, since ending the run here would take a turn its own owner is still waiting on. */
+    let dropped = false;
+    const { nap, wake } = pollNap(opts.sleep);
+    const drop = (): void => {
+      dropped = true;
+      opts.reading?.delete(drop);
+      wake();
+    };
+    opts.reading?.add(drop);
     // Both limits run from this reader's first second: nothing on the machine records when the run's last byte
     // landed, so an attach cannot inherit an idle clock and starts the turn's cap again.
     const startedAt = now();
@@ -199,6 +243,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     const finish = (code: number | null): void => {
       if (finishCode === undefined) {
         finishCode = code;
+        opts.reading?.delete(drop);
         resolveExit(code);
       }
     };
@@ -246,6 +291,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       }
 
       while (true) {
+        // This process is done reading this run: the poll ends here and the stream settles for nobody.
+        if (dropped) await never();
         if (killed) {
           await reap();
           finish(null);
@@ -268,7 +315,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
           // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
           // turn's silence: the idle clock holds here and goes on from the road's return.
-          await sleep(pollMs);
+          await nap(pollMs);
           activity.hold(now() - at);
           continue;
         }
@@ -276,7 +323,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         const out = res.stdout.split("\n");
         const markIdx = out.findIndex(l => l.startsWith(sentinel));
         if (markIdx === -1) {
-          await sleep(pollMs);
+          await nap(pollMs);
           continue;
         }
         const [, exitStr = "", live = "up", workStr = ""] = out[markIdx]!.split(" ");
@@ -311,7 +358,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(null);
           return;
         }
-        await sleep(pollMs);
+        await nap(pollMs);
       }
     }
 

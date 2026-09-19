@@ -947,3 +947,45 @@ describe("machineExecStream polling a script that ends at once", () => {
     expect(results).toEqual(Array.from({ length: 20 }, () => ({ lines: ["hi"], exited: 0 })));
   }, 60_000);
 });
+
+describe("a reader that lets go of a run still going", () => {
+  it("ends its poll where it stands, settles nothing, reaps nothing, and the run is left on the machine", async () => {
+    const { backend, machine } = await makeMachine();
+    // A run that prints nothing and never ends, which is what a turn left running on a machine is.
+    const guest = scriptGuest(backend, []);
+    const reading = new Set<() => void>();
+    const factory = machineExecStream(machine, { pollMs: 10, reading });
+    const stream = factory("claude -p hi", { env: {} });
+    const polls = (): number => guest.calls.filter(c => c.includes("__WSP_EOF_")).length;
+    // Nothing awaits this: the reader is the poll, and letting go is what this case is about.
+    void (async () => {
+      for await (const line of stream.lines) void line;
+    })();
+    await vi.waitFor(() => expect(polls()).toBeGreaterThan(1));
+    // The reader registered itself with the wiring that made the factory, as the call that stops it.
+    expect(reading.size).toBe(1);
+
+    for (const stop of [...reading]) stop();
+    expect(reading.size).toBe(0);
+    const after = polls();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(polls()).toBe(after);
+    // The turn is not written off: nothing was signalled, nothing reaped, and the stream settles for nobody, so
+    // whoever owns that turn reads its log from the first byte when it opens it again.
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+    expect(guest.files()).toContain(`${stream.run!}.sh`);
+    const settled = await Promise.race([stream.exited.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("still running"), 50))]);
+    expect(settled).toBe("still running");
+  });
+
+  it("is dropped from the set the moment its run ends, so a close after that stops nothing", async () => {
+    const { backend, machine } = await makeMachine();
+    scriptGuest(backend, [{ append: "done\n", exit: 0 }, {}]);
+    const reading = new Set<() => void>();
+    const stream = machineExecStream(machine, { pollMs: 5, reading })("claude -p hi", { env: {} });
+    for await (const line of stream.lines) void line;
+    expect(await stream.exited).toBe(0);
+    expect(reading.size).toBe(0);
+  });
+});

@@ -12,14 +12,27 @@ export interface HostLock {
   /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
   address?: string;
   startedAt: string;
-  /** What brought this host up, where wsp brought it up itself: a verb that needed one, or the wsp up a person
-   * typed. wsp down stops either, and a second wsp up is told so. Absent is a host wsp did not start from the
-   * command line, which is the app's own, and nothing here may stop that one. */
+  /** What brought this host up, where wsp brought it up itself: a verb that needed one, the wsp up a person typed,
+   * or this computer's own manager holding the unit for the state file. wsp down stops any of them, and a second
+   * wsp up is told so. Absent is a host wsp did not start from the command line, which is the app's own, and
+   * nothing here may stop that one. */
   startedBy?: HostStarted;
 }
 
-/** The two roads the command line starts a host by, as the lock records them. */
-export type HostStarted = "verb" | "up";
+/** The three roads a host is started by, as the lock records them: two a person's command line takes, and the
+ * service this computer's own manager holds. */
+export type HostStarted = "verb" | "up" | "service";
+
+/** The variable a host something else started carries. A verb's own child and the service's unit each mark the
+ * host they start, so wsp down tells them from a host a person is holding open in a terminal, and a client tells
+ * the service's own host from one it would be starting beside it. */
+export const STARTED_BY_ENV = "WSP_STARTED_BY";
+
+/** The roads that mark the host they start; the wsp up a person typed is read off the line, not the environment. */
+const MARKS: readonly HostStarted[] = ["verb", "service"];
+
+/** What the environment says started this process, and nothing where nothing did. */
+export const startedByEnv = (env: Readonly<Record<string, string | undefined>>): HostStarted | undefined => MARKS.find(word => word === env[STARTED_BY_ENV]);
 
 function isHostLock(v: unknown): v is HostLock {
   return (

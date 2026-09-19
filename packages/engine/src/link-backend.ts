@@ -281,6 +281,9 @@ export class LinkBackend implements MachineBackend {
   readonly pricing: BackendPricing;
   readonly lifecycle?: Lifecycle;
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
+  /** The daemon on the far side writes the workspace's name into the machine's specification and its /etc/hostname
+   * at every boot, so a workspace there is named before anything of this host's could ask it to be. */
+  readonly namesWorkspace = true;
   /** Where the computer on the far side keeps the logins it shares into every workspace on it, as it said. */
   readonly logins?: string;
   /** Where it keeps the project checkouts it holds and each project's own memory, as it said. */

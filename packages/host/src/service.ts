@@ -7,8 +7,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
+import { authority, fmtDuration, LABS_ENV, shellQuote } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -130,6 +131,9 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),
+    // Labs is the shell's, and a service installed from a shell that holds it would otherwise come up without the
+    // rows that shell was using.
+    ...((env[LABS_ENV] ?? "") === "" ? {} : { [LABS_ENV]: env[LABS_ENV]! }),
     ...Object.fromEntries(providerEnvNames().flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
   };
 }
@@ -285,6 +289,30 @@ export function noManagerLine(platform: string): string {
   const words = Object.entries(BY_PLATFORM).map(([os, kind]) => `a ${SERVICE_MANAGERS[kind].words} on ${os}`);
   return `wsp writes no service on ${platform}; it writes ${words.join(" and ")}. Run wsp up in a terminal that stays open instead.`;
 }
+
+/** A unit this computer's manager is registered to serve a state file with: what it is called, and the words a
+ * line naming it uses. */
+export interface RegisteredService {
+  unit: ServiceUnit;
+  words: string;
+}
+
+/** Which service this is on this computer: one per state file, under this person's home and this user. */
+export function serviceAddressHere(statePath: string): ServiceAddress {
+  return { statePath, home: homedir(), uid: process.getuid?.() ?? 0 };
+}
+
+/** What a manager is registered to serve an address with, and nothing where it holds no unit for it or there is
+ * no manager on this platform at all. The unit file standing is the whole of the reading, which is the fact wsp
+ * down and the sweep on a joined computer read too: a manager that has booted the unit out still has the file,
+ * and the state file is still that service's to serve. */
+export function registeredIn(manager: ServiceManager | undefined, at: ServiceAddress): RegisteredService | undefined {
+  const held = manager?.held(at)[0];
+  return held !== undefined && existsSync(held.unit.path) ? { unit: held.unit, words: held.words } : undefined;
+}
+
+/** The same reading for this computer and this state file, which is what the start road and wsp up ask. */
+export const registeredService = (statePath: string): RegisteredService | undefined => registeredIn(serviceManagerFor(platform()), serviceAddressHere(statePath));
 
 export interface ServiceRunner {
   /** The patience is the caller's, since what a manager is being asked for decides it; a caller that names none

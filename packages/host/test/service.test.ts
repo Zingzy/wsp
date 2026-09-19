@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { EXIT_CODES, LOOPBACK } from "@wsp/protocol";
+import { EXIT_CODES, LABS_ENV, LOOPBACK } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, hostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
@@ -14,6 +14,8 @@ import {
   installService,
   logTail,
   noManagerLine,
+  registeredIn,
+  serviceAddressHere,
   serviceEnv,
   serviceManagerFor,
   serviceReading,
@@ -200,6 +202,42 @@ describe("one module per service manager", () => {
       WSP_FAKE_AS: "solari",
     });
     expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("a service installed from a shell holding labs carries labs, since it would otherwise come up without the rows that shell was using", () => {
+    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [LABS_ENV]: "1" });
+    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
+    expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("a manager writes every variable of the plan into the unit it hands over", () => {
+    const at: ServiceAddress = { statePath: "/Users/z/.wsp/state.json", home: "/Users/z", uid: 501 };
+    const plan: ServicePlan = { ...at, argv: ["/usr/bin/node", "/usr/local/bin/wsp", "up"], cwd: "/Users/z", env: { ...serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" }), WSP_STARTED_BY: "service" }, logPath: "/Users/z/.wsp/host.log" };
+    const written = SERVICE_MANAGERS.launchd.text(plan);
+    expect(written).toContain("<key>WSP_STARTED_BY</key><string>service</string>");
+    expect(written).toContain("<key>WSP_LABS</key><string>1</string>");
+    expect(SERVICE_MANAGERS.systemd.text(plan)).toContain("Environment='WSP_STARTED_BY=service'");
+  });
+
+  it("the unit standing is what says this computer is registered to serve a state file, whether or not the manager has it loaded", () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-registered-"));
+    try {
+      const at: ServiceAddress = { statePath: join(home, ".wsp", "state.json"), home, uid: 501 };
+      const manager = SERVICE_MANAGERS.launchd;
+      expect(registeredIn(manager, at)).toBeUndefined();
+      const unit = manager.unit(at);
+      mkdirSync(dirname(unit.path), { recursive: true });
+      writeFileSync(unit.path, manager.text({ ...at, argv: ["wsp", "up"], cwd: home, env: {}, logPath: join(home, "host.log") }));
+      expect(registeredIn(manager, at)).toEqual({ unit, words: "launchd agent" });
+      // A computer whose platform wsp writes no unit for is registered to serve nothing.
+      expect(registeredIn(undefined, at)).toBeUndefined();
+      // The systemd side names the scope its host's unit sits in, which is the login's own.
+      expect(SERVICE_MANAGERS.systemd.held(at)[0]!.words).toBe("systemd user unit");
+      // One reading of which service a state file's is: the same address every service command here builds.
+      expect(serviceAddressHere(at.statePath).statePath).toBe(at.statePath);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("each manager reads its own holds answer: what it says for a service it does not have, and what it says when it could not answer at all", () => {
@@ -484,6 +522,9 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(plan.argv[0]).toBe(process.execPath);
     expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
     expect(plan.env["PATH"]).toBeDefined();
+    // The host this unit starts is the one registered to serve the state file, and the word is what lets it past
+    // the check every other client on this computer is refused by.
+    expect(plan.env["WSP_STARTED_BY"]).toBe("service");
     expect(JSON.stringify(plan)).not.toContain(KEY);
     expect(lines).toEqual([
       `fake service fake.${serviceTag(statePath)} is loaded; it serves again at every login`,

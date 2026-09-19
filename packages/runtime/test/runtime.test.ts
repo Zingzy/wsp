@@ -7,7 +7,8 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -21,6 +22,7 @@ import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
+import { scriptGuest } from "./script-guest.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
@@ -7231,4 +7233,108 @@ describe("what a move onto a newer image does with the files the image itself wr
     expect(log.findIndex(c => c.includes(READ))).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
     expect(backend.machines[0]!.killed).toBe(true);
   });
+});
+
+describe("the shape a state file was written in, on the records the runtime reads", () => {
+  it("names the build that wrote the file beside the record nothing reads, so the one field is put right instead of the file thrown away", async () => {
+    const wrote: StateShape = { shape: STATE_SHAPE, wsp: "0.2.0", daemon: DAEMON_VERSION, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-18T15:15:00.000Z" };
+    const held = memoryStore();
+    await held.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true, projects: [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00.000Z" }] });
+    // The document a state file carries, as the store that has a file behind it answers it.
+    const store = { ...held, shape: async (): Promise<StateShape> => wrote };
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-shape/state.json" });
+    await expect(rt.workspaces.list()).rejects.toThrow(
+      `workspace ws_old was recorded before a workspace held a project, and nothing reads that shape: /tmp/wsp-shape/state.json was last written by /Applications/wsp.app/Contents/Resources/bin.js (wsp 0.2.0, daemon ${DAEMON_VERSION}), so run that wsp on it, or move the file aside and start again, and wsp add records your projects on the new one`,
+    );
+  });
+
+  it("says the file alone where the file carries no such document, as one written before it did", async () => {
+    const store = memoryStore();
+    await store.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-shape/state.json" });
+    await expect(rt.workspaces.list()).rejects.toThrow(
+      "workspace ws_old was recorded before a workspace held a project, and nothing reads that shape: move /tmp/wsp-shape/state.json aside and start again, and wsp add records your projects on the new one",
+    );
+  });
+});
+
+describe("a create on a computer that names its own machines", () => {
+  it("runs no hostname command inside the workspace, and a provider's fork is still named", async () => {
+    const named = stubBackend();
+    (named as { namesWorkspace?: boolean }).namesWorkspace = true;
+    const rt = createRuntime({ backend: named, store: memoryStore(), adapters: {} });
+    await createOn(rt, { golden: "snap_g", name: "on-a-box" });
+    expect(named.machines[0]!.execLog.filter(cmd => cmd.startsWith("hostname "))).toEqual([]);
+
+    // The provider's own fork boots as localhost, so that road still names it: the flag is the backend's, not a
+    // rule about creates.
+    const provider = stubBackend();
+    const forking = createRuntime({ backend: provider, store: memoryStore(), adapters: {} });
+    await createOn(forking, { golden: "snap_g", name: "at-a-provider" });
+    expect(provider.machines[0]!.execLog.filter(cmd => cmd.startsWith("hostname "))).toEqual(["hostname at-a-provider && echo at-a-provider > /etc/hostname"]);
+  });
+});
+
+describe("a project on a computer that clones at the add, recorded before it did", () => {
+  it("is refused at the create in the doctor's own sentence, before any machine is asked for", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    // A project recorded when its computer kept no checkout of its own, which is every project added before the
+    // add cloned once on the computer.
+    const project = await projectOn(rt);
+    expect(project.checkout).toBeUndefined();
+    // The computer keeps project checkouts now, which is what puts this create on the road that reads one.
+    (backend as { projects?: string }).projects = "/wsp/projects";
+    const computer = (await rt.projects.computers()).find(row => row.id === project.computer)!.name;
+    const forked = backend.machines.length;
+    await expect(rt.workspaces.create({ project: project.id, name: "probe" })).rejects.toThrow(projectNeedsReaddLine(project.name, computer, project.source));
+    expect(backend.machines).toHaveLength(forked);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+});
+
+describe("a host that comes back to a turn still running on a machine", () => {
+  /** An adapter whose turn is the machine's own run, launched and re-opened through the wiring's exec stream:
+   * the poll that reads that run is the timer this case is about. */
+  const pollingAdapter = (): HarnessAdapterFactory => ctx => {
+    const session = (stream: ExecStream, sessionId: string, onEvent: (event: AdapterEvent) => void): HarnessSession => {
+      const finished = (async () => {
+        onEvent({ type: "session.start", sessionId });
+        for await (const line of stream.lines) void line;
+        const result: TurnResult = { status: "completed", text: "done" };
+        onEvent({ type: "turn.done", sessionId, result });
+        return result;
+      })();
+      return { localId: sessionId, finished, ...(stream.run !== undefined ? { run: stream.run } : {}), interrupt: async () => {} };
+    };
+    return {
+      steers: false,
+      start: o => session(ctx.execStream("claude -p hi", { env: {} }), "66666666-6666-4666-8666-666666666666", o.onEvent),
+      attach: async o => {
+        const opened = await ctx.execStream.attach!(o.run, { input: false });
+        return opened === "gone" ? "gone" : session(opened, o.sessionId, o.onEvent);
+      },
+    };
+  };
+
+  it("lets go of the poll that reads it when it closes, so nothing it opened holds this process open", async () => {
+    // Counted, not named: the runner holds timers of its own, and what this case is about is the one this runtime
+    // adds. The list goes into the failure so a run that drifts says what it was holding.
+    const held = (): string[] => process.getActiveResourcesInfo().filter(kind => kind === "Timeout");
+    const backend = stubBackend();
+    const store = memoryStore();
+    scriptGuest(backend, [], tokenGuest);
+    const first = createRuntime({ backend, store, adapters: { claude: pollingAdapter() } });
+    const ws = await createOn(first, { golden: "snap_g", name: "a" });
+    await first.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => ((await store.get("sessions", ws.id)) as { sessions: { run?: string }[] } | undefined)?.sessions[0]?.run !== undefined);
+    await first.close();
+
+    const before = held().length;
+    const again = createRuntime({ backend, store, adapters: { claude: pollingAdapter() } });
+    expect((await again.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    await vi.waitFor(() => expect(held().length).toBeGreaterThan(before));
+    await again.close();
+    expect(held().length, `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+  }, 20_000);
 });

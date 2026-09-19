@@ -3856,6 +3856,28 @@ export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
  * The guest's home is /root, so this is rootsPathIn answered there; the value is hashed into DAEMON_CONTENT_SHA. */
 export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
+/** The shape the records in a state file are written in. Any change to the schema of a stored record cuts this
+ * number, so a host at the older number refuses the file instead of reading a record in a form it does not know:
+ * several builds of wsp name one state file on a computer, and the one that wrote it last decides what is in it. */
+export const STATE_SHAPE = 1;
+
+/** What a save records about the wsp that wrote the file, apart from the records themselves: the shape those
+ * records are in, the build that wrote them and when. A file with none was written before this record existed. */
+export const StateShape = z.object({
+  shape: z.number().int(),
+  /** The version of the wsp that wrote it, as `wsp --version` prints it. */
+  wsp: z.string(),
+  /** The daemon that wsp deploys, which is the other half of what a build is. */
+  daemon: z.number().int(),
+  /** The binary it ran from, which is the one thing that says which of the builds on this computer wrote the file. */
+  bin: z.string(),
+  at: z.string(),
+});
+export type StateShape = z.infer<typeof StateShape>;
+
+/** How a sentence names the build that wrote a state file. */
+export const stateWriterWords = (wrote: StateShape): string => `${wrote.bin} (wsp ${wrote.wsp}, daemon ${wrote.daemon})`;
+
 /** The version a hello announces, 1 when it carries none. */
 export function daemonVersionOf(hello: { version?: number }): number {
   return hello.version ?? 1;
