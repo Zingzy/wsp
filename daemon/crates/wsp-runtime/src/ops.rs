@@ -204,8 +204,9 @@ pub struct Ops {
     /// The fenced engine socket's accept loop of every running workspace that asked for one.
     engines: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
     /// The shares section of a boot, which every create and every wake runs on a task of its own: held from the
-    /// read of the points this computer already holds to the last one made, so two of them sharing one login
-    /// never read before each other's write.
+    /// read of the points this computer already holds to the last one made, since a neighbour's claim is written
+    /// inside that section, so two boots sharing one login that both read before either wrote would each find
+    /// the point missing, each make it, and neither own it.
     points: std::sync::Mutex<()>,
     facts: BoxFacts,
     stopped: Vec<String>,
@@ -854,11 +855,8 @@ impl Ops {
         // to be there inside, so the runtime makes an empty one where the image carries none; a login this
         // computer does not hold yet is no mount at all, and the wake after the sign-in is what brings it.
         let (shares, made_points) = {
-            // One boot at a time from the read of what this computer already holds to the last point made: a
-            // neighbour's claim is written inside this section, so two boots that both read before either wrote
-            // would each find the point missing, each make it, and neither own it. A boot that panicked here
-            // leaves the lock poisoned and the next boot takes it all the same: what it holds is a read and a
-            // file on disk, not an invariant a panic could leave half true.
+            // A boot that panicked holding this leaves the lock poisoned and the next boot takes it all the
+            // same: what it holds is a read and a file on disk, not an invariant a panic could leave half true.
             let _points = self.points.lock().unwrap_or_else(|held| held.into_inner());
             // The points already known to be wsp's, read once before the first one is made. Two workspaces
             // sharing one login share the one mount point under the computer's home, so a point this boot finds

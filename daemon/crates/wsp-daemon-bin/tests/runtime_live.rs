@@ -53,9 +53,8 @@ fn live_owner() -> String {
     format!("live-665-{}", checkout_key())
 }
 
-/// Why a case here is marked ignored and what runs it: the same sentence its `#[ignore]` carries, which the
-/// attribute takes as a literal and cannot read from here, and what its body asserts root with, so a run that
-/// took it off a box says which box it wanted rather than reading ok having run nothing.
+/// The runtime crate's own `LIVE_REASON`, kept equal to it, since a test file cannot read that one: its doc
+/// says why a case carries this sentence twice.
 const LIVE_REASON: &str = "drives the kernel as root: run the live executable on a box with --ignored";
 
 struct World {
