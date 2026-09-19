@@ -203,6 +203,10 @@ pub struct Ops {
     net: Arc<Net>,
     /// The fenced engine socket's accept loop of every running workspace that asked for one.
     engines: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
+    /// The shares section of a boot, which every create and every wake runs on a task of its own: held from the
+    /// read of the points this computer already holds to the last one made, so two of them sharing one login
+    /// never read before each other's write.
+    points: std::sync::Mutex<()>,
     facts: BoxFacts,
     stopped: Vec<String>,
     net_swept: net::Swept,
@@ -273,6 +277,7 @@ impl Ops {
             runtime,
             net: Arc::new(net),
             engines: Mutex::new(BTreeMap::new()),
+            points: std::sync::Mutex::new(()),
             facts: BoxFacts::read(),
             stopped,
             net_swept,
@@ -848,20 +853,28 @@ impl Ops {
         // The computer's own logins, each mounted at the path its tool reads inside. A file bind needs the file
         // to be there inside, so the runtime makes an empty one where the image carries none; a login this
         // computer does not hold yet is no mount at all, and the wake after the sign-in is what brings it.
-        // The points already known to be wsp's, read once before the first one is made. Two workspaces sharing one
-        // login share the one mount point under the computer's home, so a point this boot finds standing and
-        // another record names is this workspace's to take off as well, and the last one holding it takes it off.
-        // This workspace's own are in the list too: a stop that could not take a point off, and a box that went
-        // down with the workspace running, both leave one standing, and the wake that finds it there is still the
-        // boot that made it.
-        let held = if record.shares.is_empty() {
-            Vec::new()
-        } else {
-            let mut held = self.points_of_others(&id)?;
-            held.extend(points_of(&self.layout, &id)?);
-            held
+        let (shares, made_points) = {
+            // One boot at a time from the read of what this computer already holds to the last point made: a
+            // neighbour's claim is written inside this section, so two boots that both read before either wrote
+            // would each find the point missing, each make it, and neither own it. A boot that panicked here
+            // leaves the lock poisoned and the next boot takes it all the same: what it holds is a read and a
+            // file on disk, not an invariant a panic could leave half true.
+            let _points = self.points.lock().unwrap_or_else(|held| held.into_inner());
+            // The points already known to be wsp's, read once before the first one is made. Two workspaces
+            // sharing one login share the one mount point under the computer's home, so a point this boot finds
+            // standing and another workspace here has named is this workspace's to take off as well, and the
+            // last one holding it takes it off. This workspace's own are in the list too: a stop that could not
+            // take a point off, and a box that went down with the workspace running, both leave one standing,
+            // and the wake that finds it there is still the boot that made it.
+            let held = if record.shares.is_empty() {
+                Vec::new()
+            } else {
+                let mut held = self.points_of_others(&id)?;
+                held.extend(points_of(&self.layout, &id)?);
+                held
+            };
+            make_points(&self.layout, &id, &record.shares, &held)?
         };
-        let (shares, made_points) = make_points(&self.layout, &id, &record.shares, &held)?;
         record.made_points = made_points;
         // The folders of the computer's own this workspace was made with, bound where it reads them: made here
         // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
@@ -1107,10 +1120,21 @@ impl Ops {
         records_under(&self.layout)
     }
 
-    /// The mount points the other workspaces on this computer say their boots made: what tells a point of wsp's
-    /// own from a file the person had at that path, since only the first of the two is ever taken off.
+    /// The mount points the other workspaces on this computer have put on its disk: what tells a point of wsp's
+    /// own from a file the person had at that path, since only the first of the two is ever taken off. Read off
+    /// every claim under the run directory through the one reader, records and claim files together, because a
+    /// create still inside its boot has written its claim's file and no record yet, and a boot that read the
+    /// records alone would take its neighbour's point for the person's own.
     fn points_of_others(&self, id: &str) -> Result<Vec<String>, OpError> {
-        Ok(records_under(&self.layout)?.into_iter().filter(|record| record.id != id).flat_map(|record| record.made_points).collect())
+        let mut points = Vec::new();
+        for entry in read_dir_or_none(&self.layout.run())?.unwrap_or_default() {
+            let other = entry.file_name().to_string_lossy().into_owned();
+            if other == id {
+                continue;
+            }
+            points.extend(points_of(&self.layout, &other)?);
+        }
+        Ok(points)
     }
 }
 
@@ -2125,6 +2149,47 @@ mod tests {
         assert!(!point.exists(), "the last workspace holding the mount point left it on the computer's home");
         // The folder stays: ~/.codex is the agent's own to make and to keep, whatever wsp put inside it.
         assert!(point.parent().unwrap().is_dir());
+    }
+
+    /// Two workspaces sharing one login that boot at the same moment: the second reads the first's point off the
+    /// first's claim, since a create still inside its boot has written its claim's file and no record yet, finds
+    /// the file standing and names the point as its own too. Both own it, and the take-off's own two rules,
+    /// pinned by `a_shared_mount_point_stands_while_another_workspace_holds_it_and_goes_with_the_last`, leave
+    /// the file standing until the last of them goes.
+    ///
+    /// What the lock over that section adds is the order of the two reads against the two writes, which no case
+    /// here drives: this one drives the reader over claims and `make_points` with a list of what is held.
+    #[test]
+    fn two_boots_sharing_one_login_at_the_same_moment_both_own_its_point_and_the_last_takes_it_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wsp");
+        let ops = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(&root);
+        // The first boot as it stands in the middle of its create: the claim's own file names the point it has
+        // just made on the computer's home, and there is no record of that workspace anywhere yet. The path is
+        // under the computer's own tree, which is what makes a point one to take off, and under a name nothing
+        // on any computer holds: what is made here is made under the second workspace's rootfs alone.
+        let target = "/root/.wsp-shared-login-proof/auth.json".to_owned();
+        fs::create_dir_all(layout.workspace("wsp-one")).unwrap();
+        bundle::write_json(&layout.points("wsp-one"), &vec![target.clone()]).unwrap();
+
+        let held = ops.points_of_others("wsp-two").unwrap();
+        assert_eq!(held, [target.as_str()], "a boot read its neighbours' records alone and missed the point one had claimed");
+
+        // The second boot, with the point standing where the first left it: it is named under this workspace's
+        // claim as well, so whichever of the two goes last is the one that takes the empty file off.
+        let source = layout.logins().join("codex/auth.json");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"{}").unwrap();
+        let share = Share { source: source.display().to_string(), target: target.clone() };
+        bundle::empty_file(&bundle::inside(&layout.rootfs("wsp-two"), &target).unwrap()).unwrap();
+        let (shares, made) = make_points(&layout, "wsp-two", std::slice::from_ref(&share), &held).unwrap();
+        assert_eq!(made, [target.as_str()], "the boot that came second owns nothing of the point it shares");
+        assert_eq!(shares, std::slice::from_ref(&share));
+        assert_eq!(points_of(&layout, "wsp-two").unwrap(), [target.as_str()]);
+        // And the same point standing with nothing here naming it is the person's own file, which no boot
+        // records and no stop takes off.
+        assert!(make_points(&layout, "wsp-two", std::slice::from_ref(&share), &[]).unwrap().1.is_empty());
     }
 
     /// A sign-in made on the computer itself since the boot writes the person's own login into the file the boot
