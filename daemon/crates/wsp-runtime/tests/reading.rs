@@ -33,6 +33,7 @@ fn recorded(layout: &Layout, id: &str, init: Init) {
         copy: None,
         shares: Vec::new(),
         binds: Vec::new(),
+        made_points: Vec::new(),
     };
     fs::create_dir_all(layout.upper(id)).unwrap();
     bundle::write_json(&layout.record(id), &record).unwrap();
