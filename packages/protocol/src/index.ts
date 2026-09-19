@@ -3688,6 +3688,7 @@ const DAEMON_CONTENTS = [
   "1e3ca55474038b943e69a5a91ddf720df24e9f8a5fff8aa05028527cbb0605f2",
   "863d552bfaeeff40212778a4f175bf821f8ff5cdd7829e6922866bf70dcdbe5e",
   "376bdbce753a06ef57dfdda1e50f1cb761a728538dd85851db285168e4d1e568",
+  "c1d414a8d13ee7070d1df56f82b7230bb53bed51b8b2d43c4bc39a864c5b5489",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3854,7 +3855,10 @@ const DAEMON_CONTENTS = [
  * Version 57 reads the mount points a neighbouring boot has claimed and not yet recorded, so two workspaces sharing one
  * login that boot at the same moment both own its point and the last one to go takes it off, and writes every record,
  * claim and network file to a sibling and renames it into place, so a daemon that dies inside a write leaves no torn
- * file for the next open to refuse, which takes a dead create's torn claim away instead. */
+ * file for the next open to refuse, which takes a dead create's torn claim away instead.
+ * Version 58 writes the process manifest to a sibling and renames it into place through the same writer every file the
+ * runtime crate writes takes, so a daemon that dies inside the write leaves the manifest it had or none, never a torn
+ * one the next start refuses. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
