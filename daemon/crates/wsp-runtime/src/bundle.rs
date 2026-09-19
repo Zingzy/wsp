@@ -201,6 +201,14 @@ pub struct Workspace {
     /// written before any workspace took one reads as a workspace with none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub binds: Vec<Bind>,
+    /// The mount points this workspace's boot made under a tree the rootfs takes from the computer, as the
+    /// computer's own paths rather than the paths under the rootfs, which name nothing once the unmount has run.
+    /// A shared login is bound at the agent's own path inside, and under /root that path is the computer's own
+    /// home, so the empty file the bind lands on is made on the computer's disk: kept here so the stop and the
+    /// remove take off what this workspace put there and nothing the person had. A record written before this
+    /// reads as a workspace that made none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub made_points: Vec<String>,
 }
 
 /// The copy one workspace was made with, as the create made it: where it came from, where it is mounted inside,
@@ -1049,6 +1057,7 @@ mod tests {
             copy: None,
             shares: Vec::new(),
             binds: Vec::new(),
+            made_points: Vec::new(),
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
@@ -1061,6 +1070,9 @@ mod tests {
         );
         assert!(read_record(&path).unwrap().unwrap().shares.is_empty());
         assert!(read_record(&path).unwrap().unwrap().binds.is_empty());
+        // And a record an older daemon wrote carries no mount point of its own, so a workspace booted then and
+        // removed now takes off nothing it cannot say it made.
+        assert!(!written.contains("madePoints") && read_record(&path).unwrap().unwrap().made_points.is_empty());
         assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
         write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);

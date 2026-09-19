@@ -294,7 +294,7 @@ impl Link {
     async fn agent_versions(&self) -> BTreeMap<String, String> {
         let held = Arc::clone(&self.versions);
         let agents = self.agents.clone();
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = place::agents_path();
         tokio::task::spawn_blocking(move || {
             let mut versions = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             versions.refresh(&agents, &path, place::VERSION_DEADLINE);
