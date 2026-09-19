@@ -185,12 +185,11 @@ function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
   };
 }
 
-/** A host serving this computer's default home, as the launchd service is: the pointer every other reading follows
- * and a lock naming a live pid. Returns the state file that host serves. */
+/** A host serving this computer's default home, as the launchd service is: a lock naming a live pid beside the
+ * state file every line that names no home works on. Returns the state file that host serves. */
 function servingStateHere(): string {
   const home = join(homedir(), ".wsp");
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "current-home"), `${home}\n`);
   writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
   return join(home, "state.json");
 }

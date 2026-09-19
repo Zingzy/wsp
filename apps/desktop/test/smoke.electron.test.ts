@@ -653,7 +653,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.locator("[role=status]").count()).toBe(0);
   });
 
-  it("follows ~/.wsp/current-home to a host serving a custom home, with no WSP_HOME and no port hint", async () => {
+  it("attaches to a host serving a custom home when that home is named on its launch, with no port hint", async () => {
     const user = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-user-"));
     const custom = join(user, "custom-home");
     const quiet: CliIO = { log: () => {}, error: () => {}, ask: () => Promise.reject(new Error("prompt")), askSecret: () => Promise.reject(new Error("prompt")) };
@@ -662,9 +662,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     vi.stubEnv("WSP_HOME", custom);
     existing = await serve(quiet, { port: 0, wsPort: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime() });
     vi.unstubAllEnvs();
-    expect(existsSync(join(user, ".wsp", "current-home"))).toBe(true);
+    // The host wrote every file of its own under the home it serves and nothing under the person's own.
+    expect(existsSync(join(custom, "host.lock"))).toBe(true);
+    expect(existsSync(join(user, ".wsp"))).toBe(false);
 
-    launched = await launch({ HOME: user, WSP_HOME: undefined });
+    launched = await launch({ HOME: user, WSP_HOME: custom });
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
     expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
@@ -749,13 +751,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await refused(home)).toBe(true);
   });
 
-  it("a pointer whose host is gone is not followed: the first launch runs on ~/.wsp", async () => {
+  it("a host under some other home is nothing to a launch that names none: the first launch runs on ~/.wsp", async () => {
     launched = await launch({ WSP_HOME: undefined }, home => {
       const custom = join(home, "old-home");
       mkdirSync(custom);
       writeFileSync(join(custom, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, wsPort: 2, startedAt: "2026-09-01T00:00:00.000Z" }));
-      mkdirSync(join(home, ".wsp"));
-      writeFileSync(join(home, ".wsp", "current-home"), `${custom}\n`);
     });
     const page = await windowAt(launched.app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");

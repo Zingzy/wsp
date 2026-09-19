@@ -30,7 +30,7 @@ import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
-import { shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
+import { rootsPathIn, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
 import { LocalDaemon } from "./local-daemon.js";
 import { onPath, runningWsp, thisComputersPath, wspCommand } from "./mcp-install.js";
 
@@ -162,7 +162,8 @@ export function fakeGuestAt(root: string): FakeGuest {
     const starting = (async () => {
       const at = folder(machineId);
       mkdirSync(at, { recursive: true });
-      return LocalDaemon.start({ root: at, workFolder: at, tokenPath: tokenPath(machineId) });
+      // A stand-in machine's folder stands in for a guest's home, so its daemon's two files sit where a guest's do.
+      return LocalDaemon.start({ root: at, workFolder: at, rootsPath: rootsPathIn(at), inboxDir: join(at, ".wsp", "inbox"), tokenPath: tokenPath(machineId) });
     })();
     started.set(machineId, starting);
     STARTED.push(starting);

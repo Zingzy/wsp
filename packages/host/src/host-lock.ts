@@ -106,6 +106,20 @@ export function hostRunDir(statePath: string): string {
   return join(dirname(statePath), "runs");
 }
 
+/** Where this host's own workspace keeps the folders its daemon may browse, beside the lock and the runs. The
+ * person's home is what that daemon browses from, and this file says which folders under it are a project's; it
+ * belongs to the host serving this state file, so two hosts on two state files write two of them rather than
+ * rewriting one another's. */
+export function hostRootsPath(statePath: string): string {
+  return join(dirname(statePath), "roots");
+}
+
+/** Where the files handed to a turn on this computer land for its daemon to pick up, beside the lock and the runs,
+ * under the same rule: one per state file, made by the host that serves it. */
+export function hostInboxDir(statePath: string): string {
+  return join(dirname(statePath), "inbox");
+}
+
 /** Where a host nobody is watching writes what a terminal run would have shown, beside the lock and the token. */
 export function hostLogPath(statePath: string): string {
   return join(dirname(statePath), "host.log");

@@ -130,6 +130,7 @@ describe("a permission prompt relayed into the chat", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };
@@ -322,6 +323,7 @@ describe("the access a thread starts at", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };
@@ -519,6 +521,7 @@ describe("an access picked while a turn runs", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };

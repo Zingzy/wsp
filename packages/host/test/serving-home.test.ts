@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultStatePath, devCheckoutState, optsFor, statePick } from "../src/cli.js";
 import { servingHost } from "../src/host-lock.js";
-import { SERVING_HOME_SH, currentHome, currentHomePointer, servingElsewhere, servingHome } from "../src/serving-home.js";
+import { SERVING_HOME_SH, servingElsewhere, servingHome } from "../src/serving-home.js";
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -37,7 +37,6 @@ function computer(): { user: string; own: string; moved: string } {
  * nothing else is not one, which is the whole point of the marker. */
 const checkoutAt = (dir: string): void => writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
 
-const pointAt = (user: string, home: string): void => writeFileSync(currentHomePointer(user), `${home}\n`);
 const lockOn = (home: string, pid: number): void =>
   writeFileSync(join(home, "host.lock"), JSON.stringify({ pid, port: 4400, wsPort: 4410, address: "127.0.0.1", startedAt: "2026-09-11T10:00:00.000Z" }));
 
@@ -71,29 +70,24 @@ function reading(user: string, env: Record<string, string> = {}): Reading {
 }
 
 describe("the home this computer's host serves", () => {
-  it("is WSP_HOME first, then a pointer whose host is alive, then this computer's own, in sh as here", () => {
+  it("is WSP_HOME when it names one and this computer's own otherwise, whatever stands under that home, in sh as here", () => {
     const { user, own, moved } = computer();
     expect(reading(user)).toEqual({ home: own, serving: false });
 
-    // A pointer naming a home nothing serves is not followed.
-    pointAt(user, moved);
-    expect(reading(user)).toEqual({ home: own, serving: false });
-
+    // A host serving a home somebody moved changes nothing for a line that names no home: the person names that
+    // home with WSP_HOME or --state, and no file under their own home speaks for it.
     lockOn(moved, process.pid);
-    expect(reading(user)).toEqual({ home: moved, serving: true });
+    expect(reading(user)).toEqual({ home: own, serving: false });
+    expect(reading(user, { WSP_HOME: moved })).toEqual({ home: moved, serving: true });
 
-    // A home named outright is the home, pointer or no pointer.
+    // A home named outright is the home, serving or not.
     expect(reading(user, { WSP_HOME: own })).toEqual({ home: own, serving: false });
 
-    // The host that wrote the pointer is gone, and its home may have gone with it.
+    // The host under the moved home is gone; nothing about this computer's own reading changes with it.
     lockOn(moved, deadPid());
-    expect(reading(user)).toEqual({ home: own, serving: false });
+    expect(reading(user, { WSP_HOME: moved })).toEqual({ home: moved, serving: false });
 
     lockOn(own, process.pid);
-    expect(reading(user)).toEqual({ home: own, serving: true });
-
-    writeFileSync(currentHomePointer(user), "\n");
-    expect(currentHome(user)).toBeUndefined();
     expect(reading(user)).toEqual({ home: own, serving: true });
   });
 
@@ -110,13 +104,10 @@ describe("the home this computer's host serves", () => {
     // The state the host serves is the state this line works on: nothing to say.
     expect(servingElsewhere(join(own, "state.json"), {}, user)).toBeUndefined();
 
-    // A host under a moved home is the one this computer serves, and the pointer is how it is found.
-    pointAt(user, moved);
+    // A host under a moved home is named by the line that wants it, and this reading answers for that home then.
     lockOn(moved, process.pid);
-    expect(servingElsewhere(elsewhere, {}, user)).toBe(join(moved, "state.json"));
-
-    // Its pid is gone, so the pointer is not followed and this computer's own home answers instead.
-    lockOn(moved, deadPid());
+    expect(servingElsewhere(elsewhere, { WSP_HOME: moved }, user)).toBe(join(moved, "state.json"));
+    // A line that names no home reads this computer's own, whatever else is serving beside it.
     expect(servingElsewhere(elsewhere, {}, user)).toBe(join(own, "state.json"));
 
     // One folder reached by two names is one state, which is what /tmp and /private/tmp are on a Mac.
@@ -132,15 +123,14 @@ describe("the home this computer's host serves", () => {
     vi.stubEnv("HOME", user);
     expect(defaultStatePath(cwd, {})).toBe(join(own, "state.json"));
 
-    pointAt(user, moved);
     lockOn(moved, process.pid);
-    expect(defaultStatePath(cwd, {})).toBe(join(moved, "state.json"));
+    expect(defaultStatePath(cwd, { WSP_HOME: moved })).toBe(join(moved, "state.json"));
     expect(defaultStatePath(cwd, { WSP_HOME: own })).toBe(join(own, "state.json"));
 
     // Keys alone say nothing about a folder: the wsp home itself holds a .env, and a line typed in it must still
-    // reach the host that is serving rather than an empty state under ~/.wsp/.wsp.
+    // reach the home it names rather than an empty state under ~/.wsp/.wsp.
     writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
-    expect(defaultStatePath(cwd, {})).toBe(join(moved, "state.json"));
+    expect(defaultStatePath(cwd, { WSP_HOME: moved })).toBe(join(moved, "state.json"));
 
     // A checkout of wsp is the reading where nothing names a state.
     checkoutAt(cwd);
@@ -192,7 +182,6 @@ describe("the home this computer's host serves", () => {
   it("a folder that only holds keys is not a checkout, and this repository's own root is", () => {
     const { user, moved } = computer();
     vi.stubEnv("HOME", user);
-    pointAt(user, moved);
     lockOn(moved, process.pid);
 
     // The person's own state home: wsp writes their provider keys into ~/.wsp/.env and the state file is right
@@ -203,7 +192,7 @@ describe("the home this computer's host serves", () => {
     mkdirSync(join(home, ".wsp"), { recursive: true });
     writeFileSync(join(home, ".wsp", "state.json"), "{}\n");
     expect(devCheckoutState(home)).toBeUndefined();
-    expect(defaultStatePath(home, {})).toBe(join(moved, "state.json"));
+    expect(defaultStatePath(home, { WSP_HOME: moved })).toBe(join(moved, "state.json"));
 
     // A folder carrying a package.json of some other project is not this one either.
     const other = mkdtempSync(join(tmpdir(), "wsp-other-repo-"));

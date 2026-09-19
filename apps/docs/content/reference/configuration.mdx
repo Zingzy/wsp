@@ -19,7 +19,8 @@ Everything sits beside the state file. The default home is `~/.wsp`; `WSP_HOME` 
 | `~/.wsp/runs/` | a turn running on this computer: its script, log and exit code, so a host restart does not cut it; mode 700 |
 | `~/.wsp/init.log` | the last five init runs, secrets redacted |
 | `~/.wsp/history-cache.json` | counts per agent session file, so the next scan is fast |
-| `~/.wsp/current-home` | which home the running host serves, so a line naming none and the app both find it |
+| `~/.wsp/roots` | the folders the daemon for this computer's workspace may browse |
+| `~/.wsp/inbox` | files handed to a turn on this computer, for that daemon to pick up |
 
 Keys are read from the environment first, then `./.env`, then `~/.wsp/.env`.
 

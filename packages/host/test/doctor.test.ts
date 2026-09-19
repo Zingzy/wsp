@@ -868,6 +868,7 @@ describe("which road wsp doctor takes", () => {
 describe("what a road of the doctor's leaves open", () => {
   it("a wiring built the doctor's way lets go of a turn it is reading when it closes, so nothing it opened holds this process", async () => {
     const home = tmp("wsp-doctor-handles-");
+    const statePath = join(home, "state.json");
     const runDir = join(home, "runs");
     // Counted, not named: the runner holds timers of its own, and what this case is about is the one this wiring
     // adds. The list goes into the failure so a run that drifts says what it was holding.
@@ -875,7 +876,7 @@ describe("what a road of the doctor's leaves open", () => {
     const before = held().length;
     // The wiring the doctor command builds: this computer's own, with the run folder beside the state file it was
     // given and a sink that keeps the daemon's own stderr off the person's screen.
-    const local = localWiring(home, { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, undefined, runDir, undefined, () => {});
+    const local = localWiring(home, { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, undefined, statePath, undefined, () => {});
     const stream = local.execStream()("sleep 300", { env: {} });
     // A turn left running here is what a doctor's runtime re-opens on a state a host is serving: the poll that
     // reads it is a timer, and a timer nobody stopped holds the loop after the last line is printed.
@@ -1669,6 +1670,7 @@ describe("the doctor's local road", () => {
           execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
           home: () => join(root, ".claude"),
           homeDir: root,
+          rootsPath: join(root, "roots"),
           env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
           platform: hostPlatform(),
         },

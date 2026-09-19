@@ -131,9 +131,9 @@ describe("a verb starts the host when none serves", () => {
   });
 
   it("a child that exits before it serves is read once and at once, with every line it wrote and none of an older start's", async () => {
-    // The wall the #942 proof hit: the host it started refused the state at boot and died in under a second, and
-    // the line that started it waited the whole twenty seconds and then said no host answered, with the refusal
-    // wrapped in a tail of lines from days before.
+    // The wall this rule is from: a host that refused its state at boot died in under a second, and the line that
+    // started it waited the whole twenty seconds and then said no host answered, with the refusal wrapped in a
+    // tail of lines from days before.
     mkdirSync(join(dir, "state"), { recursive: true });
     const logPath = hostLogPath(statePath);
     writeFileSync(logPath, "an older start's refusal\n");

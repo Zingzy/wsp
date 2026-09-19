@@ -181,7 +181,7 @@ describe("getting a project onto a machine", () => {
     const mac = { home: "/Users/dev", mac: true };
     // A dot-named folder is the machine's own wherever it sits, and with nothing known about the machine at all.
     expect(hiddenFolder("/Users/dev/.config", mac)).toBe(true);
-    expect(hiddenFolder("/root/.wsp-inbox")).toBe(true);
+    expect(hiddenFolder("/root/.wsp")).toBe(true);
     expect(hiddenFolder("/Users/dev/code", mac)).toBe(false);
     // The Library the Mac keeps in the home itself, which its Finder hides too.
     expect(hiddenFolder("/Users/dev/Library", mac)).toBe(true);

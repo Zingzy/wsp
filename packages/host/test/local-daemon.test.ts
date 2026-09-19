@@ -15,7 +15,7 @@ import { DAEMON_VERSION, daemonListeningLine, type DaemonEvent, type ProcInspect
 import { connectDaemon } from "@wsp/runtime";
 import { daemonBinaryHere } from "../src/assets.js";
 import { choosePorts } from "../src/ports.js";
-import { LocalDaemon } from "../src/local-daemon.js";
+import { LocalDaemon, type LocalDaemonOptions } from "../src/local-daemon.js";
 
 async function waitForEvent(events: DaemonEvent[], type: string, ms = 10_000): Promise<DaemonEvent> {
   const deadline = Date.now() + ms;
@@ -75,6 +75,12 @@ function fakeDaemon(root: string, version?: number, noise: readonly string[] = [
 describe("local daemon", () => {
   let root: string;
   let daemon: LocalDaemon | undefined;
+  /** The folder the host serving this daemon keeps its own files in, which is where its state file sits. */
+  const stateFolder = (): string => join(root, "state");
+  /** This daemon as a host starts it: the person's home as the browse root, and the roots file and the inbox
+   * named by the host, beside its state file. */
+  const startLocal = (over: Partial<LocalDaemonOptions> = {}): Promise<LocalDaemon> =>
+    LocalDaemon.start({ root, workFolder: root, rootsPath: join(stateFolder(), "roots"), inboxDir: join(stateFolder(), "inbox"), ...over });
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localdaemon-"));
   });
@@ -86,7 +92,7 @@ describe("local daemon", () => {
 
   it("spawns this computer's own binary out of the daemon asset, on loopback, and answers the same link a cloud workspace's daemon is reached by", async () => {
     expect(existsSync(daemonBinaryHere())).toBe(true);
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     expect(daemon.port).toBeGreaterThan(0);
     expect(alive(daemon.pid)).toBe(true);
     const link = daemon.link();
@@ -106,23 +112,31 @@ describe("local daemon", () => {
         });
       });
     const hostPorts = [await free(), await free()];
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     expect(hostPorts).not.toContain(daemon.port);
     // The host's own pick, with both ports named: it binds exactly the pair asked for, nothing taken, nothing stepped over.
     expect(await choosePorts({ port: hostPorts[0]!, wsPort: hostPorts[1]!, named: true })).toEqual({ ports: { port: hostPorts[0], wsPort: hostPorts[1] } });
-    // The folder holds the inbox it made and nothing else: the token file and the manifest sit in a folder of the
-    // daemon's own under the system's temp dir, and the flags name both, so nothing falls back to a path under /root.
-    expect(readdirSync(root)).toEqual([".wsp-inbox"]);
+    // The browse root holds the host's own folder and nothing else: the token file and the manifest sit in a folder
+    // of the daemon's own under the system's temp dir, and the flags name both, so nothing falls back to a path
+    // under /root.
+    expect(readdirSync(root)).toEqual(["state"]);
     const argv = execFileSync("ps", ["-o", "args=", "-p", String(daemon.pid)], { encoding: "utf8" }).trim().split(" ");
     for (const flag of ["--token-path", "--manifest"]) {
       const path = argv[argv.indexOf(flag) + 1]!;
       expect(path.startsWith(tmpdir())).toBe(true);
       expect(path.startsWith(root)).toBe(false);
     }
+    // The roots file and the inbox are the two the caller named, in the folder the host's state file sits in:
+    // the browse root is the person's home, one folder however many hosts run on this computer, and a path taken
+    // off it would be one file two hosts wrote.
+    expect(argv[argv.indexOf("--roots-path") + 1]).toBe(join(stateFolder(), "roots"));
+    expect(argv[argv.indexOf("--inbox") + 1]).toBe(join(stateFolder(), "inbox"));
+    expect(existsSync(join(stateFolder(), "inbox"))).toBe(true);
+    expect(existsSync(join(root, ".wsp"))).toBe(false);
   });
 
   it("hands out one road for the panes and the probe: an http route the probe fetches and every link turns into ws, with the token beside it", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const road = daemon.road;
     expect(road.url).toBe(`http://127.0.0.1:${daemon.port}`);
     expect(road.expiresAt).toBe(Number.MAX_SAFE_INTEGER);
@@ -137,7 +151,7 @@ describe("local daemon", () => {
 
   it("reads its token off a file the caller named, so a rotation under it opens the next link", async () => {
     const tokenPath = join(root, "handed", "token");
-    daemon = await LocalDaemon.start({ root, workFolder: root, tokenPath });
+    daemon = await startLocal({ tokenPath });
     const minted = readFileSync(tokenPath, "utf8").trim();
     expect(minted).toMatch(/^[0-9a-f]{48}$/);
     // A stand-in machine's daemon is reached by a token the runtime writes through that machine's own shell, and
@@ -154,7 +168,7 @@ describe("local daemon", () => {
 
   it("serves the files under the workspace folder", async () => {
     writeFileSync(join(root, "hello.txt"), "hi");
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const link = daemon.link();
     await link.ready;
     const listing = (await link.request("fs.list", { path: root })) as { entries: { name: string }[] };
@@ -163,7 +177,7 @@ describe("local daemon", () => {
   });
 
   it("answers the Live rows and the Processes tab off this computer itself, with a sample and a snapshot that holds this process", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const events: DaemonEvent[] = [];
     const link = daemon.link(e => events.push(e));
     await link.ready;
@@ -185,7 +199,7 @@ describe("local daemon", () => {
   }, 20_000);
 
   it("hands the host's Live rows one shared watch: a second pane reads the same samples, and the last one leaving closes it", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const a: SysSample[] = [];
     const b: SysSample[] = [];
     const detachA = await daemon.sysSamples(s => a.push(s));
@@ -207,7 +221,7 @@ describe("local daemon", () => {
   }, 20_000);
 
   it("runs a pty in the workspace folder", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const link = daemon.link();
     await link.ready;
     const created = (await link.request("pty.create", { cwd: root })) as { ptyId: string; pid: number };
@@ -218,7 +232,7 @@ describe("local daemon", () => {
   });
 
   it("ends the process it spawned when closed, and takes its token folder with it", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     const pid = daemon.pid;
     await daemon.close();
     daemon = undefined;
@@ -227,20 +241,20 @@ describe("local daemon", () => {
   });
 
   it("keeps the version off the hello the binary answered the first frame with, so every road that runs it reads what it is", async () => {
-    daemon = await LocalDaemon.start({ root, workFolder: root });
+    daemon = await startLocal();
     // The binary in this checkout is the one this wsp deploys; a staged binary older than it is the case below.
     expect(daemon.version).toBe(DAEMON_VERSION);
   });
 
   it("reads the version off a binary of any age, since the hello is the one word a stale one still says", async () => {
     const bin = fakeDaemon(root, 50);
-    daemon = await LocalDaemon.start({ root, workFolder: root, binary: bin });
+    daemon = await startLocal({ binary: bin });
     expect(daemon.version).toBe(50);
   });
 
   it("stops a binary that listens and answers no hello, and refuses it in one sentence naming what it said", async () => {
     const bin = fakeDaemon(root);
-    await expect(LocalDaemon.start({ root, workFolder: root, binary: bin })).rejects.toThrow(/did not answer its version within \d+ ms: nothing of a hello/);
+    await expect(startLocal({ binary: bin })).rejects.toThrow(/did not answer its version within \d+ ms: nothing of a hello/);
     // Nothing of it is left running: a daemon this host cannot read is no daemon it holds.
     const pids = readdirSync(root).filter(name => name.startsWith("fake-daemon-pid"));
     expect(pids).toHaveLength(1);
@@ -251,7 +265,7 @@ describe("local daemon", () => {
   it("names the binary and what it said when it does not start, and leaves no child behind", async () => {
     const bin = join(root, "not-a-daemon.sh");
     writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
-    await expect(LocalDaemon.start({ root, workFolder: root, binary: bin })).rejects.toThrow(/exited with 3 before it listened: refusing/);
+    await expect(startLocal({ binary: bin })).rejects.toThrow(/exited with 3 before it listened: refusing/);
   });
 
   it("hands what the binary says on its own stderr to the sink the caller named, a line at a time, and writes none of it itself", async () => {
@@ -263,7 +277,7 @@ describe("local daemon", () => {
       return true;
     });
     try {
-      daemon = await LocalDaemon.start({ root, workFolder: root, binary: fakeDaemon(root, 54, noise), say: line => void said.push(line) });
+      daemon = await startLocal({ binary: fakeDaemon(root, 54, noise), say: line => void said.push(line) });
     } finally {
       spy.mockRestore();
     }
@@ -278,7 +292,7 @@ describe("local daemon", () => {
       return true;
     });
     try {
-      daemon = await LocalDaemon.start({ root, workFolder: root, binary: fakeDaemon(root, 54, ["priority not set: Permission denied (os error 13)"]) });
+      daemon = await startLocal({ binary: fakeDaemon(root, 54, ["priority not set: Permission denied (os error 13)"]) });
     } finally {
       spy.mockRestore();
     }
@@ -289,7 +303,7 @@ describe("local daemon", () => {
     const bin = join(root, "noisy-refusal.sh");
     writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
     const said: string[] = [];
-    await expect(LocalDaemon.start({ root, workFolder: root, binary: bin, say: line => void said.push(line) })).rejects.toThrow(/exited with 3 before it listened: refusing/);
+    await expect(startLocal({ binary: bin, say: line => void said.push(line) })).rejects.toThrow(/exited with 3 before it listened: refusing/);
     expect(said).toEqual(["refusing"]);
   });
 });

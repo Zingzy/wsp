@@ -9,7 +9,6 @@ import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStre
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
-import { currentHomePointer } from "../src/serving-home.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
 import { skillsRefreshedLine } from "../src/mcp-install.js";
@@ -252,7 +251,7 @@ describe("wsp up", () => {
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
     runtimes.push(rt);
     // Nothing is bound before a pane asks: the road is what starts the daemon.
-    expect(existsSync(join(home, ".wsp-inbox"))).toBe(false);
+    expect(existsSync(join(home, "state", "inbox"))).toBe(false);
     const road = await rt.workspaces.daemonReach("ws_l");
     expect(road.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(road.daemonToken).toMatch(/^[0-9a-f]{48}$/);
@@ -310,27 +309,33 @@ describe("wsp up", () => {
     expect(mine.filter(l => l.includes("skill"))).toHaveLength(1);
   });
 
-  it("a host on a home nobody moved writes no pointer under it, and one on a moved home writes the pointer that finds it", async () => {
-    // The pointer is read only where a line names no home of its own; a host on the home such a line already picks
-    // changes nothing about where wsp looks, and a file under the person's home for that is a file nobody asked for.
-    stateFile({ goldens: { default: SEALED_GOLDEN } });
+  it("a host on another home writes every file of its own there and nothing under the home a bare line picks", async () => {
+    // The reading this rule is from: a host on a throwaway home still rewrote the roots file under the person's
+    // own wsp home and pointed a file there at itself, so for that minute a bare wsp line dialled the other host.
     const user = join(dir, "user");
-    vi.stubEnv("WSP_HOME", join(user, ".wsp"));
-    const here = join(user, ".wsp", "state.json");
-    mkdirSync(dirname(here), { recursive: true });
-    writeFileSync(here, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
-    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath: here, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(here, stateWriterHere()), adapters: {} }) })));
-    expect(existsSync(currentHomePointer(user))).toBe(false);
+    const folder = localWorkFolder(home);
+    stateFile({
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: folder }, path: folder, remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
+      workspaces: {
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, process.env, undefined, statePath) });
+    runtimes.push(rt);
+    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
 
-    for (const h of handles.splice(0)) await h.close();
-    vi.stubEnv("WSP_HOME", home);
-    await answered(await started([]));
-    expect(readFileSync(currentHomePointer(user), "utf8").trim()).toBe(home);
+    // The state file's own folder holds this host's roots file, naming the project its workspace stands on.
+    await vi.waitFor(() => expect(existsSync(join(home, "state", "roots"))).toBe(true), { timeout: 5_000 });
+    expect(readFileSync(join(home, "state", "roots"), "utf8")).toContain(folder);
+    // Nothing under the home its daemon browses from, which is one folder however many hosts run here.
+    expect(existsSync(join(home, ".wsp"))).toBe(false);
+    // And nothing under the home a line with no --state and no WSP_HOME picks: no pointer, no roots, no inbox.
+    expect(existsSync(join(user, ".wsp"))).toBe(false);
   });
 
   it("a state file a newer wsp wrote is refused once, before the runtime whose own readers would meet it again", async () => {
-    // The #942 proof read the refusal twice in one host's log, once bare and once behind the cost tracker's line
-    // with the whole error and its stack under it. One reader meets it now, and the log holds one sentence.
+    // A host on a state file it could not read wrote that refusal into its log twice, once bare and once behind
+    // the cost tracker's line with the whole error and its stack under it. One reader meets it now.
     const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});

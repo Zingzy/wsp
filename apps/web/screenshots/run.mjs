@@ -4,8 +4,8 @@
 // home, serves a fixture state out of it with the built wsp command on two free
 // ports, drives Chromium over the surfaces list and leaves a folder of PNGs and
 // an index.md. It never reads or writes the person's own ~/.wsp: HOME and
-// WSP_HOME both point into the temp folder, which is what keeps the host's own
-// current-home pointer out of it.
+// WSP_HOME both point into the temp folder, which is where every file the host
+// writes for itself then lands.
 //
 // Themes are emulated as the computer's colour scheme rather than written onto
 // the root: the preference record a fixture serves names no side, so `system`
