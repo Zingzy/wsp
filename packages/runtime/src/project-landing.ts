@@ -7,7 +7,7 @@
 // module and its row.
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
 import { INSTALL_MS, installScript, projectInstalls, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, NO_IMAGE_FOR_SEED, projectNeedsReaddLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, projectRemovedOnComputerLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedMemoryKeptLine, shellLine, shellQuote, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, NO_IMAGE_FOR_SEED, projectNeedsReaddLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, projectRemovedOnComputerLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -185,6 +185,18 @@ export function patchCleanupScript(o: PatchStep & { checkout: string }): string 
  * own output, since the script is the only thing that sees what stands there. */
 export const MEMORY_KEPT_MARK = "wsp-memory-kept";
 
+/** What the remove prints where a memory folder for the project stands on the computer: the same road, since the
+ * one command the remove runs there is the only thing that can see it. */
+export const MEMORY_STANDS_MARK = "wsp-memory-stands";
+
+/** The one command a remove runs on the computer: it says whether the agent there kept memory for this project,
+ * which the sentence names only where it is true, and takes away wsp's own folder for the project. The read comes
+ * first because the folder goes with the command; the memory is under the computer's own home and is never
+ * touched by it. No `set -e`: a memory folder that is not there is the common case, not a failure. */
+export function removeScript(o: { dir: string; memoryDir: string }): string {
+  return [`[ -d ${shellQuote(o.memoryDir)} ] && echo ${shellQuote(MEMORY_STANDS_MARK)}`, `rm -rf ${shellQuote(o.dir)}`].join("\n");
+}
+
 /** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of
  * the project reads it, and wsp's own folder and the archive gone from the checkout every copy is taken of.
  *
@@ -239,7 +251,7 @@ async function cloneSeedInstall(
     ...(project.base !== undefined ? { branch: project.base } : {}),
     ...(seedTar !== undefined ? { seedTar } : {}),
   });
-  if (seed !== undefined) report("seeding", `Landing ${seed.choice.files.length} file${seed.choice.files.length === 1 ? "" : "s"} from ${seed.plan.source}.`);
+  if (seed !== undefined) report("seeding", seedingLine(seed.plan, seed.choice));
   const ran = await machine.exec(script, { timeoutMs: CLONE_MS });
   if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `the clone exited ${ran.exitCode}`);
   const patched = seed === undefined ? undefined : await patchSeed({ seed, report, computerName: deps.computerName, checkout: places.checkout, base: project.base }, machine);
@@ -252,19 +264,22 @@ async function cloneSeedInstall(
     memoryKept = rest.stdout.includes(MEMORY_KEPT_MARK);
     if (memoryKept) report("seeding", seedMemoryKeptLine(deps.computerName));
   }
+  const memory = seed !== undefined && seed.choice.memory && seed.plan.memory !== null ? seed.plan.memory : undefined;
   const landed: Landed = {
     ...(seed === undefined
       ? {}
       : {
           seeded: {
             files: seed.choice.files.length,
-            bytes: seed.tar.length,
-            memory: seed.choice.memory && seed.plan.memory !== null,
+            // The bytes the menu showed for the ticked files, which is what the person read before they said yes;
+            // the archive they travelled in is bigger and says nothing about what landed.
+            bytes: seedBytes(seed.plan, seed.choice),
+            memory: memory === undefined ? "none" : memoryKept ? "kept" : "landed",
+            ...(memory === undefined ? {} : { memoryFiles: memory.files }),
             // What the checkout itself has, read back off git rather than taken off the plan: a patch git refused
             // is nought commits on that computer whatever the person's own folder held.
             commits: patched?.commits ?? 0,
             at: new Date(deps.now()).toISOString(),
-            ...(memoryKept ? { memoryKept: true } : {}),
           },
           ...(patched?.notice !== undefined ? { notice: patched.notice } : {}),
         }),
@@ -308,7 +323,12 @@ async function patchSeed(
   const ran = await machine.exec(patchScript({ ...step, checkout: o.checkout }), { timeoutMs: STEP_MS });
   if (ran.exitCode === 0) {
     const counted = Number(lastLine(ran.stdout));
-    if (Number.isInteger(counted)) return { commits: counted };
+    // What landed, said after what travelled: the count git read off the checkout, which is nought where that
+    // computer's clone already had the person's work. A refusal says it did not land and is said once, below.
+    if (Number.isInteger(counted)) {
+      o.report("seeding", seedCommitsLandedLine(counted));
+      return { commits: counted };
+    }
   }
   // The cleanup's own exit is not read: what it could not do (an abort with nothing in progress, a branch the
   // step never made) is no reason to fail an add whose clone and install landed.
@@ -351,8 +371,8 @@ const boxLanding: ProjectLanding = {
   refusal: (project, deps) => (project.checkout === undefined ? projectNeedsReaddLine(project.name, deps.computerName, project.source) : undefined),
   async remove(project, deps) {
     const dir = removableProjectDir(deps, project.id);
-    await onComputer(deps)(`rm -rf ${shellQuote(dir)}`, { timeoutMs: STEP_MS });
-    return projectRemovedOnComputerLine(project.name, deps.computerName, dir);
+    const ran = await onComputer(deps)(removeScript({ dir, memoryDir: project.memoryDir }), { timeoutMs: STEP_MS });
+    return projectRemovedOnComputerLine(project.name, deps.computerName, dir, ran.stdout.includes(MEMORY_STANDS_MARK));
   },
   async land(o, deps) {
     const dir = projectDir(deps, o.project.id);

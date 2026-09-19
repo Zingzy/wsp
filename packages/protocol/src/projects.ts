@@ -16,7 +16,14 @@ import { kindWords } from "./workspace-state.js";
  * and the tool answers it, so both doors say the same thing about the same record. The computer is named the way
  * every table names it, off the same places reading and the same platform word; a caller with no map says the id. */
 export function addedProjectLine(project: ProjectView, named: ReadonlyMap<string, string> | undefined, platform: "darwin" | "linux"): string {
-  return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computerNamed(project.computer, named, platform)}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
+  return addedProjectOn(project, computerNamed(project.computer, named, platform));
+}
+
+/** The same sentence where the computer's word is already in hand, which is the landing's road: the add says how
+ * far it has got as it goes and its last stage is this line, so the terminal reads where the project is from the
+ * add itself and no door says that fact a second time. */
+export function addedProjectOn(project: ProjectView, computer: string): string {
+  return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
 /** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones by its own
@@ -110,9 +117,11 @@ export const projectRemovedHereLine = (name: string): string => `${name} is no l
 
 /** What a remove says on a computer the person owns: the folder wsp itself made there at the add goes with the
  * record, and nothing else on that computer is touched. The project's memory is not in it: it sits where the
- * agent on that computer reads it, which is the agent's own work and stays. */
-export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string): string =>
-  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout, and the memory its agent keeps on that computer stays`;
+ * agent on that computer reads it, which is the agent's own work and stays. That half of the sentence is said
+ * only where such a folder stands on the computer, read by the remove itself: a project no agent ever ran on
+ * there has no memory, and naming one would name a thing that is not there. */
+export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string, memoryStands: boolean): string =>
+  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout${memoryStands ? ", and the memory its agent keeps on that computer stays" : ""}`;
 
 /** What a remove says for a project a provider keeps in an image: nothing runs on any machine, and the image
  * stays where it is, since no verb deletes one yet. */

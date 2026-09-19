@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -22,7 +22,7 @@ import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { computerLines, placeLines } from "../src/verbs.js";
+import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
@@ -2593,27 +2593,31 @@ describe("what wsp add prints while a project lands on a computer", () => {
     ...noBoxSignIn,
   });
 
-  it("prints each stage as it lands there, then where the project is, and says what did not travel", async () => {
+  it("prints each stage as it lands there, and says where the project is once: the done stage and no line of its own", async () => {
     const io = captured();
+    const done = addedProjectOn(landed, "spoo");
+    const lost = "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main";
     const dial = staging(
       [
         stage("p_1", "planned", "landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded."),
         stage("p_1", "cloning", "Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout."),
         // Another computer's add, running at the same time on the same host: none of its lines are this one's.
         stage("p_2", "cloning", "Cloning something else."),
+        stage("p_1", "seeding", lost),
         stage("p_1", "installing", "npm ci in /srv/landing-906."),
-        stage("p_1", "done", "landing-906 is on spoo, at /srv/landing-906 inside a workspace of it."),
+        stage("p_1", "done", done),
       ],
-      "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main",
+      lost,
     );
     expect(await addCommand(io, opts(tmp("add-stages")), ["https://github.com/spoo-me/spoo-ts"], { on: "spoo", name: "landing-906" }, addDeps(dial))).toBe(0);
+    // The computer's own stages are the whole of it: where the project is is said once, and what did not land
+    // the way it was asked is said once too, by the stage that said it while it was happening.
     expect(io.lines).toEqual([
       "landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded.",
       "Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout.",
+      lost,
       "npm ci in /srv/landing-906.",
-      "landing-906 is on spoo, at /srv/landing-906 inside a workspace of it.",
-      "landing-906 pr_1a2b3c4d: https://github.com/spoo-me/spoo-ts on spoo, at /srv/landing-906 inside a workspace of it\nmake one with: wsp new 'landing-906' \"<what you are working on>\"",
-      "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main",
+      done,
     ]);
   });
 
@@ -2625,5 +2629,18 @@ describe("what wsp add prints while a project lands on a computer", () => {
     expect(await addCommand(io, opts(tmp("add-here")), [folder], {}, addDeps(dial))).toBe(0);
     expect(io.lines.filter(line => line.includes("somebody else"))).toEqual([]);
     expect(io.lines.some(line => line.includes("theirs is on spoo"))).toBe(false);
+    // A record that landed with no stage of its own to read still says where the project is, off the answer.
+    expect(io.lines).toEqual([addedProjectLine(landed, new Map([["p_1", "spoo"]]), hostPlatform())]);
+  });
+
+  it("says where the project is itself, with what did not travel, where the host sent no stage of this add", async () => {
+    const io = captured();
+    const lost = "1 login inside the folders you ticked stayed on this computer: config/.netrc";
+    // Another session's add finishing on the same computer while this one runs: its done line is that project's,
+    // so this add still says its own.
+    const theirs = { type: "project.add", projectId: "pr_someone", computer: "p_1", stage: "done", message: "theirs is on spoo.", elapsedMs: 1 };
+    const dial = staging([theirs], lost);
+    expect(await addCommand(io, opts(tmp("add-no-stages")), ["https://github.com/spoo-me/spoo-ts"], { on: "spoo" }, addDeps(dial))).toBe(0);
+    expect(io.lines).toEqual(["theirs is on spoo.", addedProjectLine(landed, new Map([["p_1", "spoo"]]), hostPlatform()), lost]);
   });
 });

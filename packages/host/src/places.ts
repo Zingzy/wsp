@@ -947,10 +947,13 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
     // a person watching a line that says nothing cannot tell a slow clone from a wedged one. Only that computer's,
     // and nothing at all where this line named none: a host serves every session at once, so a filter that let
     // every computer through would print another session's add into this terminal, and a folder worked where it
-    // sits has no stages of its own anyway.
+    // sits has no stages of its own anyway. The last of them says where the project is and the ones before it say
+    // what did not land the way it was asked, so a terminal that read them says none of it again.
+    const said = new Set<string>();
     const off = client.onFrame(frame => {
       const stage = ProjectAddEvent.safeParse(frame);
       if (!stage.success || onId === undefined || stage.data.computer !== onId) return;
+      if (stage.data.stage === "done") said.add(stage.data.projectId);
       io.log(stage.data.message);
     });
     await client.events();
@@ -962,8 +965,13 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
         ...(flags.base !== undefined ? { base: flags.base } : {}),
         ...(seed !== undefined ? { seed } : {}),
       });
-      io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), hostPlatform()));
-      if (notice !== undefined) io.log(notice);
+      // A record that stood with nothing to land on that computer runs no stage at all, so this terminal says
+      // both itself: the folder worked where it sits, and a repo a workspace of it clones inside its own copy.
+      // By the project's own id, since another session's add on the same computer prints into this terminal too.
+      if (!said.has(project.id)) {
+        io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), hostPlatform()));
+        if (notice !== undefined) io.log(notice);
+      }
     } finally {
       off();
     }
