@@ -108,6 +108,15 @@ describe("bytes onto the computer itself", () => {
     expect(partsOf(l).map(f => f.opts["timeoutMs"])).toEqual([INLINE_EXEC_MS + LINK_MARGIN_MS, INLINE_EXEC_MS + LINK_MARGIN_MS]);
   });
 
+  it("leave nothing of the file on the computer where a frame failed", async () => {
+    const l = link(cmd => (cmd.endsWith(".part1") ? { exitCode: 1, stdout: "", stderr: "no space left on device" } : undefined));
+    const put = machineOn(l).putBytes("/root/.wsp/provision/in.tgz", Buffer.alloc(3 * PLACE_PART_BYTES, 7));
+    await expect(put).rejects.toThrow("part 2 of 3 did not land at /root/.wsp/provision/in.tgz on spoo: it exited 1 and said: no space left on device");
+    // Every part name, including the one whose frame failed and the ones that never went: a part can stand on that
+    // computer with its answer lost.
+    expect(String(l.frames.at(-1)!.params["cmd"])).toBe("rm -f '/root/.wsp/provision/in.tgz'.part{0..2}");
+  });
+
   it("land the same bytes once where the link lost an answer and the frame was sent again", async () => {
     const l = link();
     const at = mkdtempSync(join(tmpdir(), "wsp-place-"));

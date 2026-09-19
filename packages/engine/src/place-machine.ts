@@ -7,7 +7,7 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, placeProvisionPaths, shellQuote } from "@wsp/protocol";
+import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, placeProvisionPaths, shellQuote } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
 import type { BytesLanded, ExecResult, Machine, MachineKind, MachineState, RunOptions } from "./machine.js";
@@ -30,8 +30,7 @@ const LINK_BYTES_PER_MS = 213;
  * that rate still lands it, never under the bound a plain command gets and never over the cap the daemon holds its
  * own timer to. */
 export function placePartBoundMs(bytes: number, floorMs: number = INLINE_EXEC_MS): number {
-  const onTheWire = Math.ceil(bytes / 3) * 4;
-  return Math.min(Math.max(2 * Math.ceil(onTheWire / LINK_BYTES_PER_MS), floorMs), EXEC_TIMEOUT_MAX_MS);
+  return Math.min(Math.max(2 * Math.ceil(base64Length(bytes) / LINK_BYTES_PER_MS), floorMs), EXEC_TIMEOUT_MAX_MS);
 }
 
 /** One computer you own, driven over the link its daemon holds to this host: one exec frame per command, a
@@ -80,20 +79,27 @@ export class PlaceMachine implements Machine {
     const parts = Math.max(1, Math.ceil(bytes.length / PLACE_PART_BYTES));
     const names = `${at}.part{0..${parts - 1}}`;
     const put = randomBytes(6).toString("hex");
-    for (let i = 0; i < parts; i++) {
-      const part = bytes.subarray(i * PLACE_PART_BYTES, Math.min((i + 1) * PLACE_PART_BYTES, bytes.length));
-      const res = await this.exec([`mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
-        timeoutMs: placePartBoundMs(part.length, opts?.timeoutMs),
-        idempotencyKey: `${put}/${i}`,
-        stdin: part,
+    try {
+      for (let i = 0; i < parts; i++) {
+        const part = bytes.subarray(i * PLACE_PART_BYTES, Math.min((i + 1) * PLACE_PART_BYTES, bytes.length));
+        const res = await this.exec([`mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
+          timeoutMs: placePartBoundMs(part.length, opts?.timeoutMs),
+          idempotencyKey: `${put}/${i}`,
+          stdin: part,
+        });
+        if (res.exitCode !== 0) throw new Error(`part ${i + 1} of ${parts} did not land at ${path} on ${this.id}: ${machineAnswer(res)}`);
+      }
+      const joined = await this.exec(`if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
+        idempotencyKey: `${put}/join`,
+        ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });
-      if (res.exitCode !== 0) throw new Error(`part ${i + 1} of ${parts} did not land at ${path} on ${this.id}: ${machineAnswer(res)}`);
+      if (joined.exitCode !== 0) throw new Error(`${path} did not land on ${this.id}: ${machineAnswer(joined)}`);
+    } catch (e) {
+      // Every part name, not only the ones that answered: a part can be written on that computer and its answer
+      // lost, and a file's worth of parts under wsp's own folder there is what a failed round would leave for good.
+      await this.exec(`rm -f ${names}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => {});
+      throw e;
     }
-    const joined = await this.exec(`if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
-      idempotencyKey: `${put}/join`,
-      ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-    });
-    if (joined.exitCode !== 0) throw new Error(`${path} did not land on ${this.id}: ${machineAnswer(joined)}`);
     return { pieces: parts };
   }
 
