@@ -105,10 +105,10 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
 /** A host of this computer's own making: the wiring every `wsp up` wires, one turn running on it, and the signals
  * that stop it. The turn leads a process group of its own and reads its own log off this computer, so nothing the
  * host holds is what keeps it alive. */
-const hostScript = (home: string, runDir: string, pidFile: string, runFile: string, gate: string): string => `
+const hostScript = (home: string, statePath: string, pidFile: string, runFile: string, gate: string): string => `
 import { writeFileSync } from "node:fs";
 import { localWiring, stopOnSignals } from ${JSON.stringify(DIST)};
-const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(runDir)});
+const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(statePath)});
 const stream = wiring.execStream()("echo $$ > ${pidFile}; echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 300", { env: { PATH: process.env.PATH } });
 writeFileSync(${JSON.stringify(runFile)}, stream.run + "\\n");
 stopOnSignals({ close: () => wiring.close() }, { error: line => console.error(line) });
@@ -118,9 +118,9 @@ setInterval(() => {}, 60_000);
 
 /** The reader a host that comes next opens, in a process of its own: it never launched the run and re-opens it by
  * the handle the first host wrote down, which is what the runtime does for every row it finds running. */
-const nextHostScript = (home: string, runDir: string, run: string): string => `
+const nextHostScript = (home: string, statePath: string, run: string): string => `
 import { localWiring } from ${JSON.stringify(DIST)};
-const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(runDir)});
+const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(statePath)});
 const stream = await wiring.execStream().attach(${JSON.stringify(run)}, { input: false });
 if (stream === "gone") { console.log("GONE"); process.exit(0); }
 for await (const line of stream.lines) {
@@ -166,9 +166,11 @@ describeWithBin("a hangup on a host running a turn on this computer", () => {
     const pidFile = join(home, "harness.pid");
     const runFile = join(home, "run");
     const gate = join(home, "gate");
+    // The state file this host serves: its runs, its roots file and its inbox all sit in that file's own folder.
+    const statePath = join(home, "state.json");
     const runDir = join(home, "runs");
     const script = join(home, "host.mjs");
-    writeFileSync(script, hostScript(home, runDir, pidFile, runFile, gate));
+    writeFileSync(script, hostScript(home, statePath, pidFile, runFile, gate));
     const output: string[] = [];
     // Its own process group, so the hangup this test delivers reaches the host and nothing else on this computer.
     host = spawn(process.execPath, [script], { cwd: home, stdio: ["ignore", "pipe", "pipe"], detached: true });
@@ -191,7 +193,7 @@ describeWithBin("a hangup on a host running a turn on this computer", () => {
     // The host that comes next re-opens the run by its handle and reads the whole log, the line printed before it
     // existed and the one printed after.
     const nextScript = join(home, "next.mjs");
-    writeFileSync(nextScript, nextHostScript(home, runDir, run));
+    writeFileSync(nextScript, nextHostScript(home, statePath, run));
     const read: string[] = [];
     next = spawn(process.execPath, [nextScript], { cwd: home, stdio: ["ignore", "pipe", "pipe"], detached: true });
     next.stdout?.on("data", (chunk: Buffer) => read.push(chunk.toString()));

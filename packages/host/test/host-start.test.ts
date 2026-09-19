@@ -2,7 +2,7 @@
 // The host a verb brings up for itself: what it spawns, what it says, what it
 // does when the child never serves, and which lines start one at all.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, exitClassOf } from "@wsp/protocol";
 import { cli, HOST_STARTS_ITSELF, localWiring, serve, type CliIO } from "../src/cli.js";
 import { hostLogPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, type HostLock } from "../src/host-lock.js";
-import { hostStarter, noHostAnsweredLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
+import { hostExitedLine, hostStarter, noHostAnsweredLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
+import { SERVICE_WAIT_MS } from "../src/service.js";
 import { dialer } from "../src/mcp.js";
 import { dialHost, noHostServingLine } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
@@ -23,14 +24,24 @@ runsFromItsOwnFolder();
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const quietIO = (lines: string[] = [], errors: string[] = []): CliIO => ({ log: l => lines.push(l), error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });
 
-/** A spawn that records the line and hands back the little of a child process the starter touches. */
-function fakeSpawn(onCall: (call: { command: string; args: readonly string[]; opts: Record<string, unknown> }) => void) {
+/** A spawn that records the line and hands back the little of a child process the starter touches: the unref, and
+ * the exit the starter watches for, which this child never reaches unless a case makes it. */
+function fakeSpawn(onCall: (call: { command: string; args: readonly string[]; opts: Record<string, unknown> }) => void, exits?: { code: number | null; signal: NodeJS.Signals | null }) {
   let unrefs = 0;
+  let starts = 0;
   const spawn = ((command: string, args: readonly string[], opts: Record<string, unknown>) => {
+    starts++;
     onCall({ command, args, opts });
-    return { unref: () => void unrefs++ };
+    const onExit: ((code: number | null, signal: NodeJS.Signals | null) => void)[] = [];
+    if (exits !== undefined) queueMicrotask(() => void onExit.forEach(fn => fn(exits.code, exits.signal)));
+    return {
+      unref: () => void unrefs++,
+      once: (event: string, fn: (code: number | null, signal: NodeJS.Signals | null) => void) => {
+        if (event === "exit") onExit.push(fn);
+      },
+    };
   }) as unknown as Parameters<typeof hostStarter>[0]["spawn"];
-  return { spawn, unrefs: () => unrefs };
+  return { spawn, unrefs: () => unrefs, starts: () => starts };
 }
 
 describe("a verb starts the host when none serves", () => {
@@ -117,6 +128,64 @@ describe("a verb starts the host when none serves", () => {
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message.split("\n")).toEqual([noHostAnsweredLine(statePath, 0), "Error: EADDRINUSE 4400"]);
     expect(exitClassOf(refused)).toBe("provider");
+  });
+
+  it("a child that exits before it serves is read once and at once, with every line it wrote and none of an older start's", async () => {
+    // The wall this rule is from: a host that refused its state at boot died in under a second, and the line that
+    // started it waited the whole twenty seconds and then said no host answered, with the refusal wrapped in a
+    // tail of lines from days before.
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const logPath = hostLogPath(statePath);
+    writeFileSync(logPath, "an older start's refusal\n");
+    const refusal = ["the state was written by a newer wsp", "run that wsp, or move the file aside"];
+    const fake = fakeSpawn(() => appendFileSync(logPath, `${refusal.join("\n")}\n`), { code: 1, signal: null });
+    const start = hostStarter({
+      spawn: fake.spawn,
+      wsp: { command: "wsp", args: [] },
+      env: {},
+      waitMs: SERVICE_WAIT_MS,
+      answers: () => Promise.resolve(false),
+      registered: () => undefined,
+    });
+    const said: string[] = [];
+    vi.useFakeTimers();
+    try {
+      const refused = await start(statePath, line => said.push(line)).catch((e: unknown) => e);
+      // The refusal the child wrote, both of its lines, and nothing of the wait or of the start before it.
+      expect((refused as Error).message.split("\n")).toEqual(refusal);
+      expect((refused as Error).message).not.toContain("an older start's refusal");
+      expect((refused as Error).message).not.toContain("no host answered");
+      expect(said).toEqual([startingHostLine(statePath, logPath)]);
+      expect(fake.starts()).toBe(1);
+      // Nothing sleeps on to the deadline: the poll's timer went with the child.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a child that exits having written nothing is one sentence naming how it ended and where its log is", async () => {
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const fake = fakeSpawn(() => {}, { code: 3, signal: null });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined });
+    const refused = await start(statePath, () => {}).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(hostExitedLine(statePath, 3, hostLogPath(statePath)));
+    expect(exitClassOf(refused)).toBe("provider");
+  });
+
+  it("a line whose host exits refusing the state prints the starting line and that refusal, and starts one host", async () => {
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const logPath = hostLogPath(statePath);
+    const refusal = "the state was written by a newer wsp; run that wsp, or move the file aside";
+    const fake = fakeSpawn(() => appendFileSync(logPath, `${refusal}\n`), { code: 1, signal: null });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined });
+    const errors: string[] = [];
+    expect(await cli(["workspaces", "--state", statePath], quietIO([], errors), undefined, {}, start)).toBe(EXIT_CODES.provider);
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toBe(startingHostLine(statePath, logPath));
+    expect(errors[1]).toContain(refusal);
+    expect(errors[1]).not.toContain("no host answered");
+    expect(fake.starts()).toBe(1);
   });
 
   it("the dial starts one for a host on this computer and never for a host somewhere else, and starts none when the line hands none in", async () => {

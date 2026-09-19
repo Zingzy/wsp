@@ -25,6 +25,7 @@ import {
   type Runtime,
   type SeedWiring,
   type SshWiring,
+  type Store,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
@@ -58,7 +59,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, dialAddress, hostLogPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, dialAddress, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -88,7 +89,7 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { currentHome, currentHomePointer, defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
+import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
@@ -501,13 +502,18 @@ export function localWiring(
   home = homedir(),
   env: Readonly<Record<string, string | undefined>> = process.env,
   startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts)),
-  runDir: string = hostRunDir(join(defaultHomeIn(home), "state.json")),
+  /** The state file the host this wiring belongs to serves. Every file it writes for itself sits in that file's
+   * own folder, the runs, the roots file and the inbox alike, so a host on a home somebody named writes nothing
+   * under the home a bare line picks. */
+  statePath: string = join(defaultHomeIn(home), "state.json"),
   copier: Copier | undefined = copierHere(),
   /** Where the daemon's own stderr goes as it starts. A serving host's stderr is its log, which is where those
    * lines belong; a line at a terminal asked a question of its own and hands a sink that keeps none. */
   say: (line: string) => void = line => void process.stderr.write(`${line}\n`),
 ): LocalWiring {
   const root = localWorkFolder(home);
+  const runDir = hostRunDir(statePath);
+  const rootsPath = hostRootsPath(statePath);
   /** Every run this wiring is reading, as the call that lets go of each. A poll on a turn left running holds the
    * process after its last line, and a turn is not this wiring's to end: closing lets go and leaves them running. */
   const reading = new Set<() => void>();
@@ -519,7 +525,7 @@ export function localWiring(
   // Started on the first dial and kept: a host nobody opens a pane on starts no process, binds no port on this
   // computer and writes none of the daemon's own files under the person's home.
   const daemon = startOnce(
-    () => startDaemon({ root: home, workFolder: backend.workFolder(), say }),
+    () => startDaemon({ root: home, workFolder: backend.workFolder(), rootsPath, inboxDir: hostInboxDir(statePath), say }),
     why => `the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${why}`,
   );
   return {
@@ -527,6 +533,7 @@ export function localWiring(
     execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), runDir, reading, ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
+    rootsPath,
     ...(copier !== undefined ? { copier } : {}),
     // The binary the copy road runs, read off the daemon this host starts for its own workspace: a host rebuilt
     // without its binary runs beside an older one, which knows none of this wsp's verbs.
@@ -722,11 +729,14 @@ export function makeRuntime(
   agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
   /** This computer as a workspace, where the caller built the wiring itself and holds a reader off it: the doctor
    * reads the daemon beside this host through the same wiring the copy road runs it from. */
-  local: LocalWiring = localWiring(homedir(), process.env, undefined, hostRunDir(statePath)),
+  local: LocalWiring = localWiring(homedir(), process.env, undefined, statePath),
   /** The links this host holds to the computers a person joined, and the one planner the recipe on this computer
    * is read through. Built here for a caller that needs none of it back; handed in by one that reads the recipe
    * off the same planner, so the doctor and the recipe job cannot read this computer two ways. */
   links: PlaceWiring = placeWiring(statePath, env, agents?.advertise),
+  /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
+   * read is refused at every collection read, and a caller that met that refusal has said so already. */
+  store: Store = jsonFileStore(statePath, stateWriterHere()),
 ): Runtime {
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
@@ -751,7 +761,7 @@ export function makeRuntime(
     placeLinks: links,
     // The build this host is, written into the state file at every save, so a host that meets a record it cannot
     // read says which wsp on this computer wrote it.
-    store: jsonFileStore(statePath, stateWriterHere()),
+    store,
     statePath,
     adapters: HARNESS_ADAPTERS,
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
@@ -1198,6 +1208,17 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, { ...opts, providerEnv, links }, io, opts.running);
 }
 
+/** The state file read once, before anything else on this host reads it: a file written in a shape this build does
+ * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
+ * their own work, where one of them warns with the whole error and its stack behind a line of its own. Read here and
+ * the refusal is this start's, thrown once and printed once, and the store is handed on so the file is not read
+ * twice over. */
+async function readOnce(statePath: string): Promise<Store> {
+  const store = jsonFileStore(statePath, stateWriterHere());
+  await store.keys("workspaces");
+  return store;
+}
+
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
  * computer's included. One reading, asked by wsp up and by the desktop's first launch; what each does with the
  * answer is its own, since the app has onboarding screens to open and the command line records this computer and
@@ -1212,7 +1233,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
   const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, await readOnce(opts.statePath));
   // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
   // no workspace to record, and wsp add is the road. The host listens for pairing either way.
   if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
@@ -1290,14 +1311,6 @@ async function hostFor(
     const tokenPath = hostTokenPath(opts.statePath);
     writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
     const home = resolve(wspHome());
-    const pointer = currentHomePointer();
-    // The pointer is for a host serving a home somebody moved: a later line with no home of its own reads it and
-    // finds that host. A host on the home a bare line already picks needs none, and writing one would put a file
-    // under the person's home for a host that changed nothing about where wsp looks.
-    if (home !== resolve(defaultHomeIn(homedir()))) {
-      mkdirSync(dirname(pointer), { recursive: true });
-      writeFileSync(pointer, `${home}\n`);
-    }
     // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
     // calls verbs that are gone. The copies that are there are brought up to this wsp's, and none is written where
     // there is none. Only for a host serving this wsp home's own state file, which is the person's own wsp: a host
@@ -1322,8 +1335,6 @@ async function hostFor(
         await relay?.close();
         await handle.close();
         rmSync(lockPath, { force: true });
-        // A host that started later owns the pointer now.
-        if (currentHome() === home) rmSync(pointer, { force: true });
       },
     };
   } catch (e) {
@@ -1975,7 +1986,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // One wiring for this computer, so the daemon the copy road would run and the one the doctor reads the
       // version off are the same process. Its sink keeps nothing: this is a person's screen, and what the daemon
       // says on its own stderr as it starts is not the answer they asked for.
-      const local = localWiring(homedir(), process.env, undefined, hostRunDir(opts.statePath), undefined, () => {});
+      const local = localWiring(homedir(), process.env, undefined, opts.statePath, undefined, () => {});
       const hereDaemon = local.hereDaemon;
       const word = args[0];
       if (args.length > 1) throw usageRefusal(`wsp doctor proves one computer, and it was given ${args.length} words: ${args.map(w => JSON.stringify(w)).join(" ")}.`, DOCTOR_USAGE);

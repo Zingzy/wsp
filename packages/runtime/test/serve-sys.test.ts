@@ -55,6 +55,7 @@ async function served(sampler: ReturnType<typeof fakeSampler>): Promise<string> 
     execStream: o => localExecStream({ root: root!, runDir: join(root!, "runs"), ...o }),
     home: () => join(root!, ".claude"),
     homeDir: root,
+    rootsPath: join(root, "roots"),
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     platform: testPlatform(),
     sysSamples: sampler.subscribe,

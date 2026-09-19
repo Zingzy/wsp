@@ -48,7 +48,6 @@ function deadPid(): number {
 describe("serve takes host.lock next to the state file", () => {
   let dir: string;
   let home: string;
-  let pointerPath: string;
   let webDir: string;
   let statePath: string;
   let lockPath: string;
@@ -57,7 +56,6 @@ describe("serve takes host.lock next to the state file", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-lock-home-"));
     home = join(dir, "custom");
-    pointerPath = join(dir, "user", ".wsp", "current-home");
     webDir = join(home, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
     writeFileSync(join(webDir, "assets", "app.js"), "console.log('app')\n");
@@ -132,22 +130,15 @@ describe("serve takes host.lock next to the state file", () => {
     expect(lock.port).toBe(h.port);
   });
 
-  it("points ~/.wsp/current-home at the home it serves and removes it on close", async () => {
+  it("writes nothing under the person's own wsp home while it serves a home somebody named", async () => {
+    // A host on another state file writing a file under ~/.wsp is two hosts sharing one file; the one way a line
+    // reaches this host is naming its home, which the person does with --state or WSP_HOME.
     const h = await start();
-    expect(readFileSync(pointerPath, "utf8")).toBe(`${home}\n`);
+    expect(existsSync(join(dir, "user", ".wsp"))).toBe(false);
 
     await h.close();
     handles.splice(0);
-    expect(existsSync(pointerPath)).toBe(false);
-  });
-
-  it("leaves a pointer that a later host rewrote to its own home alone on close", async () => {
-    const h = await start();
-    writeFileSync(pointerPath, `${join(dir, "newer")}\n`);
-
-    await h.close();
-    handles.splice(0);
-    expect(readFileSync(pointerPath, "utf8")).toBe(`${join(dir, "newer")}\n`);
+    expect(existsSync(join(dir, "user", ".wsp"))).toBe(false);
   });
 
   it("wsp init refuses when the host holding the lock cannot take the build, naming wsp down before any pid, and boots nothing", async () => {

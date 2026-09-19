@@ -6,7 +6,7 @@
 // same .env a terminal run reads, so nothing secret lands in ~/Library.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { authority, fmtDuration, LABS_ENV, shellQuote } from "@wsp/protocol";
@@ -432,7 +432,16 @@ const POLL_MS = 200;
  * for every road that waits on one, so a service and a verb's own child are given the same patience. */
 export const SERVICE_WAIT_MS = 20_000;
 
-const wait = (ms: number): Promise<void> => new Promise(done => void setTimeout(done, ms));
+/** A sleep a waiter can cut short: the timer goes with it, so a loop that stopped waiting leaves nothing pending
+ * behind it. */
+const wait = (ms: number, until?: Promise<unknown>): Promise<void> =>
+  new Promise(done => {
+    const timer = setTimeout(done, ms);
+    void until?.then(() => {
+      clearTimeout(timer);
+      done();
+    });
+  });
 
 /** Whether the host a lock names is answering where the lock says it is. The lock is taken before the host binds
  * anything, so the lock alone is a claim and one GET is the proof; any answer at all means something bound it. */
@@ -459,14 +468,25 @@ export const httpProbe: HostProbe = async lock => {
 
 /** Polls until a host holds the lock and answers on the port it names, or the wait runs out. A host that cannot bind
  * takes the lock and dies under KeepAlive or Restart=always, over and over, so a lock that came and went is not a
- * host serving anything. */
-export async function untilServing(statePath: string, waitMs: number, answers: HostProbe, sleep: (ms: number) => Promise<void> = wait): Promise<HostLock | undefined> {
+ * host serving anything.
+ *
+ * `gone` is the child this wait was started for having exited: a process that is no longer there writes no lock, so
+ * waiting out the rest of the patience tells the caller nothing it does not already know. */
+export async function untilServing(
+  statePath: string,
+  waitMs: number,
+  answers: HostProbe,
+  sleep: (ms: number, until?: Promise<unknown>) => Promise<void> = wait,
+  gone?: Promise<unknown>,
+): Promise<HostLock | undefined> {
   const deadline = Date.now() + waitMs;
+  let stopped = false;
+  void gone?.then(() => (stopped = true));
   for (;;) {
     const lock = servingHost(statePath);
     if (lock !== undefined && (await answers(lock))) return lock;
-    if (Date.now() >= deadline) return undefined;
-    await sleep(POLL_MS);
+    if (stopped || Date.now() >= deadline) return undefined;
+    await sleep(POLL_MS, gone);
   }
 }
 
@@ -485,6 +505,33 @@ export async function untilLock(statePath: string, serving: boolean, waitMs: num
 /** Both managers append to the log for as long as the service lives and nothing rotates it, so only its end is
  * read. A line the window cut in half is not a line and goes. */
 const TAIL_BYTES = 64 * 1024;
+
+/** How much of the log is already written, for a caller marking where its own child's lines begin: both managers and
+ * every host a verb starts append to one file across days. Nothing written yet reads as nothing. */
+export function logSize(logPath: string): number {
+  try {
+    return statSync(logPath).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** The lines written to the log past a mark, which for a child a line started is everything that child said. */
+export function logSince(logPath: string, from: number): string[] {
+  if (!existsSync(logPath)) return [];
+  const fd = openSync(logPath, "r");
+  let text: string;
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= from) return [];
+    const buffer = Buffer.alloc(size - from);
+    readSync(fd, buffer, 0, buffer.length, from);
+    text = buffer.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+  return text.split("\n").filter(line => line.trim() !== "");
+}
 
 /** The last lines of the service's log, for a start that never took: nothing when there is no log yet. */
 export function logTail(logPath: string, lines = 20): string[] {

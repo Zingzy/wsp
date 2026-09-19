@@ -54,6 +54,7 @@ describe("the access a thread starts at, on each kind of workspace", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };

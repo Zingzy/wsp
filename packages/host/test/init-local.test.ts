@@ -47,6 +47,7 @@ function localWiring(root: string): LocalWiring {
     execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
     home: () => join(root, ".claude"),
     homeDir: root,
+    rootsPath: join(root, "roots"),
     env: () => ({}),
     platform: hostPlatform(),
   };

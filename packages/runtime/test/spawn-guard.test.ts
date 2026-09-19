@@ -88,6 +88,7 @@ describe("agents spawning agents", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };

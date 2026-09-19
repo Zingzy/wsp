@@ -1106,10 +1106,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     held.socket.close(1000, reason);
   };
 
-  /** How many forks a place holds and how many more it takes, off what its own backend says about the computer it
-   * runs on. Only what this host already knows is waited for: a table is something a person is watching, so a place
-   * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
-   * that does not answer in time shows nothing rather than a guess. */
+  /** How many forks run on a place and how many more it takes now, off what its own backend says about the computer
+   * it runs on. Only what this host already knows is waited for: a table is something a person is watching, so a
+   * place that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and
+   * one that does not answer in time shows nothing rather than a guess. */
   const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
     const linked = live.has(record.id);
     const backend = linked ? door.backendOf(record.id) : undefined;
@@ -1122,9 +1122,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const capacity = await bounded(backend.capacity(), CAPACITY_MS, `machine.capacity on ${record.name}`);
       const image = capacity.images.reduce((most, i) => Math.max(most, i.sizeBytes), 0);
       return {
-        // Every fork that computer is holding, napping ones included: a row that says napping is a machine the
-        // person still has there, so this column and the workspace list cannot disagree about how many.
-        running: capacity.machines.running + capacity.machines.paused,
+        // What runs there now. A napping fork holds the disk its copy takes and no cpu or memory, so counting it
+        // here would say a slot is taken that a create can have; the workspace list is where a napping one is
+        // counted and its state said, and the disk it holds is the row's own disk free column.
+        running: capacity.machines.running,
         // What a fork takes there, not what it would be asked for: a computer clamps a machine to its own share.
         room: forkRoom(capacity, Math.min(backend.pricing.defaultSize.memMb, capacity.machineMemMb), image === 0 ? undefined : image),
       };

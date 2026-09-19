@@ -79,6 +79,7 @@ describe("the vault a turn launches with", () => {
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: id => join(root, `.${id}`),
       homeDir: root,
+      rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
     };
