@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
@@ -9,6 +9,7 @@ import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStre
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
 import { skillsRefreshedLine } from "../src/mcp-install.js";
@@ -351,6 +352,16 @@ describe("wsp up", () => {
     } finally {
       warned.mockRestore();
     }
+  });
+
+  it("a start that refuses its state mints no key, so the home is as the refusal found it", async () => {
+    // The reading: a person who points an older command line at a newer state got the refusal and a pairing key
+    // minted beside the file for a host that never ran.
+    const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
+    stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
+    await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+    expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
+    expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
   });
 
   it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {

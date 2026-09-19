@@ -1232,8 +1232,11 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
+  // Read before the wiring, which mints this host's pairing key beside the state file on its first read: a start
+  // that refuses a state file of a shape it does not read leaves the home as it found it.
+  const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, await readOnce(opts.statePath));
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
   // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
   // no workspace to record, and wsp add is the road. The host listens for pairing either way.
   if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
