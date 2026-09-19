@@ -53,6 +53,10 @@ export interface ProvisionLanding {
  * written over. */
 export type LandOutcome = "installed" | "present" | "kept" | "failed";
 
+/** Whether one planned destination covers a path: the destination itself, or anything under it where the
+ * destination is a folder. One rule for every reader on this side, as `wsp_once` is the one rule on that computer. */
+const covers = (dest: string, rel: string): boolean => rel === dest || rel.startsWith(`${dest}/`);
+
 /** The `~/`-relative paths one agent keeps what it reads in, off the catalog alone: the home its own state sits
  * under, the folder it loads skills from, every config path the catalog names for it and the file it keeps its
  * MCP servers in. */
@@ -69,10 +73,7 @@ export function agentStateFile(f: { id: string; source: string }, home: string):
   const agent = agentOfRow(f) ?? parseMcpId(f.id)?.agent;
   const entry = CATALOG_AGENTS.find(a => a.id === agent);
   if (entry === undefined) return false;
-  return agentPaths(entry).some(p => {
-    const abs = `${home}/${p.slice(2)}`;
-    return f.source === abs || f.source.startsWith(`${abs}/`);
-  });
+  return agentPaths(entry).some(p => covers(`${home}/${p.slice(2)}`, f.source));
 }
 
 /** What each line of the landing prints, so no path of the person's can be read as the run's own words. */
@@ -112,10 +113,6 @@ interface Landed {
   rel: string;
   outcome: LandOutcome;
 }
-
-/** Whether one planned destination covers a path: the destination itself, or anything under it where the
- * destination is a folder. One rule for every reader on this side, as `wsp_once` is the one rule on that computer. */
-const covers = (dest: string, rel: string): boolean => rel === dest || rel.startsWith(`${dest}/`);
 
 /** Whether one path lands once, judged here because it has to be judged before anything travels. */
 export const landsOnce = (rel: string, once: readonly string[]): boolean => once.some(dest => covers(dest, rel));
@@ -157,9 +154,10 @@ export function standingScript(home: string): string {
     `  printf '${STAND_MARK}${TAB}%s${TAB}%s${NUL}' "\${rec%% *}" "\${p#[ *]}"`,
     "done",
     '[ -f "$ledger" ] || ledger=/dev/null',
-    // The list beside the job, keyed by the same paths. A path holding a newline keys nothing here and no line of
-    // that list can name one either, since the landing writes a line per path on a line of its own.
-    `xargs -0 printf '%s${NL}' < "$list" | awk -F"${TAB}" 'NR==FNR { want[$0]=1; next } want[$1] { printf "${LEDGER_MARK}${TAB}%s${TAB}%s${NL}", $1, $3 }' - "$ledger" | tr '${NL}' '${NUL}'`,
+    // The list beside the job, keyed by the same paths, and the first line a path has there, which is the line the
+    // landing and the close read too. A path holding a newline keys nothing here and no line of that list can name
+    // one either, since the landing writes a line per path on a line of its own.
+    `xargs -0 printf '%s${NL}' < "$list" | awk -F"${TAB}" 'NR==FNR { want[$0]=1; next } want[$1] && !seen[$1]++ { printf "${LEDGER_MARK}${TAB}%s${TAB}%s${NL}", $1, $3 }' - "$ledger" | tr '${NL}' '${NUL}'`,
     'rm -f "$list"',
     "exit 0",
   ].join("\n");

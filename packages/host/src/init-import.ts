@@ -455,7 +455,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const asked = opts.leaveOut === undefined ? [] : await opts.leaveOut(paths.map(dest => ({ dest, digest: createHash("sha256").update(readFileSync(join(stage, dest))).digest("hex") })));
     // Only a path this pack staged comes out: what the answer says about anything else is not this tree's.
     const staged = new Set(paths);
-    const stood = [...asked].filter(p => staged.has(p));
+    const stood = [...new Set(asked)].filter(p => staged.has(p));
     for (const rel of stood) rmSync(join(stage, rel), { force: true });
     const unpacked = treeBytes(stage);
     // tar truncates an existing archive in place, so the mode set here is the one it keeps.

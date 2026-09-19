@@ -495,7 +495,9 @@ describe("what already stands on that computer never travels again", { timeout: 
     write(g.root, ODD, "a skill with a backslash in its folder\n");
     write(g.root, newline, "a skill under a folder with a newline in it\n");
     mkdirSync(at.dir, { recursive: true });
-    writeFileSync(at.landed, `.claude-cfg/CLAUDE.md\twhat travelled\t${digest("his standing rules\n")}\n${ODD}\twhat travelled\tan older digest\n`);
+    // The second line a path has in that list is never read: the landing and the close both take a path's first
+    // line, and this read has to agree with them whatever the list holds.
+    writeFileSync(at.landed, `.claude-cfg/CLAUDE.md\twhat travelled\t${digest("his standing rules\n")}\n${ODD}\twhat travelled\tan older digest\n${ODD}\twhat travelled\ta second line for the same path\n`);
 
     const standing = (await standingDigests(g.machine, g.root, [".claude-cfg/CLAUDE.md", ODD, newline, ".codex/AGENTS.md"]))!;
     expect(standing.at.get(".claude-cfg/CLAUDE.md")).toBe(digest("his standing rules\n"));
