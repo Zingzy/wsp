@@ -149,16 +149,14 @@ mod inside {
 
     /// Set by the window-change signal and read by the pump, which is all a handler may do.
     static RESIZED: AtomicBool = AtomicBool::new(false);
-    /// The same for a child that ended: the pump asks the shell itself whether it was that one.
-    static A_CHILD_WENT: AtomicBool = AtomicBool::new(false);
-
     extern "C" fn window_changed(_: i32) {
         RESIZED.store(true, Ordering::Relaxed);
     }
 
-    extern "C" fn child_went(_: i32) {
-        A_CHILD_WENT.store(true, Ordering::Relaxed);
-    }
+    /// Nothing to do and everything to be: a handler is what makes the signal cut the wait below short, where the
+    /// default for a child that ended is to be dropped and to interrupt nothing. What the pump does next is ask
+    /// the shell itself whether it was that one.
+    extern "C" fn child_went(_: i32) {}
 
     /// How long the pump waits on the terminal before asking whether the shell is still there. A signal cuts the
     /// wait short, so this is the backstop and not the answer's speed.
@@ -264,7 +262,6 @@ mod inside {
                 if gone.is_some() {
                     break;
                 }
-                A_CHILD_WENT.store(false, Ordering::Relaxed);
                 match shell.try_wait() {
                     Ok(Some(status)) => gone = Some(status),
                     Ok(None) => {}

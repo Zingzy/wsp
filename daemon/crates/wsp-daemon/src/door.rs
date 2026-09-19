@@ -382,10 +382,15 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(heard.text()).unwrap()["type"], "localhost.url");
         assert!(timeout(Duration::from_millis(200), ws.next()).await.is_err(), "a socket inside a workspace was pushed to");
 
-        // And the door goes with the workspace: the loop ends and the file is off the run folder, so a dial from
-        // inside a stopped workspace finds nothing.
+        // And the door goes with the workspace: the loop ends, so a dial finds nothing to answer it. The file it
+        // was bound on is the workspace's own folder's and the runtime takes it off with the workspace, since a
+        // workspace may be stopped by something other than the daemon that bound this.
         ctx.close_workspace_door("wsp-a");
-        assert!(!at.exists());
-        assert!(UnixStream::connect(&at).await.is_err());
+        let refused = async {
+            while UnixStream::connect(&at).await.is_ok() {
+                tokio::task::yield_now().await;
+            }
+        };
+        assert!(timeout(WAIT, refused).await.is_ok(), "the door still answers after the workspace stopped");
     }
 }

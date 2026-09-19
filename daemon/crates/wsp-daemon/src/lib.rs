@@ -225,10 +225,9 @@ pub(crate) struct Ctx {
     keys: AtomicU64,
 }
 
-/// One workspace's door: the task accepting on it, and where its socket file is, so a stop takes both away.
+/// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends.
 pub(crate) struct WorkspaceDoor {
     task: tokio::task::JoinHandle<()>,
-    at: PathBuf,
 }
 
 impl Ctx {
@@ -312,19 +311,19 @@ impl Ctx {
         let ctx = Arc::clone(self);
         let workspace = id.to_owned();
         let task = tokio::spawn(door::serve_workspace(listener, ctx, workspace));
-        let held = WorkspaceDoor { task, at };
+        let held = WorkspaceDoor { task };
         if let Some(old) = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), held) {
             old.task.abort();
         }
     }
 
-    /// The door goes with the workspace it was inside: the loop ends and the socket file goes, so a stopped
-    /// workspace holds nothing of this daemon's in its folder.
+    /// The door goes with the workspace it was inside: this ends the loop, and the file it was bound on is the
+    /// runtime's to take off, since the folder it sits in is the workspace's own and a workspace may be stopped
+    /// by something other than the daemon that bound it.
     pub(crate) fn close_workspace_door(&self, id: &str) {
         let held = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
         if let Some(door) = held {
             door.task.abort();
-            let _ = std::fs::remove_file(&door.at);
         }
     }
 
