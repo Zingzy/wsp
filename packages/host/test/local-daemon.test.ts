@@ -4,9 +4,9 @@
 // leaves on disk. They run on the binary built in this checkout, placed by
 // packages/wspx/scripts/daemon-binary.mjs, so a failure here is a failure of
 // the road the host takes.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
@@ -87,6 +87,7 @@ describe("local daemon", () => {
   afterEach(async () => {
     await daemon?.close();
     daemon = undefined;
+    vi.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -238,6 +239,35 @@ describe("local daemon", () => {
     daemon = undefined;
     expect(alive(pid)).toBe(false);
     expect(readdirSync(tmpdir()).filter(name => name.startsWith("wsp-local-daemon-")).map(name => existsSync(join(tmpdir(), name, "token")) && alive(pid))).not.toContain(true);
+  });
+
+  it("the folder carries the pid of the process that removes it, and a start sweeps the folders of processes that are gone", async () => {
+    // Seventeen of these sat under one Mac's temp dir, each holding a token: a host that is killed runs no close,
+    // and nothing anywhere read a folder as a dead host's until the pid was in its own name.
+    const at = join(root, "tmp");
+    mkdirSync(at, { recursive: true });
+    vi.stubEnv("TMPDIR", at);
+    const made = (name: string): string => {
+      mkdirSync(join(at, name), { recursive: true });
+      writeFileSync(join(at, name, "token"), "0123456789abcdef\n");
+      return name;
+    };
+    // A process this case started and waited out, so its pid is one nothing holds now.
+    const gone = made(`wsp-local-daemon-${spawnSync(process.execPath, ["-e", "0"]).pid!}-x`);
+    const live = made(`wsp-local-daemon-${process.pid}-y`);
+    // The shape wsp wrote before the pid was in the name: nothing can say whose it is, so nothing takes it.
+    const older = made("wsp-local-daemon-z");
+
+    daemon = await startLocal();
+
+    const own = readdirSync(at).filter(name => name.startsWith("wsp-local-daemon-") && ![live, older].includes(name));
+    expect(own).toHaveLength(1);
+    expect(own[0]!.startsWith(`wsp-local-daemon-${process.pid}-`)).toBe(true);
+    expect([existsSync(join(at, gone)), existsSync(join(at, live)), existsSync(join(at, older))]).toEqual([false, true, true]);
+
+    await daemon.close();
+    daemon = undefined;
+    expect([existsSync(join(at, own[0]!)), existsSync(join(at, live)), existsSync(join(at, older))]).toEqual([false, true, true]);
   });
 
   it("keeps the version off the hello the binary answered the first frame with, so every road that runs it reads what it is", async () => {

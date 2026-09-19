@@ -28,7 +28,7 @@ import {
   type Store,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -93,7 +93,7 @@ import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
-import { choosePorts, type PortProbes } from "./ports.js";
+import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
@@ -1719,18 +1719,17 @@ function startingPick(opts: SharedOpts, values: SharedFlags): { statePath: strin
   return { ...aimPick(opts, values), ...(opts.start !== undefined ? { start: opts.start } : {}) };
 }
 
-/** The pair wsp up binds: the one asked for when both ports are free, the next free pair with the step said out
- * loud where nobody named the pair, and nothing where a port a person named is held, which is the whole run's
- * refusal. The sentences are the protocol's, the same three wsp init's road prints, and a held port never reaches
- * the person as the bind's own error. */
-export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbes = {}): Promise<AppPorts | undefined> {
+/** The pair wsp up binds: the one asked for when both ports are free, the next free pair with the port it stepped
+ * over handed back for the caller to say once it serves, and nothing where a port a person named is held, which is
+ * the whole run's refusal. The step is picked in silence because every refusal a start throws is thrown after this,
+ * and a refusal is one sentence with nothing above it. The refusals here are the run's end, so they are printed
+ * where they are read. The sentences are the protocol's, the same three wsp init's road prints, and a held port
+ * never reaches the person as the bind's own error. */
+export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbes = {}): Promise<PortsPicked | undefined> {
   const asked = { port: opts.port, wsPort: opts.wsPort, named: opts.named };
   const where = { states: statesHere(opts.statePath), ...probes };
   const chosen = await choosePorts(asked, where);
-  if (!("taken" in chosen)) {
-    if (chosen.moved !== undefined) io.log(portsPickedLine(chosen.ports, chosen.moved.port, chosen.moved.holder));
-    return chosen.ports;
-  }
+  if (!("taken" in chosen)) return chosen;
   io.error(portTakenLine(chosen.taken.port, chosen.taken.holder));
   // The pair a person could have had, found the same way the unnamed road finds one, so the refusal hands over a
   // line to type rather than a number to guess.
@@ -1800,9 +1799,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }
       // Which ports are free is settled before anything binds: a port another wsp or another program holds is one
       // sentence naming who holds it, and a pair nobody named is stepped over rather than refused.
-      const ports = await pickUpPorts(io, opts);
-      if (ports === undefined) return EXIT_CODES.provider;
-      stopOnSignals(await up(io, { ...opts, ...ports }), io);
+      const picked = await pickUpPorts(io, opts);
+      if (picked === undefined) return EXIT_CODES.provider;
+      const handle = await up(io, { ...opts, ...picked.ports });
+      // "Serving on 4401" is a claim about a host that serves, so it is said once one does: the state read, the
+      // keys, the second lock read and the bind itself all refuse after the ports are picked.
+      if (picked.moved !== undefined) io.log(portsPickedLine({ port: handle.port, wsPort: handle.wsPort }, picked.moved.port, picked.moved.holder));
+      stopOnSignals(handle, io);
       return 0;
     },
   },
