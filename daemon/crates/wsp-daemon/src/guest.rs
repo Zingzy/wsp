@@ -20,6 +20,10 @@ use crate::Outbound;
 struct Session {
     key: u64,
     out: Outbound,
+    /// The workspace the socket that opened it is inside, on a daemon that runs workspaces; none on a daemon
+    /// inside a machine. Every frame of this session carries it, so the host reads a session's workspace off the
+    /// listener it arrived on and never off anything the guest said.
+    machine: Option<String>,
     /// The order sessions were opened in, so a flush hands a watcher the sessions as they came.
     at: u64,
     /// The frame this session opened with, kept rather than queued: every watcher that arrives is told the sessions
@@ -79,6 +83,11 @@ impl State {
         self.watchers.last().map(|(_, out)| out)
     }
 
+    /// The workspace a session belongs to, for the frames raised about it after it was opened.
+    fn machine_of(&self, session: &str) -> Option<String> {
+        self.sessions.get(session).and_then(|held| held.machine.clone())
+    }
+
     /// Up to whoever is watching, or into the session's own queue; a queue past its cap ends the session, which is
     /// what a guest reads when the host has been away too long.
     fn upward(&mut self, session: &str, event: DaemonEvent) -> Option<Outbound> {
@@ -106,8 +115,10 @@ impl Guests {
         let at = self.ids.fetch_add(1, Ordering::Relaxed);
         let session = format!("g{at}");
         conn.take_guest(session.clone())?;
+        let machine = conn.workspace();
         let opened = DaemonEvent::GuestOpened {
             session: session.clone(),
+            machine_id: machine.clone(),
             life: self.life.clone(),
             kind: open.kind,
             token: open.token,
@@ -117,8 +128,16 @@ impl Guests {
         };
         let mut state = lock(&self.state);
         let unwatched_since = state.watching().is_none().then(Instant::now);
-        let row =
-            Session { key: conn.key, out: conn.out.clone(), at, opened: opened.clone(), queued: Vec::new(), ended: false, unwatched_since };
+        let row = Session {
+            key: conn.key,
+            out: conn.out.clone(),
+            machine,
+            at,
+            opened: opened.clone(),
+            queued: Vec::new(),
+            ended: false,
+            unwatched_since,
+        };
         state.sessions.insert(session.clone(), row);
         if let Some(out) = state.watching() {
             out.send_event(&opened);
@@ -137,10 +156,11 @@ impl Guests {
         if !state.sessions.contains_key(&session) {
             return Err(no_such_session(&session));
         }
-        let full = state.upward(&session, DaemonEvent::GuestMessage { session: session.clone(), message });
+        let machine = state.machine_of(&session);
+        let full = state.upward(&session, DaemonEvent::GuestMessage { session: session.clone(), message, machine_id: machine.clone() });
         drop(state);
         if let Some(out) = full {
-            out.send_event(&DaemonEvent::GuestClosed { session, error: Some(words::GUEST_QUEUE_FULL.to_owned()) });
+            out.send_event(&DaemonEvent::GuestClosed { session, error: Some(words::GUEST_QUEUE_FULL.to_owned()), machine_id: machine });
         }
         Ok(())
     }
@@ -176,7 +196,7 @@ impl Guests {
         let state = lock(&self.state);
         Guests::watcher(&state, conn)?;
         let held = state.sessions.get(session).ok_or_else(|| no_such_session(session))?;
-        held.out.send_event(&DaemonEvent::GuestMessage { session: session.to_owned(), message });
+        held.out.send_event(&DaemonEvent::GuestMessage { session: session.to_owned(), message, machine_id: held.machine.clone() });
         Ok(())
     }
 
@@ -185,7 +205,7 @@ impl Guests {
         Guests::watcher(&state, conn)?;
         let gone = state.sessions.remove(session).ok_or_else(|| no_such_session(session))?;
         drop(state);
-        gone.out.send_event(&DaemonEvent::GuestClosed { session: session.to_owned(), error });
+        gone.out.send_event(&DaemonEvent::GuestClosed { session: session.to_owned(), error, machine_id: gone.machine });
         Ok(())
     }
 
@@ -203,7 +223,7 @@ impl Guests {
         }
         let ended: Vec<String> = state.sessions.iter().filter(|(_, s)| s.key == key).map(|(id, _)| id.clone()).collect();
         for session in ended {
-            let closed = DaemonEvent::GuestClosed { session: session.clone(), error: None };
+            let closed = DaemonEvent::GuestClosed { session: session.clone(), error: None, machine_id: state.machine_of(&session) };
             match state.watching() {
                 Some(out) => {
                     out.send_event(&closed);
@@ -268,11 +288,11 @@ impl Guests {
             .filter(|(_, s)| s.unwatched_since.is_some_and(|since| now.duration_since(since) >= self.unwatched))
             .map(|(id, _)| id.clone())
             .collect();
-        let told: Vec<(String, Outbound)> =
-            due.into_iter().filter_map(|id| state.sessions.remove(&id).filter(|s| !s.ended).map(|s| (id, s.out))).collect();
+        let told: Vec<(String, Outbound, Option<String>)> =
+            due.into_iter().filter_map(|id| state.sessions.remove(&id).filter(|s| !s.ended).map(|s| (id, s.out, s.machine))).collect();
         drop(state);
-        for (session, out) in told {
-            out.send_event(&DaemonEvent::GuestClosed { session, error: Some(words::GUEST_UNWATCHED.to_owned()) });
+        for (session, out, machine) in told {
+            out.send_event(&DaemonEvent::GuestClosed { session, error: Some(words::GUEST_UNWATCHED.to_owned()), machine_id: machine });
         }
     }
 

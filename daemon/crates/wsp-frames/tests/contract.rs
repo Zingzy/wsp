@@ -11,10 +11,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    landed_files_script, numbers, place_owned_paths, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent,
-    DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply, MachineAnswersReply, MachineExecReply,
-    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, words, BackendFacts, CopyReport, DaemonAuthRequest,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
+    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
+    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -337,6 +337,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("openShimPath", Value::from(numbers::OPEN_SHIM_PATH));
     m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
     m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
+    m.insert("guestDaemonSocketPath", Value::from(numbers::GUEST_DAEMON_SOCKET_PATH));
     m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));
     m.insert("guestWspPath", Value::from(numbers::GUEST_WSP_PATH));
     m.insert("daemonOomScoreAdj", Value::from(numbers::DAEMON_OOM_SCORE_ADJ));
@@ -379,6 +380,9 @@ const FIXTURE_HOME: &str = "/h";
 /// value in it is kept as its template everywhere else in this set.
 const SCRIPT_HOME: &str = "{home}";
 
+/// The binary the wsp shim's fixture is rendered onto: the shim's one hole, kept as its template the same way.
+const SHIM_BINARY: &str = "{binary}";
+
 #[test]
 fn the_leaves_own_list_matches_the_committed_fixture() {
     let theirs: Vec<String> = committed_value("place-paths.json");
@@ -395,6 +399,13 @@ fn the_ownership_read_matches_the_committed_fixture_byte_for_byte() {
         theirs,
         "landed-files.sh and landed_files_script are one script"
     );
+}
+
+#[test]
+fn the_wsp_shim_matches_the_committed_fixture_byte_for_byte() {
+    let path = fixtures().join("guest-wsp-shim.sh");
+    let theirs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(guest_wsp_shim(SHIM_BINARY), theirs, "guest-wsp-shim.sh and guest_wsp_shim are one text");
 }
 
 #[test]

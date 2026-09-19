@@ -12,7 +12,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -36,7 +36,6 @@ import {
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   deployFailureLine,
-  guestWspShim,
   removeDaemonScript,
   GUEST_ENVS,
   claudeEnvs,
@@ -472,8 +471,7 @@ describe("stageDaemonBundle", () => {
     // The shim is written in the arm for the chip, since the path it names carries that chip's target triple.
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     for (const target of GUEST_DAEMON_TARGETS) {
-      expect(guestWspShim(CLOUD_PLACE, target)).toBe(`#!/bin/sh\nexec ${daemonBinaryOn(CLOUD_PLACE.dir, target)} wsp "$@"\n`);
-      expect(script).toContain(guestWspShim(CLOUD_PLACE, target));
+      expect(script).toContain(guestWspShim(daemonBinaryOn(CLOUD_PLACE.dir, target)));
     }
     expect(script).toContain(`chmod 0755 ${GUEST_WSP_PATH}`);
     expect(GUEST_WSP_PATH).toBe("/usr/local/bin/wsp");

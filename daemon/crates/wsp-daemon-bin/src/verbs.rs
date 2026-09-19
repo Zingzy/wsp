@@ -151,7 +151,13 @@ pub(crate) fn run(verb: Verb) -> i32 {
         Verb::Copy { verb } => copy(verb),
         Verb::Wsp { line } => {
             let daemon = SocketAddr::from((Ipv4Addr::LOCALHOST, numbers::DEFAULT_PORT));
-            wsp_guest::run(&line, &|name| std::env::var(name).ok(), daemon, Path::new(numbers::DEFAULT_TOKEN_PATH))
+            wsp_guest::run(
+                &line,
+                &|name| std::env::var(name).ok(),
+                daemon,
+                Path::new(numbers::DEFAULT_TOKEN_PATH),
+                Path::new(numbers::GUEST_DAEMON_SOCKET_PATH),
+            )
         }
     }
 }

@@ -4076,11 +4076,16 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     turnToken: z.string().optional(),
     argv: z.array(z.string()),
     cwd: z.string(),
+    /** The workspace the session was opened inside, on a daemon that runs workspaces: the listener the session
+     * arrived on is what names it, never anything the guest said, so a session of one workspace can never read as
+     * another's. Absent on a daemon inside a machine, where the machine is the one this host dialled. */
+    machineId: z.string().optional(),
   }),
-  /** One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down. */
-  z.object({ type: z.literal("guest.message"), session: z.string(), message: z.unknown() }),
+  /** One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down.
+   * The workspace is the opened frame's, as on every frame a place daemon relays for a session. */
+  z.object({ type: z.literal("guest.message"), session: z.string(), message: z.unknown(), machineId: z.string().optional() }),
   /** The session ended; this reaches whichever side did not end it. */
-  z.object({ type: z.literal("guest.closed"), session: z.string(), error: z.string().optional() }),
+  z.object({ type: z.literal("guest.closed"), session: z.string(), error: z.string().optional(), machineId: z.string().optional() }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 

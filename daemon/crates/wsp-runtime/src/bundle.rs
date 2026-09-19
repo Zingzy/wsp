@@ -10,7 +10,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -587,6 +587,29 @@ fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
         Err(e) => return Err(at(&path)(e)),
     }
     fs::write(&path, resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV))).map_err(at(&path))
+}
+
+/// The wsp a process inside a workspace runs, written into the workspace's own upper at `GUEST_WSP_PATH`: two
+/// lines onto the init this workspace already carries read-only, which is the same binary the daemon out here is.
+/// The computer's own wsp, where it has one at all, is a command under the wsp folder every workspace covers, so
+/// a workspace that was not given this word has none.
+///
+/// Written through the merged view, as the resolv.conf above is, and a link the computer keeps at that path is
+/// removed first: an absolute link under a rootfs is resolved by the kernel against this process's own root, so a
+/// write that followed one would land on the computer's own file instead.
+pub fn write_wsp_shim_inside(rootfs: &Path) -> Result<(), Error> {
+    let path = inside(rootfs, wsp_frames::numbers::GUEST_WSP_PATH)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(at(dir))?;
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(held) if held.file_type().is_symlink() => fs::remove_file(&path).map_err(at(&path))?,
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(at(&path)(e)),
+    }
+    fs::write(&path, wsp_frames::guest_wsp_shim(profile::INIT_PATH)).map_err(at(&path))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).map_err(at(&path))
 }
 
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
@@ -1193,6 +1216,38 @@ mod tests {
         fs::create_dir_all(bare.join("etc")).unwrap();
         write_resolv_inside(&bare).unwrap();
         assert!(fs::read_to_string(bare.join(RESOLV_INSIDE)).unwrap().contains("nameserver "));
+    }
+
+    /// The word a process inside runs, written on a rootfs made by hand: two lines onto the init already bound
+    /// inside, the text the contract fixture pins, and a link the computer keeps at that path removed first, as
+    /// the resolv.conf above is, so nothing of this write lands on the computer itself.
+    #[test]
+    fn the_workspaces_own_wsp_is_the_shim_onto_its_init_where_the_computer_keeps_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = dir.path().join("rootfs");
+        let at = rootfs.join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/'));
+        let elsewhere = dir.path().join("the-computers-own-wsp");
+        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        fs::write(&elsewhere, "the computer's own").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &at).unwrap();
+
+        write_wsp_shim_inside(&rootfs).unwrap();
+        let held = fs::symlink_metadata(&at).unwrap();
+        assert!(held.file_type().is_file(), "the workspace's wsp is not a regular file");
+        assert_eq!(held.permissions().mode() & 0o777, 0o755);
+        assert_eq!(fs::read_to_string(&at).unwrap(), wsp_frames::guest_wsp_shim(profile::INIT_PATH));
+        assert!(fs::read_to_string(&at).unwrap().contains("/sbin/wsp-init"));
+        // What the link pointed at is untouched: a link in the computer's own /usr/local/bin cannot point this
+        // write out of the rootfs.
+        assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "the computer's own");
+        // Written again at every boot, as the resolv.conf is, over what the last boot left.
+        write_wsp_shim_inside(&rootfs).unwrap();
+        assert_eq!(fs::read_to_string(&at).unwrap(), wsp_frames::guest_wsp_shim(profile::INIT_PATH));
+        // And on a rootfs with no such folder yet, which is a workspace whose upper holds nothing there.
+        let bare = dir.path().join("bare");
+        fs::create_dir_all(&bare).unwrap();
+        write_wsp_shim_inside(&bare).unwrap();
+        assert!(bare.join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/')).is_file());
     }
 
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and

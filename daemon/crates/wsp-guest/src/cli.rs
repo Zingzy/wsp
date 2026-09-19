@@ -2,12 +2,12 @@
 //! The command line kind: the host runs the verb and streams what it printed, each piece on the stream it belongs
 //! to, and the exit frame is what this process exits with.
 
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use wsp_frames::{GuestCliMessage, GuestStream};
 
 use crate::{closed, message, next_frame, Socket, Streams};
 
-pub(crate) async fn pump(mut ws: Socket, streams: &mut Streams<'_>) -> i32 {
+pub(crate) async fn pump<S: AsyncRead + AsyncWrite + Unpin>(mut ws: Socket<S>, streams: &mut Streams<'_>) -> i32 {
     loop {
         let Some(frame) = next_frame(&mut ws).await else { return 1 };
         if let Some(code) = closed(&frame, streams).await {

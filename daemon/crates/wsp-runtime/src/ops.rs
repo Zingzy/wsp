@@ -197,6 +197,15 @@ pub fn plain_copy_line(root: &Path, filesystem: Option<&str>, ms: u64) -> String
     format!("copied plainly in {seconds} s: {why}")
 }
 
+/// What the daemon serving this computer is told as its workspaces come and go: one that has booted, with the
+/// folder of its own that is mounted over the wsp folder inside it, and one that has stopped. The daemon binds
+/// its door inside a workspace on the first and takes it away on the second; nothing here knows what is on the
+/// other end of this.
+pub trait Watches: Send + Sync {
+    fn booted(&self, id: &str, wsp_home: &Path);
+    fn stopped(&self, id: &str);
+}
+
 pub struct Ops {
     layout: Layout,
     runtime: Runtime,
@@ -212,6 +221,8 @@ pub struct Ops {
     stopped: Vec<String>,
     net_swept: net::Swept,
     unfinished: Unfinished,
+    /// Who is told as workspaces boot and stop; none until the daemon that serves this computer says so.
+    watcher: std::sync::Mutex<Option<Arc<dyn Watches>>>,
 }
 
 /// What the open took away of creates that never finished: a copy still being made and a claimed run directory
@@ -283,6 +294,7 @@ impl Ops {
             stopped,
             net_swept,
             unfinished,
+            watcher: std::sync::Mutex::new(None),
         })
     }
 
@@ -334,6 +346,25 @@ impl Ops {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
+    }
+
+    /// The daemon takes the workspaces over from here: every boot and every stop after this is told as it
+    /// happens, and every workspace already running is named booted now, so a daemon that restarted under them
+    /// stands where one that booted them would.
+    pub fn watch(&self, watcher: Arc<dyn Watches>) -> Result<(), OpError> {
+        *self.watcher.lock().unwrap_or_else(|held| held.into_inner()) = Some(Arc::clone(&watcher));
+        for id in running_ids(&self.layout)? {
+            watcher.booted(&id, &self.layout.wsp_home(&id));
+        }
+        Ok(())
+    }
+
+    /// One word to whoever is watching; nothing where nobody is.
+    fn told(&self, say: impl FnOnce(&dyn Watches)) {
+        let held = self.watcher.lock().unwrap_or_else(|held| held.into_inner()).clone();
+        if let Some(watcher) = held {
+            say(watcher.as_ref());
+        }
     }
 
     /// The workspaces found stopped at open, their init gone.
@@ -940,6 +971,11 @@ impl Ops {
         if record.engine {
             self.join_ports(&record).await;
         }
+        // The wsp a process inside runs, written into the workspace's own upper onto the init already bound in
+        // read-only: the computer's own wsp is under a folder this workspace covers, so without this the word is
+        // missing inside. Written at every boot, as the workspace's resolv.conf is.
+        bundle::write_wsp_shim_inside(&self.layout.rootfs(&id))?;
+        self.told(|watcher| watcher.booted(&id, &self.layout.wsp_home(&id)));
         Ok(record)
     }
 
@@ -949,6 +985,7 @@ impl Ops {
     /// while it sleeps. The upper directories, the copy, the record and the network record stay: they are what
     /// the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
+        self.told(|watcher| watcher.stopped(&record.id));
         self.stop_engine(&record.id).await;
         self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
@@ -1025,6 +1062,7 @@ impl Ops {
     /// and every container, network and volume it made on the engine, before its rootfs those containers may bind
     /// goes. An engine that does not answer leaves them, and the workspace goes all the same.
     async fn remove(&self, id: &str, init: Option<&Init>) -> Result<(), OpError> {
+        self.told(|watcher| watcher.stopped(id));
         self.stop_engine(id).await;
         let record = bundle::read_record(&self.layout.record(id))?;
         if record.as_ref().is_some_and(|record| record.engine) {
@@ -1539,6 +1577,47 @@ mod tests {
             binds: Vec::new(),
             made_points: Vec::new(),
         }
+    }
+
+    /// What the daemon serving this computer is told, as a case can read it back.
+    #[derive(Default)]
+    struct Heard(std::sync::Mutex<Vec<String>>);
+
+    impl Heard {
+        fn said(&self) -> Vec<String> {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).clone()
+        }
+    }
+
+    impl Watches for Heard {
+        fn booted(&self, id: &str, wsp_home: &Path) {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("booted {id} {}", wsp_home.display()));
+        }
+
+        fn stopped(&self, id: &str) {
+            self.0.lock().unwrap_or_else(|held| held.into_inner()).push(format!("stopped {id}"));
+        }
+    }
+
+    /// A daemon that restarted under running workspaces stands where one that booted them would: every workspace
+    /// still running is named as it takes them over, with the folder of its own that is mounted over the wsp
+    /// folder inside it, and one that is stopped is not. What a boot and a stop say after that is the live
+    /// case's, since neither runs without the kernel.
+    #[test]
+    fn taking_the_workspaces_over_names_every_one_of_them_that_is_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let running = runtime::identity_of(std::process::id() as i32).unwrap();
+        for (id, init) in [("wsp-awake", running), ("wsp-asleep", Init { pid: i32::MAX, started: 0, boot_id: String::new() })] {
+            let mut record = awake(id, None);
+            record.init = init;
+            fs::create_dir_all(layout.workspace(id)).unwrap();
+            bundle::write_json(&layout.record(id), &record).unwrap();
+        }
+        let heard = Arc::new(Heard::default());
+        ops.watch(Arc::clone(&heard) as Arc<dyn Watches>).unwrap();
+        assert_eq!(heard.said(), [format!("booted wsp-awake {}", layout.wsp_home("wsp-awake").display())]);
     }
 
     /// A workspace here runs no daemon of its own: it boots one process that holds it up, nothing supervises a

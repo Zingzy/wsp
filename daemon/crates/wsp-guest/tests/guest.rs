@@ -5,7 +5,7 @@
 
 use std::io::Write;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -144,6 +144,22 @@ async fn ran(
     token_path: &Path,
     drive: impl FnOnce(DuplexStream) -> tokio::task::JoinHandle<()>,
 ) -> Ran {
+    ran_at(line, env, addr, token_path, NO_SOCKET.as_ref(), drive).await
+}
+
+/// The socket path of a machine wsp forked, which has none: the file is not there, so the dial is the port's.
+static NO_SOCKET: std::sync::LazyLock<PathBuf> =
+    std::sync::LazyLock::new(|| std::env::temp_dir().join("wsp-guest-no-workspace-socket/daemon.sock"));
+
+/// The same, with the workspace socket the dial rule reads named.
+async fn ran_at(
+    line: &[&str],
+    env: &[(&str, &str)],
+    addr: SocketAddr,
+    token_path: &Path,
+    socket_path: &Path,
+    drive: impl FnOnce(DuplexStream) -> tokio::task::JoinHandle<()>,
+) -> Ran {
     let words: Vec<String> = line.iter().map(|w| (*w).to_owned()).collect();
     let held: Vec<(String, String)> = env.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
     let read = move |name: &str| held.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
@@ -152,7 +168,8 @@ async fn ran(
     let (out, err) = (Wrote::default(), Wrote::default());
     let (mut input, mut out_sink, mut err_sink) = (BufReader::new(mine), out.clone(), err.clone());
     let mut streams = Streams { input: &mut input, out: &mut out_sink, err: &mut err_sink };
-    let code = tokio::time::timeout(WAIT, session(&words, &read, addr, token_path, &mut streams)).await.expect("the client answers");
+    let code =
+        tokio::time::timeout(WAIT, session(&words, &read, addr, token_path, socket_path, &mut streams)).await.expect("the client answers");
     driver.abort();
     Ran { code, out: out.text(), err: err.text() }
 }
@@ -290,4 +307,45 @@ async fn a_line_longer_than_the_cap_is_the_folders_end_and_the_word_mcp_alone_op
     let run = ran(&["mcp", "install"], &[], d.addr, d.token.path(), silent).await;
     answering.await.unwrap();
     assert_eq!(run.code, 0);
+}
+
+/// The dial rule, both ways. Inside a workspace on a computer somebody owns the daemon serving that computer has
+/// put a socket of this workspace's own at the path the contract names, and the file is the whole of the gate: the
+/// session goes over it and sends no auth frame and reads no token file. On a machine wsp forked there is no such
+/// file, and the road is that machine's own loopback port with its token, as it has always been.
+#[tokio::test]
+async fn the_workspace_socket_is_dialled_where_it_is_there_and_the_port_where_it_is_not() {
+    let d = start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let at = dir.path().join("daemon.sock");
+    let listener = tokio::net::UnixListener::bind(&at).unwrap();
+    let first = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::text(json!({ "type": "daemon.hello", "root": "/root" }).to_string())).await.unwrap();
+        let Some(Ok(Message::Text(frame))) = ws.next().await else { panic!("the guest sent nothing") };
+        let read: Value = serde_json::from_str(&frame).unwrap();
+        ws.send(Message::text(json!({ "id": read["id"], "ok": true, "session": "g1" }).to_string())).await.unwrap();
+        ws.send(Message::text(json!({ "type": "guest.closed", "session": "g1", "machineId": "wsp-a" }).to_string())).await.unwrap();
+        read
+    });
+    // A token file that is not there: nothing on this road reads one.
+    let run = ran_at(&["threads"], &[("WSP_HOST_TOKEN", "dev-1.tok")], d.addr, Path::new("/nowhere/daemon-token"), &at, silent).await;
+    let opened = first.await.unwrap();
+    assert_eq!(opened["op"], "guest.open", "the first frame on the workspace socket is the open, never an auth");
+    assert_eq!(opened["token"], "dev-1.tok");
+    assert_eq!((run.code, run.err.as_str()), (0, ""));
+
+    // And with no file at that path the same line takes the port, where the token file is read and the auth frame
+    // is the first thing on the wire.
+    let mut host = Watcher::open(d.addr).await;
+    let answering = tokio::spawn(async move {
+        let opened = host.next_event().await;
+        assert_eq!(opened["argv"], json!(["threads"]));
+        assert_eq!(opened.get("machineId"), None, "a session on a machine wsp forked names no workspace");
+        host.reply(opened["session"].as_str().unwrap(), json!({ "exit": 4 })).await;
+    });
+    let run = ran_at(&["threads"], &[], d.addr, d.token.path(), &dir.path().join("gone.sock"), silent).await;
+    answering.await.unwrap();
+    assert_eq!(run.code, 4);
 }

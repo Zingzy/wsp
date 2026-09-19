@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -539,11 +539,6 @@ export async function stageDaemonBundle(
  * to carry: the daemon beside it is a static binary and asks for nothing. */
 export const WSP_COMMAND_NODE_MAJOR = 22;
 
-/** The whole of the wsp a fork carries: two lines handing the line to the binary the bundle left for this machine's
- * chip, which opens a session on this machine's own daemon. Written on the machine, in the arm of the case that
- * knows the chip, since the path it names carries that chip's target triple. */
-export const guestWspShim = (place: DaemonPlace, target: DaemonTarget): string => `#!/bin/sh\nexec ${daemonBinaryOn(place.dir, target)} wsp "$@"\n`;
-
 /** How a node is asked which major it is. Not read into a variable, since `set -e` ends a script on an assignment
  * whose substitution failed and exempts one inside a test. */
 const NODE_MAJOR = `node -p 'process.versions.node.split(".")[0]'`;
@@ -583,7 +578,7 @@ function onTheChipItIs(place: DaemonPlace, targets: readonly DaemonTarget[], pre
         // lines onto the binary just named, so a fork needs nothing on its image to answer the word.
         ...(place.wsp !== "shim"
           ? []
-          : [`cat > ${sh(place, GUEST_WSP_PATH)} <<'WSP_SHIM'\n${guestWspShim(place, target)}WSP_SHIM`, `chmod 0755 ${sh(place, GUEST_WSP_PATH)}`]),
+          : [`cat > ${sh(place, GUEST_WSP_PATH)} <<'WSP_SHIM'\n${guestWspShim(daemonBinaryOn(place.dir, target))}WSP_SHIM`, `chmod 0755 ${sh(place, GUEST_WSP_PATH)}`]),
         // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
         // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and
         // runs its workspaces under the person's own login instead.

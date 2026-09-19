@@ -47,6 +47,7 @@
   "openShimPath": "/usr/local/bin/wsp-open",
   "xdgOpenPath": "/usr/local/bin/xdg-open",
   "openSocketPath": "/root/.wsp/open.sock",
+  "guestDaemonSocketPath": "/root/.wsp/daemon.sock",
   "guestDaemonDir": "/root/wsp-daemon",
   "guestWspPath": "/usr/local/bin/wsp",
   "daemonOomScoreAdj": -999,

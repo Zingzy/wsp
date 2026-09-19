@@ -51,6 +51,7 @@ import {
   GUEST_ARGV_MAX,
   GUEST_CWD_MAX,
   GUEST_DAEMON_DIR,
+  GUEST_DAEMON_SOCKET_PATH,
   GUEST_INBOX_DIR,
   GUEST_MANIFEST_PATH,
   GUEST_MESSAGE_CAP_BYTES,
@@ -111,6 +112,7 @@ import {
   dialTimedOutLine,
   dialUnansweredLine,
   guestNoDaemonLine,
+  guestWspShim,
   hostKeyRefusal,
   hostQuietLine,
   hostRefusedLine,
@@ -245,6 +247,10 @@ const words = (): Record<string, string> => ({
  * rather than as somebody's login, and the daemon's twin renders the same one. */
 const FIXTURE_HOME = "/h";
 
+/** The binary the wsp shim's fixture is rendered onto: the shim's one hole, kept as its template the way a
+ * sentence with a value in it is, since the path differs on each road that writes the shim. */
+const SHIM_BINARY = "{binary}";
+
 const numbers = (): Record<string, number | string | readonly string[]> => ({
   daemonVersion: DAEMON_VERSION,
   execBodyMax: EXEC_BODY_MAX,
@@ -286,6 +292,7 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   openShimPath: OPEN_SHIM_PATH,
   xdgOpenPath: XDG_OPEN_PATH,
   openSocketPath: OPEN_SOCKET_PATH,
+  guestDaemonSocketPath: GUEST_DAEMON_SOCKET_PATH,
   guestDaemonDir: GUEST_DAEMON_DIR,
   guestWspPath: GUEST_WSP_PATH,
   daemonOomScoreAdj: DAEMON_OOM_SCORE_ADJ,
@@ -534,11 +541,20 @@ describe("the words and numbers are what this package exports", () => {
     });
   }
 
+  it("guest-wsp-shim.sh equals its regeneration, so the word inside a fork and inside a workspace is one text", () => {
+    const text = guestWspShim(SHIM_BINARY);
+    const regenerated = join(tmpdir(), "wsp-contract-guest-wsp-shim.sh");
+    writeFileSync(regenerated, text);
+    const path = join(CONTRACT, "guest-wsp-shim.sh");
+    expect(existsSync(path), `daemon/fixtures/contract/guest-wsp-shim.sh is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
+    expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/guest-wsp-shim.sh is behind the protocol. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+  });
+
   it("puts every file the daemon inside a machine writes for itself under one folder, by the names a joined computer uses", () => {
     // A workspace on a computer somebody joined has this folder of its own bound over the computer's, so a path
     // that slipped out of it would be written into a /root every workspace there shares: the second workspace's
     // deploy would rewrite the first one's token.
-    for (const path of [DAEMON_TOKEN_PATH, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, OPEN_SOCKET_PATH, DAEMON_ROOTS_PATH]) {
+    for (const path of [DAEMON_TOKEN_PATH, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, OPEN_SOCKET_PATH, DAEMON_ROOTS_PATH, GUEST_DAEMON_SOCKET_PATH]) {
       expect(path.startsWith(`${GUEST_WSP_HOME}/`), path).toBe(true);
     }
     // And they are the names a daemon uses under the home of a computer somebody joined: one daemon, one rule.

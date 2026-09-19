@@ -29,12 +29,29 @@ use crate::{bring_back, frame_text as text, fs, git, hosts, paths, Ctx, Listener
 
 type Detach = Box<dyn FnOnce() + Send>;
 
-/// Which road a socket came in on: dialled by a client of this machine, or opened outward by this place to its
-/// host. The leave op and every machine op but the two read-only ones are the link's alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which road a socket came in on: dialled by a client of this machine, opened outward by this place to its host,
+/// or opened inside one workspace this computer runs, on that workspace's own socket. The leave op and every
+/// machine op but the two read-only ones are the link's alone, and a socket inside a workspace reaches nothing of
+/// the computer that workspace sits on.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Road {
     Inbound,
     Link,
+    Workspace(String),
+}
+
+/// Which of the guest road's five ops a socket on this road serves. A guest process lives inside a machine wsp
+/// forked and inside a workspace on a computer somebody owns, so its two ops are served on the inbound socket of
+/// a daemon inside a machine and on a workspace's own socket, and nowhere else. The host is on the inbound socket
+/// of a daemon inside a machine and on the other end of the link of a place's daemon, so its three are served
+/// there: a client holding the token of a computer somebody owns cannot take the sessions its host watches.
+fn guest_road_serves(road: &Road, place: bool, op: &str) -> bool {
+    let guests = matches!(op, "guest.open" | "guest.send");
+    match road {
+        Road::Workspace(_) => guests,
+        Road::Inbound => !place,
+        Road::Link => place && !guests,
+    }
 }
 
 /// What one authed socket holds between frames.
@@ -67,6 +84,14 @@ impl Conn {
             detaches: Mutex::new(Some(Vec::new())),
             proc_watch: Mutex::new(None),
             guest: Mutex::new(None),
+        }
+    }
+
+    /// The workspace this socket was opened inside; none for every other road.
+    pub(crate) fn workspace(&self) -> Option<String> {
+        match &self.road {
+            Road::Workspace(id) => Some(id.clone()),
+            Road::Inbound | Road::Link => None,
         }
     }
 
@@ -186,6 +211,16 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         }
     }
     let op = frame.get("op").and_then(Value::as_str);
+    if matches!(conn.road, Road::Workspace(_)) {
+        // A socket inside a workspace answers ping and the guest's own two ops and refuses every other op this
+        // daemon knows, the machine ops and the two place ops among them: nothing inside a workspace reads the
+        // computer it sits on, lists its neighbours or drives anything there.
+        let served = op == Some("ping") || op.is_some_and(|name| guest_road_serves(&conn.road, ctx.is_place(), name));
+        let known = op.is_some_and(|name| DAEMON_OPS.contains(&name) || MACHINE_OPS.contains(&name));
+        if known && !served {
+            return Outgoing::Text(refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD));
+        }
+    }
     if conn.road == Road::Link {
         // The road that opened this socket answers its own ops before the daemon's switch sees them.
         match op {
@@ -199,7 +234,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
             Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
             _ => {}
         }
-    } else if let Some(name) = op.filter(|name| MACHINE_OPS_ON_ANY_ROAD.contains(name)) {
+    } else if let Some(name) = op.filter(|name| conn.road == Road::Inbound && MACHINE_OPS_ON_ANY_ROAD.contains(name)) {
         // A socket that dialled in holds this daemon's token, so a person at this computer may ask it what it is
         // running and how one workspace is doing. Both only read; the rest of the machine ops stay the link's.
         return Outgoing::Text(machine_answer(ctx, id, name, &frame).await);
@@ -216,9 +251,9 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         Some(name) if name == "place.leave" || name == "place.update" || MACHINE_OPS.contains(&name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
-        // The guest ops are the inbound road's: a guest runs on a machine wsp forked, never on a computer whose
-        // daemon dialled out to its host.
-        Some(name) if conn.road == Road::Link && GUEST_OPS.contains(&name) => {
+        // The guest ops are the roads table's: a guest's two where a guest process lives, the host's three where
+        // the host is, and every other socket refused each of them.
+        Some(name) if GUEST_OPS.contains(&name) && !guest_road_serves(&conn.road, ctx.is_place(), name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
         Some(
@@ -728,6 +763,20 @@ mod tests {
         conn_on(scope, Road::Inbound)
     }
 
+    /// A daemon of a computer somebody owns: the place file is what the roads table reads, and on this platform
+    /// it turns no runtime on, so the bench is the switch alone.
+    fn place_bench() -> Bench {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "t").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.root = Some(root.path().to_path_buf());
+        options.roots_path = Some(root.path().join("roots"));
+        options.manifest_path = Some(root.path().join("manifest.json"));
+        options.place_file = Some(root.path().join("place.json"));
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()), _token: token, root }
+    }
+
     fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
@@ -1093,6 +1142,109 @@ mod tests {
             reply(&b, &inbound, json!({"id": 3, "op": "guest.open", "kind": "cli", "token": "", "argv": [], "cwd": "/root"})).await;
         assert_eq!(opened["ok"], json!(true));
         assert!(opened["session"].is_string(), "{opened}");
+    }
+
+    /// The roads table, read on every road a socket of this daemon can come in on. A process inside a workspace
+    /// opens a session and speaks on it and reaches nothing else of the computer that workspace sits on: not the
+    /// listing of its neighbours, not one of their readings, not a pty, not an exec, not the guest sessions the
+    /// host watches.
+    #[tokio::test]
+    async fn a_socket_inside_a_workspace_serves_the_guests_two_ops_and_ping_and_refuses_every_other() {
+        let b = place_bench();
+        let (inside, _rx) = conn_on(None, Road::Workspace("wsp-a".to_owned()));
+        assert_eq!(reply(&b, &inside, json!({"id": 1, "op": "ping"})).await, json!({"id": 1, "ok": true}));
+        let opened = reply(&b, &inside, json!({"id": 2, "op": "guest.open", "kind": "cli", "token": "", "argv": [], "cwd": "/root"})).await;
+        assert_eq!(opened["ok"], json!(true), "{opened}");
+        // The second of the guest's two: this socket holds a session now, so the send is answered rather than
+        // turned away at the road.
+        assert_eq!(reply(&b, &inside, json!({"id": 3, "op": "guest.send", "message": {}})).await, json!({"id": 3, "ok": true}));
+        let refused = |id: i64| json!({"id": id, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD});
+        for op in DAEMON_OPS.iter().filter(|op| !matches!(**op, "ping" | "guest.open" | "guest.send")) {
+            assert_eq!(reply(&b, &inside, json!({"id": 4, "op": op, "session": "g0", "message": {}})).await, refused(4), "{op}");
+        }
+        for op in MACHINE_OPS {
+            assert_eq!(reply(&b, &inside, json!({"id": 5, "op": op, "machineId": "wsp-b"})).await, refused(5), "{op}");
+        }
+        // The two the daemon answers on every other road, named: a process inside a workspace lists no workspace
+        // of this computer and reads no neighbour's metrics.
+        for op in ["machine.list", "machine.metrics", "place.leave", "place.update"] {
+            assert_eq!(reply(&b, &inside, json!({"id": 6, "op": op, "machineId": "wsp-b"})).await, refused(6), "{op}");
+        }
+    }
+
+    /// The other three rows of the same table: the host's three ops belong to the link of a computer's own daemon
+    /// and to the inbound socket of a daemon inside a machine, and a place daemon's own inbound socket, which a
+    /// person at that computer holds its token for, serves none of the five.
+    #[tokio::test]
+    async fn the_guest_roads_are_where_a_guest_lives_and_where_the_host_is() {
+        let b = place_bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        for op in ["guest.watch", "guest.reply", "guest.close"] {
+            let said = reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}})).await;
+            assert_ne!(said["code"], json!("forbidden"), "{op}: {said}");
+        }
+        for op in ["guest.open", "guest.send"] {
+            assert_eq!(
+                reply(&b, &link, json!({"id": 2, "op": op, "kind": "cli", "token": "", "argv": [], "cwd": "/root", "message": {}})).await,
+                json!({"id": 2, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
+                "{op}"
+            );
+        }
+        let (inbound, _rx2) = conn_on(None, Road::Inbound);
+        for op in GUEST_OPS {
+            assert_eq!(
+                reply(
+                    &b,
+                    &inbound,
+                    json!({"id": 3, "op": op, "kind": "cli", "token": "", "argv": [], "cwd": "/root", "session": "g0", "message": {}})
+                )
+                .await,
+                json!({"id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
+                "{op}"
+            );
+        }
+    }
+
+    /// The workspace a session belongs to is the daemon's own reading of which socket it arrived on, and it rides
+    /// every frame of that session up to the host. A reply reaches the socket that opened the session and no
+    /// other, so a session of one workspace can never be read or answered as another's.
+    #[tokio::test]
+    async fn a_session_carries_the_workspace_its_socket_was_inside_and_reaches_that_socket_alone() {
+        let b = place_bench();
+        let (host, mut watching) = conn_on(None, Road::Link);
+        assert_eq!(reply(&b, &host, json!({"id": 1, "op": "guest.watch"})).await["ok"], json!(true));
+        let open = json!({"id": 2, "op": "guest.open", "kind": "cli", "token": "dev-1.tok", "argv": ["threads"], "cwd": "/root"});
+        let (a_side, mut a_events) = conn_on(None, Road::Workspace("wsp-a".to_owned()));
+        let (b_side, mut b_events) = conn_on(None, Road::Workspace("wsp-b".to_owned()));
+        let a = reply(&b, &a_side, open.clone()).await["session"].as_str().unwrap().to_owned();
+        let other = reply(&b, &b_side, open).await["session"].as_str().unwrap().to_owned();
+        let mut opened = Vec::new();
+        for _ in 0..2 {
+            let frame: Value = serde_json::from_str(watching.recv().await.unwrap().text()).unwrap();
+            opened.push((frame["session"].clone(), frame["machineId"].clone()));
+        }
+        opened.sort_by_key(|(session, _)| session.to_string());
+        assert_eq!(opened, [(json!(a), json!("wsp-a")), (json!(other), json!("wsp-b"))]);
+        // The message a guest sends rides up with the same name on it.
+        assert_eq!(reply(&b, &a_side, json!({"id": 3, "op": "guest.send", "message": {"hello": 1}})).await["ok"], json!(true));
+        let said: Value = serde_json::from_str(watching.recv().await.unwrap().text()).unwrap();
+        assert_eq!(said, json!({"type": "guest.message", "session": a, "message": {"hello": 1}, "machineId": "wsp-a"}));
+        // And the host's answer goes to the socket that opened that session: the other workspace hears nothing.
+        let answered = json!({"id": 4, "op": "guest.reply", "session": a, "message": {"exit": 3}});
+        assert_eq!(reply(&b, &host, answered).await["ok"], json!(true));
+        let down: Value = serde_json::from_str(a_events.recv().await.unwrap().text()).unwrap();
+        assert_eq!(down, json!({"type": "guest.message", "session": a, "message": {"exit": 3}, "machineId": "wsp-a"}));
+        assert!(b_events.try_recv().is_err(), "a session of one workspace reached another's socket");
+        // A session opened on a daemon inside a machine names no workspace at all: that machine is the one the
+        // host dialled.
+        let b2 = bench();
+        let (fork_host, mut fork_watching) = conn(None);
+        reply(&b2, &fork_host, json!({"id": 1, "op": "guest.watch"})).await;
+        let (inbound, _rx) = conn(None);
+        reply(&b2, &inbound, json!({"id": 2, "op": "guest.open", "kind": "cli", "token": "", "argv": [], "cwd": "/root"})).await;
+        let frame: Value = serde_json::from_str(fork_watching.recv().await.unwrap().text()).unwrap();
+        assert_eq!(frame["type"], "guest.opened");
+        assert_eq!(frame.get("machineId"), None, "{frame}");
     }
 
     #[tokio::test]
