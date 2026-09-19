@@ -1247,7 +1247,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
     // A refusal thrown past a runtime this start built leaves the daemon that listing the workspaces dialled and
     // the timers behind it running, and the process stays up on them after the sentence is printed. A runtime a
     // caller handed in is that caller's to close.
-    if (opts.runtime === undefined) await rt.close();
+    if (opts.runtime === undefined) await rt.close().catch(() => {});
     throw e;
   }
 }
@@ -1786,9 +1786,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
-      // A host already serving this state file is read first of all: before this build, the sentence came after the
-      // ports had been stepped, the roots file rewritten and a daemon of this start's own started against the home
-      // the other host serves, and the shell never came back.
+      // The lock is read before a port is stepped, a key is read or a daemon is dialled: each of those writes under
+      // the home the other host is serving, and a start that is going to be refused must leave it as it found it.
       refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
       // A state file this computer's own manager is registered to serve is that service's: a host started here
       // would be a second one on it, of whichever build this line came from, which is how a state file was

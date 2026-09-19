@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
-import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
+import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
 /** Who a store in this file says wrote its file: every caller names a build, and this one is the suite. */
@@ -131,6 +131,26 @@ describe("the shape a state file was written in", () => {
     expect(await first.keys("workspaces")).toEqual([]);
     await first.put("workspaces", "a", { id: "a" });
     expect(await first.get("workspaces", "a")).toEqual({ id: "a" });
+  });
+
+  it("refuses a file whose bytes parse and are no state file, naming what it holds, and leaves its bytes alone", async () => {
+    // Every top-level name of a state file is a collection of documents by id, so a number, a string, a list or
+    // null leaves nothing to read records out of; each read as an empty store, and the next save wrote over it.
+    for (const held of [3, null, [{ id: "a" }], "state"]) {
+      const path = join(dir, `not-a-state-${typeof held}-${Array.isArray(held) ? "list" : String(held)}.json`);
+      writeFileSync(path, JSON.stringify(held));
+      const before = readFileSync(path, "utf8");
+      const store = jsonFileStore(path, writer);
+      const refusal = stateNotAnObjectLine(path, held);
+      await expect(store.get("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.list("workspaces")).rejects.toThrow(refusal);
+      await expect(store.keys("workspaces")).rejects.toThrow(refusal);
+      await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
+      await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
+      await expect(store.shape()).rejects.toThrow(refusal);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
   });
 
   it("refuses every read and write of a file whose shape document does not parse, and leaves its bytes alone", async () => {

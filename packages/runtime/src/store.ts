@@ -39,11 +39,19 @@ const shapeNow = (writer: StateWriter): StateShape => ({ shape: STATE_SHAPE, ...
 export const stateWrittenByNewerLine = (statePath: string, wrote: StateShape): string =>
   `${statePath} was written by a newer wsp (state shape ${wrote.shape}; this wsp reads ${STATE_SHAPE}; written ${wrote.at} by ${stateWriterWords(wrote)}): run that wsp, or move the file aside`;
 
-/** Why a host will not read a state file that is there and does not parse: the records are still in it, and a read
- * that answered an empty store would have the next save write one record and this build's document over all of
- * them. A file that is not there is not this: that is a fresh home, which reads empty and writes at its first save. */
+/** Why a host will not read a state file that is there and is not one this build can read, whether its bytes do not
+ * parse or what they parse to is no object of collections: whatever is in it is still in it, and a read that
+ * answered an empty store would have the next save write one record and this build's document over all of it. A
+ * file that is not there is not this: that is a fresh home, which reads empty and writes at its first save. */
 export const stateUnreadableLine = (statePath: string, why: string): string =>
-  `${statePath} does not parse as JSON (${why}), so no wsp can read the records in it: move the file aside, or put back a copy a wsp wrote`;
+  `${statePath} does not read as a state file (${why}), so no wsp can read the records in it: move the file aside, or put back a copy a wsp wrote`;
+
+/** What a file holds where a state file holds an object, in the words its refusal names it by. */
+const jsonKind = (held: unknown): string => (Array.isArray(held) ? "a list" : held === null ? "null" : `a ${typeof held}`);
+
+/** The same refusal for a file whose bytes parse and are no state: every top-level name of a state file is a
+ * collection of documents by id, so a number, a string, a list or null leaves nothing to read them out of. */
+export const stateNotAnObjectLine = (statePath: string, held: unknown): string => stateUnreadableLine(statePath, `it holds ${jsonKind(held)} where every state file is an object of collections`);
 
 /** Why a host will not read a state file whose shape document is not one: the document is what says which build
  * wrote the file and in which shape its records are, so a key that is present and unreadable leaves no reading of
@@ -89,9 +97,9 @@ export function memoryStore(): Store {
 
 export function jsonFileStore(path: string, writer: StateWriter): Store {
   /** The file as it stands: its collections, and the shape document apart from them. A file that is not there is
-   * an empty store, which is the first wsp up on a fresh home; a file that is there and cannot be read whole, its
-   * bytes or its shape document, is refused here, before a read answers anything and before a save could write one
-   * record and this build's document over records nothing read. */
+   * an empty store, which is the first wsp up on a fresh home; a file that is there and is no state this build can
+   * read, its bytes, what they parse to or its shape document, is refused here, before a read answers anything and
+   * before a save could write one record and this build's document over records nothing read. */
   const read = (): { data: Data; wrote?: StateShape } => {
     let text: string;
     try {
@@ -100,13 +108,14 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
       if ((e as { code?: string }).code === "ENOENT") return { data: {} };
       throw e;
     }
-    let held: Record<string, unknown> | null;
+    let held: unknown;
     try {
-      held = JSON.parse(text) as Record<string, unknown> | null;
+      held = JSON.parse(text);
     } catch (e) {
       throw new Error(stateUnreadableLine(path, e instanceof Error ? e.message : String(e)));
     }
-    const { [STATE_SHAPE_KEY]: document, ...collections } = held ?? {};
+    if (typeof held !== "object" || held === null || Array.isArray(held)) throw new Error(stateNotAnObjectLine(path, held));
+    const { [STATE_SHAPE_KEY]: document, ...collections } = held as Record<string, unknown>;
     if (document === undefined) return { data: collections as Data };
     const wrote = StateShape.safeParse(document);
     if (!wrote.success) throw new Error(stateShapeUnreadableLine(path, document));
