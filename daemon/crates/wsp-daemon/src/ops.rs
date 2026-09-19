@@ -19,6 +19,7 @@ use wsp_frames::{
 };
 
 use crate::exec::{run_exec, ExecOptions};
+use crate::git::Asked::{Read as Reads, Work as Works};
 use crate::guest::SESSION_TAKEN;
 use crate::manifest::RecordInput;
 use crate::paths::OpError;
@@ -259,6 +260,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         Some(
             name @ ("pty.create"
             | "pty.attach"
+            | "pty.detach"
             | "pty.write"
             | "pty.resize"
             | "pty.kill"
@@ -456,7 +458,7 @@ pub(crate) fn from_runtime(e: wsp_runtime::ops::OpError) -> OpError {
 /// reading it has no working directory inside that workspace and a git run there starts in the folder the frame
 /// names; then it is held to the wire's own plain-path rule and resolved against the rootfs, so `..` and a symlink
 /// that leaves the workspace are refused exactly as a path that leaves a root is.
-async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str, asked: git::Asked) -> Result<(Runner, PathBuf, PathBuf), OpError> {
     let Some(machine) = machine else {
         let at = locate(ctx, requested).await?;
         return Ok((Runner::Here(git::here::Here::new()), at.clone(), at));
@@ -464,33 +466,91 @@ async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runn
     if !Path::new(requested).is_absolute() {
         return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{requested} is not an absolute path inside {machine}")));
     }
-    workspace_road(ctx, machine, requested).await
+    workspace_road(ctx, machine, requested, asked).await
 }
 
 /// The same for one workspace this computer runs: the path under its rootfs, read on this side, and the runner
 /// that runs a program inside it.
 #[cfg(target_os = "linux")]
-async fn workspace_road(ctx: &Ctx, machine: &str, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+async fn workspace_road(ctx: &Ctx, machine: &str, requested: &str, asked: git::Asked) -> Result<(Runner, PathBuf, PathBuf), OpError> {
     let ops = workspaces_of(ctx, machine)?;
     let rootfs = ops.rootfs_of_running(machine).map_err(from_runtime)?;
     // The refusals name the path as the frame gave it: a person reads the folder as the workspace sees it, and
     // where this computer keeps that workspace's files is no part of the answer.
     let joined = wsp_runtime::bundle::inside(&rootfs, requested).map_err(|_| paths::outside_root(requested))?;
-    let asked = requested.to_owned();
-    let under = fs::blocking(move || paths::resolve_inside_named(&[rootfs], &joined.to_string_lossy(), &asked)).await?;
-    Ok((Runner::Inside(git::inside::Inside::new(ops, machine)), under, PathBuf::from(requested)))
+    let named = requested.to_owned();
+    let under = fs::blocking(move || paths::resolve_inside_named(&[rootfs], &joined.to_string_lossy(), &named)).await?;
+    Ok((Runner::Inside(git::inside::Inside::new(ops, machine, asked)), under, PathBuf::from(requested)))
+}
+
+/// A pty inside one workspace this computer runs: the shell opens in the folder the frame names, which is
+/// absolute and is asked for, since this daemon has no working directory inside a workspace and a pty without one
+/// would open a shell in the computer's own home, which every workspace has bound in. The pty is held beside this
+/// daemon's own and every op on it names the same workspace.
+#[cfg(target_os = "linux")]
+async fn pty_inside(
+    ctx: &Arc<Ctx>,
+    id: Option<RequestId>,
+    machine: &str,
+    cols: Option<NonZeroU16>,
+    rows: Option<NonZeroU16>,
+    shell: Option<String>,
+    cwd: String,
+) -> String {
+    let opened = async {
+        let ops = workspaces_of(ctx, machine)?;
+        let (cols, rows) = (cols.map_or(80, NonZeroU16::get), rows.map_or(24, NonZeroU16::get));
+        let running = ops.pty_in(machine, cols, rows, &cwd, shell.as_deref()).await.map_err(from_runtime)?;
+        let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).take_inside(machine, cols, rows, running);
+        let reply = PtyCreateReply { pty_id: spawned.id.clone(), pid: spawned.pid };
+        tokio::spawn(pump(Arc::clone(ctx), spawned));
+        Ok(reply)
+    };
+    answer(id, opened.await)
 }
 
 /// And on a computer whose daemon runs no workspace at all, which is every machine this daemon is inside: the
 /// missing refusal, the same one a workspace that is gone answers.
 #[cfg(not(target_os = "linux"))]
-async fn workspace_road(_ctx: &Ctx, machine: &str, _requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+async fn pty_inside(
+    _ctx: &Arc<Ctx>,
+    id: Option<RequestId>,
+    machine: &str,
+    _cols: Option<NonZeroU16>,
+    _rows: Option<NonZeroU16>,
+    _shell: Option<String>,
+    _cwd: String,
+) -> String {
+    answer::<Empty>(id, Err(no_such_workspace(machine)))
+}
+
+/// What a pty for a workspace with no folder named is refused with: the frame says which workspace, and the host
+/// fills the folder in from the workspace's own checkout before it sends one.
+fn no_folder(machine: &str) -> String {
+    format!("a pty inside {machine} needs the folder it opens in")
+}
+
+/// And on a computer whose daemon runs no workspace at all, which is every machine this daemon is inside: the
+/// missing refusal, the same one a workspace that is gone answers.
+#[cfg(not(target_os = "linux"))]
+async fn workspace_road(_ctx: &Ctx, machine: &str, _requested: &str, _asked: git::Asked) -> Result<(Runner, PathBuf, PathBuf), OpError> {
     Err(no_such_workspace(machine))
 }
 
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
     match op {
-        DaemonOp::PtyCreate { cols, rows, shell, cwd, env } => {
+        DaemonOp::PtyCreate { cols, rows, shell, cwd, env, machine_id } => {
+            if let Some(machine) = machine_id {
+                // The folder is the frame's and absolute, whatever workspace it named and whether this computer
+                // runs one: a pty for a workspace with no folder would open a shell in the computer's own home,
+                // which every workspace here has bound in, so it is a bad request before anything is looked up.
+                let Some(cwd) = cwd else { return refuse(id, DaemonErrorCode::BadRequest, no_folder(&machine)) };
+                if !Path::new(&cwd).is_absolute() {
+                    let said = format!("{cwd} is not an absolute path inside {machine}");
+                    return refuse(id, DaemonErrorCode::BadRequest, said);
+                }
+                return pty_inside(ctx, id, &machine, cols, rows, shell, cwd).await;
+            }
             let opts = PtyCreateOpts { cols: cols.map(NonZeroU16::get), rows: rows.map(NonZeroU16::get), shell, cwd, env };
             let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).create(&opts, &process_env(), passwd_row().as_ref());
             match spawned {
@@ -502,12 +562,14 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 Err(e) => fail(id, e.to_string()),
             }
         }
-        DaemonOp::PtyAttach { pty_id } => {
-            let key = ctx.next_key();
+        DaemonOp::PtyAttach { pty_id, machine_id } => {
+            // Keyed by the socket rather than by the attach, so a second attach on the same socket replaces the
+            // first and the detach below takes off what this socket holds.
+            let key = conn.key;
             let listener = || Listener { key, out: conn.out.clone() };
             let live = {
                 let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(session) = ptys.get_mut(&pty_id) else { return fail(id, no_such_pty(&pty_id)) };
+                let Some(session) = ptys.of(&pty_id, machine_id.as_deref()) else { return fail(id, no_such_pty(&pty_id)) };
                 session.attach(listener());
                 session.on_exit(listener());
                 session.exited.is_none().then_some(session.pid)
@@ -525,30 +587,53 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             }));
             text(&Reply::new(id, PtyAttachReply { pty_id }))
         }
-        DaemonOp::PtyWrite { pty_id, data } => match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&pty_id) {
-            Some(session) => {
-                session.write(&data);
-                ok(id)
-            }
-            None => fail(id, no_such_pty(&pty_id)),
-        },
-        DaemonOp::PtyResize { pty_id, cols, rows } => match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&pty_id) {
-            Some(session) => match session.resize(cols.get(), rows.get()) {
-                Ok(()) => ok(id),
-                Err(e) => fail(id, e.to_string()),
-            },
-            None => fail(id, no_such_pty(&pty_id)),
-        },
-        DaemonOp::PtyKill { pty_id } => {
+        DaemonOp::PtyDetach { pty_id, machine_id } => {
             let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
-            if ptys.get_mut(&pty_id).is_none() {
+            let Some(session) = ptys.of(&pty_id, machine_id.as_deref()) else { return fail(id, no_such_pty(&pty_id)) };
+            session.detach(conn.key);
+            drop(ptys);
+            ctx.modes.detach(&pty_id, conn.key);
+            ok(id)
+        }
+        DaemonOp::PtyWrite { pty_id, data, machine_id } => {
+            let written = match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).of(&pty_id, machine_id.as_deref()) {
+                Some(session) => {
+                    session.write(&data);
+                    true
+                }
+                None => false,
+            };
+            if !written {
+                return fail(id, no_such_pty(&pty_id));
+            }
+            // A person typing into a workspace is that workspace working, whatever the shell does with it.
+            if let Some(machine) = &machine_id {
+                ctx.workspace_touched(machine);
+            }
+            ok(id)
+        }
+        DaemonOp::PtyResize { pty_id, cols, rows, machine_id } => {
+            match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).of(&pty_id, machine_id.as_deref()) {
+                Some(session) => match session.resize(cols.get(), rows.get()) {
+                    Ok(()) => ok(id),
+                    Err(e) => fail(id, e.to_string()),
+                },
+                None => fail(id, no_such_pty(&pty_id)),
+            }
+        }
+        DaemonOp::PtyKill { pty_id, machine_id } => {
+            let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
+            if ptys.of(&pty_id, machine_id.as_deref()).is_none() {
                 return fail(id, no_such_pty(&pty_id));
             }
             ctx.modes.remove(&pty_id);
             ptys.destroy(&pty_id);
             ok(id)
         }
-        DaemonOp::PtyList => text(&Reply::new(id, PtyListReply { ptys: ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list() })),
+        DaemonOp::PtyList { machine_id } => {
+            let ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list(machine_id.as_deref());
+            text(&Reply::new(id, PtyListReply { ptys }))
+        }
         DaemonOp::Exec { cmd, timeout_ms, stdin } => {
             let env: Vec<_> = std::env::vars_os().collect();
             let opts = ExecOptions {
@@ -560,42 +645,42 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         }
         DaemonOp::FsList { path, gitignore, machine_id } => {
             let listed = async {
-                let (runner, under, at) = road(ctx, machine_id.as_deref(), &path).await?;
+                let (runner, under, at) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
                 fs::list_dir(under, &at, gitignore == Some(true), numbers::FS_LIST_CAP_ENTRIES, &runner).await
             };
             answer(id, listed.await)
         }
         DaemonOp::FsRead { path, encoding, machine_id } => {
             let read = async {
-                let (_, under, _) = road(ctx, machine_id.as_deref(), &path).await?;
+                let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
                 fs::read_file_bounded(under, encoding.unwrap_or(FsReadEncoding::Utf8), numbers::FS_READ_CAP_BYTES).await
             };
             answer(id, read.await)
         }
         DaemonOp::GitStatus { cwd, machine_id } => {
             let read = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 git::git_status(&runner, &at).await
             };
             answer(id, read.await)
         }
         DaemonOp::GitDiff { cwd, scope, path, machine_id } => {
             let diff = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 git::git_diff(&runner, &at, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await
             };
             answer(id, diff.await)
         }
         DaemonOp::GitPush { cwd, base, machine_id } => {
             let pushed = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
                 bring_back::push(&runner, &at, base.as_deref()).await
             };
             answer(id, pushed.await)
         }
         DaemonOp::GitPr { cwd, base, title, body, machine_id } => {
             let opened = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
                 let (remote, remote_url) = bring_back::remote_url(&runner, &at).await?;
                 let base = bring_back::base_of(&runner, &at, &remote, base.as_deref()).await?;
                 let branch = bring_back::head_for(&runner, &at, &base).await?;
@@ -606,7 +691,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         }
         DaemonOp::GitPrState { cwd, machine_id } => {
             let read = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd).await?;
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
                 let branch = bring_back::branch_at(&runner, &at).await?;
                 let (_, remote_url) = bring_back::remote_url(&runner, &at).await?;
                 let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
@@ -840,6 +925,7 @@ mod tests {
             "place.update",
             "pty.create",
             "pty.attach",
+            "pty.detach",
             "pty.write",
             "pty.resize",
             "pty.kill",
@@ -1245,6 +1331,59 @@ mod tests {
         let frame: Value = serde_json::from_str(fork_watching.recv().await.unwrap().text()).unwrap();
         assert_eq!(frame["type"], "guest.opened");
         assert_eq!(frame.get("machineId"), None, "{frame}");
+    }
+
+    /// The pty ops for a workspace, on a daemon that runs none, which is every machine wsp forked and this bench.
+    /// What the frame has to carry is read before the workspace is looked up, since a pty with no folder would
+    /// open a shell in the computer's own home, which every workspace here has bound in; and a workspace this
+    /// daemon does not run is the one missing refusal every other op answers for one.
+    #[tokio::test]
+    async fn a_pty_for_a_workspace_names_its_folder_and_a_workspace_this_daemon_runs() {
+        let b = bench();
+        let (c, _rx) = conn(None);
+        // No folder at all, and one that is not absolute: a bad request before anything is looked up.
+        let none = reply(&b, &c, json!({"id": 1, "op": "pty.create", "machineId": "wsp-x"})).await;
+        assert_eq!(none, json!({"id": 1, "ok": false, "code": "bad-request", "error": "a pty inside wsp-x needs the folder it opens in"}));
+        let relative = reply(&b, &c, json!({"id": 2, "op": "pty.create", "machineId": "wsp-x", "cwd": "project"})).await;
+        assert_eq!(relative, json!({"id": 2, "ok": false, "code": "bad-request", "error": "project is not an absolute path inside wsp-x"}));
+        // And with both: the workspace, which this daemon does not run.
+        let gone = reply(&b, &c, json!({"id": 3, "op": "pty.create", "machineId": "wsp-x", "cwd": "/root/project"})).await;
+        assert_eq!(gone, json!({"id": 3, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
+        // Every other pty op naming a workspace answers for a pty of that workspace, and this daemon holds none:
+        // a pane of one workspace never reaches a pty of another or of the computer itself.
+        for op in ["pty.attach", "pty.write", "pty.resize", "pty.detach", "pty.kill"] {
+            let said =
+                reply(&b, &c, json!({"id": 4, "op": op, "ptyId": "pty_1", "machineId": "wsp-x", "data": "x", "cols": 80, "rows": 24}))
+                    .await;
+            assert_eq!(said, json!({"id": 4, "ok": false, "error": "no such pty: pty_1"}), "{op}");
+        }
+        // And the listing is the machine's the frame named: this daemon's own where it named none, and a
+        // workspace's where it did, which here is empty either way.
+        assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.list"})).await, json!({"id": 5, "ok": true, "ptys": []}));
+        assert_eq!(reply(&b, &c, json!({"id": 6, "op": "pty.list", "machineId": "wsp-x"})).await, json!({"id": 6, "ok": true, "ptys": []}));
+    }
+
+    /// A pty of this computer's own is not reachable by naming a workspace, and the shell the daemon opened for
+    /// itself is listed for this computer and for no workspace.
+    #[tokio::test]
+    async fn a_pty_of_this_computer_is_no_workspaces_pty() {
+        let b = bench();
+        let (c, _rx) = conn(None);
+        let made = reply(&b, &c, json!({"id": 1, "op": "pty.create", "shell": "bash"})).await;
+        assert_eq!(made["ok"], json!(true), "{made}");
+        let pty_id = made["ptyId"].as_str().unwrap().to_owned();
+        for op in ["pty.attach", "pty.write", "pty.resize", "pty.detach", "pty.kill"] {
+            let said =
+                reply(&b, &c, json!({"id": 2, "op": op, "ptyId": &pty_id, "machineId": "wsp-a", "data": "x", "cols": 80, "rows": 24}))
+                    .await;
+            assert_eq!(said["error"], json!(format!("no such pty: {pty_id}")), "{op}");
+        }
+        let listed = reply(&b, &c, json!({"id": 3, "op": "pty.list"})).await;
+        assert_eq!(listed["ptys"].as_array().unwrap().len(), 1, "{listed}");
+        assert_eq!(listed["ptys"][0]["id"], json!(pty_id));
+        let inside = reply(&b, &c, json!({"id": 4, "op": "pty.list", "machineId": "wsp-a"})).await;
+        assert_eq!(inside, json!({"id": 4, "ok": true, "ptys": []}));
+        assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.kill", "ptyId": &pty_id})).await, json!({"id": 5, "ok": true}));
     }
 
     #[tokio::test]

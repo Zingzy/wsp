@@ -189,20 +189,55 @@ impl Scrollback {
     }
 }
 
+/// Where one pty was opened and how it is driven. A pty of this computer's own is a master this process holds,
+/// with a child to kill; one inside a workspace this computer runs is a broker behind an exec's pipes, resized by
+/// the size road the runtime hands back and killed by ending that broker. The two differ in nothing else: the
+/// same scrollback, the same listeners, the same frames.
+enum Road {
+    Here {
+        master: Box<dyn MasterPty + Send>,
+        killer: Box<dyn ChildKiller + Send + Sync>,
+    },
+    #[cfg(target_os = "linux")]
+    Inside(wsp_runtime::runtime::PtyInsideSize),
+}
+
+/// What a person types, on its way to the pty: a thread's feed for a master this process holds, a task's for a
+/// broker inside a workspace. Both take a chunk from whichever socket wrote it, without waiting.
+enum Typed {
+    Here(std_mpsc::Sender<Vec<u8>>),
+    Inside(mpsc::UnboundedSender<Vec<u8>>),
+}
+
+impl Typed {
+    fn send(&self, bytes: Vec<u8>) {
+        match self {
+            Typed::Here(feed) => {
+                let _ = feed.send(bytes);
+            }
+            Typed::Inside(feed) => {
+                let _ = feed.send(bytes);
+            }
+        }
+    }
+}
+
 pub(crate) struct Session {
     pub(crate) id: String,
     pub(crate) pid: u32,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
     pub(crate) exited: Option<Exit>,
+    /// The workspace this pty was opened inside, on a daemon that runs workspaces; none for this computer's own.
+    /// Every op on it names the same workspace, and one that names another is told there is no such pty.
+    pub(crate) machine: Option<String>,
     scrollback: Scrollback,
     listeners: Vec<Listener>,
     exit_listeners: Vec<Listener>,
-    /// The write thread's feed and the master: both go with the exit, so an exited pty holds its scrollback and
+    /// The way in and the way it is held: both go with the exit, so an exited pty holds its scrollback and
     /// nothing else until pty.kill, as node-pty closes its master 200 ms after the exit.
-    input: Option<std_mpsc::Sender<Vec<u8>>>,
-    master: Option<Box<dyn MasterPty + Send>>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    input: Option<Typed>,
+    road: Option<Road>,
 }
 
 fn pty_thread<F: FnOnce() + Send + 'static>(name: &str, f: F) -> io::Result<()> {
@@ -281,21 +316,24 @@ impl Session {
             cols,
             rows,
             exited: None,
+            machine: None,
             scrollback: Scrollback::default(),
             listeners: Vec::new(),
             exit_listeners: Vec::new(),
-            input: Some(input),
-            master: Some(pair.master),
-            killer,
+            input: Some(Typed::Here(input)),
+            road: Some(Road::Here { master: pair.master, killer }),
         };
         Ok((session, Spawned { id, pid, data, exit }))
     }
 
-    /// Replays the scrollback held so far as one frame, then streams what comes next.
+    /// Replays the scrollback held so far as one frame, then streams what comes next. A socket already listening
+    /// to this pty is replaced rather than added to: on a road where every pane of a computer rides one socket, a
+    /// reload of the app or a second window attaching the same pty would otherwise print every byte twice.
     pub(crate) fn attach(&mut self, listener: Listener) {
         if let Some(data) = self.scrollback.replay() {
             listener.out.send_event(&DaemonEvent::PtyData { pty_id: self.id.clone(), data });
         }
+        self.listeners.retain(|l| l.key != listener.key);
         self.listeners.push(listener);
     }
 
@@ -304,6 +342,7 @@ impl Session {
         if let Some(exit) = self.exited {
             listener.out.send_event(&exit_event(&self.id, exit));
         }
+        self.exit_listeners.retain(|l| l.key != listener.key);
         self.exit_listeners.push(listener);
     }
 
@@ -314,13 +353,19 @@ impl Session {
 
     pub(crate) fn write(&self, data: &str) {
         if let Some(input) = &self.input {
-            let _ = input.send(data.as_bytes().to_vec());
+            input.send(data.as_bytes().to_vec());
         }
     }
 
     pub(crate) fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
-        let master = self.master.as_ref().ok_or_else(|| io::Error::other(format!("{} has exited", self.id)))?;
-        master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(io::Error::other)?;
+        let road = self.road.as_ref().ok_or_else(|| io::Error::other(format!("{} has exited", self.id)))?;
+        match road {
+            Road::Here { master, .. } => {
+                master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(io::Error::other)?
+            }
+            #[cfg(target_os = "linux")]
+            Road::Inside(size) => size.resize(cols, rows).map_err(io::Error::other)?,
+        }
         self.cols = cols;
         self.rows = rows;
         Ok(())
@@ -328,7 +373,18 @@ impl Session {
 
     fn kill(&mut self) {
         self.listeners.clear();
-        let _ = self.killer.kill();
+        match &mut self.road {
+            Some(Road::Here { killer, .. }) => {
+                let _ = killer.kill();
+            }
+            // The broker inside holds the master, so ending it closes that terminal and the kernel hangs the
+            // shell on it up, as it does for a person's terminal that goes.
+            #[cfg(target_os = "linux")]
+            Some(Road::Inside(size)) => {
+                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(size.pid() as i32), nix::sys::signal::Signal::SIGKILL);
+            }
+            None => {}
+        }
     }
 
     fn deliver(&mut self, data: &str) {
@@ -336,6 +392,66 @@ impl Session {
         let frame = frame_text(&DaemonEvent::PtyData { pty_id: self.id.clone(), data: data.to_owned() });
         self.listeners.retain(|l| l.out.send_text(&frame));
     }
+}
+
+/// One pty inside a workspace this computer runs, held beside the daemon's own: the broker's pipes become the
+/// same two channels a master's threads feed, so everything past this point, the scrollback, the listeners, the
+/// mode watcher and the frames, is the one road for both kinds of pty.
+#[cfg(target_os = "linux")]
+fn spawn_inside(
+    id: String,
+    machine: &str,
+    cols: u16,
+    rows: u16,
+    mut running: wsp_runtime::runtime::PtyInsideRunning,
+) -> (Session, Spawned) {
+    let pid = running.pid();
+    let pipes = running.pipes();
+    let (helper, size) = running.apart();
+    let (data_tx, data) = mpsc::channel::<Vec<u8>>(PTY_QUEUE_CHUNKS);
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    if let Some((mut to_shell, mut from_shell)) = pipes {
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; READ_BUF_BYTES];
+            while let Ok(n) = tokio::io::AsyncReadExt::read(&mut from_shell, &mut buf).await {
+                if n == 0 || data_tx.send(buf[..n].to_vec()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        tokio::spawn(async move {
+            while let Some(bytes) = input_rx.recv().await {
+                if tokio::io::AsyncWriteExt::write_all(&mut to_shell, &bytes).await.is_err() {
+                    break;
+                }
+                let _ = tokio::io::AsyncWriteExt::flush(&mut to_shell).await;
+            }
+        });
+    }
+    let (exit_tx, exit) = oneshot::channel::<Exit>();
+    let mut helper = helper;
+    tokio::spawn(async move {
+        let ended = helper.wait().await;
+        let exit = match ended {
+            Ok(status) => Exit { code: status.code().unwrap_or(1), signal: None },
+            Err(_) => Exit { code: 1, signal: None },
+        };
+        let _ = exit_tx.send(exit);
+    });
+    let session = Session {
+        id: id.clone(),
+        pid,
+        cols,
+        rows,
+        exited: None,
+        machine: Some(machine.to_owned()),
+        scrollback: Scrollback::default(),
+        listeners: Vec::new(),
+        exit_listeners: Vec::new(),
+        input: Some(Typed::Inside(input_tx)),
+        road: Some(Road::Inside(size)),
+    };
+    (session, Spawned { id, pid, data, exit })
 }
 
 fn exit_event(pty_id: &str, exit: Exit) -> DaemonEvent {
@@ -357,17 +473,43 @@ impl PtyManager {
         Ok(spawned)
     }
 
+    /// One pty inside a workspace this computer runs, taken over from the runtime and held beside the rest.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn take_inside(&mut self, machine: &str, cols: u16, rows: u16, running: wsp_runtime::runtime::PtyInsideRunning) -> Spawned {
+        self.next_id += 1;
+        let id = format!("pty_{}", self.next_id);
+        let (session, spawned) = spawn_inside(id.clone(), machine, cols, rows, running);
+        self.sessions.insert(id, session);
+        spawned
+    }
+
     pub(crate) fn get_mut(&mut self, id: &str) -> Option<&mut Session> {
         self.sessions.get_mut(id)
     }
 
-    pub(crate) fn list(&self) -> Vec<PtyListEntry> {
-        let mut entries: Vec<&Session> = self.sessions.values().collect();
+    /// The pty by that name where it belongs to the machine the frame named: this computer's own where the frame
+    /// named none, and one workspace's where it named that workspace. A pty of another is no pty to this caller,
+    /// so no pane reaches a shell of a workspace it is not looking at, or of the computer itself.
+    pub(crate) fn of(&mut self, id: &str, machine: Option<&str>) -> Option<&mut Session> {
+        self.sessions.get_mut(id).filter(|held| held.machine.as_deref() == machine)
+    }
+
+    /// The ptys of the machine the frame named, and no other's: with a workspace named, that workspace's alone;
+    /// without one, this daemon's own alone.
+    pub(crate) fn list(&self, machine: Option<&str>) -> Vec<PtyListEntry> {
+        let mut entries: Vec<&Session> = self.sessions.values().filter(|s| s.machine.as_deref() == machine).collect();
         entries.sort_by_key(|s| s.id.trim_start_matches("pty_").parse::<u64>().unwrap_or(0));
         entries
             .into_iter()
             .map(|s| PtyListEntry { id: s.id.clone(), pid: s.pid, cols: s.cols, rows: s.rows, exited: s.exited.is_some() })
             .collect()
+    }
+
+    /// The pid and the name of every pty still running, whichever machine it belongs to: what labels a row of
+    /// this computer's own process list, since a pty inside a workspace is held here by a process on this
+    /// computer too, the broker that opened it.
+    pub(crate) fn labels(&self) -> Vec<(u32, String)> {
+        self.sessions.values().filter(|s| s.exited.is_none()).map(|s| (s.pid, s.id.clone())).collect()
     }
 
     pub(crate) fn destroy(&mut self, id: &str) {
@@ -410,12 +552,18 @@ pub(crate) async fn pump(ctx: Arc<Ctx>, spawned: Spawned) {
         if text.is_empty() {
             return;
         }
-        let cols = {
+        let (cols, machine) = {
             let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
             let Some(session) = ptys.get_mut(&id) else { return };
             session.deliver(&text);
-            usize::from(session.cols)
+            (usize::from(session.cols), session.machine.clone())
         };
+        // A shell printing inside a workspace is that workspace working, as bytes through a published port are:
+        // a person with a pane open and a build running in it is using it, and what is left printing with nobody
+        // reading is theirs to close.
+        if let Some(machine) = &machine {
+            ctx.workspace_touched(machine);
+        }
         for port in callback.feed(&text, Some(cols)).into_iter().filter_map(RelayPort::new) {
             ctx.broadcast(&DaemonEvent::CallbackPort { port });
         }
@@ -445,7 +593,7 @@ pub(crate) async fn pump(ctx: Arc<Ctx>, spawned: Spawned) {
     if let Some(session) = ptys.get_mut(&id) {
         session.exited = Some(exit);
         session.input = None;
-        session.master = None;
+        session.road = None;
         let frame = frame_text(&exit_event(&id, exit));
         session.exit_listeners.retain(|l| l.out.send_text(&frame));
     }

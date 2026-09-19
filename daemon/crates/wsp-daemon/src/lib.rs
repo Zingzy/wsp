@@ -276,6 +276,17 @@ impl Ctx {
         (self.log)(line);
     }
 
+    /// One workspace of this computer's is working, so its quiet clock starts over: what a pty inside it says on
+    /// every keystroke and every chunk it prints. Nothing on a daemon that runs no workspace.
+    pub(crate) fn workspace_touched(&self, machine: &str) {
+        #[cfg(target_os = "linux")]
+        if let Some(runtime) = &self.runtime {
+            runtime.touched(machine);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = machine;
+    }
+
     /// Whether this daemon is a computer's own rather than one inside a machine, which is what the guest roads
     /// table reads: the same fact the workspace runtime is opened on.
     pub(crate) fn is_place(&self) -> bool {
@@ -350,11 +361,8 @@ impl Ctx {
         // An exited pty's pid can be reused by a stranger; only live shells carry the label. Weak, since the sampler
         // lives inside the context it reads.
         let ctx = Arc::downgrade(self);
-        let ptys: proc::PtyPids = Arc::new(move || {
-            ctx.upgrade().map_or_else(Vec::new, |ctx| {
-                ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list().into_iter().filter(|p| !p.exited).map(|p| (p.pid, p.id)).collect()
-            })
-        });
+        let ptys: proc::PtyPids =
+            Arc::new(move || ctx.upgrade().map_or_else(Vec::new, |ctx| ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).labels()));
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
             ptys,

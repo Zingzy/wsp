@@ -2316,22 +2316,28 @@ async fn frames_daemon() -> FramesDaemon {
     // through. A daemon opened inside this process would otherwise run this test executable as its helper, and a
     // test binary answers an exec line by refusing its first flag.
     options.runtime_helper = Some(bin());
+    // A guest session with nobody watching it stands for ten minutes on a machine; a case cannot sit through
+    // that, and what it reads is the sentence the guest prints when the span runs out.
+    options.guest_unwatched_ms = Some(2_000);
     let daemon = wsp_daemon::Daemon::bind(options).await.unwrap();
     let addr = daemon.local_addr();
     tokio::spawn(daemon.run());
     FramesDaemon { addr, _token: token }
 }
 
-/// One authed socket on that daemon, one frame at a time.
+/// One authed socket on that daemon, one frame at a time, keeping every event that arrived while a reply was
+/// waited for: the daemon writes a handler's events ahead of its reply on the one channel, and a pane's bytes are
+/// exactly those events.
 struct FrameClient {
     ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     next_id: u64,
+    seen: Vec<Value>,
 }
 
 impl FrameClient {
     async fn connect(addr: std::net::SocketAddr) -> FrameClient {
         let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/")).await.unwrap();
-        let mut c = FrameClient { ws, next_id: 0 };
+        let mut c = FrameClient { ws, next_id: 0, seen: Vec::new() };
         assert_eq!(c.request("auth", json!({ "token": FRAMES_TOKEN })).await["ok"], true);
         c
     }
@@ -2353,11 +2359,45 @@ impl FrameClient {
                     if value.get("id") == Some(&json!(id)) {
                         return value;
                     }
+                    self.seen.push(value);
                 }
                 Some(Ok(_)) => continue,
                 other => panic!("the socket ended while {frame} was pending: {other:?}"),
             }
         }
+    }
+
+    /// The same, asserting the daemon took it.
+    async fn ok(&mut self, op: &str, params: Value) -> Value {
+        let said = self.request(op, params.clone()).await;
+        assert_eq!(said["ok"], json!(true), "{op} {params}: {said}");
+        said
+    }
+
+    /// Everything this socket has been pushed, up to now.
+    async fn listen(&mut self, span: Duration) {
+        use futures_util::StreamExt;
+        let deadline = tokio::time::Instant::now() + span;
+        while let Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) = tokio::time::timeout_at(deadline, self.ws.next()).await {
+            self.seen.push(serde_json::from_str(&t).unwrap());
+        }
+    }
+
+    /// What every pty.data event of one pty carried, in order.
+    fn pty_text(&self, pty_id: &str) -> String {
+        self.seen.iter().filter(|f| f["type"] == "pty.data" && f["ptyId"] == pty_id).filter_map(|f| f["data"].as_str()).collect()
+    }
+
+    /// Reads until that pty's text holds the word, or the wait runs out.
+    async fn printed_within(&mut self, pty_id: &str, word: &str, patience: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + patience;
+        while !self.pty_text(pty_id).contains(word) {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            self.listen(Duration::from_millis(100)).await;
+        }
+        true
     }
 }
 
@@ -2465,5 +2505,468 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
         (Some(false), Some(format!("workspace {id} is stopped").as_str())),
         "{asleep}"
     );
+    w.close().await;
+}
+
+/// A pty inside a workspace as a case drives it: what is typed into it, and everything it has printed, read on a
+/// task of its own so a wait here is on a word and never on a read that may not return.
+struct Pane {
+    input: tokio::process::ChildStdin,
+    printed: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl Pane {
+    fn open(input: tokio::process::ChildStdin, mut output: tokio::process::ChildStdout) -> Pane {
+        let printed = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let held = std::sync::Arc::clone(&printed);
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = tokio::io::AsyncReadExt::read(&mut output, &mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                held.lock().unwrap_or_else(|held| held.into_inner()).push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+        });
+        Pane { input, printed }
+    }
+
+    async fn typed(&mut self, line: &str) {
+        self.sent(format!("{line}\n").as_bytes()).await;
+    }
+
+    /// A write that fails is the road into the pty going, which is the shell or the broker gone: said here rather
+    /// than left as a torn pipe, since every read after it would give out for that one reason.
+    async fn sent(&mut self, bytes: &[u8]) {
+        let typed = tokio::io::AsyncWriteExt::write_all(&mut self.input, bytes).await;
+        let flushed = match typed {
+            Ok(()) => tokio::io::AsyncWriteExt::flush(&mut self.input).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = flushed {
+            panic!("the pane could not be typed into: {e}; it had read {:?}", self.text());
+        }
+    }
+
+    /// Whether the word is among what the pane has printed, within the wait.
+    async fn printed_within(&self, word: &str, patience: Duration) -> bool {
+        let deadline = Instant::now() + patience;
+        loop {
+            if self.text().contains(word) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    fn text(&self) -> String {
+        self.printed.lock().unwrap_or_else(|held| held.into_inner()).clone()
+    }
+}
+
+/// The terminal pane's road into a workspace on this computer, at its own end. The pty is opened inside the
+/// workspace by this binary's own broker, run as the command of a plain exec: the library's terminal road is not
+/// taken at all, since its detached tenant's seccomp load is refused by the kernel before any shell runs. What is
+/// proved here is that the pty is the workspace's and not the computer's, that a resize reaches the shell, that
+/// job control works, and that the exit comes back.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_pane_opens_a_shell_inside_the_workspace_on_a_pty_of_the_workspaces_own() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // What the workspace's own /dev holds, read through an exec, which is the road the pty is opened on: the
+    // terminal is made from these devices, so a run that got none says here whether the workspace had a devpts of
+    // its own to make it from and what may reach it.
+    let (code, reading, said) = w
+        .exec(
+            &id,
+            "ls -la /dev/pts /dev/ptmx; echo ---; (mount 2>/dev/null || cat /proc/self/mountinfo) | grep -E 'pts|devtmpfs'; echo ---; id; echo ---; grep -E '^(Seccomp|Seccomp_filters|CapEff|NoNewPrivs):' /proc/self/status",
+        )
+        .await;
+    eprintln!("what the workspace's own /dev reads:\n{reading}{said}");
+    assert_eq!(code, 0, "the reading of the workspace's /dev failed: {said}");
+
+    let opened = Instant::now();
+    let mut running = match w.ops.pty_in(&id, 100, 40, "/root", None).await {
+        Ok(running) => running,
+        // On its own line and whole: the sentence names which step gave out, how the helper ended and what it
+        // printed, which is what says whether this is a mount, a filter or the road itself.
+        Err(e) => panic!("no terminal after {} ms:\n{}", opened.elapsed().as_millis(), e.message),
+    };
+    eprintln!("pty inside: {} ms", opened.elapsed().as_millis());
+    let pid = running.pid();
+    let Some((input, output)) = running.pipes() else {
+        panic!("the pty handed no pipes over; {}", running.said().await);
+    };
+    let mut pane = Pane::open(input, output);
+
+    // Every word waited for below is one the shell has to print: a terminal echoes what is typed into it, so a
+    // marker that stood in the line as typed would be read back before the shell had run anything at all.
+    // The shell is inside: its host name is the workspace's, which is its id, and the computer's is not that. A
+    // pane that printed nothing is asked of the helper: the library writes the broker's pid the moment the tenant
+    // is made, so a tenant the kernel refuses after that is a pty that stands for a moment and says nothing.
+    pane.typed("hostname; echo mark-$((20+3))").await;
+    if !pane.printed_within("mark-23", Duration::from_secs(20)).await {
+        panic!("{}", gave_out("the shell's first line", &pane, &mut running, &id).await);
+    }
+    assert!(pane.text().contains(&id), "the shell is not inside the workspace: {:?}", pane.text());
+
+    // Its terminal is a device of the workspace's own devpts, which exists inside; the broker is a process of the
+    // workspace's cgroup, which is what says the pty is not the computer's. The name is read where it stands in
+    // the bytes: a pane carries the prompt and whatever the line editor writes around an answer, so the device is
+    // on a line of its own on no terminal worth the name.
+    pane.typed("tty; echo said-$((20+3))").await;
+    if !pane.printed_within("said-23", Duration::from_secs(20)).await {
+        panic!("{}", gave_out("the terminal's own name", &pane, &mut running, &id).await);
+    }
+    let Some(device) = device_of(&pane.text()) else {
+        panic!("{}", gave_out("a /dev/pts device in what the shell printed", &pane, &mut running, &id).await);
+    };
+    let (code, _, said) = w.exec(&id, &format!("test -c {device}")).await;
+    assert_eq!(code, 0, "{device} is no character device inside the workspace: {said}");
+    let at = format!("/proc/{pid}/cgroup");
+    let cgroup = match fs::read_to_string(&at) {
+        Ok(cgroup) => cgroup,
+        Err(e) => {
+            panic!("the broker's own cgroup could not be read at {at}: {e}; {}", gave_out("a cgroup", &pane, &mut running, &id).await)
+        }
+    };
+    assert!(cgroup.contains(&id), "the pty is held outside the workspace's cgroup: {cgroup}");
+
+    // The size the pane holds is the size the shell reads, before and after a resize, which travels as the size
+    // in the workspace's own file and a window-change signal to the broker.
+    pane.typed("stty size").await;
+    if !pane.printed_within("40 100", Duration::from_secs(20)).await {
+        panic!("{}", gave_out("the size the pane opened with", &pane, &mut running, &id).await);
+    }
+    if let Err(e) = running.resize(80, 24) {
+        panic!("the resize was not sent: {e}; {}", gave_out("a resize", &pane, &mut running, &id).await);
+    }
+    pane.typed("stty size; echo sized-$((20+3))").await;
+    if !pane.printed_within("sized-23", Duration::from_secs(20)).await {
+        panic!("{}", gave_out("the size after a resize", &pane, &mut running, &id).await);
+    }
+    assert!(pane.text().contains("24 80"), "the resize did not reach the shell: {:?}", pane.text());
+
+    // Job control: a background job brought to the foreground and interrupted from the pane leaves the shell
+    // answering, well inside the sleep it was given.
+    pane.typed("sleep 30 &").await;
+    pane.typed("fg").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    pane.sent(&[0x03]).await;
+    pane.typed("echo back-$((20+3))").await;
+    if !pane.printed_within("back-23", Duration::from_secs(10)).await {
+        panic!("{}", gave_out("the shell after an interrupt", &pane, &mut running, &id).await);
+    }
+
+    // And the exit comes back: the shell ends, the broker and the helper end with it, and nothing of either is
+    // left on the computer.
+    pane.typed("exit").await;
+    let waited = tokio::time::timeout(Duration::from_secs(20), running.helper.wait()).await;
+    let ended = match waited {
+        Ok(Ok(ended)) => ended,
+        Ok(Err(e)) => panic!("the helper could not be waited for: {e}; the pane read {:?}", pane.text()),
+        Err(_) => panic!("the helper did not end with the shell; the pane read {:?}", pane.text()),
+    };
+    eprintln!("the pane's shell exited: {ended}");
+    assert!(!Path::new(&format!("/proc/{pid}")).exists(), "the broker is still on the computer");
+    // Nothing of the pty is left: the pid file went when the pid was read, and the size file with the pty it was
+    // written for.
+    assert!(pty_files(&id).is_empty(), "the pty left {:?} behind", pty_files(&id));
+    w.close().await;
+}
+
+/// The terminal device a shell named, read where it stands in the bytes rather than as a line of its own: a pane
+/// carries the prompt before an answer and whatever the line editor writes around it.
+fn device_of(printed: &str) -> Option<String> {
+    let at = printed.find(DEV_PTS)?;
+    let digits: String = printed[at + DEV_PTS.len()..].chars().take_while(char::is_ascii_digit).collect();
+    (!digits.is_empty()).then(|| format!("{DEV_PTS}{digits}"))
+}
+
+const DEV_PTS: &str = "/dev/pts/";
+
+/// What the pty left in the workspace's own folders: the pid file the library writes and the size file the
+/// resize is read from, both of which go with the pty they were made for.
+fn pty_files(id: &str) -> Vec<String> {
+    let mut held = Vec::new();
+    for dir in [root().join("run").join(id), root().join("run").join(id).join("wsp-home")] {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        held.extend(
+            entries
+                .filter_map(|entry| entry.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .filter(|name| name.starts_with("pty-"))
+                .map(|name| format!("{}/{name}", dir.display())),
+        );
+    }
+    held.sort();
+    held
+}
+
+/// The three things a read that gave out is explained by: what the pane has read so far, what the helper and the
+/// broker inside printed, and what the pty left in the workspace's folders. Ends the pty, since it is asked once
+/// the case has already failed.
+async fn gave_out(what: &str, pane: &Pane, running: &mut wsp_runtime::runtime::PtyInsideRunning, id: &str) -> String {
+    format!("{what} never came. the pane read {:?}; {}; the workspace holds {:?}", pane.text(), running.said().await, pty_files(id))
+}
+
+/// The device read against the bytes a terminal really carries: a prompt before the answer, the line editor's own
+/// escape sequences around it, and the answer arriving in pieces.
+#[test]
+fn the_terminal_device_is_read_wherever_it_stands_in_what_the_shell_printed() {
+    assert_eq!(device_of("/dev/pts/0\r\n").as_deref(), Some("/dev/pts/0"));
+    // A prompt and the echo of the line before it, which is every interactive shell.
+    assert_eq!(device_of("root@wsp-a:~# tty\r\n/dev/pts/3\r\nroot@wsp-a:~# ").as_deref(), Some("/dev/pts/3"));
+    // What bash with its line editor writes around an answer, which is not a line this could split on.
+    assert_eq!(device_of("\u{1b}[?2004l\r/dev/pts/12\r\n\u{1b}[?2004h").as_deref(), Some("/dev/pts/12"));
+    // Nothing of the sort, and a name cut by a read that has not landed whole.
+    assert_eq!(device_of("bash: tty: command not found\r\n"), None);
+    assert_eq!(device_of("/dev/pts/"), None);
+}
+
+/// The Terminal pane's own frames, answered by this computer's daemon for the workspace they name: a pane opens a
+/// shell inside that workspace, reads its bytes, resizes it, stops reading it and ends it, and no frame of one
+/// machine reaches a pty of another. What a pane does never keeps a workspace awake, and what a person types into
+/// it does.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn the_computers_daemon_answers_a_workspaces_pane_and_leaves_its_quiet_clock_alone() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let d = frames_daemon().await;
+    let mut pane = FrameClient::connect(d.addr).await;
+
+    // A pty for a workspace names the folder it opens in, and the pane's own first tab is given the workspace's
+    // checkout path by the host before the frame goes.
+    let none = pane.request("pty.create", json!({ "machineId": &id, "cols": 100, "rows": 40 })).await;
+    assert_eq!(none["code"], "bad-request", "{none}");
+    assert_eq!(none["error"], format!("a pty inside {id} needs the folder it opens in"));
+    let made = pane.ok("pty.create", json!({ "machineId": &id, "cols": 100, "rows": 40, "cwd": "/root" })).await;
+    let pty = made["ptyId"].as_str().unwrap().to_owned();
+    let pid = made["pid"].as_u64().unwrap();
+    assert!(pid > 0, "{made}");
+    pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
+
+    // The shell is inside the workspace, on a terminal of that workspace's own devpts, and the size it reads is
+    // the one the pane opened with.
+    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "hostname; tty; stty size; echo mark-$((20+3))\n" })).await;
+    assert!(pane.printed_within(&pty, "mark-23", Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    let said = pane.pty_text(&pty);
+    assert!(said.contains(&id), "the shell is not inside the workspace: {said}");
+    assert!(said.contains("/dev/pts/"), "{said}");
+    assert!(said.contains("40 100"), "the shell read another size: {said}");
+
+    // The listing is the machine's the frame names: this workspace's pty for the workspace, and nothing for the
+    // computer itself, which opened none of its own.
+    let inside = pane.ok("pty.list", json!({ "machineId": &id })).await;
+    assert_eq!(inside["ptys"].as_array().unwrap().len(), 1, "{inside}");
+    assert_eq!(inside["ptys"][0]["id"], json!(pty));
+    assert_eq!(inside["ptys"][0]["cols"], json!(100));
+    let here = pane.ok("pty.list", json!({})).await;
+    assert_eq!(here["ptys"], json!([]), "a workspace's pty was listed as this computer's own");
+    // And a frame that names no workspace, or another, reaches no pty of this one.
+    for named in [json!({ "ptyId": &pty }), json!({ "ptyId": &pty, "machineId": "wsp-other" })] {
+        let said = pane
+            .request("pty.write", {
+                let mut frame = named.clone();
+                frame["data"] = json!("echo nowhere\n");
+                frame
+            })
+            .await;
+        assert_eq!(said["error"], json!(format!("no such pty: {pty}")), "{named}");
+    }
+
+    // A resize reaches the shell through the size file and the signal the broker reads it on.
+    pane.ok("pty.resize", json!({ "ptyId": &pty, "machineId": &id, "cols": 80, "rows": 24 })).await;
+    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "stty size; echo sized-$((20+3))\n" })).await;
+    assert!(pane.printed_within(&pty, "sized-23", Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    assert!(pane.pty_text(&pty).contains("24 80"), "the resize did not reach the shell: {:?}", pane.pty_text(&pty));
+
+    // A second pane on a socket of its own reads the same shell; the first stops reading it and the second does
+    // not, which is what a closed tab does on a computer whose panes share one link.
+    let mut second = FrameClient::connect(d.addr).await;
+    second.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
+    pane.ok("pty.detach", json!({ "ptyId": &pty, "machineId": &id })).await;
+    let before = pane.pty_text(&pty);
+    second.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "echo after-$((20+3))\n" })).await;
+    assert!(second.printed_within(&pty, "after-23", Duration::from_secs(30)).await, "{:?}", second.pty_text(&pty));
+    pane.listen(Duration::from_millis(500)).await;
+    assert_eq!(pane.pty_text(&pty), before, "a pane that stopped reading was still sent the pty's bytes");
+
+    // The quiet clock: a pane reading this workspace's checkout leaves it where it was, and a person typing into
+    // the pane starts it over. The reading is the runtime's own, off the machine op this computer answers.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let quiet = w.quiet_ms(&id).await;
+    assert!(quiet >= 1_000, "the clock did not run while nothing happened: {quiet}");
+    let read = second.request("git.status", json!({ "cwd": "/root", "machineId": &id })).await;
+    assert_eq!(read["ok"], json!(false), "the workspace's home is no checkout: {read}");
+    let after_read = w.quiet_ms(&id).await;
+    assert!(after_read >= quiet, "a pane reading the workspace started its clock over: {quiet} then {after_read}");
+    second.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "echo typed-$((20+3))\n" })).await;
+    assert!(second.printed_within(&pty, "typed-23", Duration::from_secs(30)).await, "{:?}", second.pty_text(&pty));
+    let typed_at = w.quiet_ms(&id).await;
+    assert!(typed_at < 1_000, "typing into the pane left the workspace reading quiet: {typed_at}");
+
+    // And the pty ends: the shell is gone, the broker with it, and nothing of either is left in the workspace's
+    // own folders.
+    second.ok("pty.kill", json!({ "ptyId": &pty, "machineId": &id })).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!Path::new(&format!("/proc/{pid}")).exists(), "the broker is still on the computer");
+    let gone = second.ok("pty.list", json!({ "machineId": &id })).await;
+    assert_eq!(gone["ptys"], json!([]), "the pty stands after its kill");
+    let held: Vec<String> = ["", "wsp-home"]
+        .iter()
+        .flat_map(|under| {
+            let dir = root().join("run").join(&id).join(under);
+            fs::read_dir(dir).into_iter().flatten().filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        })
+        .filter(|name| name.starts_with("pty-"))
+        .collect();
+    assert!(held.is_empty(), "the pty left {held:?} behind");
+    w.close().await;
+}
+
+/// A guest inside a workspace reaches this computer's daemon over the socket that workspace alone can see, and
+/// reaches nothing else of the computer through it. The word it runs is the shim the boot wrote into the
+/// workspace's own upper, onto the init already bound inside.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_own() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The daemon is started after the workspace, as one that restarted under a running workspace is: it names
+    // every workspace already running as it takes them over, and binds the door inside each.
+    let d = frames_daemon().await;
+    let mut here = FrameClient::connect(d.addr).await;
+
+    // What the workspace's own wsp folder holds: the socket this computer bound in it, and none of the
+    // computer's own daemon files, since that folder is the workspace's and not the box's.
+    let (code, listed, said) = w.exec(&id, "ls -1 /root/.wsp; echo ---; command -v wsp; echo ---; cat /usr/local/bin/wsp").await;
+    assert_eq!((code, said.as_str()), (0, ""), "{listed}");
+    let (folder, rest) = listed.split_once("---\n").unwrap();
+    assert!(folder.lines().any(|name| name.trim() == "daemon.sock"), "no socket inside the workspace: {folder}");
+    assert!(!folder.contains("daemon-token"), "the computer's own daemon token is inside the workspace: {folder}");
+    let (word, shim) = rest.split_once("---\n").unwrap();
+    assert_eq!(word.trim(), wsp_frames::numbers::GUEST_WSP_PATH);
+    assert_eq!(shim, wsp_frames::guest_wsp_shim(wsp_runtime::profile::INIT_PATH));
+
+    // The word inside opens a session on that socket and nothing answers it, since this daemon's host is not
+    // there: the daemon ends it after the span it was started with and the guest prints why and exits 1.
+    let (code, out, said) = w.exec(&id, "wsp threads; echo exited-$?").await;
+    assert_eq!(code, 0, "{said}");
+    assert!(said.contains(wsp_frames::words::GUEST_UNWATCHED), "the session ended another way: {said:?} {out:?}");
+    assert!(out.contains("exited-1"), "the guest exited another way: {out:?}");
+
+    // The socket itself, dialled from this computer as a process inside would: no auth frame, and the guest's own
+    // two ops and ping answered. Everything else of this computer is refused, the listing of its workspaces and
+    // the sessions its host watches among them.
+    let at = root().join("run").join(&id).join("wsp-home").join("daemon.sock");
+    let mut inside = InsideSocket::open(&at).await;
+    assert_eq!(inside.hello().await["type"], "daemon.hello");
+    assert_eq!(inside.request("ping", json!({})).await, json!({ "id": 1, "ok": true }));
+    let opened = inside.request("guest.open", json!({ "kind": "cli", "token": "", "argv": ["threads"], "cwd": "/root" })).await;
+    assert_eq!(opened["ok"], json!(true), "{opened}");
+    for op in ["machine.list", "machine.metrics", "guest.watch", "exec", "pty.list", "fs.list", "place.leave"] {
+        let said = inside.request(op, json!({ "machineId": &id, "cmd": "id", "path": "/root" })).await;
+        assert_eq!(said["code"], json!("forbidden"), "{op}: {said}");
+        assert_eq!(said["error"], json!(wsp_frames::words::NOT_ON_THIS_ROAD), "{op}");
+    }
+
+    // And the computer's own socket, which holds its token, is refused the host's three: a client here may read
+    // what this computer runs and may not take the sessions its host watches.
+    let watched = here.request("guest.watch", json!({})).await;
+    assert_eq!(watched["error"], json!(wsp_frames::words::NOT_ON_THIS_ROAD), "{watched}");
+    assert_eq!(here.ok("machine.list", json!({})).await["machines"].as_array().unwrap().len(), 1);
+
+    // The door goes with the workspace: a stopped workspace holds no socket, and nothing can be dialled there.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!at.exists(), "the socket stands after the workspace stopped");
+    assert!(tokio::net::UnixStream::connect(&at).await.is_err());
+    w.close().await;
+}
+
+/// One socket inside a workspace, dialled from this computer the way a process inside dials it: the file is the
+/// whole of the gate, so nothing is sent before the frames themselves.
+struct InsideSocket {
+    ws: tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+    next_id: u64,
+}
+
+impl InsideSocket {
+    async fn open(at: &Path) -> InsideSocket {
+        let stream = tokio::net::UnixStream::connect(at).await.unwrap_or_else(|e| panic!("{}: {e}", at.display()));
+        let (ws, _) = tokio_tungstenite::client_async("ws://workspace/", stream).await.unwrap();
+        InsideSocket { ws, next_id: 1 }
+    }
+
+    async fn next_frame(&mut self) -> Value {
+        use futures_util::StreamExt;
+        let next = tokio::time::timeout(Duration::from_secs(20), self.ws.next()).await.expect("the door answers");
+        match next {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => serde_json::from_str(&t).unwrap(),
+            other => panic!("the socket inside ended: {other:?}"),
+        }
+    }
+
+    async fn hello(&mut self) -> Value {
+        self.next_frame().await
+    }
+
+    async fn request(&mut self, op: &str, params: Value) -> Value {
+        use futures_util::SinkExt;
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut frame = json!({ "id": id, "op": op });
+        for (k, v) in params.as_object().unwrap() {
+            frame[k] = v.clone();
+        }
+        self.ws.send(tokio_tungstenite::tungstenite::Message::text(frame.to_string())).await.unwrap();
+        loop {
+            let read = self.next_frame().await;
+            if read.get("id") == Some(&json!(id)) {
+                return read;
+            }
+        }
+    }
+}
+
+/// A diff inside a workspace past the byte budget says so, whichever cap it met: the exec road inside has one of
+/// its own under the diff's, and a person reading a cut diff is told either way.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_diff_inside_past_the_cap_reads_cut() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let d = frames_daemon().await;
+    let mut client = FrameClient::connect(d.addr).await;
+    // A checkout of the workspace's own, under one of its overlays rather than the computer's home, with one
+    // small change and one past every cap the road has.
+    let repo = "/var/tmp/live-diff";
+    let (code, _, said) = w
+        .exec(
+            &id,
+            &format!(
+                "set -e; rm -rf {repo}; mkdir -p {repo}; cd {repo}; git init -q -b main; git config user.email a@b; git config user.name a; printf 'one\\n' > small.txt; git add -A; git commit -q -m first; printf 'two\\n' > small.txt; git add -A"
+            ),
+        )
+        .await;
+    assert_eq!((code, said.as_str()), (0, ""));
+    let small = client.ok("git.diff", json!({ "cwd": repo, "scope": "staged", "machineId": &id })).await;
+    assert_eq!(small["truncated"], json!(false), "{small}");
+    // Three megabytes of it, which is past the diff's own two and past the exec road's under it.
+    let (code, _, said) = w
+        .exec(&id, &format!("set -e; cd {repo}; yes 'a line of a file that is about to be large' | head -c 3000000 > big.txt; git add -A"))
+        .await;
+    assert_eq!((code, said.as_str()), (0, ""));
+    let cut = client.ok("git.diff", json!({ "cwd": repo, "scope": "staged", "machineId": &id })).await;
+    assert_eq!(cut["truncated"], json!(true), "a diff past every cap read whole");
     w.close().await;
 }

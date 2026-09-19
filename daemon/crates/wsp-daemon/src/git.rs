@@ -20,6 +20,17 @@ pub(crate) mod here;
 #[cfg(target_os = "linux")]
 pub(crate) mod inside;
 
+/// What a frame is doing to the workspace it names, which is what that workspace's quiet clock reads. A pane
+/// reading a checkout's status, its diff or a folder asks the workspace nothing: it may be read a hundred times
+/// over an afternoon nobody is working, and a workspace nobody is working in is one this computer may stop.
+/// Pushing a branch, opening a pull request or reading one back is work somebody asked for, and starts that
+/// clock over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asked {
+    Read,
+    Work,
+}
+
 pub(crate) struct GitResult {
     /// None when a signal ended the program, which is what the byte cap does.
     pub(crate) code: Option<i32>,

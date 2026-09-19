@@ -14,7 +14,7 @@ use std::time::Duration;
 use wsp_frames::numbers;
 use wsp_runtime::ops::Ops;
 
-use super::{GitResult, Runs, GIT_ENV};
+use super::{Asked, GitResult, Runs, GIT_ENV};
 use crate::paths::OpError;
 
 /// One workspace of this computer's, and how long a command in it may run: the daemon's own exec ceiling rather
@@ -23,11 +23,21 @@ use crate::paths::OpError;
 pub(crate) struct Inside {
     runtime: Arc<Ops>,
     machine: String,
+    asked: Asked,
 }
 
 impl Inside {
-    pub(crate) fn new(runtime: Arc<Ops>, machine: &str) -> Inside {
-        Inside { runtime, machine: machine.to_owned() }
+    pub(crate) fn new(runtime: Arc<Ops>, machine: &str, asked: Asked) -> Inside {
+        Inside { runtime, machine: machine.to_owned(), asked }
+    }
+
+    /// One command inside, on the road the frame asked for.
+    async fn ran(&self, line: &str, input: Option<Vec<u8>>) -> Result<wsp_runtime::runtime::Exec, OpError> {
+        let done = match self.asked {
+            Asked::Read => self.runtime.read_in(&self.machine, line, input, DEADLINE).await,
+            Asked::Work => self.runtime.exec_in(&self.machine, line, input, DEADLINE).await,
+        };
+        done.map_err(crate::ops::from_runtime)
     }
 }
 
@@ -43,12 +53,12 @@ impl Runs for Inside {
         input: Option<&[u8]>,
         max_bytes: Option<usize>,
     ) -> Result<GitResult, OpError> {
-        let done = self.runtime.exec_in(&self.machine, &line(cwd, program, args), input.map(<[u8]>::to_vec), DEADLINE).await;
-        let done = done.map_err(crate::ops::from_runtime)?;
+        let done = self.ran(&line(cwd, program, args), input.map(<[u8]>::to_vec)).await?;
         // The cap is the diff pane's byte budget, spent on what came back rather than by killing a process this
-        // daemon does not hold: an exec inside answers whole or not at all.
+        // daemon does not hold: an exec inside answers whole or not at all. The exec road has a cap of its own
+        // under this one, so what it cut is cut here too and the person reading is told either way.
         let mut stdout = done.stdout.into_bytes();
-        let truncated = max_bytes.is_some_and(|cap| stdout.len() > cap);
+        let truncated = done.truncated || max_bytes.is_some_and(|cap| stdout.len() > cap);
         if let Some(cap) = max_bytes.filter(|cap| stdout.len() > *cap) {
             stdout.truncate(cap);
         }
@@ -57,8 +67,7 @@ impl Runs for Inside {
 
     async fn on_path(&self, program: &str) -> Result<bool, OpError> {
         let read = format!("command -v {} >/dev/null 2>&1", quoted(program));
-        let done = self.runtime.exec_in(&self.machine, &read, None, DEADLINE).await.map_err(crate::ops::from_runtime)?;
-        Ok(done.exit_code == 0)
+        Ok(self.ran(&read, None).await?.exit_code == 0)
     }
 }
 

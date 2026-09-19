@@ -31,18 +31,62 @@ pub enum DaemonOp {
         cwd: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env: Option<BTreeMap<String, String>>,
+        /// The workspace this pty is for, on a daemon that runs workspaces: the shell opens inside that
+        /// workspace's namespaces, in the folder the frame names, which is absolute and is asked for, since this
+        /// daemon has no working directory inside a workspace. Without one the shell is the daemon's own
+        /// computer's, which is every machine wsp forked. The pty is held beside the daemon's own either way, and
+        /// every other pty op names the same workspace to reach it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
     },
     #[serde(rename = "pty.attach", rename_all = "camelCase")]
-    PtyAttach { pty_id: String },
+    PtyAttach {
+        pty_id: String,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
+    /// This socket's listeners off that pty: the mirror of pty.attach, so a pane that closed stops the bytes of
+    /// its own pty on a socket many panes share.
+    #[serde(rename = "pty.detach", rename_all = "camelCase")]
+    PtyDetach {
+        pty_id: String,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "pty.write", rename_all = "camelCase")]
-    PtyWrite { pty_id: String, data: String },
-    #[serde(rename = "pty.resize", rename_all = "camelCase")]
+    PtyWrite {
+        pty_id: String,
+        data: String,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     /// A size of zero is refused here as node-pty refuses it; the protocol's number says only "number".
-    PtyResize { pty_id: String, cols: NonZeroU16, rows: NonZeroU16 },
+    #[serde(rename = "pty.resize", rename_all = "camelCase")]
+    PtyResize {
+        pty_id: String,
+        cols: NonZeroU16,
+        rows: NonZeroU16,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "pty.kill", rename_all = "camelCase")]
-    PtyKill { pty_id: String },
-    #[serde(rename = "pty.list")]
-    PtyList,
+    PtyKill {
+        pty_id: String,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
+    #[serde(rename = "pty.list", rename_all = "camelCase")]
+    PtyList {
+        /// The workspace whose ptys are listed, as on pty.create above: with one, that workspace's alone, and
+        /// without one, this daemon's own alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "ports.watch")]
     PortsWatch,
     #[serde(rename = "manifest.get")]
@@ -207,9 +251,10 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 36] = [
+pub const DAEMON_OPS: [&str; 37] = [
     "pty.create",
     "pty.attach",
+    "pty.detach",
     "pty.write",
     "pty.resize",
     "pty.kill",

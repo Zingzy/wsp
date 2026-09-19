@@ -3031,6 +3031,12 @@ export const GuestKind = z.enum(["mcp", "cli"]);
 export type GuestKind = z.infer<typeof GuestKind>;
 
 export const DaemonRequest = z.discriminatedUnion("op", [
+  /** machineId, on these seven and on no other op of this road: the workspace the pty belongs to, on a daemon
+   * that runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of
+   * the computer holding it opens the shell inside that workspace's namespaces, in the folder the frame names,
+   * which is absolute and is asked for, since that daemon has no working directory inside a workspace. Without
+   * one the pty is the daemon's own computer's, which is every machine wsp forked; every later op on that pty
+   * names the same workspace, and one that names another, or none, is answered no such pty. */
   z.object({
     id: reqId,
     op: z.literal("pty.create"),
@@ -3039,12 +3045,17 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     shell: z.string().optional(),
     cwd: z.string().optional(),
     env: z.record(z.string()).optional(),
+    machineId: z.string().optional(),
   }),
-  z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.write"), ptyId: z.string(), data: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.resize"), ptyId: z.string(), cols: z.number(), rows: z.number() }),
-  z.object({ id: reqId, op: z.literal("pty.kill"), ptyId: z.string() }),
-  z.object({ id: reqId, op: z.literal("pty.list") }),
+  z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string(), machineId: z.string().optional() }),
+  /** This socket's listeners off that pty, the mirror of pty.attach: a pane that closed stops the bytes of its
+   * own pty on a socket that many panes share. */
+  z.object({ id: reqId, op: z.literal("pty.detach"), ptyId: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.write"), ptyId: z.string(), data: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.resize"), ptyId: z.string(), cols: z.number(), rows: z.number(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("pty.kill"), ptyId: z.string(), machineId: z.string().optional() }),
+  /** With a workspace named, that workspace's ptys alone; without one, this daemon's own alone. */
+  z.object({ id: reqId, op: z.literal("pty.list"), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("ports.watch") }),
   z.object({ id: reqId, op: z.literal("manifest.get") }),
   z.object({

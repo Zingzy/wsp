@@ -48,6 +48,11 @@ pub const OFFER: &str = "runtime";
 pub const HOSTNAME_MAX: usize = 63;
 /// The environment every exec carries ahead of its command, as every wsp guest exec does.
 pub const EXEC_ENV: &str = "export HOME=/root USER=root";
+/// What a terminal inside a workspace says it is, the one the daemon's own ptys name.
+const TERM: &str = "xterm-256color";
+/// The shell a pane opens inside a workspace where the frame names none: the workspace's own bash, by name and
+/// not by path, since the PATH inside is what says which bash that is.
+const SHELL_INSIDE: &str = "bash";
 /// The label every workspace wears, so a listing is only ours.
 pub const WSP_LABEL: &str = "wsp";
 /// The label a workspace's own name rides on, which the host stamps at the create: what the refusal of a create
@@ -1009,8 +1014,7 @@ impl Ops {
     /// serves it is this one and a workspace that runs is a workspace that answers.
     async fn exec(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
         self.net.touched(&record.id);
-        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
-        let done = self.runtime.exec(&record.id, &args, stdin, timeout).await?;
+        let done = self.inside(record, cmd, stdin, timeout).await?;
         Ok(ExecResult { exit_code: done.exit_code, stdout: done.stdout, stderr: done.stderr })
     }
 
@@ -1131,12 +1135,67 @@ impl Ops {
         Ok(self.layout.rootfs(&record.id))
     }
 
+    /// A shell inside a running workspace, on a pty of that workspace's own, for the terminal pane of a machine
+    /// this computer holds. The folder is the caller's and absolute, since this daemon has no working directory
+    /// inside a workspace; the environment is the workspace's own with the terminal named, as a thread's is.
+    pub async fn pty_in(
+        &self,
+        id: &str,
+        cols: u16,
+        rows: u16,
+        cwd: &str,
+        shell: Option<&str>,
+    ) -> Result<runtime::PtyInsideRunning, OpError> {
+        let record = self.running(id)?;
+        if !Path::new(cwd).is_absolute() {
+            return Err(OpError::plain(format!("{cwd} is not an absolute path inside {id}")));
+        }
+        let mut env = BTreeMap::from([
+            ("HOME".to_owned(), "/root".to_owned()),
+            ("USER".to_owned(), "root".to_owned()),
+            ("TERM".to_owned(), TERM.to_owned()),
+        ]);
+        if record.engine {
+            env.insert("COMPOSE_PROJECT_NAME".to_owned(), compose_project(&record.id));
+        }
+        // A login shell, as a person's terminal on any other machine opens: the workspace's own profile and the
+        // person's own rc file, which are the computer's home bound inside.
+        let args = match shell {
+            Some(shell) => vec![shell.to_owned()],
+            None => vec![SHELL_INSIDE.to_owned(), "-l".to_owned()],
+        };
+        let opts = runtime::PtyInside { cols, rows, cwd: cwd.to_owned(), args, env };
+        self.runtime.pty(id, &opts).await.map_err(|e| OpError::plain(e.to_string()))
+    }
+
     /// One command inside a running workspace, for the halves of this daemon that serve a workspace's own work:
     /// the git road runs here rather than on the computer, since a checkout's hooks and config are agent-written
-    /// and belong inside the workspace's namespaces, its cgroup and its covers.
-    pub async fn exec_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
+    /// and belong inside the workspace's namespaces, its cgroup and its covers. Work, so the workspace's quiet
+    /// clock starts over: somebody asked for this.
+    pub async fn exec_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
         let record = self.running(id)?;
-        self.exec(&record, cmd, stdin, timeout).await
+        self.net.touched(&record.id);
+        self.inside(&record, cmd, stdin, timeout).await
+    }
+
+    /// The same command, read rather than run: a pane asking a workspace what its files and its checkout hold
+    /// leaves the quiet clock where it was, however often it asks. A workspace nobody is working in is one this
+    /// computer may stop, and a person with a pane open is not working in it.
+    pub async fn read_in(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
+        let record = self.running(id)?;
+        self.inside(&record, cmd, stdin, timeout).await
+    }
+
+    /// The workspace is working: its quiet clock starts over. The one road the halves of this daemon that are
+    /// not an exec take to say so, the pty's keystrokes and its output among them.
+    pub fn touched(&self, id: &str) {
+        self.net.touched(id);
+    }
+
+    /// One command inside, with neither the clock nor the machine op's shape: what both roads above share.
+    async fn inside(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
+        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
+        Ok(self.runtime.exec(&record.id, &args, stdin, timeout).await?)
     }
 
     fn record(&self, id: &str) -> Result<Workspace, OpError> {
