@@ -86,6 +86,9 @@ describe("what a backend over a link says about itself", () => {
     expect(backend.capabilities).toEqual(CAPABILITIES);
     expect(backend.lifecycle?.budgets.wakeAttempts).toBe(1);
     expect(backend.baseTemplates?.sandbox).toBe("ubuntu:24.04");
+    // The daemon writes the workspace's name into the machine's specification at every boot, so nothing above
+    // this backend names one again; a provider's fork comes up as localhost and says nothing here.
+    expect(backend.namesWorkspace).toBe(true);
   });
 
   it("carries no snapshot and no template call at all: a computer somebody joined keeps no image", async () => {

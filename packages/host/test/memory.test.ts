@@ -41,7 +41,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
-import { startHost, localWiring } from ${JSON.stringify(DIST)};
+import { startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
 import { NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
 
 const home = ${JSON.stringify(home)};
@@ -72,7 +72,7 @@ const scripted = () => ({
 const runtime = createRuntime({
   backend: new NoProviderBackend(),
   local: localWiring(home),
-  store: jsonFileStore(statePath),
+  store: jsonFileStore(statePath, stateWriterHere()),
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, wsPort: 0, statePath });

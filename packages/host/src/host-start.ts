@@ -7,16 +7,9 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { fmtDuration } from "@wsp/protocol";
-import { hostLogPath, type HostLock } from "./host-lock.js";
+import { hostLogPath, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { httpProbe, logTail, SERVICE_WAIT_MS, untilServing, type HostProbe } from "./service.js";
-
-/** The variable a verb's child carries, which the host it starts writes into its lock, so wsp down can tell a host
- * nobody is watching from one a person is holding open in a terminal. */
-export const STARTED_BY_ENV = "WSP_STARTED_BY";
-
-/** Whether this process is the host a verb started, read off the environment it was spawned with. */
-export const startedByVerb = (env: Readonly<Record<string, string | undefined>>): boolean => env[STARTED_BY_ENV] === "verb";
+import { httpProbe, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
 /** Starts a host serving this state file on this computer and answers with its lock once it answers on its port. */
 export interface HostStarter {
@@ -30,6 +23,9 @@ export interface StartDeps {
   env: Readonly<Record<string, string | undefined>>;
   waitMs: number;
   answers: HostProbe;
+  /** What this computer's own manager is registered to serve this state file with, and nothing where none is.
+   * One reading, in service.ts, so this road and wsp up refuse on the same fact. */
+  registered: (statePath: string) => RegisteredService | undefined;
 }
 
 /** The one line a verb prints before it waits, on stderr whatever the line prints on stdout. */
@@ -38,8 +34,31 @@ export const startingHostLine = (statePath: string, logPath: string): string => 
 /** A child that took the wait and never served: one refusal naming the file it was started for. */
 export const noHostAnsweredLine = (statePath: string, waitMs: number): string => `no host answered for ${statePath} within ${fmtDuration(waitMs)}`;
 
+/** Why a line starts no host of its own: this computer's own manager is registered to serve that state file, and
+ * a host of whatever build happened to be on the line would read those records and write them back in its own
+ * shape under the one that owns them. The one line named starts the service whether the manager has the unit
+ * loaded or not, so a person reads one road out of either state. */
+export const serviceServesStateLine = (statePath: string, service: RegisteredService): string =>
+  `${statePath} is served by the ${service.words} ${service.unit.name}, which is not running; wsp up --service --state ${statePath} starts it again`;
+
+/** Why a line brings up no host on this state file, or nothing where it may. One rule for both roads that start
+ * one, so the sentence is true in the state it is read in: a host that is already serving is the lock's own
+ * refusal to give and not this one, and a file no unit of this computer's names is nobody's but the caller's. */
+export function serviceServesState(
+  statePath: string,
+  registered: (statePath: string) => RegisteredService | undefined,
+  serving: (statePath: string) => HostLock | undefined = servingHost,
+): string | undefined {
+  if (serving(statePath) !== undefined) return undefined;
+  const service = registered(statePath);
+  return service === undefined ? undefined : serviceServesStateLine(statePath, service);
+}
+
 export function hostStarter(deps: StartDeps): HostStarter {
   return async (statePath, say) => {
+    // Before anything is spawned: a state file the service owns is served by the service or by nothing.
+    const owned = serviceServesState(statePath, deps.registered);
+    if (owned !== undefined) throw new Error(owned);
     const logPath = hostLogPath(statePath);
     mkdirSync(dirname(logPath), { recursive: true });
     const log = openSync(logPath, "a");
@@ -67,5 +86,5 @@ export function hostStarter(deps: StartDeps): HostStarter {
 /** The starter for a process that knows how it was started: the same line an agent's config would be given, with
  * the wait a service load is given. */
 export function starterFor(run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): HostStarter {
-  return hostStarter({ spawn: nodeSpawn, wsp: wspCommand(run), env, waitMs: SERVICE_WAIT_MS, answers: httpProbe });
+  return hostStarter({ spawn: nodeSpawn, wsp: wspCommand(run), env, waitMs: SERVICE_WAIT_MS, answers: httpProbe, registered: registeredService });
 }

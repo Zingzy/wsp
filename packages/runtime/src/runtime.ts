@@ -182,6 +182,7 @@ import type {
   SessionTitleReader,
   SessionView,
   StartPicks,
+  StateShape,
   TitleSource,
   SnapshotStorage,
   ImageAttachment,
@@ -209,7 +210,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1029,9 +1030,13 @@ export const NO_COPIER_HERE = "this host has no copy road for a folder on this c
 export const COPY_SIZE_LINE_BYTES = 20 * 1024 * 1024 * 1024;
 
 /** Why a host will not serve a state file written before a workspace named its project: nothing reads the old
- * shape, so the file is moved aside by hand and this host starts empty. */
-export const wipeTheState = (workspaceId: string, statePath: string | undefined): string =>
-  `workspace ${workspaceId} was recorded before a workspace held a project, and nothing reads that shape: move ${statePath ?? "this host's state file"} aside and start again, and wsp add records your projects on the new one`;
+ * shape, so the file is moved aside by hand and this host starts empty. Where the file says which build wrote it,
+ * the build is named first: several wsps share one state file on a computer, and a record another build wrote in
+ * its own shape is that build's to put right, not a reason to throw away every project and workspace on the file. */
+export const wipeTheState = (workspaceId: string, statePath: string | undefined, wrote?: StateShape): string =>
+  `workspace ${workspaceId} was recorded before a workspace held a project, and nothing reads that shape: ` +
+  (wrote !== undefined ? `${statePath ?? "this host's state file"} was last written by ${stateWriterWords(wrote)}, so run that wsp on it, or ` : "") +
+  `move ${wrote !== undefined ? "the file" : (statePath ?? "this host's state file")} aside and start again, and wsp add records your projects on the new one`;
 
 /** The last line a command said, which is what git puts its reason on. */
 const lastLineOf = (said: string): string => said.trimEnd().split("\n").at(-1)?.trim() ?? "";
@@ -2227,6 +2232,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (placeDoor === undefined) throw new Error(noKindLine("place"));
     return placeDoor;
   };
+  /** Every run on a machine this runtime is reading, as the call that lets go of each. A poll on a turn left
+   * running holds this process after its last line, and a turn on a machine is not this host's to end: closing
+   * lets go and leaves them running, and whoever opens them next reads their logs from the first byte. Each
+   * kind's wiring holds its own set; this one is for the kinds whose runs live on a machine. */
+  const machineReading = new Set<() => void>();
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
       // A fork lands either at this host's own provider or on a computer somebody joined; the record says which,
@@ -2237,7 +2247,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (at === undefined) throw new PlaceForksNowhereError(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
         return at;
       },
-      execStream: (entry, o, waiting) => machineExecStream(entry.machine, o, waiting),
+      execStream: (entry, o, waiting) => machineExecStream(entry.machine, { reading: machineReading, ...o }, waiting),
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
@@ -2337,7 +2347,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The run's script, log and exit code live in wsp's own folder under the machine's home, not a folder
             // every login on it shares: on the person's own machine another account's /tmp folder is theirs, and a
             // turn that cannot write in it would launch nothing.
-            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }, waiting),
+            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { reading: machineReading, ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }, waiting),
             // A turn lands where the person's own login lands. wsp makes no folder on a machine it only reaches, so
             // there is none of its own to start in, and a thread that wants another says so in its own cwd.
             folder: () => undefined,
@@ -2420,6 +2430,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * and nothing is looked up or built for it. The one reading of that road above the backend, so no road here
    * names a provider or a place to learn it. */
   const keepsImages = (at: MachineBackend): boolean => at.capabilities.images;
+  /** Whether the machines of this backend come up under the workspace's own name. The one reading of that road
+   * above the backend, beside the images one: a fork that is named at its boot is never named again from here. */
+  const namesWorkspace = (at: MachineBackend): boolean => at.namesWorkspace === true;
   /** The budgets a kind's backend declares for its naps and wakes. Every reader sits behind the pause refusal or
    * behind a machine's preview route, so a kind without one here is a wiring fault, never a person's road. */
   const lifecycleOf = (entry: LiveWorkspace): Lifecycle => {
@@ -3726,6 +3739,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       pricing: at.pricing,
       // The golden's builder is created through this handle, so the image the provider boots from rides along.
       ...(at.baseTemplates !== undefined ? { baseTemplates: at.baseTemplates } : {}),
+      // And whether this backend's machines come up under the workspace's own name, since the fork behind this
+      // handle is what would name one again.
+      ...(at.namesWorkspace !== undefined ? { namesWorkspace: at.namesWorkspace } : {}),
       get: id => at.get(id),
       list: labels => at.list(labels),
       deleteSnapshot: id => at.deleteSnapshot(id),
@@ -3803,9 +3819,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         bind(machine);
         // No line for the machine coming up: the starting line above is the step a person waits through, and a
         // fork's own id names nothing to them.
-        const named = await setHostname(machine, record.name);
-        if (named.refused === undefined) report?.("hostname-set", hostnameSetLine(named.host));
-        else report?.("hostname-set", HOSTNAME_KEPT, { detail: named.refused });
+        // A machine that boots under the workspace's name is not named again: the name is on the specification the
+        // computer booted it from, and the command here runs inside the workspace, where it has no right to change
+        // the host name and says so on every create.
+        if (!namesWorkspace(b)) {
+          const named = await setHostname(machine, record.name);
+          if (named.refused === undefined) report?.("hostname-set", hostnameSetLine(named.host));
+          else report?.("hostname-set", HOSTNAME_KEPT, { detail: named.refused });
+        }
         // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
         const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
         if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
@@ -4311,7 +4332,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const rest = stored;
     // Nothing reads a record from before projects were records of their own: the owner ruled no migration, so a
     // state file holding one is refused in one sentence and this host does not serve it.
-    if (typeof stored.project !== "string" || !projectsHeld.has(stored.project)) throw new Error(wipeTheState(stored.id, opts.statePath));
+    if (typeof stored.project !== "string" || !projectsHeld.has(stored.project)) throw new Error(wipeTheState(stored.id, opts.statePath, await store.shape()));
     // A record whose kind this host wired no module for, or whose place forks nothing any more, is left as it
     // was: only the host that owns that machine can serve it.
     let at: MachineBackend;
@@ -4544,8 +4565,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const binds = road.workspaceBinds(projectHeld(project.id));
     // A project whose checkout the add left on that computer: this workspace takes its own copy of it, mounted at
     // the path the project has inside, so the seed and the install the add paid for are there and nothing is
-    // cloned again. A project the computer keeps in an image carries it in the image instead, and one with
-    // neither is cloned by the stage below.
+    // cloned again. A project the computer keeps in an image carries it in the image instead. On a computer that
+    // clones at the add, a project with no checkout was refused above by that road's own refusal; a project at a
+    // provider has neither, and cloneProject clones it inside the fork.
     const copy = project.checkout === undefined ? undefined : { from: project.checkout, at: project.path };
     // A computer that keeps no image is forked from none: the workspace is a copy of that computer itself, so no
     // image is read, no copy of one is built there ahead of the fork, and the record names none the way a
@@ -6123,7 +6145,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       calls.clear();
       leadAsks.delete(threadId);
       void persistSessions(workspaceId);
-      void refreshTitle(view, true);
+      // Only a turn that ended on its own: a turn this host ended is one whose workspace is going away under it,
+      // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
+      // taken down and say so in the log for every thread on it.
+      if (!ended) void refreshTitle(view, true);
       if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
     };
     // The reload a client runs on session.end shares that read rather than starting a second.
@@ -8402,6 +8427,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // at every running workspace without waiting for it, and a write landing after the close is this process
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.
       await Promise.allSettled([...daemonSyncs.values()]);
+      // The turns running on machines are not ended: each leads a process group on its own machine and its log is
+      // there to be read again, so what this host lets go of is the reading of them, which is what holds this
+      // process open after its last line.
+      for (const stop of [...machineReading]) stop();
+      machineReading.clear();
       await local?.close?.();
       await ssh?.close?.();
       await placeDoor?.close();

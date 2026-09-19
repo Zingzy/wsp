@@ -58,7 +58,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, dialAddress, hostLogPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, dialAddress, hostLogPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -67,7 +67,9 @@ import {
   installService,
   logTail,
   noManagerLine,
+  registeredService,
   runFailureLine,
+  serviceAddressHere,
   serviceEnv,
   serviceManagerFor,
   SERVICE_WAIT_MS,
@@ -78,11 +80,10 @@ import {
   untilLock,
   untilServing,
   type HostProbe,
-  type ServiceAddress,
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
-import { startedByVerb, starterFor, type HostStarter } from "./host-start.js";
+import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
@@ -95,7 +96,7 @@ import { choosePorts, type PortProbes } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
-import { VERSION } from "./version.js";
+import { stateWriterHere, VERSION } from "./version.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -748,7 +749,9 @@ export function makeRuntime(
     local,
     ssh: sshWiring(),
     placeLinks: links,
-    store: jsonFileStore(statePath),
+    // The build this host is, written into the state file at every save, so a host that meets a record it cannot
+    // read says which wsp on this computer wrote it.
+    store: jsonFileStore(statePath, stateWriterHere()),
     statePath,
     adapters: HARNESS_ADAPTERS,
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
@@ -1254,7 +1257,7 @@ async function hostFor(
   const address = opts.address ?? LOOPBACK;
   const links = opts.links ?? placeWiring(opts.statePath, opts.providerEnv, opts.advertise);
   const lockPath = lockPathFor(opts.statePath);
-  const started = startedByVerb(process.env) ? ("verb" as const) : opts.startedBy;
+  const started = startedByEnv(process.env) ?? opts.startedBy;
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address, ...(started !== undefined ? { startedBy: started } : {}) });
   // Read before the host serves a byte, for the line that says what a linked box is open to; the page's token is
   // withheld per request, off what the connector puts on the ones it forwards, so a connector an earlier run left
@@ -1355,8 +1358,10 @@ export interface ServiceDeps {
 }
 
 /** Which line brought a host up, in the words every sentence about it uses: a person who typed wsp up reads their
- * own line back, and a host a verb started for itself is nobody's line. */
-export const hostRoadWord = (started: HostStarted): string => (started === "up" ? "wsp up" : "a verb");
+ * own line back, a host a verb started for itself is nobody's line, and the one this computer's manager holds up
+ * is the service. */
+const HOST_ROAD_WORDS: Readonly<Record<HostStarted, string>> = { up: "wsp up", verb: "a verb", service: "the service" };
+export const hostRoadWord = (started: HostStarted): string => HOST_ROAD_WORDS[started];
 
 /** What wsp down says for a host the command line brought up, whichever of its two roads did: the same shape the
  * service's own stop line takes, naming the road. */
@@ -1366,11 +1371,6 @@ export const hostStoppedLine = (started: HostStarted, pid: number, statePath: st
 export function systemService(): ServiceDeps {
   const os = platform();
   return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost, stop: pid => process.kill(pid, "SIGTERM"), here: home => openHere(home) };
-}
-
-/** Which service this is: one per state file, under this person's home and this user. */
-function serviceAddress(statePath: string): ServiceAddress {
-  return { statePath, home: homedir(), uid: process.getuid?.() ?? 0 };
 }
 
 /** The line the service runs: this node and this wsp, serving the state file, the ports, the address and the
@@ -1437,9 +1437,13 @@ export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: Servic
   }
   const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
   if (claudeOnly !== undefined) io.log(claudeOnly);
-  const at = serviceAddress(opts.statePath);
+  const at = serviceAddressHere(opts.statePath);
   const logPath = hostLogPath(opts.statePath);
-  const { unit, installed, failure } = await installService(manager, { ...at, argv: serviceArgv(opts), cwd: process.cwd(), env: serviceEnv(process.env), logPath }, deps.run);
+  // The word the host this unit starts carries: it is the one registered to serve that state file, so it serves
+  // where every other client on this computer is told to start the service instead. It is the host's own mark and
+  // not a service's, so the agent on a joined computer, whose unit comes out of the same serviceEnv, carries none.
+  const env = { ...serviceEnv(process.env), [STARTED_BY_ENV]: "service" };
+  const { unit, installed, failure } = await installService(manager, { ...at, argv: serviceArgv(opts), cwd: process.cwd(), env, logPath }, deps.run);
   if (failure !== undefined) {
     io.error(`wsp up --service: ${runFailureLine(failure)}`);
     if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp down takes it away.`);
@@ -1469,7 +1473,7 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
     io.error(noManagerLine(deps.platform));
     return 1;
   }
-  const at = serviceAddress(opts.statePath);
+  const at = serviceAddressHere(opts.statePath);
   const unit = manager.unit(at);
   // The manager is asked even with no unit file: a file somebody removed, or an install that took the file back,
   // still leaves the manager holding the service, and that is the one thing wsp down is for.
@@ -1557,7 +1561,7 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
   if (opts.watch === true) {
     throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.");
   }
-  const reading = await serviceReading(deps.manager, serviceAddress(opts.statePath), deps.run, deps.platform);
+  const reading = await serviceReading(deps.manager, serviceAddressHere(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
   const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
   for (const line of statusLines(opts.statePath, host, reading)) io.log(line);
@@ -1757,6 +1761,15 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
+      // A state file this computer's own manager is registered to serve is that service's: a host started here
+      // would be a second one on it, of whichever build this line came from, which is how a state file was
+      // rewritten under the host that owned it. The service's own host carries the word and passes, and a host
+      // that is already serving is the lock's refusal below, which names the pid and how to stop it.
+      const owned = startedByEnv(process.env) === "service" ? undefined : serviceServesState(opts.statePath, registeredService);
+      if (owned !== undefined) {
+        io.error(owned);
+        return EXIT_CODES.provider;
+      }
       // Which ports are free is settled before anything binds: a port another wsp or another program holds is one
       // sentence naming who holds it, and a pair nobody named is stepped over rather than refused.
       const ports = await pickUpPorts(io, opts);
