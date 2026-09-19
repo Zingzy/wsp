@@ -1229,23 +1229,16 @@ mod tests {
         assert!(fs::read_to_string(bare.join(RESOLV_INSIDE)).unwrap().contains("nameserver "));
     }
 
-    /// Whether a live mount case may run here: the flag the live suite sets and root, since every mount below
-    /// needs both. A run as anyone else is a return at the first line, as every live case in this crate is.
-    fn live_and_root() -> bool {
-        std::env::var("WSP_RUNTIME_LIVE").as_deref() == Ok("1") && nix::unistd::geteuid().is_root()
-    }
-
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and
     /// taken down again: the box's own top-level symlinks, the skeleton, an overlay over each of the computer's
     /// system directories with the workspace's own upper under it, the box's /root, an empty directory over every
     /// path nothing inside may read, and this computer's own install roots outside those trees bound in at their
-    /// own paths. Root and the live flag, as every mount case here is. Nothing of the computer's /home is written
-    /// here: the roots are whatever it already has, read rather than made.
+    /// own paths. Root, as every mount case here is. Nothing of the computer's /home is written here: the roots
+    /// are whatever it already has, read rather than made.
     #[test]
+    #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
     fn a_workspace_is_the_computers_own_directories_over_the_workspaces_own_uppers() {
-        if !live_and_root() {
-            return;
-        }
+        assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(&dir.path().join("root"));
         let (id, rootfs) = ("wsp-computer", layout.rootfs("wsp-computer"));
@@ -1392,12 +1385,11 @@ mod tests {
     /// A bind whose source is in a shared peer group, which is what the computer's own `/` is on a box: what
     /// the boot mounts under that bind may not appear at the source's own path. The source here is a temp
     /// directory this case makes shared itself, never the computer's `/root`, which this case neither reads nor
-    /// writes. Root and the live flag, as every mount case here is.
+    /// writes. Root, as every mount case here is.
     #[test]
+    #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
     fn nothing_mounted_under_a_bind_reaches_the_peer_group_its_source_is_in() {
-        if !live_and_root() {
-            return;
-        }
+        assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         // The stand-in for the computer's own home and the folder under it a workspace covers: a marker in it,
         // so a mount that reached the source would hide this file and the case would read that.
@@ -1458,12 +1450,11 @@ mod tests {
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
-    /// holds under the same root stays. Root and a mount namespace of its own, so it runs where the live cases do.
+    /// holds under the same root stays. Root and a mount namespace of its own, so it runs where the mount cases do.
     #[test]
+    #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
     fn unmount_under_takes_a_bind_under_a_bind_and_leaves_the_boxs_own_mounts() {
-        if !live_and_root() {
-            return;
-        }
+        assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         let (root, rootfs) = (dir.path().join("root"), dir.path().join("root/run/wsp-a/rootfs"));
         let outside = dir.path().join("outside");

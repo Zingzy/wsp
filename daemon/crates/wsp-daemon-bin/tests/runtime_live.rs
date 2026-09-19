@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The machine ops against the kernel, through this binary as the helper and the init: root and cgroup v2, so
-//! gated WSP_RUNTIME_LIVE=1. The root is one directory under /tmp per checkout; every workspace a case makes is
+//! every case here is marked ignored and a box runs them with `--ignored`, and a run anywhere else reads them
+//! ignored rather than ok. The root is one directory under /tmp per checkout; every workspace a case makes is
 //! killed at its end, and its mount and its cgroup are checked gone. Nothing here touches a workspace it did not
 //! make. The cases are the Docker backend's, the fake engine replaced by the kernel, then the network's: the box
 //! reaches a workspace at a published port, a workspace reaches its box, a registry and nothing of its
@@ -52,9 +53,10 @@ fn live_owner() -> String {
     format!("live-665-{}", checkout_key())
 }
 
-fn live() -> bool {
-    std::env::var("WSP_RUNTIME_LIVE").as_deref() == Ok("1")
-}
+/// Why a case here is marked ignored and what runs it: the same sentence its `#[ignore]` carries, which the
+/// attribute takes as a literal and cannot read from here, and what its body asserts root with, so a run that
+/// took it off a box says which box it wanted rather than reading ok having run nothing.
+const LIVE_REASON: &str = "drives the kernel as root: run the live executable on a box with --ignored";
 
 struct World {
     ops: Ops,
@@ -228,10 +230,9 @@ fn spec(extra: Value) -> Value {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_command() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let started = Instant::now();
     // Two cores of a box that keeps one, so this reads the box rather than a number: a runner with two cores gives
@@ -273,10 +274,9 @@ async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_comm
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn holds_a_machines_size_to_what_the_box_has() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let capacity = w.ok("machine.capacity", json!({})).await;
     let cores = capacity["cores"].as_f64().unwrap();
@@ -300,10 +300,9 @@ async fn holds_a_machines_size_to_what_the_box_has() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn answers_exec_with_stdout_stderr_and_the_exit_code() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let (code, out, err) = w.exec(&id, "echo out; echo err >&2; echo $HOME $USER; exit 7").await;
@@ -323,10 +322,9 @@ async fn answers_exec_with_stdout_stderr_and_the_exit_code() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn an_exec_runs_behind_the_workspaces_seccomp_filter_with_the_inits_capabilities() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     const FENCE_LINES: &str = "grep -E '^(Seccomp|Seccomp_filters|CapBnd|CapEff|CapPrm|CapInh|CapAmb):'";
@@ -342,10 +340,9 @@ async fn an_exec_runs_behind_the_workspaces_seccomp_filter_with_the_inits_capabi
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn an_exec_against_a_filter_with_a_notify_action_is_refused_and_the_workspace_still_answers() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     // The bundle's config.json is what every exec reads its filter from; a rule with the notify action is added to
@@ -367,10 +364,9 @@ async fn an_exec_against_a_filter_with_a_notify_action_is_refused_and_the_worksp
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let patience = wsp_runtime::runtime::STOP_PATIENCE;
     // What a stop that asked and was answered costs: the processes end themselves and the wait ends with them,
     // so the figure is the workspace's own shutdown and not the deadline. Read against a fifth of the patience,
@@ -463,10 +459,9 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
 /// path of this checkout's own under that home and never an agent's real login, and takes the folder it made off
 /// the box at its end.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_mount_point_a_shared_login_needs_leaves_nothing_on_the_boxs_own_home() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     // The login as this daemon shares them out: a file under its own logins directory and nowhere else.
     let logins = root().join("logins/live-share");
@@ -511,10 +506,9 @@ async fn the_mount_point_a_shared_login_needs_leaves_nothing_on_the_boxs_own_hom
 /// What this computer can see of a workspace working, which is the figure the host's idle firing reads before it
 /// stops one: a byte through a published port and a command run in it start it over, and nothing else does.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_quiet_figure_is_what_this_computer_can_see_of_a_workspace_working() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     w.listen_inside(&id).await;
@@ -557,10 +551,9 @@ async fn the_quiet_figure_is_what_this_computer_can_see_of_a_workspace_working()
 /// binds, answers at the box's published port: the listener out here dials from inside the workspace's own
 /// network namespace, where that loopback is the workspace's.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let (code, _, err) = w.exec(&id, &answer_on(LOOPBACK_INSIDE, 7070)).await;
@@ -607,10 +600,9 @@ async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() 
 /// /var and /srv, so the box's own /home is not inside one at all. The case reads it all the same, since what
 /// it asks is that no other person's home on the box shows through, however the rootfs comes to be made.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     // What the box holds, read before any workspace is made: the length of one file and the count of one
     // directory, neither of which is a thing this reads the content of.
     let box_shadow = fs::metadata("/etc/shadow").map(|m| m.len()).unwrap_or(0);
@@ -664,10 +656,9 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
 /// and nothing inside can write the prefix. A box with no such root reads the PATH and no mount, which is the
 /// other half of the case.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_be_written() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
@@ -715,10 +706,9 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn kills_by_the_id_it_was_given_and_maps_every_state() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     assert_eq!(w.state(&id).await, "running");
@@ -741,10 +731,9 @@ async fn kills_by_the_id_it_was_given_and_maps_every_state() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn lists_by_our_labels_and_answers_the_size_the_listing_carries() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     // The size this box gives, read off the box rather than written down: it keeps a core and two thirds of its
     // memory for itself, so a workspace asking for two cores on a two core box is listed at one, and one asking
@@ -776,10 +765,9 @@ async fn lists_by_our_labels_and_answers_the_size_the_listing_carries() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_reading_of_a_workspace_is_what_its_cgroup_its_record_and_its_network_say() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let capacity = w.ok("machine.capacity", json!({})).await;
     let id = w.create(spec(json!({ "cpu": 1, "memMb": 1024 }))).await;
@@ -814,10 +802,9 @@ async fn a_reading_of_a_workspace_is_what_its_cgroup_its_record_and_its_network_
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn puts_bytes_where_they_belong_and_serves_no_signed_url() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
@@ -849,10 +836,9 @@ async fn daemon_answers(w: &World, id: &str) -> bool {
 /// The daemon that serves a workspace here is this one, so what it answers about that workspace is whether it
 /// runs: nothing listens inside, nothing is asked inside, and a stopped workspace answers no.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn answers_for_a_workspace_itself_rather_than_asking_a_port_inside_it() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
 
@@ -876,10 +862,9 @@ async fn answers_for_a_workspace_itself_rather_than_asking_a_port_inside_it() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn describes_the_workspace_from_its_record() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "cpu": 1, "memMb": 768 }))).await;
     let shape = w.ok("machine.describe", json!({ "machineId": id })).await["shape"].clone();
@@ -890,10 +875,9 @@ async fn describes_the_workspace_from_its_record() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_memory_cap_holds_seven_hundred_megabytes_touched_under_five_hundred_twelve_exit_137() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "memMb": 512 }))).await;
     let (code, _, _) = w.exec(&id, "perl -e '$x = \"x\" x (700 * 1024 * 1024); print length($x)'").await;
@@ -908,10 +892,9 @@ async fn a_memory_cap_holds_seven_hundred_megabytes_touched_under_five_hundred_t
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_world_dropped_without_its_close_leaves_nothing_on_the_box() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let id = {
         let mut w = World::open().await;
         let id = w.create(spec(json!({}))).await;
@@ -926,10 +909,9 @@ async fn a_world_dropped_without_its_close_leaves_nothing_on_the_box() {
 /// The init's pid is only the init while the process behind it is the one the record named: after the init died
 /// with no daemon there to delete it, the kernel hands that pid to whatever comes next.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_pid_the_kernel_reused_after_the_init_died_is_not_the_workspace() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let record: Value = serde_json::from_str(&fs::read_to_string(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
@@ -995,10 +977,9 @@ async fn a_pid_the_kernel_reused_after_the_init_died_is_not_the_workspace() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_backend_and_the_self_check_answer_on_this_box() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let w = World::open().await;
     assert_eq!(w.ok("machine.checkKey", json!({})).await, json!({ "id": 1, "ok": true }));
     let facts = w.ok("machine.backend", json!({})).await;
@@ -1017,10 +998,9 @@ async fn the_backend_and_the_self_check_answer_on_this_box() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn answers_the_daemon_road_at_the_published_port_on_the_boxs_loopback() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     w.listen_inside(&id).await;
@@ -1041,10 +1021,9 @@ async fn answers_the_daemon_road_at_the_published_port_on_the_boxs_loopback() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_address_a_turn_inside_dials_the_box_at_resolves_and_connects() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let network = w.network(&id);
@@ -1067,10 +1046,9 @@ async fn the_address_a_turn_inside_dials_the_box_at_resolves_and_connects() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn outbound_reaches_a_registry_the_tests_own_and_then_the_real_one() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let network = w.network(&id);
@@ -1099,10 +1077,9 @@ async fn outbound_reaches_a_registry_the_tests_own_and_then_the_real_one() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn two_workspaces_cannot_reach_each_other() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let a = w.create(spec(json!({ "idempotencyKey": format!("live-665-apart-a-{}", checkout_key()) }))).await;
     let b = w.create(spec(json!({ "idempotencyKey": format!("live-665-apart-b-{}", checkout_key()) }))).await;
@@ -1121,10 +1098,9 @@ async fn two_workspaces_cannot_reach_each_other() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn delete_leaves_no_interface_no_rule_and_no_listener() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     w.listen_inside(&id).await;
@@ -1144,10 +1120,9 @@ async fn delete_leaves_no_interface_no_rule_and_no_listener() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_daemon_restart_keeps_a_running_workspaces_network_and_its_forward() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     w.listen_inside(&id).await;
@@ -1171,10 +1146,9 @@ async fn a_daemon_restart_keeps_a_running_workspaces_network_and_its_forward() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_sweep_at_start_takes_the_network_of_a_workspace_that_is_gone() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let port = w.publish(&id, 7070).await;
@@ -1268,10 +1242,9 @@ impl Drop for LabFirewall {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_cannot_reach_the_boxs_cloud_metadata() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let box_reaches = TcpStream::connect_timeout(&SocketAddrV4::new(METADATA, 80).into(), Duration::from_secs(2)).is_ok();
@@ -1283,10 +1256,9 @@ async fn a_workspace_cannot_reach_the_boxs_cloud_metadata() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_forwards_through_the_default_route_alone() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let a = w.create(spec(json!({}))).await;
     let b = w.create(spec(json!({}))).await;
@@ -1319,10 +1291,9 @@ async fn a_workspace_forwards_through_the_default_route_alone() {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_firewall_that_ends_its_chains_in_a_reject_gets_the_accepts_at_its_head() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let lab = LabFirewall::build();
     let id = w.create(spec(json!({}))).await;
@@ -1349,10 +1320,9 @@ async fn a_firewall_that_ends_its_chains_in_a_reject_gets_the_accepts_at_its_hea
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_link_alias_longer_than_the_kernel_takes_is_refused_by_name() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut route = Route::open().unwrap();
     let lo = route.index_of("lo").unwrap();
     let refused = route.set_alias(lo, &"a".repeat(300)).unwrap_err();
@@ -1363,10 +1333,9 @@ async fn a_link_alias_longer_than_the_kernel_takes_is_refused_by_name() {
 /// this daemon can neither nap nor wake: it reads gone, not a nap the resume would refuse, and the kill still takes
 /// it whole, since a workspace that cannot be killed would stay on the box for good.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_live_init_whose_state_does_not_read_is_gone_not_a_nap_and_still_dies() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let init = init_pid(&id);
@@ -1385,10 +1354,9 @@ async fn a_live_init_whose_state_does_not_read_is_gone_not_a_nap_and_still_dies(
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forward_under_200_ms() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "memMb": 512 }))).await;
     // A second workspace beside it, to be stopped and woken first: its block is then not the lowest free one. At
@@ -1673,10 +1641,9 @@ fn show(title: &str, code: i64, out: &str, err: &str) {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_containers_alone() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
         eprintln!("this box has no container engine with a socket; the engine case is skipped");
         return;
@@ -1819,10 +1786,9 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
 /// wants and fail at the network step. The name rides on the boot and on every exec, since a tenant inherits
 /// neither the init's environment nor the daemon's.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
         eprintln!("this box has no container engine with a socket; the compose project case is skipped");
         return;
@@ -1896,10 +1862,9 @@ fn checkout(at: &Path) {
 /// A workspace of this computer and nothing else: no image named, no project handed in. What it holds is what
 /// the box holds, read through an overlay of its own; what the box keeps to itself is an empty directory inside.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     // The box's own tools and the box's own /etc, through the overlays; the box's /root, through the bind. The
@@ -1988,10 +1953,9 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
 /// A create meant for a provider, sent here: one sentence, and nothing of a workspace left behind. The eight ops
 /// a layer store answered are not ops at all any more, so the frame itself is refused and names itself.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_create_that_names_an_image_is_refused_and_the_snapshot_ops_are_gone() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let w = World::open().await;
     let key = checkout_key();
     let refused = w
@@ -2016,10 +1980,9 @@ async fn a_create_that_names_an_image_is_refused_and_the_snapshot_ops_are_gone()
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own_path() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let key = checkout_key();
     let from = root().join("projects").join(format!("live-copy-{key}"));
@@ -2083,10 +2046,9 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothing() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let w = World::open().await;
     let key = checkout_key();
     let gone = root().join("projects").join(format!("live-copy-no-such-{key}"));
@@ -2111,10 +2073,9 @@ async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothi
 /// path of its own leaves the box's home exactly as it found it, and a copy asking for a path under that home is
 /// refused before anything is made at it.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_copy_at_a_path_of_the_workspaces_own_leaves_the_boxs_home_alone_and_one_under_it_is_refused() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let mut w = World::open().await;
     let key = checkout_key();
     let from = root().join("projects").join(format!("live-trees-{key}"));
@@ -2219,7 +2180,8 @@ fn used_bytes(at: &Path) -> u64 {
     (stat.f_blocks - stat.f_bfree) * u64::from(stat.f_frsize as u32)
 }
 
-/// Whether this run is root, which the loop volumes and their mounts need.
+/// Whether this run is root, which every case here asserts before its first line and the loop volumes and
+/// their mounts need.
 fn root_here() -> bool {
     // SAFETY: geteuid reads this process and touches nothing.
     unsafe { libc::geteuid() == 0 }
@@ -2240,10 +2202,9 @@ fn big_checkout(at: &Path, mb: u64) {
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_disk_that_shares_blocks_copies_a_two_hundred_megabyte_checkout_for_its_metadata_alone() {
-    if !live() || !root_here() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let Some(volume) = volume("xfs", &["mkfs.xfs", "-q", "-m", "reflink=1"], 2) else { return };
     let (from, copies) = (volume.at.join("projects/checkout"), volume.at.join("copies"));
     big_checkout(&from, 200);
@@ -2276,10 +2237,9 @@ async fn a_disk_that_shares_blocks_copies_a_two_hundred_megabyte_checkout_for_it
 }
 
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_btrfs_subvolume_is_snapshotted_rather_than_walked_at_all() {
-    if !live() || !root_here() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let Some(volume) = volume("btrfs", &["mkfs.btrfs", "-q", "-f"], 2) else { return };
     let (from, copies) = (volume.at.join("checkout"), volume.at.join("copies"));
     let made = std::process::Command::new("btrfs").args(["subvolume", "create"]).arg(&from).output();
@@ -2407,10 +2367,9 @@ impl FrameClient {
 /// same root serves them. Files are read on the box side through the workspace's rootfs, since a read runs no code;
 /// git runs inside the workspace, which is what the hook this case writes proves.
 #[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspace_named() {
-    if !live() {
-        return;
-    }
+    assert!(root_here(), "{LIVE_REASON}");
     let key = checkout_key();
     // A checkout with its own bare origin inside it, at a relative remote url, so the copy carries the origin into
     // the workspace and the push inside has somewhere to land with no network and no credential. The runtime root

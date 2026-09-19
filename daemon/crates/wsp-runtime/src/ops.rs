@@ -2305,15 +2305,14 @@ mod tests {
     /// The same create answered before the next open: its own remove, which is what the create runs when the boot
     /// it was in the middle of refuses, reads the claim's points as a record's and takes them off.
     ///
-    /// Root and the live flag, as the mount cases are: a remove takes the workspace's network down on its way,
+    /// Root, as every case here that drives the kernel is: a remove takes the workspace's network down on its way,
     /// and the nftables read that ends with is refused to anything without the capability a box's daemon runs
     /// with. The open's sweep above is the road this create's leavings are answered by wherever the remove is
     /// refused, and the create drops the remove's own refusal already.
     #[tokio::test]
+    #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
     async fn a_remove_of_a_claim_with_no_record_takes_its_points_off() {
-        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
-            return;
-        }
+        assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("wsp");
         let ops = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
@@ -2387,12 +2386,11 @@ mod tests {
 
     /// The claim of a create that died with its mounts up: the open takes the mounts down before it takes the
     /// directory, or the remove walks into the copy through the bind and then answers EBUSY on the mount point
-    /// and the daemon does not come up at all. Root and the live flag, as the mount cases are.
+    /// and the daemon does not come up at all. Root, as every case here that drives the kernel is.
     #[test]
+    #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
     fn the_open_unmounts_what_a_dead_create_left_under_a_claim_before_it_takes_the_claim() {
-        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
-            return;
-        }
+        assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let layout = Layout::new(root);
