@@ -127,19 +127,22 @@ impl ProcessManifest {
         lines.join("\n")
     }
 
+    /// A sibling a death leaves beside the manifest is swept by nothing and read by nothing: the next write
+    /// names a new one.
     fn save(&self) -> io::Result<()> {
         let Some(path) = &self.path else { return Ok(()) };
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let saved = Saved { next_id: self.next_id, entries: self.entries() };
-        fs::write(path, serde_json::to_string_pretty(&saved).map_err(io::Error::other)?)
+        wsp_runtime::files::write_json(path, &saved)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::process::Command;
 
     fn record(m: &mut ProcessManifest, cmd: &str, cwd: &str, port: Option<u16>) -> ManifestEntry {
@@ -170,6 +173,26 @@ mod tests {
         assert_eq!(saved["entries"][1]["cmd"], "node worker.js");
         assert!(saved["entries"][1].get("port").is_none());
         assert!(saved["entries"][0]["recordedAt"].as_str().unwrap().ends_with('Z'));
+    }
+
+    /// `save` takes the writer's road, which is described once at the writer's own case in the runtime's
+    /// `files`. A daemon killed inside its write is not something a case here can stage; the handle held across
+    /// the second record stands in for it.
+    #[test]
+    fn a_manifest_write_lands_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("manifest.json");
+        let mut m = ProcessManifest::load(Some(path.clone()), None, None).unwrap();
+        record(&mut m, "pnpm dev", "/root/app", Some(8080));
+        let first = fs::read(&path).unwrap();
+        let mut held = fs::File::open(&path).unwrap();
+        record(&mut m, "node worker.js", "/root/app", None);
+        let mut carried = Vec::new();
+        held.read_to_end(&mut carried).unwrap();
+        assert_eq!(carried, first, "a record went through the file a reader already had open");
+        assert_eq!(ProcessManifest::load(Some(path), None, None).unwrap().entries().len(), 2);
+        let left: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|entry| entry.file_name()).collect();
+        assert_eq!(left, ["manifest.json"]);
     }
 
     #[test]

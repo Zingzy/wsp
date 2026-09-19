@@ -14,6 +14,10 @@ serde_json.workspace = true
 base64.workspace = true
 tokio.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# The sibling every JSON write lands in before its rename, so a daemon that dies inside a write leaves no torn
+# file. A dependency of the crate and not of its tests alone, since the writer ships, and of no target alone,
+# since the door's manifest goes through it on every platform the daemon runs on.
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # clonefile, statfs and getattrlist: the three calls the directory clone on a Mac is made of.
@@ -29,12 +33,6 @@ netlink-packet-core = "0.8"
 netlink-packet-route = "0.31"
 httparse = "1"
 percent-encoding = "2"
-# The sibling every JSON write lands in before its rename, so a daemon that dies inside a write leaves no torn
-# file. A dependency of the crate and not of its tests alone, since the writer ships.
-tempfile = "3"
 
 [dev-dependencies]
-# The cases of the modules that build on every platform make their directories with it; on Linux the writer
-# above already carries it.
-tempfile = "3"
 xattr = "1"

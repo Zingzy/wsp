@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -783,18 +782,10 @@ fn unescaped(word: &str) -> String {
     out
 }
 
-/// A file this daemon owns written whole or not at all: the bytes go to a sibling of their own in the file's
-/// directory and the rename puts them at the path, so a daemon that dies inside a write leaves the file it had
-/// or no file, never half of one, and two tasks writing the same path never rename each other's bytes. The
-/// sibling a death leaves sits in the workspace's own directory, which the remove and the open's sweep take
+/// The sibling a death leaves sits in the workspace's own directory, which the remove and the open's sweep take
 /// away with everything else under it.
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
-    let text = serde_json::to_vec_pretty(value).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) })?;
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut sibling = tempfile::NamedTempFile::new_in(dir).map_err(at(dir))?;
-    sibling.write_all(&text).map_err(at(path))?;
-    sibling.persist(path).map_err(|e| Error { path: path.to_owned(), source: e.error })?;
-    Ok(())
+    crate::files::write_json(path, value).map_err(at(path))
 }
 
 /// The mount points a boot wrote under its claim, or none where the record has taken them over and the file is
@@ -825,32 +816,7 @@ pub fn read_record(path: &Path) -> Result<Option<Workspace>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
-
     use super::*;
-
-    /// A file this daemon owns is whole or it is the file it was: the bytes land in a sibling and the rename
-    /// puts them at the path, so a reader holding the file the write replaced reads all of it and nothing
-    /// anywhere reads half of either. A daemon that dies inside a write leaves the old file just this way.
-    #[test]
-    fn a_json_write_lands_whole_or_not_at_all() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("points.json");
-        write_json(&path, &vec!["/root/.codex/auth.json".to_owned()]).unwrap();
-        let before = fs::read(&path).unwrap();
-        // The handle a reader took before the write, which under a rewrite of the same file reads the new bytes
-        // and under a rename reads the whole of the old ones.
-        let mut held = fs::File::open(&path).unwrap();
-        write_json(&path, &vec!["/root/.claude/.credentials.json".to_owned()]).unwrap();
-        let mut carried = Vec::new();
-        held.read_to_end(&mut carried).unwrap();
-        assert_eq!(carried, before, "a write went through the file a reader already had open");
-        let now: Vec<String> = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(now, ["/root/.claude/.credentials.json"]);
-        // The sibling goes with the rename: the directory holds the file it held and nothing beside it.
-        let left: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|entry| entry.file_name()).collect();
-        assert_eq!(left, ["points.json"]);
-    }
 
     /// The one reader of a claim's points takes a file that does not parse as no points, so a file an older
     /// daemon tore costs that workspace its claim's names and nothing else. The record's reader refuses such a
