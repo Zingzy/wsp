@@ -2455,6 +2455,23 @@ mod tests {
         assert!(Ops::open(dir.path(), PathBuf::from("/bin/true")).is_ok());
     }
 
+    /// An older daemon that died inside the write of a claim's points file left a torn one behind: the open
+    /// reads it as the leaving of a create that never finished and takes the claim away with it, where before
+    /// it refused, and went on refusing every open after that until somebody deleted the file on the box.
+    #[test]
+    fn the_open_takes_a_claim_whose_points_file_is_torn_as_a_dead_creates_leaving() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wsp");
+        let layout = Layout::new(&root);
+        drop(Ops::open(&root, PathBuf::from("/bin/true")).unwrap());
+        fs::create_dir_all(layout.workspace("wsp-torn")).unwrap();
+        fs::write(layout.points("wsp-torn"), "[\"/root/.codex/auth.json\"").unwrap();
+
+        let again = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-torn".to_owned()]);
+        assert!(!layout.workspace("wsp-torn").exists());
+    }
+
     #[test]
     fn a_record_that_does_not_read_refuses_the_open_by_name() {
         let dir = tempfile::tempdir().unwrap();

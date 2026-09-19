@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -782,17 +783,33 @@ fn unescaped(word: &str) -> String {
     out
 }
 
+/// A file this daemon owns written whole or not at all: the bytes go to a sibling of their own in the file's
+/// directory and the rename puts them at the path, so a daemon that dies inside a write leaves the file it had
+/// or no file, never half of one, and two tasks writing the same path never rename each other's bytes. The
+/// sibling a death leaves sits in the workspace's own directory, which the remove and the open's sweep take
+/// away with everything else under it.
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     let text = serde_json::to_vec_pretty(value).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) })?;
-    fs::write(path, text).map_err(at(path))
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut sibling = tempfile::NamedTempFile::new_in(dir).map_err(at(dir))?;
+    sibling.write_all(&text).map_err(at(path))?;
+    sibling.persist(path).map_err(|e| Error { path: path.to_owned(), source: e.error })?;
+    Ok(())
 }
 
 /// The mount points a boot wrote under its claim, or none where the record has taken them over and the file is
 /// gone. This daemon wrote it and no other program reads it, so a name in it the record already carries costs
 /// the take-off nothing: what that removes is an empty file no running record has bound.
+///
+/// A file that does not parse reads as none as well. This daemon writes the file whole or not at all, so a torn
+/// one is an older daemon's death inside its write and what it named is lost with it: an empty file at an
+/// agent's login path, which is the box as it was before any of this was written down. Refusing instead would
+/// refuse that workspace's every stop and remove, and its neighbours' every boot, for as long as the file
+/// stands, with no road out but a delete by hand on the box. The record's own reader is strict still: a
+/// workspace whose record does not read is one nothing here can reason about, and the open says so by name.
 pub fn read_points(path: &Path) -> Result<Vec<String>, Error> {
     match fs::read(path) {
-        Ok(text) => serde_json::from_slice(&text).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) }),
+        Ok(text) => Ok(serde_json::from_slice(&text).unwrap_or_default()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(Error { path: path.to_owned(), source: e }),
     }
@@ -808,7 +825,53 @@ pub fn read_record(path: &Path) -> Result<Option<Workspace>, Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
+
+    /// A file this daemon owns is whole or it is the file it was: the bytes land in a sibling and the rename
+    /// puts them at the path, so a reader holding the file the write replaced reads all of it and nothing
+    /// anywhere reads half of either. A daemon that dies inside a write leaves the old file just this way.
+    #[test]
+    fn a_json_write_lands_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("points.json");
+        write_json(&path, &vec!["/root/.codex/auth.json".to_owned()]).unwrap();
+        let before = fs::read(&path).unwrap();
+        // The handle a reader took before the write, which under a rewrite of the same file reads the new bytes
+        // and under a rename reads the whole of the old ones.
+        let mut held = fs::File::open(&path).unwrap();
+        write_json(&path, &vec!["/root/.claude/.credentials.json".to_owned()]).unwrap();
+        let mut carried = Vec::new();
+        held.read_to_end(&mut carried).unwrap();
+        assert_eq!(carried, before, "a write went through the file a reader already had open");
+        let now: Vec<String> = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(now, ["/root/.claude/.credentials.json"]);
+        // The sibling goes with the rename: the directory holds the file it held and nothing beside it.
+        let left: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|entry| entry.file_name()).collect();
+        assert_eq!(left, ["points.json"]);
+    }
+
+    /// The one reader of a claim's points takes a file that does not parse as no points, so a file an older
+    /// daemon tore costs that workspace its claim's names and nothing else. The record's reader refuses such a
+    /// file by name still: a workspace whose record does not read is one nothing here can reason about.
+    #[test]
+    fn a_points_file_that_does_not_parse_reads_as_absent_and_a_record_that_does_not_still_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let points = dir.path().join("points.json");
+        fs::write(&points, "[\"/root/.codex/auth.json\"").unwrap();
+        assert!(read_points(&points).unwrap().is_empty(), "a torn claim file refused the read where it had nothing to say");
+        // A whole one answers what it names, and one that is not there answers none, as they both did before.
+        write_json(&points, &vec!["/root/.codex/auth.json".to_owned()]).unwrap();
+        assert_eq!(read_points(&points).unwrap(), ["/root/.codex/auth.json"]);
+        fs::remove_file(&points).unwrap();
+        assert!(read_points(&points).unwrap().is_empty());
+
+        let record = dir.path().join("workspace.json");
+        fs::write(&record, "{ \"id\": \"wsp-torn\"").unwrap();
+        let refused = read_record(&record).unwrap_err().to_string();
+        assert!(refused.contains("workspace.json"), "{refused}");
+    }
 
     #[test]
     fn every_path_sits_under_the_root() {
