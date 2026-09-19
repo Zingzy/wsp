@@ -19,6 +19,7 @@ pub mod copy_snapshot;
 pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;
+pub mod files;
 #[cfg(target_os = "linux")]
 pub mod freeze;
 pub mod hardening;
