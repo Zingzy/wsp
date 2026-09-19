@@ -861,29 +861,8 @@ impl Ops {
             held.extend(points_of(&self.layout, &id)?);
             held
         };
-        let mut shares = Vec::new();
-        let mut made_points = Vec::new();
-        for share in &record.shares {
-            if !Path::new(&share.source).is_file() {
-                continue;
-            }
-            let at = bundle::inside(&self.layout.rootfs(&id), &share.target)?;
-            let stood = at.exists();
-            bundle::empty_file(&at)?;
-            if point_is_ours(&share.target, stood, &held) {
-                made_points.push(share.target.clone());
-            }
-            shares.push(share.clone());
-        }
+        let (shares, made_points) = make_points(&self.layout, &id, &record.shares, &held)?;
         record.made_points = made_points;
-        // Written under the claim after the points are on the computer's disk and before the container is
-        // created, and taken away by the record write below: between those two moments this file is the only
-        // thing naming what this boot put on the computer's own home, so a create that fails in between, or a
-        // daemon that dies there, still leaves the remove and the open's sweep something to take off. A boot
-        // that made none writes nothing, and a file an earlier boot left goes with the record write all the same.
-        if !record.made_points.is_empty() {
-            bundle::write_json(&self.layout.points(&id), &record.made_points)?;
-        }
         // The folders of the computer's own this workspace was made with, bound where it reads them: made here
         // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
         // workspace mounts under one of them never reaches the computer.
@@ -965,7 +944,7 @@ impl Ops {
         bundle::unmount_under(&self.layout.rootfs(&record.id))?;
         // After the unmount, so what goes is the empty file on the computer's own disk and never a mount: a
         // workspace asleep is one nothing holds a login open for, and the wake makes its points again.
-        take_off_points(&self.layout, &record.id, &record.made_points)?;
+        take_off_points(&self.layout, &record.id, &points_of(&self.layout, &record.id)?)?;
         Ok(())
     }
 
@@ -1180,6 +1159,34 @@ fn take_off_points(layout: &Layout, id: &str, points: &[String]) -> Result<(), O
         }
     }
     Ok(())
+}
+
+/// The mount point each of a workspace's file shares needs inside, made where nothing carries one, and the ones
+/// of wsp's own among them named under the claim as they are made: the shares to write into the config, and the
+/// points to write into the record.
+///
+/// A name goes into the claim's file before the file it names is made, and the file is rewritten at every name.
+/// A boot that refuses partway through this loop, on a target that is no path inside a workspace or a disk with
+/// nothing left, has already put the earlier points on the computer's own home, and until the record is written
+/// the claim's file is the only thing that can name them for the remove and the open's sweep. Naming one that
+/// this boot then failed to make costs them nothing: what the take-off removes is an empty file that stands.
+fn make_points(layout: &Layout, id: &str, wanted: &[Share], held: &[String]) -> Result<(Vec<Share>, Vec<String>), OpError> {
+    let mut shares = Vec::new();
+    let mut made_points = Vec::new();
+    for share in wanted {
+        if !Path::new(&share.source).is_file() {
+            continue;
+        }
+        let at = bundle::inside(&layout.rootfs(id), &share.target)?;
+        let stood = at.exists();
+        if point_is_ours(&share.target, stood, held) {
+            made_points.push(share.target.clone());
+            bundle::write_json(&layout.points(id), &made_points)?;
+        }
+        bundle::empty_file(&at)?;
+        shares.push(share.clone());
+    }
+    Ok((shares, made_points))
 }
 
 /// Whether a mount point a boot has just made for a file share is that workspace's to take off when it goes: one
@@ -2167,6 +2174,43 @@ mod tests {
         // And a point both places name is one point: the take-off is asked for it once.
         bundle::write_json(&layout.points("wsp-two"), &vec![recorded.clone()]).unwrap();
         assert_eq!(points_of(&layout, "wsp-two").unwrap(), [recorded.as_str()]);
+    }
+
+    /// A boot that refuses partway through its shares has put the earlier points on the computer's own home
+    /// already, so each point is named under the claim before the file it names is made. The second share here
+    /// cannot have its mount point made, a file standing where its folder would go, and the first share's point
+    /// is named all the same. What the remove and the open's sweep take off is what the reader answers, which
+    /// the case below drives all the way to the unlink.
+    #[test]
+    fn a_boot_that_refuses_inside_the_shares_loop_leaves_the_points_it_made_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        let id = "wsp-halfway";
+        fs::create_dir_all(layout.workspace(id)).unwrap();
+        let login = |name: &str| {
+            let source = layout.logins().join(name);
+            fs::create_dir_all(source.parent().unwrap()).unwrap();
+            fs::write(&source, b"{}").unwrap();
+            source.display().to_string()
+        };
+        // Paths under the computer's own home, which is what makes a point one to take off, and under a name no
+        // computer holds anything at: the take-off reads the computer's path, never the one under the rootfs.
+        let first = "/root/.wsp-share-proof/one.json".to_owned();
+        let second = "/root/.wsp-share-proof/two/two.json".to_owned();
+        let shares =
+            vec![Share { source: login("one.json"), target: first.clone() }, Share { source: login("two.json"), target: second.clone() }];
+        let under = bundle::inside(&layout.rootfs(id), "/root/.wsp-share-proof").unwrap();
+        fs::create_dir_all(&under).unwrap();
+        fs::write(under.join("two"), b"a file where the second share's folder would go").unwrap();
+
+        let refused = make_points(&layout, id, &shares, &[]).unwrap_err();
+        assert!(refused.message.contains("two"), "{refused:?}");
+        // The first share's point was made before the refusal, and the claim names it: that is what the remove
+        // and the open's sweep take off. The second is named and was never made, which costs them nothing, since
+        // what the take-off removes is an empty file that stands.
+        assert!(under.join("one.json").is_file());
+        assert_eq!(bundle::read_points(&layout.points(id)).unwrap(), [first.as_str(), second.as_str()]);
+        assert_eq!(points_of(&layout, id).unwrap(), [first.as_str(), second.as_str()]);
     }
 
     /// The create that fails between the mount point and its record: the claim names the point, so the open's
