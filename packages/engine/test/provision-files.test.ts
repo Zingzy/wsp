@@ -9,9 +9,27 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
-import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedFilesScript, landedServers, oncePathsOf, parseLanded, provisionFiles, type FilesSay, type ProvisionLanding } from "../src/provision-files.js";
-import type { McpPlan } from "../src/golden-mcp.js";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat } from "@wsp/catalog";
+import {
+  SERVER_MARK,
+  agentStateFile,
+  appendLanding,
+  closeAgentFiles,
+  filesRows,
+  landAgentFiles,
+  landedFilesScript,
+  landedServers,
+  oncePathsOf,
+  parseLanded,
+  provisionFiles,
+  serverDigest,
+  serversOutLines,
+  unmergeServers,
+  type FilesSay,
+  type ProvisionLanding,
+  type ServerPort,
+} from "../src/provision-files.js";
+import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
@@ -354,6 +372,26 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     expect(readFileSync(config, "utf8")).toContain("github");
   });
 
+  it("takes no key out of the list on a round whose copy of that agent's file never travelled", async () => {
+    const { root, machine } = box();
+    const at = placeProvisionPaths(root);
+    const lands: ProvisionLanding[] = [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/CLAUDE.md" }, { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true }];
+    const both = tarOf([file(".claude-cfg/CLAUDE.md", "his standing rules\n"), file(".claude-cfg/.claude.json", `${JSON.stringify({ mcpServers: { github: { command: "npx" } } }, null, 2)}\n`)]);
+    const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(both) });
+    await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {} });
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
+    const listed = readFileSync(at.landed, "utf8");
+    expect(listed).toContain(`${MCP_ID_PREFIX}claude/github`);
+
+    // A round that lands the person's files but never gets this computer's copy of the agent's own file there:
+    // it reads that file and writes nothing in it, so it knows nothing about either name and says nothing.
+    const again = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tarOf([file(".claude-cfg/CLAUDE.md", "his standing rules\n")])) });
+    const rows = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: again.owned, tools: [], stage: () => {} });
+    expect(rows.map(r => r.outcome)).toEqual(["present", "skipped"]);
+    await closeAgentFiles(machine, root, oncePathsOf(lands));
+    expect(readFileSync(at.landed, "utf8")).toBe(listed);
+  });
+
   it("sweeps the markers the job's own log left in wsp's folder there, and keeps the files a person reads", async () => {
     const { root, machine } = box();
     const at = placeProvisionPaths(root);
@@ -396,5 +434,107 @@ describe("the ownership read as the daemon on that computer renders it", () => {
     const path = join(CONTRACT, "landed-files.sh");
     expect(existsSync(path), `daemon/fixtures/contract/landed-files.sh is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
     expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/landed-files.sh is behind the engine. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+  });
+});
+
+describe("taking wsp's servers back out of the agents' own files there", () => {
+  const CLAUDE = "/root/.claude.json";
+  const CODEX = "/root/.codex/config.toml";
+
+  /** Claude Code's own file on that computer: one server wsp merged in, one of the person's own, one whose entry
+   * the agent has rewritten since, and one under the machine's home folder. */
+  const claudeText = (): string =>
+    `${JSON.stringify(
+      {
+        numStartups: 41,
+        mcpServers: { gsc: { command: "npx", args: ["gsc-mcp"] }, mine: { command: "/usr/local/bin/mine" }, notes: { command: "notes", args: ["--rewritten-by-the-agent"] } },
+        projects: { "/root": { mcpServers: { zed: { command: "zed" } } }, "/root/work": { history: ["his own turn"] } },
+      },
+      null,
+      2,
+    )}\n`;
+
+  const codexText = (): string => ['[projects."/root/repo"]', 'trust_level = "trusted"', "", "[mcp_servers.mine]", 'command = "/usr/local/bin/mine"', "", "[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', ""].join("\n");
+
+  /** That computer as the three calls the unmerge makes of it, over files held here rather than on a disk. */
+  function fakePort(files: Record<string, string>, keys: Record<string, string>): { port: ServerPort; wrote: string[] } {
+    const wrote: string[] = [];
+    return {
+      wrote,
+      port: {
+        run: script => Promise.resolve(script.includes(MCP_ID_PREFIX) ? Object.entries(keys).map(([id, digest]) => `${SERVER_MARK}\t${digest}\t${id}`).join("\n") : ""),
+        read: candidates => Promise.resolve(candidates.flatMap(path => (files[path] === undefined ? [] : [{ path, text: files[path]! }]))[0]),
+        write: (path, text) => {
+          files[path] = text;
+          wrote.push(path);
+          return Promise.resolve();
+        },
+      },
+    };
+  }
+
+  const digestIn = (text: string, format: McpFormat, name: string, project?: string): string => serverDigest(format.entryOf(text, name, project))!;
+
+  it("takes out the names the list holds whose entry there is still wsp's own, under both scopes and in both formats", async () => {
+    const files = { [CLAUDE]: claudeText(), [CODEX]: codexText() };
+    const keys = {
+      [`${MCP_ID_PREFIX}claude/gsc`]: digestIn(files[CLAUDE]!, MCP_SERVERS_JSON, "gsc"),
+      [`${MCP_ID_PREFIX}claude/home/zed`]: digestIn(files[CLAUDE]!, MCP_SERVERS_JSON, "zed", "/root"),
+      // The agent has written that entry back with something of its own on it, so it is the agent's now.
+      [`${MCP_ID_PREFIX}claude/notes`]: "a digest from the round that landed it",
+      [`${MCP_ID_PREFIX}codex/context7`]: digestIn(files[CODEX]!, CODEX_TOML, "context7"),
+    };
+    const { port, wrote } = fakePort(files, keys);
+
+    const took = await unmergeServers(port, "/root");
+    expect(took).toEqual([
+      { path: CLAUDE, names: ["gsc", "zed"], commentsDropped: false },
+      { path: CODEX, names: ["context7"], commentsDropped: false },
+    ]);
+    expect(wrote.sort()).toEqual([CODEX, CLAUDE].sort());
+    expect(serversOutLines(took[1]!)).toEqual([`context7 (out of ${CODEX})`]);
+
+    const claude = JSON.parse(files[CLAUDE]!) as { numStartups: number; mcpServers: Record<string, unknown>; projects: Record<string, { mcpServers?: Record<string, unknown>; history?: unknown }> };
+    expect(Object.keys(claude.mcpServers)).toEqual(["mine", "notes"]);
+    expect(claude.projects["/root"]!.mcpServers).toEqual({});
+    expect(claude.projects["/root/work"]).toEqual({ history: ["his own turn"] });
+    expect(claude.numStartups).toBe(41);
+    // Codex's file loses wsp's table and nothing else: the trust table and the person's own server stand.
+    expect(files[CODEX]).toBe(['[projects."/root/repo"]', 'trust_level = "trusted"', "", "[mcp_servers.mine]", 'command = "/usr/local/bin/mine"', ""].join("\n"));
+  });
+
+  it("says the comments a jsonc file loses as it is written back, in the one sentence that loss has, and says nothing of them for a plain JSON file", async () => {
+    const opencode = "/root/.config/opencode/opencode.json";
+    const commented = '{\n  // my own servers\n  "theme": "dark",\n  "mcp": { "docs": { "type": "local", "command": ["npx", "docs-mcp"] } }\n}\n';
+    const files = { [opencode]: commented, [CLAUDE]: claudeText() };
+    const keys = {
+      [`${MCP_ID_PREFIX}opencode/docs`]: digestIn(commented, OPENCODE_JSON, "docs"),
+      [`${MCP_ID_PREFIX}claude/gsc`]: digestIn(files[CLAUDE]!, MCP_SERVERS_JSON, "gsc"),
+    };
+    const { port } = fakePort(files, keys);
+
+    const took = await unmergeServers(port, "/root");
+    expect(took).toEqual([
+      { path: CLAUDE, names: ["gsc"], commentsDropped: false },
+      { path: opencode, names: ["docs"], commentsDropped: true },
+    ]);
+    // The leave's lines for that file: what came out of it, then the one sentence for the comments it lost.
+    expect(serversOutLines(took[1]!)).toEqual([`docs (out of ${opencode})`, commentsDroppedLine(opencode)]);
+    expect(files[opencode]).not.toContain("my own servers");
+    // The file that held no comment says nothing of them.
+    expect(serversOutLines(took[0]!)).toEqual([`gsc (out of ${CLAUDE})`]);
+  });
+
+  it("writes nothing where the list holds no key of that agent's, where the file is not there, and where every entry has changed", async () => {
+    const empty = fakePort({ [CLAUDE]: claudeText() }, {});
+    expect(await unmergeServers(empty.port, "/root")).toEqual([]);
+    expect(empty.wrote).toEqual([]);
+
+    // The list names a key in a file that computer does not have, and one whose entry is no longer wsp's.
+    const gone = fakePort({}, { [`${MCP_ID_PREFIX}claude/gsc`]: "d1" });
+    expect(await unmergeServers(gone.port, "/root")).toEqual([]);
+    const theirs = fakePort({ [CLAUDE]: claudeText() }, { [`${MCP_ID_PREFIX}claude/gsc`]: "d1" });
+    expect(await unmergeServers(theirs.port, "/root")).toEqual([]);
+    expect(theirs.wrote).toEqual([]);
   });
 });

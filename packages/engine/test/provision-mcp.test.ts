@@ -7,9 +7,9 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON } from "@wsp/catalog";
 import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
-import type { McpPlan } from "../src/golden-mcp.js";
+import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
 import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import { provisionMcp, theirServerLine } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
@@ -58,12 +58,25 @@ const CLAUDE_TRAVELLED = (gsc: string[] = ["--stdio"], far = false): string =>
 
 const CODEX_TRAVELLED = ['model = "gpt-5"', "", "[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', "", "[mcp_servers.grafana]", 'command = "npx"', ""].join("\n");
 
+/** OpenCode's own config as somebody keeps it on that computer: jsonc, with a comment the rewrite cannot keep. */
+const OPENCODE_ON_BOX = '{\n  // my own servers\n  "theme": "dark",\n  "mcp": {}\n}\n';
+const OPENCODE_TRAVELLED = `${JSON.stringify({ mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } }, null, 2)}\n`;
+
+const opencodePlanOn = (root: string): McpPlan => ({
+  agents: [{ id: "opencode", label: "OpenCode", scopes: [{ files: [join(root, ".config/opencode/opencode.json")], format: OPENCODE_JSON, keep: ["docs"], drop: [] }], aside: [] }],
+  guestHome: root,
+  rewrites: [[`${HOME}/`, `${root}/`]],
+  binDirs: [],
+  tools: [],
+});
+
 const LANDS: ProvisionLanding[] = [
   { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true },
   { id: "agents/codex", label: "Codex", dest: ".codex/config.toml", once: true },
 ];
 
-function planOn(root: string, far = false): McpPlan {
+function planOn(root: string, far = false, unticked: readonly string[] = []): McpPlan {
+  const asked = ["gsc", "mine", ...(far ? ["far"] : [])];
   return {
     agents: [
       {
@@ -73,8 +86,8 @@ function planOn(root: string, far = false): McpPlan {
           {
             files: [join(root, ".claude-cfg/.claude.json")],
             format: MCP_SERVERS_JSON,
-            keep: ["gsc", "mine", ...(far ? ["far"] : [])],
-            drop: [{ name: "notes", reason: "command is macOS-only, will not run" }],
+            keep: asked.filter(name => !unticked.includes(name)),
+            drop: [{ name: "notes", reason: "command is macOS-only, will not run" }, ...unticked.map(name => ({ name, reason: "unticked" }))],
           },
         ],
         aside: [],
@@ -98,10 +111,10 @@ const tarOfConfigs = (claude: string, codex: string): Buffer =>
 
 /** One run of the job's files and servers rounds on that computer, in the order the job runs them, with the close
  * that folds what it wrote into the list beside the job. */
-async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][]; closing: string }> {
+async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean; untick?: readonly string[] } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][]; closing: string }> {
   const said: string[] = [];
   const landed = await provisionFiles(g.machine, { home: g.root, lands: LANDS, pack: async () => packed(tarOfConfigs(o.claude ?? CLAUDE_TRAVELLED(["--stdio"], o.far === true), o.codex ?? CODEX_TRAVELLED)) });
-  const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true), {
+  const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true, o.untick ?? []), {
     home: g.root,
     landed: landed.owned,
     tools: [],
@@ -228,6 +241,56 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
       theirServerLine("Claude Code", "gsc", join(root, ".claude-cfg/.claude.json")),
     ]);
     expect(readFileSync(join(root, ".claude-cfg/.claude.json"), "utf8")).toBe(theirs);
+  });
+
+  it("writes down the keys it no longer owns, so the list stops naming a server that was unticked on this computer", async () => {
+    const g = box();
+    const { root } = g;
+    mkdirSync(join(root, ".claude-cfg"), { recursive: true });
+    writeFileSync(join(root, ".claude-cfg/.claude.json"), CLAUDE_ON_BOX);
+    await run(g);
+    expect(list(root).map(l => l.split("\t")[0]).sort()).toEqual([`${MCP_ID_PREFIX}claude/gsc`, `${MCP_ID_PREFIX}codex/context7`]);
+
+    // The person unticks that server on this computer: the merge takes wsp's own entry back out of the file its
+    // agent keeps, and the list stops saying wsp owns the name.
+    const second = await run(g, { untick: ["gsc"] });
+    expect(second.servers.find(r => r[0] === `${MCP_ID_PREFIX}claude/gsc`)![1]).toBe("skipped");
+    expect(claudeOf(root).mcpServers["gsc"]).toBeUndefined();
+    expect(list(root).map(l => l.split("\t")[0])).toEqual([`${MCP_ID_PREFIX}codex/context7`]);
+    // What the round wrote down for a name it no longer owns is itself out of the list: it is read once, by the
+    // close, and what stands afterwards is what wsp owns.
+    expect(readFileSync(placeProvisionPaths(root).landed, "utf8")).not.toContain("\t-\t-");
+    // Every key the agent wrote for itself and the server the person put there are where they were.
+    expect(claudeOf(root).numStartups).toBe(41);
+    expect(claudeOf(root).mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+  });
+
+  it("says on every row of a jsonc config that the comments its rewrite could not keep are gone", async () => {
+    const g = box();
+    const { root } = g;
+    const config = join(root, ".config/opencode/opencode.json");
+    mkdirSync(join(root, ".config/opencode"), { recursive: true });
+    writeFileSync(config, OPENCODE_ON_BOX);
+    const lands: ProvisionLanding[] = [{ id: "agents/opencode", label: "OpenCode", dest: ".config/opencode/opencode.json", once: true }];
+    const landed = await provisionFiles(g.machine, { home: root, lands, pack: async () => packed(tarOf([{ path: ".config/opencode/opencode.json", mode: 0o600, content: OPENCODE_TRAVELLED }])) });
+    const said: string[] = [];
+    const rows = await provisionMcp(g.machine, opencodePlanOn(root), {
+      home: root,
+      landed: landed.owned,
+      tools: [],
+      stage: (_which, detail) => {
+        if (detail !== undefined) said.push(detail);
+      },
+    });
+    expect(rows.map(r => [r.id, r.outcome])).toEqual([[`${MCP_ID_PREFIX}opencode/docs`, "installed"]]);
+    // Beside whatever else that row had to say, and in the words the install on this computer reads for it.
+    expect(rows[0]!.note).toBe(`npx fetches the package on first use; ${commentsDroppedLine(config)}`);
+    // And once as the round goes, since a row that installed reads as installed and no more on the screen.
+    expect(said.filter(line => line === commentsDroppedLine(config))).toHaveLength(1);
+    // The server is merged into the person's own file, and what the rewrite could not keep is the comment.
+    const held = readFileSync(config, "utf8");
+    expect(JSON.parse(held)).toEqual({ theme: "dark", mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } });
+    expect(held).not.toContain("my own servers");
   });
 
   it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {

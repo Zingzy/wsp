@@ -4203,7 +4203,7 @@ describe("wsp init --recipe", () => {
     await f.press(KEY.enter);
     await f.until(BOOT);
     const out = f.text();
-    expect(out).toMatch(/Gemini CLI now has the wsp tools: ~\/\.gemini\/settings\.json\n│\s+The file held comments; the rewrite is plain JSON, so they are gone\.\n/);
+    expect(out).toMatch(/Gemini CLI now has the wsp tools: ~\/\.gemini\/settings\.json\n│\s+~\/\.gemini\/settings\.json held comments; the rewrite is plain JSON, so they are gone\n/);
     expect(out).not.toContain("Claude Code now has the wsp tools");
     expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
     const settings = JSON.parse(readFileSync(join(f.opts.home, ".gemini", "settings.json"), "utf8")) as { theme: string; mcpServers: { wsp: { args: string[] } } };

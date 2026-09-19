@@ -241,9 +241,10 @@ function editScopes(plan: McpPlan, agents: readonly McpAgentPlan[], read: readon
   return { outcomes, texts };
 }
 
-/** Where a config's edited bytes land before they go over it, and the copy of it they are poured into. */
+/** Where a config's edited bytes land before they go over it, and the copy of it they are poured into. The copy
+ * is named here for every road that writes such a file back, this one and the leave's own on that computer. */
 const landing = (path: string): string => `${path}.wsp-mcp`;
-const beside = (path: string): string => `${path}.wsp-new`;
+export const besideConfig = (path: string): string => `${path}.wsp-new`;
 
 /** The bytes land beside the file, are poured into a copy of it and that copy is renamed over it. The pour keeps
  * the file's own mode, since a signed upload writes a new file at the road's own and a config that held a login
@@ -251,9 +252,9 @@ const beside = (path: string): string => `${path}.wsp-new`;
  * whole of one copy or the whole of the other, never a file cut in half. */
 const pourOver = (path: string): string =>
   [
-    `if [ -f ${shellQuote(path)} ]; then cp -p ${shellQuote(path)} ${shellQuote(beside(path))}; else : > ${shellQuote(beside(path))}; fi`,
-    `cat ${shellQuote(landing(path))} > ${shellQuote(beside(path))}`,
-    `mv ${shellQuote(beside(path))} ${shellQuote(path)}`,
+    `if [ -f ${shellQuote(path)} ]; then cp -p ${shellQuote(path)} ${shellQuote(besideConfig(path))}; else : > ${shellQuote(besideConfig(path))}; fi`,
+    `cat ${shellQuote(landing(path))} > ${shellQuote(besideConfig(path))}`,
+    `mv ${shellQuote(besideConfig(path))} ${shellQuote(path)}`,
     `rm -f ${shellQuote(landing(path))}`,
   ].join("\n");
 
@@ -265,7 +266,7 @@ export async function landConfigs(machine: Machine, read: readonly (ScopeFile | 
   const changed = [...texts].filter(([path, text]) => was.get(path) !== text);
   if (changed.length === 0) return undefined;
   const swept = async (why: string): Promise<string> => {
-    await machine.exec(`rm -f ${changed.flatMap(([path]) => [shellQuote(landing(path)), shellQuote(beside(path))]).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    await machine.exec(`rm -f ${changed.flatMap(([path]) => [shellQuote(landing(path)), shellQuote(besideConfig(path))]).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
     return `the edited config did not land (${why})`;
   };
   try {
@@ -377,6 +378,11 @@ export function withoutAbsent(plan: McpPlan, agents: readonly McpAgentPlan[], re
 /** The count line a servers round opens with: each agent and how many servers of its the plan names. */
 export const mcpOpening = (agents: readonly McpAgentPlan[]): string =>
   agents.map(a => `${a.label} ${a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length}`).join(", ");
+
+/** What a person is told about a file whose comments a rewrite did not keep: the one sentence for it, read by the
+ * install on this computer and by every server's row on a computer somebody owns, since one file and two roads
+ * must not word the same loss two ways. */
+export const commentsDroppedLine = (path: string): string => `${path} held comments; the rewrite is plain JSON, so they are gone`;
 
 /** Every server of a plan as a row, and the words a person reads for them, whichever road wrote the configs: one
  * row per kept name, per dropped name and per name set aside, uv installed where a kept server runs through it and
