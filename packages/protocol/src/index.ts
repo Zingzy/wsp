@@ -3937,10 +3937,13 @@ export function provisionLines(name: string, p: PlaceProvision): string[] {
  * afterwards rather than timed while it happens. */
 export const provisionLogLine = (at: number, line: string): string => `${isoSeconds(at)} ${line}`;
 
-/** What the round that lands the person's agent files packed on this computer: the paths the recipe planned, the
- * archive that goes over the link, and what it comes to once it is unpacked there. */
-export const provisionPackedLine = (paths: number, bytes: number, unpacked: number): string =>
-  `packed on this computer: ${plural(paths, "path")}, ${fmtBytes(bytes)} packed, ${fmtBytes(unpacked)} unpacked`;
+/** What the round that lands the person's agent files packed on this computer: the paths the recipe planned, then
+ * what the pack counted where it asked that computer first, the files already standing there at the same bytes and
+ * the files the archive holds, and what that archive weighs. A pack that asked nothing says its bytes alone. */
+export const provisionPackedLine = (paths: number, p: { bytes: number; files?: number; stood?: number }): string => {
+  const counted = p.files === undefined || p.stood === undefined ? "" : `${plural(p.stood, "file")} ${p.stood === 1 ? "stands" : "stand"} there already, ${plural(p.files, "file")} packed, `;
+  return `packed on this computer: ${plural(paths, "path")}, ${counted}${fmtBytes(p.bytes)}`;
+};
 
 /** What one part of that archive came to on the way over: the bytes it carried, and the pieces the road cut it
  * into where the bytes travel as text in one exec each, which is how a computer you own is reached. */

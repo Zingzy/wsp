@@ -30,12 +30,13 @@ export class PlaceMachine implements Machine {
   }
 
   /** The daemon's own exec frame, held under the cap the daemon holds its own timer to, with the link given the
-   * frame's wait and the margin the road takes on top of it. */
-  async exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string }): Promise<ExecResult> {
+   * frame's wait and the margin the road takes on top of it. Bytes a caller has for the command's own stdin ride
+   * the frame's own field, so nothing of them is in the command and the exec body's cap is not what bounds them. */
+  async exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult> {
     const timeoutMs = Math.min(opts?.timeoutMs ?? INLINE_EXEC_MS, EXEC_TIMEOUT_MAX_MS);
     const answer = await this.link.request(
       "exec",
-      { cmd, timeoutMs },
+      { cmd, timeoutMs, ...(opts?.stdin !== undefined ? { stdin: Buffer.from(opts.stdin).toString("base64") } : {}) },
       { timeoutMs: timeoutMs + LINK_MARGIN_MS, ...(opts?.idempotencyKey !== undefined ? { idempotencyKey: opts.idempotencyKey } : {}) },
     );
     const reply = DaemonExecReply.parse(answer);

@@ -470,14 +470,16 @@ describe("the person's own files and their servers, on the same run", () => {
     const said: string[] = [];
     const rows = await provisionBox(
       machine,
-      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, skipped: [], cut: [], silenced: [], macPaths: [] }) } },
+      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, files: 1, stood: [".claude-cfg/skills/old/SKILL.md"], skipped: [], cut: [], silenced: [], macPaths: [] }) } },
       detail => said.push(detail),
       ON,
     );
     // The lines the job reads its own minutes off, each written when its stage is done: the log on that computer
     // carries the time of every one of them.
     expect(said.filter(l => /^(packed|shipped|landed|list read|servers merged)/.test(l))).toEqual([
-      provisionPackedLine(1, tar.length, 4),
+      // What the pack left home because that computer already holds it, and what it put in the archive, are both
+      // on the line: this pack was told one file of the plan stands there.
+      provisionPackedLine(1, { bytes: tar.length, files: 1, stood: 1 }),
       provisionShippedLine({ part: 1, parts: 1, bytes: tar.length, total: tar.length }),
       // This machine's canned run prints no landing line, so the walk reads none; the file counts are the
       // landing's own test, over a real shell.

@@ -43,6 +43,13 @@ describe("a command on the computer itself", () => {
     expect(l.frames[0]!.params["timeoutMs"]).toBe(EXEC_TIMEOUT_MAX_MS);
     expect(l.frames[0]!.opts).toEqual({ timeoutMs: EXEC_TIMEOUT_MAX_MS + LINK_MARGIN_MS, idempotencyKey: "upload/1" });
   });
+
+  it("carries the bytes a caller gave it for the command's own stdin on the frame, as base64, and nothing of them in the command", async () => {
+    const l = link();
+    const stdin = Buffer.from([0, 1, 2, 250, 251]);
+    await machineOn(l).exec("cat > /root/x", { stdin });
+    expect(l.frames).toEqual([{ op: "exec", params: { cmd: "cat > /root/x", timeoutMs: INLINE_EXEC_MS, stdin: stdin.toString("base64") }, opts: { timeoutMs: INLINE_EXEC_MS + LINK_MARGIN_MS } }]);
+  });
 });
 
 describe("a step that may run for minutes", () => {

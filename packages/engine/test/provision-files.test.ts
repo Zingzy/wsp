@@ -3,15 +3,18 @@
 // real shell over a real directory standing in for that computer's home: what
 // it is for is deciding whether a file there is theirs or wsp's own copy, and
 // only a shell reading the bytes decides that.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat } from "@wsp/catalog";
 import {
+  LEDGER_MARK,
   SERVER_MARK,
+  STAND_MARK,
   agentStateFile,
   appendLanding,
   closeAgentFiles,
@@ -24,14 +27,16 @@ import {
   provisionFiles,
   serverDigest,
   serversOutLines,
+  standingDigests,
   unmergeServers,
   type FilesSay,
   type ProvisionLanding,
   type ServerPort,
 } from "../src/provision-files.js";
 import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
-import type { PackedFiles } from "../src/golden.js";
+import type { PackFiles, PackedFiles, StagedFile } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
+import type { ExecResult, Machine } from "../src/machine.js";
 import { tarOf } from "../src/vault.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
 
@@ -128,6 +133,27 @@ const read = (root: string, rel: string): string => readFileSync(join(root, rel)
 
 /** A packed archive as the host's own pack answers with one, with the sizes nothing here reads. */
 const packed = (tar: Buffer): PackedFiles => ({ tar, bytes: tar.length, unpacked: tar.length, skipped: [], cut: [], silenced: [], macPaths: [] });
+
+const digest = (content: string): string => createHash("sha256").update(content).digest("hex");
+
+/** The pack on this computer as the host's own answers one: the staged files with the digest each would land at,
+ * every path the answer names left out of the archive, and what it left out said beside what it packed. `sent` is
+ * the archive's own paths, one entry per pack. */
+function packing(files: readonly { path: string; content: string }[]): { pack: PackFiles; sent: string[][]; asked: StagedFile[][] } {
+  const sent: string[][] = [];
+  const asked: StagedFile[][] = [];
+  const pack: PackFiles = async leaveOut => {
+    const staged = files.map(f => ({ dest: f.path, digest: digest(f.content) }));
+    if (leaveOut !== undefined) asked.push(staged);
+    const answered = leaveOut === undefined ? [] : [...(await leaveOut(staged))];
+    const stood = files.map(f => f.path).filter(p => answered.includes(p));
+    const travels = files.filter(f => !stood.includes(f.path));
+    sent.push(travels.map(f => f.path));
+    const tar = tarOf(travels.map(f => file(f.path, f.content)));
+    return { tar, bytes: tar.length, unpacked: tar.length, files: travels.length, stood, skipped: [], cut: [], silenced: [], macPaths: [] };
+  };
+  return { pack, sent, asked };
+}
 
 /** The claude scope over the config the landing puts there, for the run that reads whose that config is. One
  * server of it is in the copy that travels and one is in neither that copy nor the file there. */
@@ -286,7 +312,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     const landed = await provisionFiles(machine, { home: root, lands: LANDS, pack: async () => packed(tar), say: line => said.push(line) });
     expect(landed.rows.map(r => r.outcome)).toEqual(["installed", "installed", "installed"]);
     expect(said).toEqual([
-      provisionPackedLine(LANDS.length, tar.length, tar.length),
+      provisionPackedLine(LANDS.length, { bytes: tar.length }),
       // The box's own road takes the part whole, so there is no piece count on the line it says.
       provisionShippedLine({ part: 1, parts: 1, bytes: tar.length, total: tar.length }),
       // The four files of the archive, each walked against what stands at its path there.
@@ -416,6 +442,165 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS, say: QUIET });
     expect(landed.length).toBeGreaterThan(0);
     for (const path of landed) expect(path.startsWith(`${placeProvisionPaths(root).dir}/`)).toBe(true);
+  });
+});
+
+/** The five planned files of the runs below, one landing each so a row reads one file, and the file an agent keeps
+ * for itself, which lands once and always travels. */
+const STANDS: ProvisionLanding[] = [
+  { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/CLAUDE.md" },
+  { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills/why/SKILL.md" },
+  { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills/how/SKILL.md" },
+  { id: "agents/codex", label: "Codex", dest: ".codex/AGENTS.md" },
+  { id: "agents/gemini", label: "Gemini CLI", dest: ".gemini/GEMINI.md" },
+  { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true },
+];
+
+const CONTENT: { path: string; content: string }[] = [
+  { path: ".claude-cfg/CLAUDE.md", content: "his standing rules\n" },
+  { path: ".claude-cfg/skills/why/SKILL.md", content: "the why skill\n" },
+  { path: ".claude-cfg/skills/how/SKILL.md", content: "the how skill\n" },
+  { path: ".codex/AGENTS.md", content: "the same rules for codex\n" },
+  { path: ".gemini/GEMINI.md", content: "the same rules again\n" },
+  { path: ".claude-cfg/.claude.json", content: "{}\n" },
+];
+
+const ONCE = oncePathsOf(STANDS);
+
+/** The lines of the list beside the job, path to the digest it says is standing there. */
+const listedIn = (root: string): Map<string, string> =>
+  new Map(
+    readFileSync(placeProvisionPaths(root).landed, "utf8")
+      .split("\n")
+      .filter(l => l !== "")
+      .map(l => l.split("\t"))
+      .map(w => [w[0]!, w[2]!] as const),
+  );
+
+describe("what already stands on that computer never travels again", { timeout: 60_000 }, () => {
+  /** One round of the recipe's files and the close behind it, which is what leaves the list this reads. */
+  const round = async (g: BoxGuest, pack: PackFiles, say: FilesSay = QUIET) => {
+    const landed = await provisionFiles(g.machine, { home: g.root, lands: STANDS, pack, say });
+    await closeAgentFiles(g.machine, g.root, ONCE);
+    return landed;
+  };
+
+  it("reads the digest of every path that stands there and the list's own line for it, off one xargs -0 sha256sum -z -- over the paths on the read's input (read on coreutils 9.4 and findutils 4.9.0)", async () => {
+    const g = box();
+    const at = placeProvisionPaths(g.root);
+    // A path whose folder holds a newline: it comes back on a record of its own, since every record of this read
+    // ends in a NUL and not in a line break.
+    const newline = ".claude-cfg/skills/two\nlines/SKILL.md";
+    write(g.root, ".claude-cfg/CLAUDE.md", "his standing rules\n");
+    write(g.root, ODD, "a skill with a backslash in its folder\n");
+    write(g.root, newline, "a skill under a folder with a newline in it\n");
+    mkdirSync(at.dir, { recursive: true });
+    writeFileSync(at.landed, `.claude-cfg/CLAUDE.md\twhat travelled\t${digest("his standing rules\n")}\n${ODD}\twhat travelled\tan older digest\n`);
+
+    const standing = (await standingDigests(g.machine, g.root, [".claude-cfg/CLAUDE.md", ODD, newline, ".codex/AGENTS.md"]))!;
+    expect(standing.at.get(".claude-cfg/CLAUDE.md")).toBe(digest("his standing rules\n"));
+    expect(standing.at.get(ODD)).toBe(digest("a skill with a backslash in its folder\n"));
+    expect(standing.at.get(newline)).toBe(digest("a skill under a folder with a newline in it\n"));
+    // A path that is not there at all takes the read's exit non-zero with it and the rest are read all the same.
+    expect(standing.at.has(".codex/AGENTS.md")).toBe(false);
+    expect(standing.listed.get(".claude-cfg/CLAUDE.md")).toBe(digest("his standing rules\n"));
+    expect(standing.listed.get(ODD)).toBe("an older digest");
+    expect(standing.listed.has(newline)).toBe(false);
+    // The paths ride the read's own input: no path of the person's is in the command, which is the text a log keeps.
+    const command = g.cmds.at(-1)!;
+    expect(command).toContain(STAND_MARK);
+    expect(command).not.toContain("CLAUDE.md");
+    // What the read wrote down to hold them is gone again.
+    expect(existsSync(at.asked)).toBe(false);
+  });
+
+  it("packs only what is not already there: three files stand at their digest with the list saying so and stay home, the one that differs and the one that is gone travel, and the file an agent keeps travels every run", async () => {
+    const g = box();
+    const first = packing(CONTENT);
+    await round(g, first.pack);
+    // Nothing stood on the first round: no file of wsp's was there and the list named none.
+    expect(first.sent).toEqual([CONTENT.map(f => f.path)]);
+
+    // The person wrote their own words over one of them, and another is gone from that computer.
+    write(g.root, ".codex/AGENTS.md", "what he wrote on the box\n");
+    rmSync(join(g.root, ".gemini/GEMINI.md"));
+    // A line an older run left for the file an agent keeps for itself, saying the bytes standing there: that file
+    // travels all the same, since the servers round reads the copy that came over and nothing else.
+    const at = placeProvisionPaths(g.root);
+    writeFileSync(at.landed, `${readFileSync(at.landed, "utf8")}.claude-cfg/.claude.json\t${digest("{}\n")}\t${digest("{}\n")}\n`);
+
+    const said: string[] = [];
+    const second = packing(CONTENT);
+    const landed = await round(g, second.pack, line => said.push(line));
+    // The archive holds the file that differs, the file that is gone and the one that lands once, and nothing else.
+    expect(second.sent[0]).toEqual([".codex/AGENTS.md", ".gemini/GEMINI.md", ".claude-cfg/.claude.json"]);
+    // The line a person reads says both: what the far side already holds, and what this pack put in the archive.
+    expect(said[0]).toMatch(/^packed on this computer: 6 paths, 3 files stand there already, 3 files packed, \d+ B$/);
+    // The three that stayed home read present, the person's own file is kept and the one that was gone is landed.
+    expect(landed.rows.map(r => [r.id, r.outcome])).toEqual([
+      ["files/.claude-cfg/CLAUDE.md", "present"],
+      ["files/.claude-cfg/skills/why/SKILL.md", "present"],
+      ["files/.claude-cfg/skills/how/SKILL.md", "present"],
+      ["files/.codex/AGENTS.md", "skipped"],
+      ["files/.gemini/GEMINI.md", "installed"],
+      ["files/.claude-cfg/.claude.json", "present"],
+    ]);
+    // A file that stayed home is wsp's own copy standing there, which is what the servers round reads.
+    expect(landed.owned.get(`${g.root}/.claude-cfg/CLAUDE.md`)).toBe("present");
+    expect(landed.skipped.map(s => s.path)).toEqual([`${g.root}/.codex/AGENTS.md`]);
+    expect(read(g.root, ".codex/AGENTS.md")).toBe("what he wrote on the box\n");
+    expect(read(g.root, ".gemini/GEMINI.md")).toBe("the same rules again\n");
+    // The list beside the job still holds every path at the digest it held, the ones that stayed home included.
+    expect(listedIn(g.root).get(".claude-cfg/CLAUDE.md")).toBe(digest("his standing rules\n"));
+    expect([...listedIn(g.root).keys()].sort()).toEqual([".claude-cfg/CLAUDE.md", ".claude-cfg/skills/how/SKILL.md", ".claude-cfg/skills/why/SKILL.md", ".codex/AGENTS.md", ".gemini/GEMINI.md"]);
+  });
+
+  it("sends a file whose line in the list is older than the bytes standing there, and one the list does not name at all, so the close writes both lines again", async () => {
+    const g = box();
+    const at = placeProvisionPaths(g.root);
+    await round(g, packing(CONTENT).pack);
+
+    // One path's line says bytes that are no longer what stands there, which is a line a lost close left behind;
+    // another path has no line at all. Both files themselves are the ones wsp landed.
+    const lines = readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "");
+    writeFileSync(
+      at.landed,
+      `${lines
+        .flatMap(l => (l.startsWith(".claude-cfg/skills/how/SKILL.md\t") ? [] : [l.startsWith(".claude-cfg/CLAUDE.md\t") ? `${l.split("\t").slice(0, 2).join("\t")}\tan older digest` : l]))
+        .join("\n")}\n`,
+    );
+
+    const second = packing(CONTENT);
+    await round(g, second.pack);
+    expect(second.sent[0]).toEqual([".claude-cfg/CLAUDE.md", ".claude-cfg/skills/how/SKILL.md", ".claude-cfg/.claude.json"]);
+    // Both lines are written again off what stands there now, which is the close's own rule, untouched.
+    expect(listedIn(g.root).get(".claude-cfg/CLAUDE.md")).toBe(digest("his standing rules\n"));
+    expect(listedIn(g.root).get(".claude-cfg/skills/how/SKILL.md")).toBe(digest("the how skill\n"));
+  });
+
+  it("sends every file where the read itself did not happen: a link that threw, the daemon's own timer, no shell, and an answer with no mark of the read's", async () => {
+    const g = box();
+    await round(g, packing(CONTENT).pack);
+    // With the read answering, the round that follows packs only the file that lands once.
+    const quiet = packing(CONTENT);
+    await round(g, quiet.pack);
+    expect(quiet.sent[0]).toEqual([".claude-cfg/.claude.json"]);
+
+    // What the read would have said for one of the files that stands there, so a run that read the marks and not
+    // the exit would leave that file home.
+    const stands = `${STAND_MARK}\t${digest("his standing rules\n")}\t.claude-cfg/CLAUDE.md\0${LEDGER_MARK}\t.claude-cfg/CLAUDE.md\t${digest("his standing rules\n")}\0`;
+    const answers: { why: string; answer: () => Promise<ExecResult> }[] = [
+      { why: "the link threw", answer: () => Promise.reject(new Error("spoo is not connected")) },
+      { why: "the daemon's own timer cut it", answer: () => Promise.resolve({ exitCode: EXEC_DEADLINE_EXIT, stdout: stands, stderr: "" }) },
+      { why: "no shell ran it", answer: () => Promise.resolve({ exitCode: 127, stdout: stands, stderr: "bash: not found\n" }) },
+      { why: "nothing of the read came back", answer: () => Promise.resolve({ exitCode: 0, stdout: "not a record of the read's\n", stderr: "" }) },
+    ];
+    for (const { why, answer } of answers) {
+      const broken: Machine = { ...g.machine, exec: (cmd, opts) => (cmd.includes(STAND_MARK) ? answer() : g.machine.exec(cmd, opts)) };
+      const asked = packing(CONTENT);
+      await provisionFiles(broken, { home: g.root, lands: STANDS, pack: asked.pack, say: QUIET });
+      expect(asked.sent[0], why).toEqual(CONTENT.map(f => f.path));
+    }
   });
 });
 
