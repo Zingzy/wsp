@@ -6,11 +6,11 @@
 // computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, localShape, ownMarks, plainPath, readValues } from "@wsp/engine";
+import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLine, unmergeServers, type ServerPort } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname, join } from "node:path";
 import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
@@ -222,6 +222,11 @@ export const placeService = (home: string, uid?: number): ServiceAddress => ({ r
  * take, and a file the person has written since is not on that read at all. The list sits inside the folder the
  * walk below takes, which is why the read comes first.
  *
+ * The servers wsp merged into the agents' own files here come out the same way and for the same reason, key by
+ * key off that same list: those files are the agents' own from their first launch, so a leave that took the path
+ * would take the person's file, and one that took nothing would leave an agent starting a server whose command
+ * has gone.
+ *
  * Every scope the manager could be holding a unit in, not only the one a join writes today: a computer joined
  * before the place's unit became the machine's own has its file under that login's systemd, and a sweep that read
  * one scope left that unit behind to come back under auto-restart with nothing to serve. Each line names the scope
@@ -238,9 +243,13 @@ export const placeService = (home: string, uid?: number): ServiceAddress => ({ r
  * decided this computer is out of that wsp. */
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
+  const sh = opts.sh ?? shStdout;
   // Before a single path of the list below goes: the list this read reads sits inside the provision folder that
   // walk takes, and what it says is which files in the agents' homes here are still wsp's own copies.
-  const own = ownMarks((opts.sh ?? shStdout)(landedFilesScript(home)));
+  const own = ownMarks(sh(landedFilesScript(home)));
+  // And what wsp merged into the agents' own files here, which no path of the list names: those files are the
+  // agents' own and stay, with wsp's keys taken out of them one by one. The same list, so this read comes first too.
+  const unmerged = await unmergeServers(hereServerPort(sh), home).catch(() => []);
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
   const removed: string[] = [];
   if (manager !== undefined) {
@@ -263,6 +272,7 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       removed.push(`${held.words} ${held.unit.name} (${refused === undefined ? "stopped" : runFailureLine(refused)})`);
     }
   }
+  for (const out of unmerged) removed.push(serversOutLine(out));
   // Every file wsp itself landed in an agent's home here whose bytes are still the ones wsp left. A file the
   // person has written since hashes differently, so the read never named it and it stays where it is.
   for (const rel of own) {
@@ -299,6 +309,33 @@ const shStdout = (script: string): string => {
 };
 
 const SH = "/bin/sh";
+
+/** The port the unmerge runs on when it runs on the computer it is taking wsp off: that computer's own sh for
+ * the read of the list, and its own file system for the agents' files. The write goes beside the file and is
+ * renamed over it, as the road that merged those servers in writes one back, so an agent launching in that
+ * moment reads one whole copy of it or the other. */
+function hereServerPort(sh: (script: string) => string): ServerPort {
+  return {
+    run: script => Promise.resolve(sh(script)),
+    read: files =>
+      Promise.resolve(
+        files.flatMap(path => {
+          try {
+            return [{ path, text: readFileSync(path, "utf8") }];
+          } catch {
+            return [];
+          }
+        })[0],
+      ),
+    write: (path, text) => {
+      const beside = besideConfig(path);
+      copyFileSync(path, beside);
+      writeFileSync(beside, text);
+      renameSync(beside, path);
+      return Promise.resolve();
+    },
+  };
+}
 
 /** How long the read of what wsp owns here gets; it hashes one file per line of the list. */
 const OWN_READ_MS = 60_000;

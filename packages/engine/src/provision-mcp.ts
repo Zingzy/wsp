@@ -5,13 +5,14 @@
 // is read out of the job's own folder, the agent's own file off the computer,
 // and the recipe's servers are merged into it key by key. What wsp wrote it
 // writes down at that grain, one line per key beside the job, so the next run
-// knows its own hand from the agent's and from the person's.
-import { createHash } from "node:crypto";
+// knows its own hand from the agent's and from the person's; a name it planned
+// and wrote nowhere is written down as one it no longer owns.
 import { placeProvisionPaths, type PlaceProvisionRow } from "@wsp/protocol";
 import type { McpEditLib, McpMergeResult } from "@wsp/catalog";
 import {
   READ_MS,
   absentCommands,
+  commentsDroppedLine,
   landConfigs,
   mcpOpening,
   mcpRowId,
@@ -32,7 +33,7 @@ import {
 import type { ToolResult } from "./golden-tools.js";
 import type { StageListener } from "./golden.js";
 import type { Machine } from "./machine.js";
-import { appendLanding, landedServers, type OwnedPaths } from "./provision-files.js";
+import { NO_DIGEST, appendLanding, landedServers, serverDigest, type OwnedPaths } from "./provision-files.js";
 
 /** The plan as it reads on a computer whose login keeps its home somewhere else: every guest path the plan carries
  * hangs off the home it was planned for, so the whole of it moves with that home. The plan is made once for every
@@ -70,16 +71,20 @@ interface Candidate {
   travelled: string;
 }
 
-/** The digest one key is owned by: the entry standing under that name, in the shape its format keeps when the
- * agent writes the file again. Nothing for a name the text does not define. */
+/** The digest one key is owned by, read off one scope's file: the entry standing under that name, by the one
+ * rule the leave reads such a line back with. Nothing for a name the text does not define. */
 function entryDigest(scope: McpScope, text: string | undefined, name: string): string | undefined {
-  const entry = text === undefined ? undefined : scope.format.entryOf(text, name, scope.project?.to);
-  return entry === undefined ? undefined : createHash("sha256").update(entry).digest("hex");
+  return serverDigest(text === undefined ? undefined : scope.format.entryOf(text, name, scope.project?.to));
 }
 
 /** One key's line in the list beside the job: the server's row id and the digest of the entry wsp left under that
  * name, in both digest fields, since no file's bytes are that entry's alone. */
 const serverLine = (id: string, digest: string): string => `${id}\t${digest}\t${digest}`;
+
+/** One key's line for a name this round planned and did not write: the row id with no digest in either field.
+ * The close keeps the first line each id has, which is this one, and then leaves every line with no digest out,
+ * so the list stops saying wsp owns a name it no longer wrote anywhere. */
+const tombstoneLine = (id: string): string => `${id}\t${NO_DIGEST}\t${NO_DIGEST}`;
 
 /** What one pass of the merge came to. */
 interface Merged {
@@ -88,6 +93,10 @@ interface Merged {
   texts: Map<string, string>;
   /** Row id to the digest of the entry standing under that name once every scope of its file has merged. */
   records: Map<string, string>;
+  /** Row ids this round planned in a scope it merged and left no entry of wsp's under. */
+  tombstones: string[];
+  /** The files whose merge could not keep the comments they held. */
+  commentsDropped: Set<string>;
   /** Row ids whose entry the merge found already as the copy that travelled has it. */
   same: Set<string>;
   /** Row ids an agent's own definition stands under, with the file it stands in. */
@@ -150,7 +159,11 @@ export async function provisionMcp(
     const theirs = new Map<string, string>();
     const noCopy = new Map<string, string>();
     const where = new Map<string, string>();
+    const commentsDropped = new Set<string>();
     const wrote: { id: string; name: string; scope: McpScope; path: string }[] = [];
+    /** Every row id this round planned where it had both the file there and a copy of this computer's to merge:
+     * a scope with neither knows nothing about those names and says nothing about them. */
+    const planned: string[] = [];
     let at = 0;
     for (const agent of agents) {
       for (const scope of agent.scopes) {
@@ -188,6 +201,8 @@ export async function provisionMcp(
         try {
           const merged = scope.format.merge(lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), replace, ...(scope.project !== undefined ? { project: scope.project } : {}) }, standing, arrived);
           if (merged.text !== (standing ?? "")) texts.set(path, merged.text);
+          if (merged.commentsDropped) commentsDropped.add(path);
+          planned.push(...names.map(id));
           for (const r of merged.results) {
             if (r.outcome === "same") same.add(id(r.name));
             if (r.outcome === "theirs") theirs.set(id(r.name), path);
@@ -207,7 +222,7 @@ export async function provisionMcp(
         return digest === undefined ? [] : [[w.id, digest] as const];
       }),
     );
-    return { outcomes, texts, records, same, theirs, noCopy, where };
+    return { outcomes, texts, records, tombstones: planned.filter(id => !records.has(id)), same, theirs, noCopy, where, commentsDropped };
   };
 
   const missing = new Set<string>();
@@ -242,6 +257,11 @@ export async function provisionMcp(
   // the rows are built, since the words the round closes with say what the rows say; nothing is present on a round
   // whose configs did not land, where every kept server is skipped with that reason instead.
   const present = new Set(failure !== undefined || merged === undefined ? [] : [...merged.same].filter(id => !arrivedWhole(merged?.where.get(id))));
+  // A merge that could not keep a file's comments is said on every row of that file and once here as the round
+  // goes: a row of a server that installed reads as installed and no more on the screen, and the person whose
+  // comments those were is reading this terminal.
+  const commentsAt = failure !== undefined || merged === undefined ? new Set<string>() : merged.commentsDropped;
+  for (const path of commentsAt) o.stage("installing-mcp", commentsDroppedLine(path));
   const results = await mcpRows(machine, plan, {
     agents,
     missing,
@@ -250,9 +270,13 @@ export async function provisionMcp(
     ...(merged !== undefined ? { report: merged.outcomes } : {}),
     ...(failure !== undefined ? { failure } : {}),
   });
-  if (failure === undefined && merged !== undefined) await appendLanding(machine, o.home, [...merged.records].map(([id, digest]) => serverLine(id, digest)));
+  if (failure === undefined && merged !== undefined) {
+    await appendLanding(machine, o.home, [...[...merged.records].map(([id, digest]) => serverLine(id, digest)), ...merged.tombstones.map(tombstoneLine)]);
+  }
   return results.map(r => {
     const outcome = r.outcome === "skipped" ? "skipped" : present.has(r.id) ? "present" : "installed";
-    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(r.note !== undefined && outcome !== "present" ? { note: r.note } : {}) };
+    const at = merged?.where.get(r.id);
+    const notes = [...(r.note !== undefined && outcome !== "present" ? [r.note] : []), ...(at !== undefined && commentsAt.has(at) ? [commentsDroppedLine(at)] : [])];
+    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
   });
 }

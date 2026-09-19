@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
+import { commentsDroppedLine } from "@wsp/engine";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
@@ -254,7 +255,7 @@ export function removeEach(agentIds: Iterable<string>, project: string): RemoveR
  * last, where the skill went. */
 export function installLines(placed: Installed): string[] {
   const lines = placed.path === undefined ? [`${placed.agent}: the catalog has no MCP config for it yet, so the server was not written; add it by hand.`] : [`${placed.agent} now has the wsp tools: ${placed.path}`];
-  if (placed.commentsDropped === true) lines.push("The file held comments; the rewrite is plain JSON, so they are gone.");
+  if (placed.commentsDropped === true && placed.path !== undefined) lines.push(commentsDroppedLine(placed.path));
   lines.push(`The wsp skill went to ${placed.skill}`);
   if (placed.docs !== undefined && placed.docs.length > 0) lines.push(`The wsp section is in ${placed.docs.join(" and ")}`);
   return lines;

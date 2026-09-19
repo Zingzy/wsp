@@ -195,6 +195,7 @@ describe("mcp servers", () => {
       // machine's, and this row's module is here to be read through.
       entryOf: () => undefined,
       merge: (_lib, _scope, own) => ({ text: own ?? "", results: [], commentsDropped: false }),
+      remove: text => text,
     };
     const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
     const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });

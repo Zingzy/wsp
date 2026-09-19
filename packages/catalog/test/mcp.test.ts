@@ -338,3 +338,45 @@ describe("merge", () => {
     expect(CODEX_TOML.merge(LIB, { keep: ["nobody"], drop: [], replace: [] }, undefined, CODEX_TRAVELLED()).text).toBe("");
   });
 });
+
+describe("remove", () => {
+  it("mcpServers JSON: the named keys go, under the user scope and the home folder alike, and every other key of the agent's and the person's stands", () => {
+    const merged = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED()).text;
+    const withHome = MCP_SERVERS_JSON.merge(LIB, { keep: ["zed"], drop: [], replace: [], project: { from: HOME, to: "/root" } }, merged, CLAUDE_TRAVELLED()).text;
+
+    const gone = MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]);
+    const root = JSON.parse(gone) as { numStartups: number; oauthAccount: unknown; projects: Record<string, { mcpServers?: Record<string, unknown> }>; mcpServers: Record<string, unknown> };
+    expect(Object.keys(root.mcpServers)).toEqual(["mine"]);
+    expect(root.numStartups).toBe(41);
+    expect(root.oauthAccount).toEqual({ emailAddress: "he@example.com" });
+    expect(root.projects["/root/work"]).toEqual({ history: ["his own turn"] });
+    // The home folder's servers are the person's own scope and are named there, not under the root key.
+    expect(root.projects["/root"]!.mcpServers).toEqual({ zed: { command: "/root/.local/bin/zed", args: [] } });
+    const both = MCP_SERVERS_JSON.remove(gone, ["zed"], "/root");
+    expect((JSON.parse(both) as { projects: Record<string, { mcpServers: Record<string, unknown> }> }).projects["/root"]!.mcpServers).toEqual({});
+
+    // A name the file does not define, a scope it has nothing under, and a file with no servers at all: the text
+    // stands as it is rather than being rewritten for nothing.
+    expect(MCP_SERVERS_JSON.remove(withHome, ["nobody"])).toBe(withHome);
+    expect(MCP_SERVERS_JSON.remove(withHome, ["gsc"], "/root/elsewhere")).toBe(withHome);
+    expect(MCP_SERVERS_JSON.remove('{ "theme": "x" }', ["gsc"])).toBe('{ "theme": "x" }');
+    expect(() => MCP_SERVERS_JSON.remove("[]", ["gsc"])).toThrow("the file is not a JSON object");
+  });
+
+  it("OpenCode's JSON: the named keys go from under its own key and the rest of the file is written back as the merge writes it", () => {
+    const own = '{\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] }, "mine": { "type": "local", "command": ["mine"] } }\n}\n';
+    const gone = OPENCODE_JSON.remove(own, ["wsp"]);
+    expect(JSON.parse(gone)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
+    expect(OPENCODE_JSON.remove(own, ["nobody"])).toBe(own);
+  });
+
+  it("Codex's TOML: the named tables go with their sub-tables, and the person's trust tables, hooks state and own server stay byte for byte", () => {
+    const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
+    expect(landed).toContain("[mcp_servers.context7.env]");
+    expect(CODEX_TOML.remove(landed, ["context7"])).toBe(CODEX_OWN);
+    // A name no table stands for leaves the file exactly as it was, comments and spacing with it.
+    expect(CODEX_TOML.remove(landed, ["nobody"])).toBe(landed);
+    expect(CODEX_TOML.remove(landed, ["mine"])).not.toContain("[mcp_servers.mine]");
+    expect(CODEX_TOML.remove(landed, ["mine"])).toContain('[projects."/private/tmp/proof-907/repo"]');
+  });
+});
