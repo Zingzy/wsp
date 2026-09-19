@@ -175,9 +175,9 @@ mod tests {
         assert!(saved["entries"][0]["recordedAt"].as_str().unwrap().ends_with('Z'));
     }
 
-    /// The manifest is whole or it is the manifest it was: the bytes land in a sibling and the rename puts them
-    /// at the path, so a reader holding the file the write replaced reads all of it. A daemon killed inside its
-    /// write is not something a case here can stage; the handle is what stands in for it.
+    /// `save` takes the writer's road, which is described once at the writer's own case in the runtime's
+    /// `files`. A daemon killed inside its write is not something a case here can stage; the handle held across
+    /// the second record stands in for it.
     #[test]
     fn a_manifest_write_lands_whole_or_not_at_all() {
         let dir = tempfile::tempdir().unwrap();
@@ -185,15 +185,12 @@ mod tests {
         let mut m = ProcessManifest::load(Some(path.clone()), None, None).unwrap();
         record(&mut m, "pnpm dev", "/root/app", Some(8080));
         let first = fs::read(&path).unwrap();
-        // The handle a reader took before the second record, which under a rewrite of the same file reads the
-        // new bytes and under a rename reads the whole of the old ones.
         let mut held = fs::File::open(&path).unwrap();
         record(&mut m, "node worker.js", "/root/app", None);
         let mut carried = Vec::new();
         held.read_to_end(&mut carried).unwrap();
         assert_eq!(carried, first, "a record went through the file a reader already had open");
         assert_eq!(ProcessManifest::load(Some(path), None, None).unwrap().entries().len(), 2);
-        // The sibling goes with the rename: the directory holds the manifest and nothing beside it.
         let left: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|entry| entry.file_name()).collect();
         assert_eq!(left, ["manifest.json"]);
     }

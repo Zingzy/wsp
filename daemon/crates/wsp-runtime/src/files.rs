@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The one writer for every file a daemon owns whole, on every platform a daemon runs on: the runtime's own
-//! files on Linux, and the door's process manifest wherever the daemon is.
+//! The one writer for every JSON file a daemon owns whole, on every platform a daemon runs on: the runtime's
+//! own records on Linux, and the door's process manifest wherever the daemon is.
 
 use std::io;
 use std::io::Write;
