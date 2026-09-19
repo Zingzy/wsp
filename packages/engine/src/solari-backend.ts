@@ -1,5 +1,5 @@
 import { moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
-import { MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -128,14 +128,6 @@ export function previewTokenExpiry(token: string, now = Date.now()): number {
 
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
-}
-
-/** What a fetch is given to end it early: the cap, the caller's own signal, or both. A fresh timeout per attempt,
- * so a call the backend sends again gets the whole cap again rather than what the first attempt left of it. */
-function abort(capMs: number | undefined, signal: AbortSignal | undefined): { signal?: AbortSignal } {
-  const caps = capMs === undefined ? undefined : AbortSignal.timeout(capMs);
-  if (caps === undefined) return signal === undefined ? {} : { signal };
-  return { signal: signal === undefined ? caps : AbortSignal.any([caps, signal]) };
 }
 
 export class SolariBackend implements MachineBackend {

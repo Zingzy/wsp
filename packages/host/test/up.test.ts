@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
@@ -9,6 +9,7 @@ import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStre
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
 import { skillsRefreshedLine } from "../src/mcp-install.js";
@@ -353,6 +354,15 @@ describe("wsp up", () => {
     }
   });
 
+  it("a start that refuses its state mints no key, so the home is as the refusal found it", async () => {
+    // The key is the place wiring's, minted beside the state at its first read, so a start that refuses before it wires places leaves none.
+    const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
+    stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
+    await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+    expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
+    expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
+  });
+
   it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {
     stateFile({ goldens: { default: SEALED_GOLDEN } });
     await answered(await started([]));
@@ -393,6 +403,23 @@ describe("wsp up", () => {
     } finally {
       rmSync(held.unit.path, { force: true });
     }
+  });
+
+  it("a host the service started records the mark in its lock and carries it into nothing it starts", async () => {
+    // Everything this host starts inherits the environment of its own process, the threads it runs and the daemon its panes dial alike.
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    vi.stubEnv(STARTED_BY_ENV, "service");
+    // The wiring a turn on this computer runs under, made while the mark stands: it answers the environment as it is when it is asked.
+    const wiring = localWiring(home, process.env, undefined, statePath);
+    expect(wiring.env()[STARTED_BY_ENV]).toBe("service");
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
+    runtimes.push(rt);
+
+    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
+
+    expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("service");
+    expect(STARTED_BY_ENV in process.env).toBe(false);
+    expect(STARTED_BY_ENV in wiring.env()).toBe(false);
   });
 
   it("wsp up refuses a flag it does not answer in and starts nothing", async () => {
