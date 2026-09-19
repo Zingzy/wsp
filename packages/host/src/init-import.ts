@@ -25,6 +25,8 @@ import {
   type GoldenImport,
   type ImportResult,
   type CutNames,
+  type LeaveOut,
+  type PackFiles,
   type PackedFiles,
   type PathInfo,
   type PlannedFile,
@@ -184,6 +186,16 @@ export async function readSecrets(wanted: readonly PlannedSecret[], reader: Secr
   return out;
 }
 
+/** Every file staged under a tree, by its path relative to that tree, which is where it lands under the home on
+ * the far side. */
+function stagedPaths(dir: string, under = ""): string[] {
+  return readdirSync(dir).flatMap(name => {
+    const p = join(dir, name);
+    const rel = under === "" ? name : `${under}/${name}`;
+    return statSync(p).isDirectory() ? stagedPaths(p, rel) : [rel];
+  });
+}
+
 /** Bytes a tree takes once extracted, links counted as their targets since the archive ships those. */
 function treeBytes(path: string): number {
   const st = statSync(path);
@@ -249,6 +261,9 @@ export interface PackOptions {
   onImage?: ReadonlySet<string>;
   /** Every command the recipe or the catalog knows a tool for (see toolNames); an oh-my-zsh plugin by one of these names, off the image, leaves the plugin list. */
   tools?: ReadonlySet<string>;
+  /** Asked once the staged tree is what would land, before it is tarred: which of those files need not travel at
+   * all. Left out, every staged file is packed, which is the image. */
+  leaveOut?: LeaveOut;
 }
 
 /** Copies the planned files into a staging tree, renders each secret into it,
@@ -434,13 +449,21 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     repoint(stage);
     for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);
     if (existsSync(join(stage, ".ssh"))) chmodSync(join(stage, ".ssh"), 0o700);
+    // The staged tree is now what would land, rewrites and all, so this is where a road that can read the far side
+    // is asked what need not travel; the digest is of the bytes as they would stand there, which only the stage has.
+    const paths = stagedPaths(stage);
+    const asked = opts.leaveOut === undefined ? [] : await opts.leaveOut(paths.map(dest => ({ dest, digest: createHash("sha256").update(readFileSync(join(stage, dest))).digest("hex") })));
+    // Only a path this pack staged comes out: what the answer says about anything else is not this tree's.
+    const staged = new Set(paths);
+    const stood = [...new Set(asked)].filter(p => staged.has(p));
+    for (const rel of stood) rmSync(join(stage, rel), { force: true });
     const unpacked = treeBytes(stage);
     // tar truncates an existing archive in place, so the mode set here is the one it keeps.
     writeFileSync(tgz, "", { mode: 0o600 });
     const { file, args, env } = tarPackCommand(stage, tgz);
     await execFileAsync(file, args, { env });
     const tar = readFileSync(tgz);
-    return { tar, bytes: tar.length, unpacked, skipped, cut, silenced, macPaths, ...(left.length > 0 ? { leftBehind: left } : {}) };
+    return { tar, bytes: tar.length, unpacked, files: paths.length - stood.length, stood, skipped, cut, silenced, macPaths, ...(left.length > 0 ? { leftBehind: left } : {}) };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
@@ -612,11 +635,12 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const hash = recipeHash(recipeDigest(bring, digested, custom, brew));
   const settingsSource = join(home, CLAUDE_SETTINGS_FILE.slice(2));
   const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools, brew), tools: toolNames(opts.rows ?? bring, brew) };
-  const pack = (): Promise<PackedFiles> => packPlan(plan, packOpts);
+  const packWith = (files: FilesPlan): PackFiles => leaveOut => packPlan(files, { ...packOpts, ...(leaveOut !== undefined ? { leaveOut } : {}) });
+  const pack = packWith(plan);
   const volatileFiles = files.filter(f => f.volatile);
   const volatile =
     volatileFiles.length > 0 || plan.secrets.length > 0
-      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(secretPath)], pack: () => packPlan({ ...plan, files: volatileFiles }, packOpts) }
+      ? { paths: [...volatileFiles.map(tilde), ...plan.secrets.map(secretPath)], pack: packWith({ ...plan, files: volatileFiles }) }
       : undefined;
   return {
     recipeHash: hash,
