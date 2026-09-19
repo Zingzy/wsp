@@ -3937,7 +3937,7 @@ export const provisionPackedLine = (paths: number, bytes: number, unpacked: numb
   `packed on this computer: ${plural(paths, "path")}, ${fmtBytes(bytes)} packed, ${fmtBytes(unpacked)} unpacked`;
 
 /** What one part of that archive came to on the way over: the bytes it carried, and the pieces the road cut it
- * into where the bytes travel as text in one exec each, which is how a computer you own is reached. */
+ * into where the bytes travel on one exec frame each, which is how a computer you own is reached. */
 export const provisionShippedLine = (p: { part: number; parts: number; bytes: number; total: number; pieces?: number }): string => {
   const took = p.pieces === undefined ? "" : ` in ${plural(p.pieces, "piece")}`;
   return p.parts === 1 ? `shipped: ${fmtBytes(p.total)}${took}` : `shipped part ${p.part} of ${p.parts}: ${fmtBytesOfTotal(p.bytes, p.total)}${took}`;
