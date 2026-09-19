@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -154,6 +154,8 @@ describe("what a computer is called in a row", () => {
   });
 
   it("the remove on a computer you own names the memory kept there only where a folder of it stands", () => {
+    // The clause has one home, which the tool describing the remove reads too.
+    expect(MEMORY_KEPT_CLAUSE).toBe("the memory its agent keeps on that computer stays");
     expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", true)).toBe(
       "spoo-landing is no longer a project on spoo; the folder wsp kept for it there, /wsp/projects/pr_1, is gone with its checkout, and the memory its agent keeps on that computer stays",
     );

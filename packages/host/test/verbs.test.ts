@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type RuntimeDaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -18,7 +18,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, CLI_VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT, hostPlatform, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
@@ -3654,5 +3654,16 @@ describe("the verbs never talk to the provider", () => {
     expect(imports).not.toContain("@wsp/runtime");
     expect(imports).not.toContain("@wsp/engine");
     expect(source).not.toMatch(/SOLARI|ANTHROPIC|loadKeys|SolariBackend|getsolari/);
+  });
+});
+
+describe("what the projects remove tool says", () => {
+  it("reads the same memory clause the sentence a remove answers with reads, rather than the opposite of it", () => {
+    const remove = VERBS.filter(hasTool).find(v => v.name === "projects remove");
+    const description = remove?.tool.description ?? "";
+    expect(description).toContain(MEMORY_KEPT_CLAUSE);
+    expect(description).not.toContain("the memory its threads kept");
+    // The words the remove itself answers with carry that same clause, so the two cannot drift apart.
+    expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", true)).toContain(MEMORY_KEPT_CLAUSE);
   });
 });
