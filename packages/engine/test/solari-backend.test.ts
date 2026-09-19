@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RESUME_UNANSWERED } from "@wsp/protocol";
-import { isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError } from "../src/errors.js";
-import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
+import { fetchCapMs, isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
+import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
@@ -584,8 +584,8 @@ describe("a pause and a resume the provider does not answer", () => {
   const RESUME = "POST /sandboxes/x/resume";
   const STATE = "GET /sandboxes/x";
   /** A machine handle off a create, so the first read the test sees is the move's own. */
-  async function machine(f: typeof globalThis.fetch) {
-    const b = new SolariBackend({ apiKey: "k", fetch: f, budgets: BUDGETS });
+  async function machine(f: typeof globalThis.fetch, over?: { budgets?: Partial<MoveBudgets>; clock?: RetryClock }) {
+    const b = new SolariBackend({ apiKey: "k", fetch: f, budgets: { ...BUDGETS, ...over?.budgets }, ...(over?.clock !== undefined ? { clock: over.clock } : {}) });
     return b.create({ kind: "sandbox" });
   }
   const created = () => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox" }), { status: 201 });
@@ -667,9 +667,11 @@ describe("a pause and a resume the provider does not answer", () => {
     expect(sent(STATE)).toBe(1);
   });
 
-  it("a pause the provider refuses is not retried: the refusal is the answer, thrown as itself", async () => {
+  it("a pause the provider refuses is not retried, and an odd millisecond left in the budget is no reason to fail before the call", async () => {
     const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: new Response(JSON.stringify({ error: "upstream request timeout" }), { status: 400 }), [STATE]: reads("running") });
-    const m = await machine(f);
+    // A clock that does not move and an odd budget: the first attempt's half is 19.5ms on every run, which the
+    // timer refuses unless the cap is made whole, so the refusal below is the only thing this case can read.
+    const m = await machine(f, { budgets: { pauseMs: 39 }, clock: { now: () => 0, sleep: async () => {} } });
     const err = await m.pause().catch(e => e as unknown);
     expect((err as Error).message).toBe("upstream request timeout");
     expect(err).not.toBeInstanceOf(MoveUnansweredError);
@@ -761,5 +763,12 @@ describe("the cap the caller puts on one call", () => {
     // nobody answered from one the provider refused.
     await expect(b.request("POST", "/sandboxes/x/resume", {}, 20)).rejects.toSatisfy(isCapped);
     expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("the cap a fetch is given is a whole number of milliseconds inside the timer's range", () => {
+    expect(fetchCapMs(19.5)).toBe(20);
+    expect(fetchCapMs(30_000)).toBe(30_000);
+    expect(fetchCapMs(2 ** 32)).toBe(4_294_967_295);
+    expect(fetchCapMs(-1)).toBe(0);
   });
 });

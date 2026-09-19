@@ -95,6 +95,27 @@ export function isCapped(e: unknown): boolean {
   return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "TimeoutError";
 }
 
+/** The largest delay AbortSignal.timeout takes: past it the call is refused with a range error rather than capped.
+ * Node also runs anything past a signed 32-bit millisecond as one millisecond, and the longest cap a backend here
+ * hands a fetch is four minutes, so neither bound is in reach of a real call. */
+const TIMER_CAP_MS = 4_294_967_295;
+
+/** The cap one fetch is given, as a whole number of milliseconds inside the timer's range. A budget split across two
+ * attempts leaves half a millisecond whenever an odd number of them is left, and AbortSignal.timeout refuses a delay
+ * that is not an integer, so the call would fail with a range error before it was ever sent. Rounded up, so no
+ * attempt is given less than the share its caller worked out. */
+export function fetchCapMs(ms: number): number {
+  return Math.min(TIMER_CAP_MS, Math.max(0, Math.ceil(ms)));
+}
+
+/** What a fetch is given to end it early: the cap, the caller's own signal, or both. A fresh timeout per attempt, so
+ * a call a backend sends again gets the whole cap again rather than what the first attempt left of it. */
+export function abort(capMs: number | undefined, signal: AbortSignal | undefined): { signal?: AbortSignal } {
+  const caps = capMs === undefined ? undefined : AbortSignal.timeout(fetchCapMs(capMs));
+  if (caps === undefined) return signal === undefined ? {} : { signal };
+  return { signal: signal === undefined ? caps : AbortSignal.any([caps, signal]) };
+}
+
 /** The system errors under a failed fetch that mean this computer has no road out: the name would not resolve, or
  * there is no route to anything. A refused or reset connection and a timeout are the far end's and stay the
  * machine's miss (a dropped edge request is how the poll finds a machine gone). */
