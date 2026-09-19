@@ -941,10 +941,11 @@ describe("a reply given while the agent's background work runs", () => {
    * closed its channel and ended its process: what a case waits before reading that nothing was delivered. */
   const drained = (): Promise<unknown> => new Promise(r => setTimeout(r, 80));
 
-  /** A turn whose stream the case feeds, on the exit window every case here runs with. */
-  function held(opts: { slowTeardown?: boolean } = {}) {
+  /** A turn whose stream the case feeds, on the exit window every case here runs with. `graceMs` is how long the
+   * process gets after the teardown, which a case that goes on feeding lines past the reply gives itself. */
+  function held(opts: { slowTeardown?: boolean; graceMs?: number } = {}) {
     const m = manualExec(opts);
-    const adapter = createClaudeAdapter({ exec: m.factory, configDir: "/root/.claude-cfg", resultExitMs: 40, interruptGraceMs: 15 });
+    const adapter = createClaudeAdapter({ exec: m.factory, configDir: "/root/.claude-cfg", resultExitMs: 40, interruptGraceMs: opts.graceMs ?? 15 });
     const { events, onEvent } = collect();
     const session = adapter.start({ prompt: "run it in the background and say you are waiting", onEvent });
     return { m, events, session };
@@ -985,6 +986,27 @@ describe("a reply given while the agent's background work runs", () => {
     const texts = events.filter(e => e.type === "turn.delta" && e.kind === "text").map(e => (e.type === "turn.delta" ? e.text : ""));
     expect(texts).toEqual(["The background sleep finished with exit code 0 and printed `done`."]);
     expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("delivered once: a reply the CLI wakes its agent for after the hold is over is not a second reply", async () => {
+    const { m, events, session } = held({ slowTeardown: true, graceMs: 5_000 });
+    for (const line of [init, running, startedTask, reply, none, updated, notified]) m.push(line);
+    // Nothing woke the agent inside the window, so the words it gave are the turn's and the reply is out.
+    await until(() => dones(events).length === 1);
+    const delivered = dones(events)[0]!.result;
+
+    // The CLI wakes its agent anyway, later. Its words reach the pane; the turn's reply does not change.
+    m.push(woke);
+    m.push(second);
+    await until(() => events.some(e => e.type === "turn.delta" && e.kind === "text" && e.text.startsWith("The background sleep finished")));
+    await drained();
+    expect(dones(events)).toHaveLength(1);
+    expect(dones(events)[0]!.result).toBe(delivered);
+    expect(delivered.costUsd).toBe(0.26918);
+
+    m.end(0);
+    expect(await session.finished).toBe(delivered);
+    expect(events.filter(e => e.type === "session.end")).toHaveLength(1);
   });
 
   it("takes a message: a send during the hold steers the agent, and its next reply ends the hold", async () => {

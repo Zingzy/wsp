@@ -406,7 +406,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** The reply the agent gave while the CLI still reported work it started running: the turn is not over, so the
      * reply is kept here and delivered once nothing it started is left running. */
     let heldReply: TurnResult | undefined;
-    /** When that reply came, so a task finishing after it says how long after. */
+    /** When that reply came, so a task finishing after it says how long after. Wall clock here and not the CLI's
+     * own: on a turn re-opened after a host restart the run's log is replayed from its first byte, so the figure a
+     * finished line carries is measured from the replay and not from the words the person read an hour ago. */
     let heldAt = 0;
     /** The CLI's one phrase for each background task it has reported, by its own handle for it: only the set lines
      * carry it, and the line a finished task gets is written from it. */
@@ -574,6 +576,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               }
             }
             if (normalized.type === "turn.done") {
+              // The turn's reply is already out: the tasks ended in silence, the window passed and the held words
+              // went as the turn's, and this is the CLI waking its agent after that. One turn is one reply, so it
+              // is not delivered a second time; its cost would be added to the row again, its notify line sent
+              // again and its reply row written again, and the agent's later words are already in the pane as
+              // their own lines.
+              if (sawResult) continue;
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the

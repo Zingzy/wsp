@@ -5871,10 +5871,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * still standing counts the same as one that lands after it closed. */
     const waitedSoFar = (): number => waited + (waitingSince === undefined ? 0 : clock.now() - waitingSince);
 
-    /** Everything that moves when a prompt of this turn opens or closes, by the protocol's one rule for which open
-     * prompt leads: what the row says the thread is waiting on, the question itself for a thread waiting behind
-     * this one, whether the turn is blocked on a person, and the clock on how long it has been. Written on every
-     * open and close, so the sidebar, the command line, the turn's idle clock and its settled figure read one fact. */
     /** The one expression that says the turn is waiting on something outside its own process, which its stream's
      * idle clock touches on every poll: a prompt of its own nobody has answered, or work it started that the harness
      * says is still running. */
@@ -5882,6 +5878,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (t.waiting !== undefined) t.waiting.on = open.size > 0 || tasksRunning;
     };
 
+    /** Everything that moves when a prompt of this turn opens or closes, by the protocol's one rule for which open
+     * prompt leads: what the row says the thread is waiting on, the question itself for a thread waiting behind
+     * this one, whether the turn is blocked on a person, and the clock on how long it has been. Written on every
+     * open and close, so the sidebar, the command line, the turn's idle clock and its settled figure read one fact. */
     const readsOpen = (): void => {
       const lead = leadAsk(open.values());
       if (lead === undefined) {
