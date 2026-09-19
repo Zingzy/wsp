@@ -284,9 +284,30 @@ export interface PackedFiles {
   /** What became of each Mac path the copied files carried, once each: repointed at the image, or out of the file
    * where the image has no such place. */
   macPaths: string[];
+  /** How many files the archive holds. */
+  files?: number;
+  /** The paths left out of the archive because the same bytes already stand where they would land, home-relative
+   * and answered by the road that asked; empty where the pack was asked nothing, which is the image. */
+  stood?: string[];
   /** The skips a fork should know about, stamped on the sealed version: a hook whose script did not travel. */
   leftBehind?: GoldenLeftBehind[];
 }
+
+/** One file staged for that computer as the archive would carry it: where it lands under the home there, and the
+ * digest of the bytes after the pack's own rewrites, which is what would stand at that path once it landed. */
+export interface StagedFile {
+  dest: string;
+  digest: string;
+}
+
+/** Asked of the pack between its rewrites and the archive by a road that can read the computer the files are going
+ * to: the staged paths to leave out, because the same bytes are already there. Nothing is asked on the road to an
+ * image, which has no computer to ask and packs every staged file. */
+export type LeaveOut = (staged: readonly StagedFile[]) => Promise<readonly string[]>;
+
+/** Builds the archive off this computer. A caller that can read the far side hands it the one question the pack
+ * can answer and it cannot: which of the staged files need not travel at all. */
+export type PackFiles = (leaveOut?: LeaveOut) => Promise<PackedFiles>;
 
 export interface GoldenImport {
   /** Identifies the ticks this plan came from; a builder carrying the same hash needs nothing re-applied. */
@@ -305,10 +326,10 @@ export interface GoldenImport {
      * archive whole and needs none of it, a computer somebody owns lands them one at a time and answers a row each. */
     lands: readonly { id: string; label: string; dest: string }[];
     /** Builds the archive. */
-    pack: () => Promise<PackedFiles>;
+    pack: PackFiles;
     /** The planned files a tool rewrites while it runs, `~`-relative: they never decide the hash, so an
      * attach uploads the latest copy again. Absent when none was ticked. */
-    volatile?: { paths: string[]; pack: () => Promise<PackedFiles> };
+    volatile?: { paths: string[]; pack: PackFiles };
   };
   /** The person's login shell and its frameworks, put on the machine before the files land. */
   shell?: ShellInstall;

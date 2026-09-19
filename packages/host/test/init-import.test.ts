@@ -10,7 +10,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
-import { NODE_RELEASES, planFiles } from "@wsp/engine";
+import { NODE_RELEASES, planFiles, type StagedFile } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
@@ -96,6 +96,45 @@ function extract(tar: Buffer): string {
 }
 
 describe("packPlan", () => {
+  it("asks what need not travel with every staged file and the digest it would land at, leaves those out of the archive and counts them, and packs everything where it is asked nothing", async () => {
+    const home = laptop();
+    const plan = planFiles(
+      [
+        row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] }),
+        row({ rung: "identity", id: "identity/ssh-config", paths: ["~/.ssh/config"] }),
+      ],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const whole = await packPlan(plan, { secrets: new Map(), home });
+    expect(whole.stood).toEqual([]);
+    expect(whole.files).toBe(2);
+
+    let asked: StagedFile[] = [];
+    const packed = await packPlan(plan, {
+      secrets: new Map(),
+      home,
+      leaveOut: staged => {
+        asked = [...staged];
+        // A path no file of this pack's is named too, to prove the answer cannot take anything out of the tree
+        // that the pack did not stage itself.
+        return Promise.resolve([".gitconfig", ".ssh/id_ed25519"]);
+      },
+    });
+    // The digest is of the bytes as they would stand on the far side, after the pack's own rewrites: the copied
+    // ssh config carries the preface, so its digest is the preface's and not the file's on this computer.
+    expect(asked.map(f => f.dest).sort()).toEqual([".gitconfig", ".ssh/config"]);
+    expect(asked.find(f => f.dest === ".ssh/config")!.digest).toBe(createHash("sha256").update(withIgnoreUnknown("Host work\n")).digest("hex"));
+    expect(asked.find(f => f.dest === ".gitconfig")!.digest).toBe(createHash("sha256").update("[user]\n\tname = Me\n").digest("hex"));
+
+    expect(packed.stood).toEqual([".gitconfig"]);
+    expect(packed.files).toBe(1);
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(".gitconfig");
+    expect(readFileSync(join(extract(packed.tar), ".ssh", "config"), "utf8")).toBe(withIgnoreUnknown("Host work\n"));
+    // What the pack leaves behind is the archive's business alone: the file on this computer is untouched.
+    expect(readFileSync(join(home, ".gitconfig"), "utf8")).toBe("[user]\n\tname = Me\n");
+    expect(listTar(whole.tar).map(e => e.path)).toContain(".gitconfig");
+  });
+
   it("packs the planned files under their guest paths with the laptop's modes, .ssh closed to 700, and measures the unpacked size", async () => {
     const home = laptop();
     const plan = planFiles(

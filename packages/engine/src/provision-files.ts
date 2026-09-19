@@ -11,6 +11,7 @@
 // and a leave takes those keys back out of it one by one.
 import { createHash } from "node:crypto";
 import {
+  EXEC_DEADLINE_EXIT,
   MCP_ID_PREFIX,
   agentOfRow,
   placeProvisionPaths,
@@ -24,7 +25,7 @@ import {
 import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
-import type { PackedFiles } from "./golden.js";
+import type { PackFiles } from "./golden.js";
 import { READ_MS, commentsDroppedLine, landConfigs, parseConfigs, parseMcpId, readConfigsCmd, type ScopeFile } from "./golden-mcp.js";
 import type { Machine } from "./machine.js";
 import { importInto } from "./vault.js";
@@ -52,6 +53,10 @@ export interface ProvisionLanding {
  * written over. */
 export type LandOutcome = "installed" | "present" | "kept" | "failed";
 
+/** Whether one planned destination covers a path: the destination itself, or anything under it where the
+ * destination is a folder. One rule for every reader on this side, as `wsp_once` is the one rule on that computer. */
+const covers = (dest: string, rel: string): boolean => rel === dest || rel.startsWith(`${dest}/`);
+
 /** The `~/`-relative paths one agent keeps what it reads in, off the catalog alone: the home its own state sits
  * under, the folder it loads skills from, every config path the catalog names for it and the file it keeps its
  * MCP servers in. */
@@ -68,10 +73,7 @@ export function agentStateFile(f: { id: string; source: string }, home: string):
   const agent = agentOfRow(f) ?? parseMcpId(f.id)?.agent;
   const entry = CATALOG_AGENTS.find(a => a.id === agent);
   if (entry === undefined) return false;
-  return agentPaths(entry).some(p => {
-    const abs = `${home}/${p.slice(2)}`;
-    return f.source === abs || f.source.startsWith(`${abs}/`);
-  });
+  return agentPaths(entry).some(p => covers(`${home}/${p.slice(2)}`, f.source));
 }
 
 /** What each line of the landing prints, so no path of the person's can be read as the run's own words. */
@@ -110,6 +112,90 @@ export const oncePathsOf = (lands: readonly ProvisionLanding[]): string[] => lan
 interface Landed {
   rel: string;
   outcome: LandOutcome;
+}
+
+/** Whether one path lands once, judged here because it has to be judged before anything travels. */
+export const landsOnce = (rel: string, once: readonly string[]): boolean => once.some(dest => covers(dest, rel));
+
+/** What the read of what already stands there prints for one path: the digest of the bytes at that path, and the
+ * digest the list beside the job records for it. Each record ends in a NUL rather than a newline, since a path of
+ * the person's may hold a newline and a record ending in one would read as two. */
+export const STAND_MARK = "wsp-stand";
+export const LEDGER_MARK = "wsp-ledger";
+
+/** The end of one record of that read, as the text of the run spells it: a printf escape, never the byte itself. */
+const NUL = "\\0";
+
+/** How long the read of what stands there may take. It hashes the files the round would land, the same bytes the
+ * landing's own walk reads at the other end; past it nothing stands and every file travels, which is the round as
+ * it was before this read existed. */
+const STAND_MS = 120_000;
+
+/** The run that reads what already stands where this round's files would land: the paths come over on the run's
+ * own input, since there are more of them than a command line may carry and none of them belongs in a command a
+ * log would keep. One `sha256sum` process reads them all, so the answer costs one pass over those files rather
+ * than a process each, and one `awk` beside it prints what the list beside the job records for the same paths.
+ * A path that is not there prints nothing of its own and takes that read's exit non-zero with it, which is why
+ * the answer is the marks and no reader of it looks at an exit. */
+export function standingScript(home: string): string {
+  const at = placeProvisionPaths(home);
+  const q = (s: string): string => shellQuote(s);
+  return [
+    "set -u",
+    `home=${q(home)}; ledger=${q(at.landed)}; list=${q(at.asked)}`,
+    'mkdir -p "$(dirname "$list")" || exit 1',
+    'cat > "$list" || exit 1',
+    '[ -s "$list" ] || exit 0',
+    'cd "$home" || exit 1',
+    // The digest of the bytes standing at each path, in one process over the whole list. The record sha256sum
+    // prints is the digest, one space, the character saying how it read the file, then the path as it was given.
+    'xargs -0 sha256sum -z -- < "$list" 2>/dev/null | while IFS= read -r -d "" rec; do',
+    '  p=${rec#* }',
+    `  printf '${STAND_MARK}${TAB}%s${TAB}%s${NUL}' "\${rec%% *}" "\${p#[ *]}"`,
+    "done",
+    '[ -f "$ledger" ] || ledger=/dev/null',
+    // The list beside the job, keyed by the same paths, and the first line a path has there, which is the line the
+    // landing and the close read too. A path holding a newline keys nothing here and no line of that list can name
+    // one either, since the landing writes a line per path on a line of its own.
+    `xargs -0 printf '%s${NL}' < "$list" | awk -F"${TAB}" 'NR==FNR { want[$0]=1; next } want[$1] && !seen[$1]++ { printf "${LEDGER_MARK}${TAB}%s${TAB}%s${NL}", $1, $3 }' - "$ledger" | tr '${NL}' '${NUL}'`,
+    'rm -f "$list"',
+    "exit 0",
+  ].join("\n");
+}
+
+/** What that read answered, by home-relative path: the digest of the bytes standing at it, and the digest the list
+ * beside the job records for it. A path is in neither where nothing stands there and the list names it not. */
+export interface Standing {
+  at: Map<string, string>;
+  listed: Map<string, string>;
+}
+
+/** What the read printed, record by record: a record that is not a mark's is not an answer, and a path of the
+ * person's that holds a tab keeps every byte of itself, since the path is the last field of its record. */
+export function parseStanding(stdout: string): Standing {
+  const standing: Standing = { at: new Map(), listed: new Map() };
+  for (const record of stdout.split("\0")) {
+    const words = record.split("\t");
+    if (words.length < 3) continue;
+    if (words[0] === STAND_MARK) standing.at.set(words.slice(2).join("\t"), words[1]!);
+    if (words[0] === LEDGER_MARK) standing.listed.set(words[1]!, words[2]!);
+  }
+  return standing;
+}
+
+/** The exit a command gets where no shell ran it at all, which is the one answer that says the read itself did not
+ * happen rather than what it found. */
+const NO_SHELL_EXIT = 127;
+
+/** What stands at the paths this round would land on, read off that computer in one frame. Nothing at all where
+ * the read itself did not happen: the link threw, the daemon's own timer cut the command, no shell ran it, or
+ * nothing of the read came back. Everything then travels, which is the round as it was. */
+export async function standingDigests(machine: Machine, home: string, paths: readonly string[]): Promise<Standing | undefined> {
+  if (paths.length === 0) return undefined;
+  const res = await machine.exec(standingScript(home), { timeoutMs: STAND_MS, stdin: Buffer.from(paths.map(p => `${p}\0`).join("")) }).catch(() => undefined);
+  if (res === undefined || res.exitCode === EXEC_DEADLINE_EXIT || res.exitCode === NO_SHELL_EXIT) return undefined;
+  const standing = parseStanding(res.stdout);
+  return standing.at.size === 0 && standing.listed.size === 0 ? undefined : standing;
 }
 
 /** The run on the computer itself, over the tree already extracted beside the job: every file the person's copy
@@ -268,7 +354,7 @@ export function parseLanded(stdout: string): Landed[] {
 function ownerOf(rel: string, lands: readonly ProvisionLanding[]): ProvisionLanding | undefined {
   let best: ProvisionLanding | undefined;
   for (const l of lands) {
-    if (rel !== l.dest && !rel.startsWith(`${l.dest}/`)) continue;
+    if (!covers(l.dest, rel)) continue;
     if (best === undefined || l.dest.length > best.dest.length) best = l;
   }
   return best;
@@ -335,7 +421,7 @@ const LAND_MS = 300_000;
 /** Lands the person's agent files on the computer itself: the archive extracted into wsp's own folder there, then
  * one run that puts each file in its agent's home under the rules above, then the rows. The staging tree stays
  * until the job closes, since the servers step reads the configs that travelled out of it. */
-export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; say: FilesSay }): Promise<LandFilesResult> {
+export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[]; stood?: readonly string[]; say: FilesSay }): Promise<LandFilesResult> {
   const at = placeProvisionPaths(o.home);
   await machine.exec(`rm -rf ${shellQuote(at.staging)}`, { timeoutMs: INLINE_EXEC_MS });
   // Under wsp's own folder there, never the shared temporary one: on a computer somebody owns, another account
@@ -343,8 +429,12 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
   await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir, onPart: p => o.say(provisionShippedLine(p)) });
   const res = await machine.run(landFilesScript(o.home, oncePathsOf(o.lands)), { deadlineMs: LAND_MS });
   if (res.exitCode !== 0) throw new Error(`the agents' files did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.slice(-300)}`);
-  const landed = parseLanded(res.stdout);
-  o.say(provisionLandedLine(landed.length));
+  const walked = parseLanded(res.stdout);
+  o.say(provisionLandedLine(walked.length));
+  // A file the pack left home because the same bytes stand there is read as present: the landing never walked it,
+  // the list beside the job already holds the line saying wsp left those bytes, and the servers round has to know
+  // that the copy there is wsp's own.
+  const landed = [...walked, ...(o.stood ?? []).map(rel => ({ rel, outcome: "present" as const }))];
   return {
     rows: filesRows(o.lands, landed, o.home),
     owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[`${o.home}/${l.rel}`, l.outcome] as const] : []))),
@@ -495,13 +585,22 @@ export async function appendLanding(machine: Machine, home: string, lines: reado
  * path and what this run itself put there. A pack or a landing that throws is one failed row per planned path
  * with the reason, since the archive is the person's whole set of agent files and one row of it cannot fail
  * alone, and the round then says it put nothing there rather than anything about whose the files are. */
-export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: () => Promise<PackedFiles>; say?: FilesSay }): Promise<LandFilesResult> {
+export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: PackFiles; say?: FilesSay }): Promise<LandFilesResult> {
   // The one place the stages may go unsaid, so every step below takes a say and none of them asks whether it has one.
   const say = o.say ?? ((): void => {});
+  const once = oncePathsOf(o.lands);
   try {
-    const packed = await o.pack();
-    say(provisionPackedLine(o.lands.length, packed.bytes, packed.unpacked));
-    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, say });
+    const packed = await o.pack(async staged => {
+      const standing = await standingDigests(machine, o.home, staged.map(f => f.dest));
+      if (standing === undefined) return [];
+      // Three digests have to agree before a file stays home: the bytes staged here, the bytes standing there, and
+      // the line the list beside the job holds for that path. A line older than the bytes, or none at all, sends
+      // the file, so the close writes that line exactly as it does today. A path that lands once always travels,
+      // since the servers round reads the copy that travelled out of the tree beside the job.
+      return staged.filter(f => !landsOnce(f.dest, once) && standing.at.get(f.dest) === f.digest && standing.listed.get(f.dest) === f.digest).map(f => f.dest);
+    });
+    say(provisionPackedLine(o.lands.length, { bytes: packed.bytes, ...(packed.files !== undefined ? { files: packed.files } : {}), ...(packed.stood !== undefined ? { stood: packed.stood.length } : {}) }));
+    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, ...(packed.stood !== undefined ? { stood: packed.stood } : {}), say });
     return { ...landed, skipped: [...packed.skipped, ...landed.skipped] };
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;

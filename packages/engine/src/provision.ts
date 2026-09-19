@@ -12,7 +12,7 @@ import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import type { McpPlan } from "./golden-mcp.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
-import type { GoldenImport, ImportResult, PackedFiles } from "./golden.js";
+import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
 import { closeAgentFiles, oncePathsOf, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
@@ -28,7 +28,7 @@ export interface ProvisionPlan {
   skipped: readonly { id: string; label: string; note: string }[];
   /** The person's own agent files: where each ticked path lands in an agent's home on the computer, and the
    * archive read off this computer when the job runs. Absent when the recipe carries none. */
-  files?: { lands: readonly ProvisionLanding[]; pack: () => Promise<PackedFiles> };
+  files?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
   /** The MCP servers the recipe names, per agent and config format; absent when no row is a server. */
   mcp?: McpPlan;
 }
