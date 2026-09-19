@@ -5558,9 +5558,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. `turnEnv` is
    * what only a turn's own launch carries, laid over the machine's login environment: every kind answers with that
    * environment through its one module, so a variable put on here reaches a launch on every kind of machine and is
-   * written nowhere else. `waiting` is the turn's own reading of whether it is blocked on a person, which its
-   * stream's idle clock reads; absent on every road that is not a turn. It is handed beside the limits and never as
-   * one, so the turn road goes on handing the factory none and runs under the turn's own. */
+   * written nowhere else. `waiting` is the turn's own reading of whether it is waiting on something outside its own
+   * process, a person's answer to a prompt or a command it started in the background, which its stream's idle clock
+   * reads; absent on every road that is not a turn. It is handed beside the limits and never as one, so the turn
+   * road goes on handing the factory none and runs under the turn's own. */
   const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
@@ -5812,9 +5813,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
-    /** The box the turn's own exec stream reads to know it is blocked on a person: flipped while a permission prompt
-     * of this turn stands open, so the turn's idle clock does not run out under a question nobody has answered yet.
-     * Absent on a road that hands the adapter no stream of its own. */
+    /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
+     * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
+     * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
+     * under a quiet watch on work the turn started. Absent on a road that hands the adapter no stream of its own. */
     waiting?: { on: boolean };
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
@@ -5850,6 +5852,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The permission prompts of this turn nobody has answered. The harness is blocked on every one of them, so this
      * map is what the thread is waiting on, and it holds for as long as the turn lives. */
     const open = new Map<string, PermissionAsk>();
+    /** Whether the harness reports work this turn started still running in the background. Beside the open prompts
+     * because the two say the same thing about the turn: it is waiting on something its own process is not doing. */
+    let tasksRunning = false;
     /** The tool calls of this turn the harness has not answered yet: what the agent is inside right now. A wsp call
      * among them that follows another thread is what can leave this turn stopped on a question it never asked. */
     const calls = new Map<string, { toolName: string; input: string }>();
@@ -5870,6 +5875,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * prompt leads: what the row says the thread is waiting on, the question itself for a thread waiting behind
      * this one, whether the turn is blocked on a person, and the clock on how long it has been. Written on every
      * open and close, so the sidebar, the command line, the turn's idle clock and its settled figure read one fact. */
+    /** The one expression that says the turn is waiting on something outside its own process, which its stream's
+     * idle clock touches on every poll: a prompt of its own nobody has answered, or work it started that the harness
+     * says is still running. */
+    const readsWaiting = (): void => {
+      if (t.waiting !== undefined) t.waiting.on = open.size > 0 || tasksRunning;
+    };
+
     const readsOpen = (): void => {
       const lead = leadAsk(open.values());
       if (lead === undefined) {
@@ -5879,7 +5891,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         view.asking = askingLine(lead);
         leadAsks.set(threadId, lead);
       }
-      if (t.waiting !== undefined) t.waiting.on = open.size > 0;
+      readsWaiting();
       if (open.size > 0) waitingSince ??= clock.now();
       else if (waitingSince !== undefined) {
         waited += clock.now() - waitingSince;
@@ -6031,6 +6043,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           return;
         }
+        case "turn.tasks":
+          // The harness's own word on the work this turn started: while any of it runs the turn is working, whatever
+          // its agent has already said, so the idle clock is held the way an open prompt holds it.
+          tasksRunning = event.running > 0;
+          readsWaiting();
+          return;
         case "permission.ask": {
           const ask = { ...event.ask, options: named(event.ask) };
           // The turn stops here until an option comes back. Nothing else closes it: a person who was away for an

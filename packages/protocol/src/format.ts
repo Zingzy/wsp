@@ -1249,11 +1249,19 @@ export function execFolderLine(cwd: string | undefined): string {
   return `ran in ${cwd ?? "the home folder"}`;
 }
 
-/** The turn's error when the harness's result arrived while the agent's own background tasks were still running: the
- * harness kills them with the turn and nothing wakes the thread when they would have finished, so the turn ended
- * before the work it started did. */
+/** The turn's error when its process was cut while the agent's own background tasks were still running: the harness
+ * kills them with its process, so the turn ended before the work it started did. A reply given while they run holds
+ * the turn open instead, so these are the words of a turn stopped from outside, the six hour wall among the causes. */
 export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
+}
+
+/** One line under a held reply for a background command that finished after the agent's words without waking it: the
+ * command as the harness described it, how it ended and how long after the reply, so the thread's last message says
+ * what the turn stayed open for and what came of it. Where the harness wakes the agent instead, its own next reply
+ * is the report and no line of ours is added. */
+export function taskFinishedLine(description: string, status: string, msAfterReply: number): string {
+  return `\`${description}\` ${status}, ${fmtDuration(msAfterReply)} after the reply`;
 }
 
 /** What a launch that woke a machine and then died before its agent said a word answers with. The wake was this
@@ -1299,8 +1307,9 @@ export function providerRoadRetryLine(call: string, code: string, tryNumber: num
  * the row settles only at the process exit, since a harness can keep working after it answers. */
 export const TURN_END_WORDS = "A turn ends when the agent process exits, not at its reply, and the thread reads running until then";
 
-/** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. */
-export const NOTIFY_WORDS = "The notify line goes once, at the reply";
+/** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. A reply the agent
+ * gave while work it started was still running is delivered when that work is done, and the line goes with it. */
+export const NOTIFY_WORDS = "The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done";
 
 /** Which road a caller takes to its children's ends, in the two sentences every door quotes whole: the skill's rules,
  * the tool descriptions and the command line. Which one holds is decided by whether the caller is a thread, which its

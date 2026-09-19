@@ -61,6 +61,15 @@ export type AdapterEvent =
       cwd?: string;
     }
   | { type: "turn.done"; sessionId: string; result: TurnResult }
+  | {
+      /** How many commands and subagents the harness reports running in the background right now, sent every time
+       * that set changes. The turn is still working while the count is above zero, whatever its agent has said, so
+       * this is what holds its idle clock the way an open permission prompt does. Read by the runtime alone: no
+       * client sees it and nothing folds it into a wire event. */
+      type: "turn.tasks";
+      sessionId: string;
+      running: number;
+    }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {
       type: "permission.close";
