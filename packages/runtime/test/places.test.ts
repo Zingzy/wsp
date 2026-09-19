@@ -20,6 +20,7 @@ import {
   placeBehindLine,
   agentsCell,
   placeDaemonBehind,
+  placeWatchesItselfLine,
   placeServesDaemonLine,
   noHostCliLine,
   THREAD_OPS,
@@ -1843,6 +1844,7 @@ function forks(
     },
   };
   let made = 0;
+  let ptys = 0;
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
   client.ws.on("message", raw => {
@@ -1923,6 +1925,20 @@ function forks(
       case "git.status":
         seen.frames.push(frame);
         return say({ branch: "work", ahead: 0, files: [] });
+      // The pane's road: this computer's daemon opens and drives a shell inside the workspace the frame names.
+      case "pty.create":
+        seen.frames.push(frame);
+        return say({ ptyId: `p${++ptys}`, pid: 4242 });
+      case "pty.attach":
+      case "pty.detach":
+      case "pty.write":
+      case "pty.resize":
+      case "pty.kill":
+        seen.frames.push(frame);
+        return say({});
+      case "pty.list":
+        seen.frames.push(frame);
+        return say({ ptys: [] });
       case "git.push":
         seen.frames.push(frame);
         return say({ branch: "work", base: String(frame["base"] ?? ""), remote: "origin", ahead: 1, uncommitted: 0, stat: [" README.md | 2 +-"] });
@@ -2195,6 +2211,54 @@ describe("a fork on a computer you joined", () => {
     await until(() => heard.length > 1);
     expect(heard.slice(1)).toEqual([{ ...session, machineId: made.machineId }]);
     channel.close();
+  });
+
+  it("opens a pane's shell in the workspace's own folder, keeps that computer's readings off it, and lets its ptys go when it closes", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c => (place = forks(c)),
+    });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const cwd = (await runtime.workspaces.get(made.id)).project.path;
+    const heard: Record<string, unknown>[] = [];
+    const channel = await runtime.workspaces.daemonChannel(made.id, e => heard.push(e));
+
+    // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
+    // inside one; a tab that names its own keeps it.
+    const created = await channel.send({ op: "pty.create", cols: 80, rows: 24 });
+    expect(place.frames.at(-1)).toMatchObject({ op: "pty.create", cwd, cols: 80, machineId: made.machineId });
+    await channel.send({ op: "pty.create", cols: 80, rows: 24, cwd: `${cwd}/docs` });
+    expect(place.frames.at(-1)).toMatchObject({ op: "pty.create", cwd: `${cwd}/docs` });
+
+    // The two a pane opens every link with: the ports and the load that computer's daemon reads are the whole
+    // computer's, so they are answered here and nothing goes up the link.
+    for (const op of ["ports.watch", "sys.watch"]) {
+      const before = place.asked[op] ?? 0;
+      expect(await channel.send({ op })).toMatchObject({ ok: false, code: "unsupported", error: placeWatchesItselfLine("srv") });
+      expect(place.asked[op] ?? 0).toBe(before);
+    }
+
+    // A pty of another pane on that computer is not this channel's to read.
+    const ptyId = String((created as Record<string, unknown>)["ptyId"]);
+    await channel.send({ op: "pty.attach", ptyId });
+    place.push({ type: "pty.data", ptyId: "p99", data: "another pane's" });
+    place.push({ type: "pty.data", ptyId, data: "hello" });
+    await until(() => heard.length > 1);
+    expect(heard.slice(1)).toEqual([{ type: "pty.data", ptyId, data: "hello" }]);
+
+    // Every pane on that computer rides the one link, so a pane that closes takes its own listeners off rather
+    // than leaving its bytes riding it.
+    channel.close();
+    await until(() => place.frames.some(f => f["op"] === "pty.detach"));
+    expect(place.frames.filter(f => f["op"] === "pty.detach")).toEqual([expect.objectContaining({ ptyId, machineId: made.machineId })]);
   });
 
   it("opens no channel at all on a computer whose daemon is older than the one this wsp deploys", async () => {

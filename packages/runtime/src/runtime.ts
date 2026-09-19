@@ -210,7 +210,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -943,7 +943,6 @@ export interface RuntimeOptions {
    * a test says the environment it means here rather than inheriting the shell that started it. */
   env?: Readonly<Record<string, string | undefined>>;
 }
-
 
 /** Where this host answers, as the host itself knows it: the address the person named with --advertise, which
  * every kind of machine is told whatever it is; the address a machine somewhere else dials, which is none where
@@ -3087,6 +3086,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
    * it arrived on and never anything the guest said. */
   const GUEST_EVENTS = ["guest.opened", "guest.message", "guest.closed"];
+  /** What a pty pushes, each naming the pty it is of; a computer answering for many workspaces pushes every
+   * workspace's up the one link. */
+  const PTY_EVENTS = ["pty.data", "pty.exit", "pty.mode"];
+  /** The two a pane opens every link with, and the two a workspace on a computer somebody owns has no answer of
+   * its own for: the ports and the load that computer's daemon reads are the whole computer's. */
+  const COMPUTER_WATCHES = ["ports.watch", "sys.watch"];
 
   /** The channel a client of this host drives a served workspace's daemon over: every frame goes up that
    * computer's link with the workspace named on it, and the events that come back are the ones this workspace's,
@@ -3105,16 +3110,59 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (placeId === undefined || placeDoor === undefined) throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
     const behind = await placeBehind(entry);
     if (behind !== undefined) throw new Error(behind);
-    const version = (await placeDoor.reportOf(placeId))?.daemonVersion;
+    const door = placeDoor;
+    const version = (await door.reportOf(placeId))?.daemonVersion;
     const machineId = entry.machine.id;
-    const link = placeDoor.channel(placeId, event => {
-      if (GUEST_EVENTS.includes(String(event["type"])) && event["machineId"] === machineId) onEvent(event);
+    const checkout = checkoutOf(entry.record);
+    /** The ptys on that computer this channel named, so an event of a pty another pane opened is not pushed at
+     * this one; of those, the ones it is listening to, which it takes its listeners off when it goes. */
+    const named = new Set<string>();
+    const attached = new Set<string>();
+    const link = door.channel(placeId, event => {
+      const type = String(event["type"]);
+      if (GUEST_EVENTS.includes(type)) {
+        if (event["machineId"] === machineId) onEvent(event);
+        return;
+      }
+      if (PTY_EVENTS.includes(type) && named.has(String(event["ptyId"]))) onEvent(event);
     });
-    if (link === undefined) throw new Error(absentComputer(placeDoor.nameOf(placeId), null).sentence);
-    onEvent({ type: "daemon.hello", root: checkoutOf(entry.record), ...(version !== undefined ? { version } : {}) });
+    if (link === undefined) throw new Error(absentComputer(door.nameOf(placeId), null).sentence);
+    /** What this channel now holds on the far end, off a frame it sent and the answer to it. */
+    const held = (op: string, frame: Record<string, unknown>, reply: Record<string, unknown>): void => {
+      if (op === "pty.create") {
+        named.add(String(reply["ptyId"]));
+        return;
+      }
+      if (op === "pty.list") {
+        for (const row of Array.isArray(reply["ptys"]) ? (reply["ptys"] as Record<string, unknown>[]) : []) named.add(String(row["id"]));
+        return;
+      }
+      const ptyId = String(frame["ptyId"]);
+      if (op === "pty.attach") {
+        named.add(ptyId);
+        attached.add(ptyId);
+      }
+      if (op === "pty.detach") attached.delete(ptyId);
+    };
+    onEvent({ type: "daemon.hello", root: checkout, ...(version !== undefined ? { version } : {}) });
     return {
-      send: async frame => ({ id: null, ...(await served(frame)) }) as DaemonResponse,
-      close: () => link.close(),
+      async send(frame) {
+        const op = frame.op;
+        if (COMPUTER_WATCHES.includes(op)) return { id: null, ok: false, code: "unsupported", error: placeWatchesItselfLine(door.nameOf(placeId)) };
+        // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
+        // inside it: without one the shell would open in the home of the computer, which is bound in.
+        const asked = op === "pty.create" && frame["cwd"] === undefined ? { ...frame, cwd: checkout } : frame;
+        const reply = await served(asked);
+        if (reply["ok"] === true) held(op, asked, reply);
+        return { id: null, ...reply } as DaemonResponse;
+      },
+      close: () => {
+        // Every channel on that computer rides the one socket its link is, so a pane that goes says which ptys it
+        // is done with; the socket's own close would be the link's, and that is the whole computer going.
+        for (const ptyId of attached) void served({ op: "pty.detach", ptyId }).catch(() => undefined);
+        attached.clear();
+        link.close();
+      },
       closed: link.closed,
     };
   };
