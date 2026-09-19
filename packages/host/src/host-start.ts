@@ -7,7 +7,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { fmtDuration } from "@wsp/protocol";
-import { hostLogPath, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
+import { hostLogPath, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { httpProbe, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
@@ -41,11 +41,24 @@ export const noHostAnsweredLine = (statePath: string, waitMs: number): string =>
 export const serviceServesStateLine = (statePath: string, service: RegisteredService): string =>
   `${statePath} is served by the ${service.words} ${service.unit.name}, which is not running; wsp up --service --state ${statePath} starts it again`;
 
+/** Why a line brings up no host on this state file, or nothing where it may. One rule for both roads that start
+ * one, so the sentence is true in the state it is read in: a host that is already serving is the lock's own
+ * refusal to give and not this one, and a file no unit of this computer's names is nobody's but the caller's. */
+export function serviceServesState(
+  statePath: string,
+  registered: (statePath: string) => RegisteredService | undefined,
+  serving: (statePath: string) => HostLock | undefined = servingHost,
+): string | undefined {
+  if (serving(statePath) !== undefined) return undefined;
+  const service = registered(statePath);
+  return service === undefined ? undefined : serviceServesStateLine(statePath, service);
+}
+
 export function hostStarter(deps: StartDeps): HostStarter {
   return async (statePath, say) => {
     // Before anything is spawned: a state file the service owns is served by the service or by nothing.
-    const service = deps.registered(statePath);
-    if (service !== undefined) throw new Error(serviceServesStateLine(statePath, service));
+    const owned = serviceServesState(statePath, deps.registered);
+    if (owned !== undefined) throw new Error(owned);
     const logPath = hostLogPath(statePath);
     mkdirSync(dirname(logPath), { recursive: true });
     const log = openSync(logPath, "a");

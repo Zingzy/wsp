@@ -12,6 +12,7 @@ import { localShape, NoProviderBackend } from "@wsp/engine";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
+import { stateWriterHere } from "../src/version.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
 import { fakeSsh } from "../../runtime/test/fake-ssh.js";
@@ -55,7 +56,7 @@ describe("a computer with no machine provider key", () => {
     const io = captured();
     const rt = createRuntime({
       backend: new NoProviderBackend(),
-      store: jsonFileStore(statePath),
+      store: jsonFileStore(statePath, stateWriterHere()),
       adapters: {},
       local: localWiring(home),
       ssh: fakeSsh().wiring,

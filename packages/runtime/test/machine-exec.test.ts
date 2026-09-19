@@ -989,3 +989,42 @@ describe("a reader that lets go of a run still going", () => {
     expect(reading.size).toBe(0);
   });
 });
+
+describe("a reader let go of while its poll is in flight", () => {
+  it("starts no timer for the poll it comes back to, so nothing it held outlives the close", async () => {
+    // Counted, not named: the runner holds timers of its own, and what this case is about is the one this poll
+    // would add after it was let go. The poll is slow enough that such a timer is still there to be counted.
+    const timers = (): number => process.getActiveResourcesInfo().filter(kind => kind === "Timeout").length;
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, []);
+    const inner = backend.execImpl;
+    let inFlight = false;
+    let answer: (() => void) | undefined;
+    const holding = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    backend.execImpl = async (m, cmd) => {
+      if (cmd.includes("__WSP_EOF_") && answer !== undefined) {
+        inFlight = true;
+        await holding;
+      }
+      return inner(m, cmd);
+    };
+    const reading = new Set<() => void>();
+    const stream = machineExecStream(machine, { pollMs: 5_000, reading })("claude -p hi", { env: {} });
+    void (async () => {
+      for await (const line of stream.lines) void line;
+    })();
+    await vi.waitFor(() => expect(inFlight).toBe(true));
+
+    const before = timers();
+    for (const stop of [...reading]) stop();
+    answer!();
+    answer = undefined;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(timers(), `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+    // And the run is left as it was, as a dropped reader always leaves it.
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+  });
+});

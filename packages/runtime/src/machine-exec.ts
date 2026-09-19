@@ -165,8 +165,13 @@ const never = (): Promise<never> => new Promise<never>(() => {});
  * a clock of its own waits on that instead, and the wake ends that wait the same way. */
 function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => Promise<void>; wake: () => void } {
   let woken: (() => void) | undefined;
-  const nap = (ms: number): Promise<void> =>
-    new Promise<void>(resolve => {
+  /** Set once the reader has let go. Every nap after that returns where it stands rather than starting a timer:
+   * the wake often lands while the poll is inside its exec, and the nap it comes back to would otherwise hold
+   * this process for one more poll. */
+  let awake = false;
+  const nap = (ms: number): Promise<void> => {
+    if (awake) return Promise.resolve();
+    return new Promise<void>(resolve => {
       let done = false;
       const settle = (): void => {
         if (done) return;
@@ -181,7 +186,14 @@ function pollNap(sleep?: (ms: number) => Promise<void>): { nap: (ms: number) => 
         settle();
       };
     });
-  return { nap, wake: () => woken?.() };
+  };
+  return {
+    nap,
+    wake: () => {
+      awake = true;
+      woken?.();
+    },
+  };
 }
 
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}, isWaiting?: TurnWaiting): ExecStreamFactory {

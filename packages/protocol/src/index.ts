@@ -3871,7 +3871,8 @@ export const STATE_SHAPE = 1;
  * records are in, the build that wrote them and when. A file with none was written before this record existed. */
 export const StateShape = z.object({
   shape: z.number().int(),
-  /** The version of the wsp that wrote it, as `wsp --version` prints it. */
+  /** What the build calls itself: the version a released wsp prints, or the program's own name where it has none,
+   * which is what a person would have to run again. */
   wsp: z.string(),
   /** The daemon that wsp deploys, which is the other half of what a build is. */
   daemon: z.number().int(),

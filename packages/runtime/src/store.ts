@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DAEMON_VERSION, STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
+import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
 
 /** Persistence port. Hosted Postgres impl is Plan 2's problem. Blobs are
  * bytes too large for the JSON document (vault archives); one per id. */
@@ -26,13 +26,10 @@ type Data = Record<string, Record<string, unknown>>;
  * writes it. */
 export const STATE_SHAPE_KEY = "$shape";
 
-/** The build a save records as the writer of the file. Handed in by the caller: the version a person reads off
- * `wsp --version` is the binary's own and no package below it knows it. */
+/** The build a save records as the writer of the file, which every caller says for itself: the version a person
+ * reads off `wsp --version` is the binary's own and no package below it knows it, and a file whose writer nobody
+ * could name would tell the next host to run a build with no name. */
 export type StateWriter = Omit<StateShape, "shape" | "at">;
-
-/** What a store nobody named a build for records: the daemon this build carries and the binary it ran from, which
- * is the one thing that tells two wsps on a computer apart. */
-const writerHere = (): StateWriter => ({ wsp: "unknown", daemon: DAEMON_VERSION, bin: process.argv[1] ?? process.execPath });
 
 const shapeNow = (writer: StateWriter): StateShape => ({ shape: STATE_SHAPE, ...writer, at: new Date().toISOString() });
 
@@ -78,7 +75,7 @@ export function memoryStore(): Store {
   };
 }
 
-export function jsonFileStore(path: string, writer: StateWriter = writerHere()): Store {
+export function jsonFileStore(path: string, writer: StateWriter): Store {
   /** The file as it stands: its collections, and the shape document apart from them. */
   const read = (): { data: Data; wrote?: StateShape } => {
     let held: Record<string, unknown>;

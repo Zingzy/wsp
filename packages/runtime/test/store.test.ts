@@ -6,6 +6,8 @@ import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
+/** Who a store in this file says wrote its file: every caller names a build, and this one is the suite. */
+const WRITER = { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" };
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 function roundTrip(name: string, make: () => Store) {
@@ -35,24 +37,24 @@ function roundTrip(name: string, make: () => Store) {
 }
 
 roundTrip("memoryStore", () => memoryStore());
-roundTrip("jsonFileStore", () => jsonFileStore(join(dir, `s-${Math.random().toString(36).slice(2)}.json`)));
+roundTrip("jsonFileStore", () => jsonFileStore(join(dir, `s-${Math.random().toString(36).slice(2)}.json`), WRITER));
 
 describe("jsonFileStore persistence", () => {
   it("survives a new instance over the same file and writes real JSON", async () => {
     const path = join(dir, "persist.json");
-    const s1 = jsonFileStore(path);
+    const s1 = jsonFileStore(path, WRITER);
     await s1.put("goldens", "default", { head: 1 });
-    const s2 = jsonFileStore(path);
+    const s2 = jsonFileStore(path, WRITER);
     expect(await s2.get("goldens", "default")).toEqual({ head: 1 });
     expect(() => JSON.parse(readFileSync(path, "utf8"))).not.toThrow();
   });
   it("keeps blobs as files beside the json, never inside it", async () => {
     const path = join(dir, "blobs-home", "state.json");
-    const store = jsonFileStore(path);
+    const store = jsonFileStore(path, WRITER);
     await store.putBlob("vaults", "ws_2", Buffer.from("tgz"));
     expect(readFileSync(join(dir, "blobs-home", "blobs", "vaults", "ws_2"), "utf8")).toBe("tgz");
     expect(existsSync(path) ? readFileSync(path, "utf8") : "").not.toContain("tgz");
-    expect(await jsonFileStore(path).getBlob("vaults", "ws_2")).toEqual(Buffer.from("tgz"));
+    expect(await jsonFileStore(path, WRITER).getBlob("vaults", "ws_2")).toEqual(Buffer.from("tgz"));
   });
 });
 

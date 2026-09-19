@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { type AppPorts, authority, authRefusal, DAEMON_VERSION, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -83,7 +83,7 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
-import { serviceServesStateLine, starterFor, type HostStarter } from "./host-start.js";
+import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
@@ -96,7 +96,7 @@ import { choosePorts, type PortProbes } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
-import { VERSION } from "./version.js";
+import { stateWriterHere, VERSION } from "./version.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -749,10 +749,9 @@ export function makeRuntime(
     local,
     ssh: sshWiring(),
     placeLinks: links,
-    // The build this host is, written into the state file at every save: the version a person reads off
-    // wsp --version, the daemon it deploys and the binary it ran from, which is what tells the wsps on one
-    // computer apart when a file was written by another of them.
-    store: jsonFileStore(statePath, { wsp: VERSION, daemon: DAEMON_VERSION, bin: process.argv[1] === undefined ? process.execPath : resolve(process.argv[1]) }),
+    // The build this host is, written into the state file at every save, so a host that meets a record it cannot
+    // read says which wsp on this computer wrote it.
+    store: jsonFileStore(statePath, stateWriterHere()),
     statePath,
     adapters: HARNESS_ADAPTERS,
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
@@ -1764,10 +1763,11 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
       // A state file this computer's own manager is registered to serve is that service's: a host started here
       // would be a second one on it, of whichever build this line came from, which is how a state file was
-      // rewritten under the host that owned it. The service's own host carries the word and passes.
-      const service = startedByEnv(process.env) === "service" ? undefined : registeredService(opts.statePath);
-      if (service !== undefined) {
-        io.error(serviceServesStateLine(opts.statePath, service));
+      // rewritten under the host that owned it. The service's own host carries the word and passes, and a host
+      // that is already serving is the lock's refusal below, which names the pid and how to stop it.
+      const owned = startedByEnv(process.env) === "service" ? undefined : serviceServesState(opts.statePath, registeredService);
+      if (owned !== undefined) {
+        io.error(owned);
         return EXIT_CODES.provider;
       }
       // Which ports are free is settled before anything binds: a port another wsp or another program holds is one

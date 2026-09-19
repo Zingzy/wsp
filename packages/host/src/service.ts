@@ -128,13 +128,14 @@ const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
  * terminal, so a rotated key needs no new unit file and nothing secret is copied into the manager's own folder. */
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
   const home = homeNamed(env["WSP_HOME"]);
+  // Every variable the installing shell holds that the service would be without: the provider ones, since a host
+  // that picks its provider out of an environment naming none forks nothing, and labs, since a service installed
+  // from a shell holding it would come up without the rows that shell was using. One list, copied by one rule.
+  const carried = [LABS_ENV, ...providerEnvNames()];
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),
-    // Labs is the shell's, and a service installed from a shell that holds it would otherwise come up without the
-    // rows that shell was using.
-    ...((env[LABS_ENV] ?? "") === "" ? {} : { [LABS_ENV]: env[LABS_ENV]! }),
-    ...Object.fromEntries(providerEnvNames().flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
+    ...Object.fromEntries(carried.flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
   };
 }
 
@@ -307,6 +308,9 @@ export function serviceAddressHere(statePath: string): ServiceAddress {
  * down and the sweep on a joined computer read too: a manager that has booted the unit out still has the file,
  * and the state file is still that service's to serve. */
 export function registeredIn(manager: ServiceManager | undefined, at: ServiceAddress): RegisteredService | undefined {
+  // The first unit a manager holds is the one it writes for this address today, which is what `unit` answers; it
+  // is read off `held` because that reading also carries the words a line naming it uses, and on systemd those
+  // words say which of its two scopes the unit sits in.
   const held = manager?.held(at)[0];
   return held !== undefined && existsSync(held.unit.path) ? { unit: held.unit, words: held.words } : undefined;
 }

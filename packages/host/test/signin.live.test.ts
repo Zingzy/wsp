@@ -18,6 +18,7 @@ import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
+import { stateWriterHere } from "../src/version.js";
 import { importResultPath } from "../src/init-import.js";
 import { runInit, type InitIO, type InitOptions } from "../src/init.js";
 import { startCallbackRelay, systemOpener, type CallbackRelay } from "../src/relay.js";
@@ -143,7 +144,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
       runtime: recipe =>
         createRuntime({
           backend,
-          store: jsonFileStore(statePath),
+          store: jsonFileStore(statePath, stateWriterHere()),
           adapters: {},
           goldenRecipe: { ...recipe, setup: SETUP, deployDaemon: async m => deployDaemon(m).then(() => DAEMON_DEPLOYED_LINE) },
         }),
