@@ -1262,6 +1262,7 @@ mod tests {
             copy: None,
             shares: Vec::new(),
             binds: Vec::new(),
+            made_points: Vec::new(),
         }
     }
 

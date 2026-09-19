@@ -454,6 +454,60 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     w.close().await;
 }
 
+/// A login this computer shares into a workspace is bound at the agent's own path inside, and under the box's own
+/// /root that path is the box's: the empty file the bind lands on is made on the box's home, where a tool run on
+/// the box itself reads it as its login. So the boot records what it made, the stop takes it off, the wake makes
+/// it again, and the workspace takes it with it when it goes.
+///
+/// The one case here whose point is a file on the box's own home, which is what the rule is about: it asks for a
+/// path of this checkout's own under that home and never an agent's real login, and takes the folder it made off
+/// the box at its end.
+#[tokio::test]
+async fn the_mount_point_a_shared_login_needs_leaves_nothing_on_the_boxs_own_home() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    // The login as this daemon shares them out: a file under its own logins directory and nowhere else.
+    let logins = root().join("logins/live-share");
+    fs::create_dir_all(&logins).unwrap();
+    let source = logins.join("auth.json");
+    fs::write(&source, b"{\"live\":\"a login\"}\n").unwrap();
+    // A path of this case's own under the box's home, so the mount point is never a real agent's login on the box.
+    let point = PathBuf::from(format!("/root/.wsp-live-share-{}/auth.json", checkout_key()));
+    let _ = fs::remove_file(&point);
+    let id = w
+        .create(spec(json!({
+            "shares": [{ "source": source.display().to_string(), "target": point.display().to_string() }],
+            "idempotencyKey": format!("live-share-{}", checkout_key()),
+        })))
+        .await;
+    // The login reads inside at the path its tool looks at, and what the box holds at that path is the empty file
+    // the bind landed on, which is the thing this rule is about.
+    let said = "{\"live\":\"a login\"}\n";
+    let (code, out, _) = w.exec(&id, &format!("cat {}", point.display())).await;
+    assert_eq!((code, out.as_str()), (0, said));
+    assert_eq!(fs::metadata(&point).unwrap().len(), 0, "the box's own file under the mount is not an empty point");
+
+    // Asleep: nothing holds the login open, so the empty file is off the box's home. The wake makes it again and
+    // the login reads inside as before.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    assert!(!point.exists(), "a napping workspace left its mount point on the box's own home");
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(fs::metadata(&point).unwrap().len(), 0);
+    let (code, out, _) = w.exec(&id, &format!("cat {}", point.display())).await;
+    assert_eq!((code, out.as_str()), (0, said));
+
+    // And gone with the workspace: the file the boot made is off the box, and the folder under the home stays,
+    // as the leave leaves the agents' own folders.
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert!(!point.exists(), "the workspace went and the mount point it made stayed on the box's home");
+    assert!(point.parent().unwrap().is_dir());
+    let _ = fs::remove_dir(point.parent().unwrap());
+    let _ = fs::remove_dir_all(&logins);
+    w.close().await;
+}
+
 /// What this computer can see of a workspace working, which is the figure the host's idle firing reads before it
 /// stops one: a byte through a published port and a command run in it start it over, and nothing else does.
 #[tokio::test]

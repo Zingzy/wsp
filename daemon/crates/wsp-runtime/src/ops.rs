@@ -817,6 +817,7 @@ impl Ops {
             copy,
             shares: mounted.shares,
             binds: mounted.binds,
+            made_points: Vec::new(),
         };
         self.boot(record).await
     }
@@ -847,14 +848,34 @@ impl Ops {
         // The computer's own logins, each mounted at the path its tool reads inside. A file bind needs the file
         // to be there inside, so the runtime makes an empty one where the image carries none; a login this
         // computer does not hold yet is no mount at all, and the wake after the sign-in is what brings it.
+        // The points already known to be wsp's, read once before the first one is made. Two workspaces sharing one
+        // login share the one mount point under the computer's home, so a point this boot finds standing and
+        // another record names is this workspace's to take off as well, and the last one holding it takes it off.
+        // This workspace's own are in the list too: a stop that could not take a point off, and a box that went
+        // down with the workspace running, both leave one standing, and the wake that finds it there is still the
+        // boot that made it.
+        let held = if record.shares.is_empty() {
+            Vec::new()
+        } else {
+            let mut held = self.points_of_others(&id)?;
+            held.extend(record.made_points.iter().cloned());
+            held
+        };
         let mut shares = Vec::new();
+        let mut made_points = Vec::new();
         for share in &record.shares {
             if !Path::new(&share.source).is_file() {
                 continue;
             }
-            bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
+            let at = bundle::inside(&self.layout.rootfs(&id), &share.target)?;
+            let stood = at.exists();
+            bundle::empty_file(&at)?;
+            if point_is_ours(&share.target, stood, &held) {
+                made_points.push(share.target.clone());
+            }
             shares.push(share.clone());
         }
+        record.made_points = made_points;
         // The folders of the computer's own this workspace was made with, bound where it reads them: made here
         // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
         // workspace mounts under one of them never reaches the computer.
@@ -927,6 +948,9 @@ impl Ops {
         self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
         bundle::unmount_under(&self.layout.rootfs(&record.id))?;
+        // After the unmount, so what goes is the empty file on the computer's own disk and never a mount: a
+        // workspace asleep is one nothing holds a login open for, and the wake makes its points again.
+        self.take_off_points(&record.id, &record.made_points)?;
         Ok(())
     }
 
@@ -1006,6 +1030,8 @@ impl Ops {
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
         bundle::unmount_under(&self.layout.rootfs(id))?;
+        let made_points = record.as_ref().map(|record| record.made_points.clone()).unwrap_or_default();
+        self.take_off_points(id, &made_points)?;
         // After the unmount, and the way it was made: a snapshot is a subvolume the kernel takes away, a copied
         // tree is a tree. The copy is the workspace's own, so it goes with it.
         if let Some(made) = record.and_then(|record| record.copy) {
@@ -1087,6 +1113,50 @@ impl Ops {
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
         records_under(&self.layout)
     }
+
+    /// The mount points the other workspaces on this computer say their boots made: what tells a point of wsp's
+    /// own from a file the person had at that path, since only the first of the two is ever taken off.
+    fn points_of_others(&self, id: &str) -> Result<Vec<String>, OpError> {
+        Ok(records_under(&self.layout)?.into_iter().filter(|record| record.id != id).flat_map(|record| record.made_points).collect())
+    }
+
+    /// The empty files this workspace's boot made on the computer's own disk, taken off now that its mounts are
+    /// down: a file share lands at the agent's own path inside, and under the computer's own home that path is the
+    /// computer's, where the tool running on the computer itself would read the empty file as its login.
+    ///
+    /// Two rules hold it to this workspace's own leavings. A point another workspace here still has bound stays,
+    /// read off the records as the sweep reads them, since one workspace's stop may not unlink a mount point
+    /// another is holding. And only an empty file goes: a sign-in made on the computer itself since the boot wrote
+    /// the person's own login into that file, and it is theirs. The folder the point sits in stays, as the leave
+    /// leaves ~/.codex and ~/.claude-cfg: those are the agents' own to make and to keep.
+    fn take_off_points(&self, id: &str, points: &[String]) -> Result<(), OpError> {
+        if points.is_empty() {
+            return Ok(());
+        }
+        let running = running_ids(&self.layout)?;
+        let bound: Vec<String> = records_under(&self.layout)?
+            .into_iter()
+            .filter(|record| record.id != id && running.contains(&record.id))
+            .flat_map(|record| record.shares.into_iter().map(|share| share.target))
+            .collect();
+        for point in points {
+            if bound.iter().any(|target| target == point) {
+                continue;
+            }
+            if fs::metadata(point).is_ok_and(|held| held.is_file() && held.len() == 0) {
+                fs::remove_file(point).map_err(|e| OpError::plain(format!("{point}: {e}")))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether a mount point a boot has just made for a file share is that workspace's to take off when it goes: one
+/// under a tree the rootfs takes from the computer, since anywhere else it is the workspace's own upper and goes
+/// with it, and either made by this boot or already named by another workspace here as a point of wsp's. A file
+/// that was there before any workspace asked for it is the person's and is never recorded.
+fn point_is_ours(target: &str, stood: bool, held: &[String]) -> bool {
+    bundle::under_computer_tree(target).is_some() && (!stood || held.iter().any(|point| point == target))
 }
 
 /// The join of a container's published port to the workspace's loopback, made off the proxy's own task once the
@@ -1404,6 +1474,7 @@ mod tests {
             copy: None,
             shares: Vec::new(),
             binds: Vec::new(),
+            made_points: Vec::new(),
         }
     }
 
@@ -1835,6 +1906,7 @@ mod tests {
             copy: None,
             shares: Vec::new(),
             binds: Vec::new(),
+            made_points: Vec::new(),
         };
         fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
     }
@@ -1949,6 +2021,88 @@ mod tests {
         // host fills one from.
         assert!(ops.binds_of(&MachineSpec { binds: None, ..binding(&memory) }).unwrap().is_empty());
         assert_eq!(ops.backend_facts().projects, Some(projects.display().to_string()));
+    }
+
+    /// A login shared into a workspace is bound at the agent's own path inside, and under the computer's own home
+    /// that path is the computer's: the empty file the bind lands on is made on its disk, where a tool run on the
+    /// computer itself reads it as its login. So the boot records the computer's own path of a point it made, and
+    /// records nothing for a file that was already there, which is the person's or the first workspace's.
+    #[test]
+    fn the_boot_records_the_computers_own_path_of_a_mount_point_it_made_and_no_file_it_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = dir.path().join("rootfs");
+        let target = "/root/.codex/auth.json";
+        // The point is made under the rootfs, which reaches the computer's home through the bind of its /root;
+        // what is recorded is the computer's own path, since the one under the rootfs names nothing once the
+        // unmount has run.
+        let at = bundle::inside(&rootfs, target).unwrap();
+        assert!(!at.exists());
+        bundle::empty_file(&at).unwrap();
+        assert!(at.is_file() && at.ends_with("root/.codex/auth.json"));
+        assert!(point_is_ours(target, false, &[]));
+        // One that stood there is recorded only where another workspace here says wsp made it: that is the two
+        // of them sharing one login, and the last to go takes it off.
+        assert!(!point_is_ours(target, true, &[]));
+        assert!(point_is_ours(target, true, &[target.to_owned()]));
+        assert!(!point_is_ours(target, true, &["/root/.claude.json".to_owned()]));
+        // A destination the rootfs owns is the workspace's own upper and goes with the workspace, so there is
+        // nothing on the computer to record.
+        assert!(!point_is_ours("/etc/wsp-login.json", false, &[]));
+        assert!(!point_is_ours("/srv/logins/auth.json", true, &["/srv/logins/auth.json".to_owned()]));
+    }
+
+    /// Two workspaces sharing one login share the one mount point under the computer's home: the first to stop may
+    /// not unlink what the second still has bound, and the last one to go is what takes it off.
+    #[test]
+    fn a_shared_mount_point_stands_while_another_workspace_holds_it_and_goes_with_the_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        // The point as a boot leaves it on the computer's own disk: empty, with the login bound over it inside.
+        let point = dir.path().join("home/.codex/auth.json");
+        fs::create_dir_all(point.parent().unwrap()).unwrap();
+        fs::write(&point, b"").unwrap();
+        let target = point.display().to_string();
+        let share = Share { source: layout.logins().join("codex/auth.json").display().to_string(), target: target.clone() };
+        let mut one = awake("wsp-one", None);
+        one.init = runtime::identity_of(std::process::id() as i32).unwrap();
+        one.shares = vec![share];
+        one.made_points = vec![target.clone()];
+        let mut two = one.clone();
+        two.id = "wsp-two".to_owned();
+        for record in [&one, &two] {
+            fs::create_dir_all(layout.upper(&record.id)).unwrap();
+            bundle::write_json(&layout.record(&record.id), record).unwrap();
+        }
+        // The first stops: the second runs with the same login bound, so the point stands.
+        ops.take_off_points("wsp-one", &one.made_points).unwrap();
+        assert!(point.is_file(), "a stop unlinked a mount point another workspace still had bound");
+        // The second goes while the first is asleep: nothing here holds it any more, so the empty file goes.
+        one.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+        bundle::write_json(&layout.record("wsp-one"), &one).unwrap();
+        ops.take_off_points("wsp-two", &two.made_points).unwrap();
+        assert!(!point.exists(), "the last workspace holding the mount point left it on the computer's home");
+        // The folder stays: ~/.codex is the agent's own to make and to keep, whatever wsp put inside it.
+        assert!(point.parent().unwrap().is_dir());
+    }
+
+    /// A sign-in made on the computer itself since the boot writes the person's own login into the file the boot
+    /// left: what a stop takes off is an empty mount point, never a file with a login in it.
+    #[test]
+    fn a_login_written_on_the_computer_since_the_boot_stays_when_the_workspace_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let point = dir.path().join("home/.codex/auth.json");
+        fs::create_dir_all(point.parent().unwrap()).unwrap();
+        fs::write(&point, b"{\"tokens\":\"the person's own\"}\n").unwrap();
+        ops.take_off_points("wsp-one", &[point.display().to_string()]).unwrap();
+        assert!(point.is_file(), "a stop took off a login the person had written");
+        // A record that made no point of its own asks the disk nothing, which is every workspace before this rule
+        // and every one whose shares land in its own upper.
+        ops.take_off_points("wsp-one", &[]).unwrap();
+        // And a point that is already gone, which is a remove after the stop that took it off, is no refusal.
+        fs::remove_file(&point).unwrap();
+        ops.take_off_points("wsp-one", &[point.display().to_string()]).unwrap();
     }
 
     #[test]

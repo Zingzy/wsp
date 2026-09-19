@@ -3681,6 +3681,7 @@ const DAEMON_CONTENTS = [
   "eb6eb2701b4edafd3f62e17ab032313660bafbfe80ce973bd56a56c86662aff8",
   "2b992e451cd69dbf08eac12f8c1208a1b01cf1a5a36319bc4875a08e387ae05f",
   "7deddf539fb438f49cc68e299e5d3e08413202f7325a73d7d815a532ac1e96c7",
+  "1e3ca55474038b943e69a5a91ddf720df24e9f8a5fff8aa05028527cbb0605f2",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3835,7 +3836,12 @@ const DAEMON_CONTENTS = [
  * files leave with it and the folders they emptied are pruned; a bring back reports its push half first, the branch, the
  * ahead count and the diffstat, and a gh that is present but not signed in reads as the note beside the landed push,
  * while a push refused for want of a credential says so in the person's words with the command only the person can run.
- * Version 54 adds two optional fields to the place report: each agent's version as the daemon read it, and the relative paths of the files under the logins directory. A host on 53 reads a 54 report as before; a 53 daemon's report reads on a 54 host as today, with no version and no sign-in word. */
+ * Version 54 adds two optional fields to the place report: each agent's version as the daemon read it, and the relative paths of the files under the logins directory. A host on 53 reads a 54 report as before; a 53 daemon's report reads on a 54 host as today, with no version and no sign-in word.
+ * Version 55 reads the agents it reports, and their versions, on the tools PATH the workspaces and the presence read use
+ * before the unit's own, so an agent installed by Homebrew or by its own installer is on the report; and the boot records
+ * the computer's own paths of the mount points it made for file shares under the computer's trees, so the stop and the
+ * remove take them off when no other running workspace shares the target and nothing of a workspace's mounts stays on
+ * the computer's own home. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
