@@ -59,7 +59,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, dialAddress, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, dialAddress, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -1237,11 +1237,19 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
-  // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
-  // no workspace to record, and wsp add is the road. The host listens for pairing either way.
-  if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
-  // The road is written into the lock here and nowhere else: this is wsp up, so wsp down stops what it serves.
-  return hostFor(rt, keys, { ...opts, providerEnv, links, startedBy: opts.startedBy ?? "up" }, io, opts.running);
+  try {
+    // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
+    // no workspace to record, and wsp add is the road. The host listens for pairing either way.
+    if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
+    // The road is written into the lock here and nowhere else: this is wsp up, so wsp down stops what it serves.
+    return await hostFor(rt, keys, { ...opts, providerEnv, links, startedBy: opts.startedBy ?? "up" }, io, opts.running);
+  } catch (e) {
+    // A refusal thrown past a runtime this start built leaves the daemon that listing the workspaces dialled and
+    // the timers behind it running, and the process stays up on them after the sentence is printed. A runtime a
+    // caller handed in is that caller's to close.
+    if (opts.runtime === undefined) await rt.close();
+    throw e;
+  }
 }
 
 /** What a host with no Claude key says as it starts. A host that forks machines gives each fork the key as an env,
@@ -1778,6 +1786,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
+      // A host already serving this state file is read first of all: before this build, the sentence came after the
+      // ports had been stepped, the roots file rewritten and a daemon of this start's own started against the home
+      // the other host serves, and the shell never came back.
+      refuseIfServed(lockPathFor(opts.statePath), opts.statePath);
       // A state file this computer's own manager is registered to serve is that service's: a host started here
       // would be a second one on it, of whichever build this line came from, which is how a state file was
       // rewritten under the host that owned it. The service's own host carries the word and passes, and a host
