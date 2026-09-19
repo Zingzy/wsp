@@ -26,6 +26,14 @@ export function addedProjectOn(project: ProjectView, computer: string): string {
   return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
+/** What the add says before any work runs on that computer: what is being recorded and where its code comes from,
+ * and, where nothing of the person's folder travels with it, that nothing is seeded. It counts nothing else: what
+ * travels is the seeding's own line in the counts the menu showed, and a count of ticked files here read as the
+ * whole of a seed that was also carrying a memory folder. */
+export function addingProjectLine(name: string, source: ProjectSource, seeding: boolean): string {
+  return `${name} from ${sourceWord(source)}${seeding ? "" : ", nothing seeded"}.`;
+}
+
 /** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones by its own
  * url, `owner/repo` on a host whose signed-in command line the image carries, or a folder a computer holds. Read
  * once here, so the command line, the tool and the runtime cannot each decide for themselves what somebody typed.

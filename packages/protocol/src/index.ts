@@ -3868,7 +3868,9 @@ export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 /** The shape the records in a state file are written in. Any change to the schema of a stored record cuts this
  * number, so a host at the older number refuses the file instead of reading a record in a form it does not know:
  * several builds of wsp name one state file on a computer, and the one that wrote it last decides what is in it.
- * 2 since a project's seeded row says in one word what its memory did, where it held two flags. */
+ * 2 since a project's seeded row changed whole: one word for what its memory did where it held two flags, the
+ * memory folder's own file count beside it, and `bytes` now the sum the menu showed for the ticked files where it
+ * was the size of the archive they travelled in, which is bigger, so the two numbers do not compare. */
 export const STATE_SHAPE = 2;
 
 /** What a save records about the wsp that wrote the file, apart from the records themselves: the shape those

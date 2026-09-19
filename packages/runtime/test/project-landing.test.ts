@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { addedProjectOn, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { MEMORY_KEPT_MARK, MEMORY_STANDS_MARK } from "../src/project-landing.js";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -235,9 +235,9 @@ describe("a folder seeding a project on a computer that clones", () => {
     rt.events.on("*", e => events.push(e));
     const seeded = await rt.projects.add({ source: folder, on: "default", seed: { files: [".env.local"], memory: true, commits: true } });
     // The planned line says what is being added and from where, and counts nothing: the count of ticked files
-    // alone read as the whole of a seed that was carrying a memory folder too.
-    // The folder as this host resolved it, which on a Mac is the real path under /private.
-    expect(stages(events)[0]?.message).toBe(`${seeded.name} from ${seeded.source.kind === "folder" ? seeded.source.path : ""}.`);
+    // alone read as the whole of a seed that was carrying a memory folder too. Read off the protocol's own
+    // sentence, with the source as the record holds it, which on a Mac is the real path under /private.
+    expect(stages(events)[0]?.message).toBe(addingProjectLine(seeded.name, seeded.source, true));
     const seeding = stages(events).filter(e => e.stage === "seeding").map(e => e.message);
     expect(seeding).toEqual([`Seeding 1 file (4 KB), Claude Code memory (3 files, 20 KB), 1 commit the remote does not have, from ${folder}.`, "1 commit landed"]);
   });
