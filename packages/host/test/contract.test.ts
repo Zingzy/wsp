@@ -137,6 +137,8 @@ describe("the agent contract on the command line and the tool door", () => {
               ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true }
               : { id: 1, ok: false as const, error: prRefusal },
         close: () => {},
+        // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.
+        closed: new Promise(() => {}),
       }),
       placeLinks: placeWiring(statePath, {}),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a

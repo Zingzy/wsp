@@ -55,7 +55,7 @@ import {
   type WorkspaceOrigin,
   type WorkspaceView,
 } from "@wsp/protocol";
-import { openDaemonChannel, type DaemonChannel } from "./daemon-channel.js";
+import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
@@ -785,14 +785,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               if (msg.workspaceId === undefined) throw new Error(DAEMON_OPEN_ONE_OF);
-              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused here.
-              const reach = await rt.workspaces.daemonReach(msg.workspaceId, origin);
-              if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
-              const ch = await openDaemonChannel({
-                url: reach.url,
-                token: reach.daemonToken,
-                onEvent,
-              });
+              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused
+              // here. Which road the frames take is the runtime's own reading, dial or link, and not this door's.
+              const ch = await rt.workspaces.daemonChannel(msg.workspaceId, onEvent, origin);
               // The page left while the dial was in flight; the machine keeps no socket for a tab that is gone.
               if (ws.readyState !== ws.OPEN) {
                 ch.close();

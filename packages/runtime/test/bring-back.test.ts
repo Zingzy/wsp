@@ -4,7 +4,8 @@
 // signed-in command line for the git host answers with.
 import { describe, expect, it, afterEach } from "vitest";
 import { branchUnreadRefusal, noGitCredentialLine, noHostCliLine, noParentWorkspaceLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
-import { createRuntime, type RuntimeDaemonChannel, type Runtime } from "../src/runtime.js";
+import { createRuntime, type Runtime } from "../src/runtime.js";
+import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
@@ -12,13 +13,13 @@ const DAEMON_TOKEN = "cafef00d".repeat(3);
 
 /** A daemon that records every frame and answers each op the way one on a machine would. */
 function fakeDaemon(answers: Partial<Record<string, (frame: Record<string, unknown>) => DaemonResponse>> = {}): {
-  open: (o: { url: string; token: string }) => Promise<RuntimeDaemonChannel>;
+  open: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
   frames: Record<string, unknown>[];
-  dials: { url: string; token: string }[];
+  dials: DaemonChannelOptions[];
   closed: number;
 } {
   const frames: Record<string, unknown>[] = [];
-  const dials: { url: string; token: string }[] = [];
+  const dials: DaemonChannelOptions[] = [];
   const state = { closed: 0 };
   const push = (frame: Record<string, unknown>): DaemonResponse => ({
     id: 1,
@@ -50,6 +51,8 @@ function fakeDaemon(answers: Partial<Record<string, (frame: Record<string, unkno
         close: () => {
           state.closed += 1;
         },
+        // Nothing here ends of its own: the runtime's own road closes the channel when the work it opened it for is over.
+        closed: new Promise(() => {}),
       };
     },
   };
@@ -89,7 +92,7 @@ describe("workspaces.bringBack", () => {
       stat: [" src/page.tsx | 4 ++--"],
       pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" },
     });
-    expect(daemon.dials).toEqual([{ url: "http://127.0.0.1:7070", token: DAEMON_TOKEN }]);
+    expect(daemon.dials.map(({ url, token }) => ({ url, token }))).toEqual([{ url: "http://127.0.0.1:7070", token: DAEMON_TOKEN }]);
     expect(daemon.closed).toBe(1);
   });
 

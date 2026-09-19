@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { DaemonEvent, LOOPBACK, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
-import { plumbTunnel, realClock, tunnelFrame, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
+import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
 
@@ -115,7 +115,16 @@ export const CALLBACK_HOLD_MAX_CONNS = 8;
 interface Target {
   id: string;
   name: string;
-  reach(): Promise<DaemonReachView>;
+  /** How this link reaches the daemon answering for the target: a dial of the machine's own daemon, or the
+   * channel the runtime holds over the link of the computer that answers for a workspace. */
+  open(o: { onEvent: (event: Record<string, unknown>) => void; onEventError: (error: unknown) => void }): Promise<DaemonSocket>;
+  /** Whether the ports the daemon on the far end watches are this target's own. A workspace whose computer
+   * answers for it has none: the ports that daemon sees are the whole computer's, and forwarding them here would
+   * carry another workspace's listener to this computer's loopback. */
+  ownPorts: boolean;
+  /** The workspace as the computer answering for it names it on every frame it relays up, where the far end
+   * answers for more than one; what tells this target's sessions from another workspace's on the one link. */
+  machineId?: string;
 }
 
 interface Link {
@@ -189,6 +198,26 @@ function seconds(ms: number): string {
 
 function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
+}
+
+/** One channel the runtime holds, as the link road drives it: a refusal comes back as a throw, the way the dial's
+ * own op does, and the beats are nobody's, since a channel over a computer's link has no edge to stay awake under. */
+function daemonSocketOver(channel: DaemonChannel): DaemonSocket {
+  let open = true;
+  void channel.closed.then(() => (open = false));
+  return {
+    op: async (op, extra = {}) => {
+      const reply = await channel.send({ op, ...extra });
+      if (reply.ok !== true) throw new Error(String((reply as { error?: unknown }).error ?? `${op} was refused`));
+      return reply;
+    },
+    close: () => channel.close(),
+    closed: channel.closed.then(({ code }) => code),
+    beats: 0,
+    get open() {
+      return open;
+    },
+  };
 }
 
 function portsOf(rows: unknown): number[] {
@@ -539,6 +568,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "guest.opened":
       case "guest.message":
       case "guest.closed":
+        // A computer that answers for many workspaces names the one each session was opened inside; a session of
+        // another workspace is that workspace's link to hand over, and this one never opens or ends it.
+        if (link.target.machineId !== undefined && e.machineId !== link.target.machineId) return;
         o.guest?.event({ workspaceId: link.target.id, request: (op, params) => downward(link, op, params) }, e);
         return;
       case "tunnel.data":
@@ -557,8 +589,6 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     while (!link.stopped) {
       let sock: DaemonSocket | undefined;
       try {
-        const reach = await link.target.reach();
-        if (reach.daemonToken === undefined) throw new Error("no daemon token");
         // The daemon pushes to a socket the moment it has authed it, which is before this dial resolves and before
         // the link is holding it. An event acted on in that gap reaches a link with no socket: a sign-in page
         // opened and its callback port was never forwarded, with no line saying so. Events wait here instead, for
@@ -577,9 +607,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
             cannotHandle(e);
           }
         };
-        sock = await connect({
-          url: reach.url,
-          token: reach.daemonToken,
+        sock = await link.target.open({
           onEvent: raw => {
             if (recorded) deliver(raw);
             else early.push(raw);
@@ -591,8 +619,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
           return;
         }
         // Starts the daemon's port watcher (its listener heuristic reads it) and seeds what the guest listens on now.
-        const watched = await sock.op("ports.watch");
-        link.ports = new Set(portsOf(watched["ports"]));
+        if (link.target.ownPorts) {
+          const watched = await sock.op("ports.watch");
+          link.ports = new Set(portsOf(watched["ports"]));
+        }
         // And takes the guest sessions on this machine, which go to the last socket that asked for them. A daemon
         // deployed before the road existed answers that it has no such op, and the guests there keep the command
         // that rides in its bundle.
@@ -712,7 +742,38 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     return link.done;
   };
 
-  const workspaceTarget = (id: string, name: string): Target => ({ id, name, reach: () => rt.workspaces.daemonReach(id) });
+  /** A machine with a daemon of its own: the link is one dial of it, beaten to stay alive under the edge's sweep
+   * of quiet sockets, and every port it watches is that machine's own. */
+  const dialled = (id: string, name: string, reach: () => Promise<DaemonReachView>): Target => ({
+    id,
+    name,
+    ownPorts: true,
+    open: async at => {
+      const road = await reach();
+      if (road.daemonToken === undefined) throw new Error("no daemon token");
+      return connect({ url: road.url, token: road.daemonToken, ...at });
+    },
+  });
+
+  /** A workspace whose computer answers its daemon frames: the link is the channel the runtime holds over that
+   * computer's own link, so nothing is dialled and nothing is beaten, and the sessions on it are told apart by
+   * the workspace the computer stamps on every frame it relays. */
+  const servedTarget = (id: string, name: string, machineId: string): Target => ({
+    id,
+    name,
+    machineId,
+    ownPorts: false,
+    open: async at => daemonSocketOver(await rt.workspaces.daemonChannel(id, at.onEvent)),
+  });
+
+  /** The target for one running workspace, on whichever of the two roads its own runtime says it is on. */
+  const addWorkspace = (w: { id: string; name: string; machineId: string }): void => {
+    if (closed || links.has(w.id)) return;
+    void rt.workspaces.servedByItsComputer(w.id).then(
+      served => add(served ? servedTarget(w.id, w.name, w.machineId) : dialled(w.id, w.name, () => rt.workspaces.daemonReach(w.id))),
+      () => {},
+    );
+  };
 
   /** The workspace was named: every row and every log line for it reads the name it carries now. The link's target
    * and a url forward's are two objects once that forward has outlived a nap, so both are named, and each open
@@ -729,13 +790,13 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const onRuntimeEvent = (e: EventUnion): void => {
     switch (e.type) {
       case "workspace.created":
-        if (e.workspace.phase === "running") add(workspaceTarget(e.workspace.id, e.workspace.name));
+        if (e.workspace.phase === "running") addWorkspace(e.workspace);
         return;
       case "workspace.woken":
       case "workspace.upgraded":
         // A fresh machine or a fresh edge route: redial through a new reach.
         void drop(e.workspaceId, e.type === "workspace.woken" ? "the workspace woke" : "the workspace moved to a new machine", "pause", e.type === "workspace.woken" ? "the wake" : "it moved to a new machine").then(() =>
-          rt.workspaces.get(e.workspaceId).then(w => add(workspaceTarget(w.id, w.name)), () => {}),
+          rt.workspaces.get(e.workspaceId).then(addWorkspace, () => {}),
         );
         return;
       case "workspace.renamed":
@@ -759,13 +820,13 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   detaches.push(rt.events.on("*", onRuntimeEvent));
   void rt.workspaces.list().then(
     list => {
-      for (const w of list) if (w.phase === "running") add(workspaceTarget(w.id, w.name));
+      for (const w of list) if (w.phase === "running") addWorkspace(w);
     },
     () => {},
   );
   if (o.builder !== undefined) {
     const b = o.builder;
-    add({ id: b.id, name: `${b.name} (builder)`, reach: () => rt.golden.builderReach(b.id) });
+    add(dialled(b.id, `${b.name} (builder)`, () => rt.golden.builderReach(b.id)));
   }
 
   const every = (): Forward[] => [...forwards.values(), ...urlForwards.values()];

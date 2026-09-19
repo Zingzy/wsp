@@ -211,7 +211,7 @@ import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type Landing
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
-import { openDaemonChannel } from "./daemon-channel.js";
+import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
@@ -933,9 +933,9 @@ export interface RuntimeOptions {
   agents?: { reach?: HostReach; wspMcp?: McpServerSpec };
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
-  /** How this host opens a channel to a workspace's daemon for the frames the runtime sends itself, which today is
-   * the bring back's two; the real dial unless a test hands in its own. */
-  daemonChannel?: (o: { url: string; token: string }) => Promise<RuntimeDaemonChannel>;
+  /** How this host dials a workspace's own daemon: for the frames the runtime sends itself, and for the channel a
+   * client of this host drives one frame at a time; the real dial unless a test hands in its own. */
+  daemonChannel?: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
    * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
   daemonHelloTimeoutMs?: number;
@@ -944,11 +944,6 @@ export interface RuntimeOptions {
   env?: Readonly<Record<string, string | undefined>>;
 }
 
-/** One open channel to a workspace's daemon, as the runtime drives it: a frame in, its reply out, and a close. */
-export interface RuntimeDaemonChannel {
-  send(frame: DaemonFrame): Promise<DaemonResponse>;
-  close(): void;
-}
 
 /** Where this host answers, as the host itself knows it: the address the person named with --advertise, which
  * every kind of machine is told whatever it is; the address a machine somewhere else dials, which is none where
@@ -1311,6 +1306,14 @@ export interface Runtime {
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
+    /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon
+     * pushes for it: the dial of its own daemon where it runs one, and the link of the computer holding it where
+     * that computer answers for it. The one reading of how a workspace's daemon is reached, so the pane's road
+     * and the runtime's own cannot disagree about which road a workspace is on. */
+    daemonChannel(id: string, onEvent: (event: Record<string, unknown>) => void, origin?: Caller): Promise<DaemonChannel>;
+    /** Whether the computer holding this workspace answers its daemon frames, which is what a road that would
+     * otherwise dial reads first: a workspace on a computer somebody owns runs no daemon of its own. */
+    servedByItsComputer(id: string, origin?: Caller): Promise<boolean>;
     /** This workspace's own utilisation, pushed to the listener every poll tick until the returned detach runs.
      * Refused for a kind whose Live rows are read off its machine's daemon, which a pane asks over its own link:
      * the kind table says which is which, so neither side decides it for itself. */
@@ -2423,7 +2426,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return found;
   };
   const backendFor = (record: WorkspaceRecord): MachineBackend => moduleOf(record.kind).backend(record);
-  const openChannel = opts.daemonChannel ?? (o => openDaemonChannel({ ...o, onEvent: () => {} }));
+  const openChannel = opts.daemonChannel ?? openDaemonChannel;
   /** The backend a kind's machines live on where no record is in hand yet: the create that is about to write one,
    * and the roads that ask what this host can do at all. The same reading a record gets, off the two facts a record
    * would carry. */
@@ -3056,7 +3059,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
     if (reach.daemonToken === undefined) throw new Error(`${entry.record.name} has no daemon answering yet`);
-    const channel = await openChannel({ url: reach.url, token: reach.daemonToken });
+    const channel = await openChannel({ url: reach.url, token: reach.daemonToken, onEvent: () => {} });
     try {
       return await work(async frame => {
         const reply = (await channel.send(frame)) as Record<string, unknown>;
@@ -3079,6 +3082,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (report === undefined) return undefined;
     const behind = placeDaemonBehind(report);
     return behind === undefined ? undefined : placeBehindLine(placeDoor.nameOf(placeId), behind);
+  };
+
+  /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
+   * it arrived on and never anything the guest said. */
+  const GUEST_EVENTS = ["guest.opened", "guest.message", "guest.closed"];
+
+  /** The channel a client of this host drives a served workspace's daemon over: every frame goes up that
+   * computer's link with the workspace named on it, and the events that come back are the ones this workspace's,
+   * read off the link every road on that computer shares. Nothing is dialled and no token is spent, since the
+   * road is the link that computer opened.
+   *
+   * Its own hello opens it. The link's hello named the computer's home, and a client builds this workspace's
+   * paths off the root it reads here. */
+  const servedChannel = async (
+    entry: LiveWorkspace,
+    served: (frame: Record<string, unknown>) => Promise<Record<string, unknown>>,
+    onEvent: (event: Record<string, unknown>) => void,
+  ): Promise<DaemonChannel> => {
+    const placeId = entry.record.place;
+    // A machine that answers its own daemon frames is one on a computer this host holds a link to.
+    if (placeId === undefined || placeDoor === undefined) throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
+    const behind = await placeBehind(entry);
+    if (behind !== undefined) throw new Error(behind);
+    const version = (await placeDoor.reportOf(placeId))?.daemonVersion;
+    const machineId = entry.machine.id;
+    const link = placeDoor.channel(placeId, event => {
+      if (GUEST_EVENTS.includes(String(event["type"])) && event["machineId"] === machineId) onEvent(event);
+    });
+    if (link === undefined) throw new Error(absentComputer(placeDoor.nameOf(placeId), null).sentence);
+    onEvent({ type: "daemon.hello", root: checkoutOf(entry.record), ...(version !== undefined ? { version } : {}) });
+    return {
+      send: async frame => ({ id: null, ...(await served(frame)) }) as DaemonResponse,
+      close: () => link.close(),
+      closed: link.closed,
+    };
   };
 
   /** What a machine that did not answer the branch read exits with, so a read that never happened is told apart
@@ -5303,6 +5341,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async daemonReach(id, origin) {
       const entry = await entryOf(id, origin);
       return moduleOf(entry.record.kind).daemonRoad(entry);
+    },
+
+    async daemonChannel(id, onEvent, origin) {
+      const entry = await entryOf(id, origin);
+      const served = servedByItsComputer(entry);
+      if (served !== undefined) return servedChannel(entry, served, onEvent);
+      const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
+      if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
+      return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
+    },
+
+    async servedByItsComputer(id, origin) {
+      return servedByItsComputer(await entryOf(id, origin)) !== undefined;
     },
 
     async watchSys(id, fn, origin) {
