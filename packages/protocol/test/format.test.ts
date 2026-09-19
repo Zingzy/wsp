@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  taskFinishedLine,
   psCpuSeconds,
   biggerSizeLine,
   catalogSourceLine,
@@ -1091,9 +1092,23 @@ describe("execFolderLine", () => {
 });
 
 describe("backgroundTasksLine", () => {
-  it("counts the tasks the harness still had running when its result arrived", () => {
+  it("counts the tasks the harness still had running when its process was cut", () => {
     expect(backgroundTasksLine(1)).toBe("ended with 1 background task running");
     expect(backgroundTasksLine(2)).toBe("ended with 2 background tasks running");
+  });
+});
+
+describe("taskFinishedLine", () => {
+  it("names the command, how it ended and how long after the reply, in the one duration every door reads", () => {
+    expect(taskFinishedLine("pnpm test", "completed", 14 * 60_000)).toBe("`pnpm test` completed, 14m after the reply");
+    // Under a minute it is seconds, as a turn's own duration is: a task that ended in twenty seconds says so
+    // rather than rounding to nothing.
+    expect(taskFinishedLine("Sleep 20 seconds then echo done", "completed", 20_400)).toBe("`Sleep 20 seconds then echo done` completed, 20s after the reply");
+    expect(taskFinishedLine("gate", "failed", 90_000)).toBe("`gate` failed, 1m 30s after the reply");
+  });
+
+  it("keeps a description the harness wrote with backticks in it whole, since the agent's own words are in it", () => {
+    expect(taskFinishedLine("echo `date`", "completed", 1_000)).toBe("`echo `date`` completed, 1.0s after the reply");
   });
 });
 

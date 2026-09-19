@@ -874,36 +874,9 @@ describe("result classification", () => {
     expect(withUsage.result.error).toBeUndefined();
   });
 
-  it("a result that arrives while the agent's own background tasks still run fails the turn with the count and keeps the reply", async () => {
-    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
-    const lines = [
-      init,
-      `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b4nj5kk38","task_type":"local_bash","description":"sleep 25; echo done"}],"session_id":"${FIXTURE_SESSION_ID}"}`,
-      `{"type":"system","subtype":"task_started","task_id":"b4nj5kk38","tool_use_id":"toolu_01","description":"sleep 25; echo done","is_backgrounded":true,"task_type":"local_bash","session_id":"${FIXTURE_SESSION_ID}"}`,
-      `{"type":"result","subtype":"success","is_error":false,"duration_ms":3925,"total_cost_usd":0.0186,"result":"Waiting for the background command to finish.","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":18,"output_tokens":230}}`,
-      `{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"${FIXTURE_SESSION_ID}"}`,
-      `{"type":"system","subtype":"task_notification","task_id":"b4nj5kk38","tool_use_id":"toolu_01","status":"stopped","summary":"sleep 25; echo done","session_id":"${FIXTURE_SESSION_ID}"}`,
-    ];
-    const exec = scriptedExec(lines);
-    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
-    const { events, onEvent } = collect();
-
-    const session = adapter.start({ prompt: "x", onEvent });
-    const result = await session.finished;
-
-    expect(result).toMatchObject({ status: "failed", error: "ended with 1 background task running", text: "Waiting for the background command to finish.", durationMs: 3925, costUsd: 0.0186 });
-    const done = events.filter((e) => e.type === "turn.done");
-    expect(done).toHaveLength(1);
-    expect(done[0]).toMatchObject({ type: "turn.done", result: { status: "failed", error: "ended with 1 background task running" } });
-    const end = events.at(-1);
-    if (end?.type !== "session.end") throw new Error("expected session.end");
-    expect(end.sawResult).toBe(true);
-  });
-
-  it("a background task that ended before the result leaves the turn completed; two still running are counted; an interrupted result keeps its status", async () => {
+  it("a background task that ended before the result leaves the turn completed; an interrupted result keeps its status", async () => {
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
     const one = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"local_bash","description":"sleep 5"}],"session_id":"${FIXTURE_SESSION_ID}"}`;
-    const two = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a","task_type":"local_bash","description":"sleep 5"},{"task_id":"b","task_type":"local_agent","description":"review"}],"session_id":"${FIXTURE_SESSION_ID}"}`;
     const none = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"${FIXTURE_SESSION_ID}"}`;
     const success = `{"type":"result","subtype":"success","is_error":false,"duration_ms":30,"result":"done","session_id":"${FIXTURE_SESSION_ID}","usage":{"input_tokens":1,"output_tokens":1}}`;
     const aborted = `{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming","duration_ms":812,"session_id":"${FIXTURE_SESSION_ID}"}`;
@@ -916,8 +889,6 @@ describe("result classification", () => {
     const finishedFirst = await run([init, one, none, success]);
     expect(finishedFirst).toMatchObject({ status: "completed", text: "done" });
     expect(finishedFirst.error).toBeUndefined();
-    const twoRunning = await run([init, one, two, success]);
-    expect(twoRunning).toMatchObject({ status: "failed", error: "ended with 2 background tasks running", text: "done" });
     const interrupted = await run([init, one, aborted]);
     expect(interrupted.status).toBe("interrupted");
     expect(interrupted.error).toBeUndefined();
@@ -939,6 +910,172 @@ describe("result classification", () => {
 
     expect(result.status).toBe("completed");
     expect(events.map((e) => e.type)).toEqual(["turn.done", "session.end"]);
+  });
+});
+
+// Every line of this block but the two-task ones is a line the CLI printed on this Mac (2.1.257, print mode with the
+// channel held open past the reply): the agent ran one command in the background, replied, and the CLI kept the
+// command alive, reported its end and woke the agent with it.
+describe("a reply given while the agent's background work runs", () => {
+  const SID = "8ba924b7-5641-4448-a153-9b11d4675297";
+  const TASK = "bv4027ti3";
+  const CALL = "toolu_01R1kAQuvHmCcYjmDNFfpsCg";
+  const init = `{"type":"system","subtype":"init","session_id":"${SID}"}`;
+  const running = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"${TASK}","task_type":"local_bash","description":"Sleep 20 seconds then echo done"}],"uuid":"5007fb59-c70a-4259-9056-e6427fbbf60c","session_id":"${SID}"}`;
+  const startedTask = `{"type":"system","subtype":"task_started","task_id":"${TASK}","tool_use_id":"${CALL}","description":"Sleep 20 seconds then echo done","is_backgrounded":true,"task_type":"local_bash","session_id":"${SID}"}`;
+  const handedBack = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"${CALL}","type":"tool_result","content":"Command running in background with ID: ${TASK}. Output is being written to: /private/tmp/claude-501/tasks/${TASK}.output. You will be notified when it completes.","is_error":false}],"role":"user"},"parent_tool_use_id":null,"session_id":"${SID}"}`;
+  const reply = `{"type":"result","subtype":"success","is_error":false,"duration_ms":10657,"total_cost_usd":0.26918,"result":"Waiting for the background sleep to finish.","session_id":"${SID}","usage":{"input_tokens":58,"output_tokens":188}}`;
+  const none = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"uuid":"e6b61619-0394-459a-ad13-d748543abaf0","session_id":"${SID}"}`;
+  const updated = `{"type":"system","subtype":"task_updated","task_id":"${TASK}","patch":{"status":"completed","end_time":1789828771480},"session_id":"${SID}"}`;
+  const notified = `{"type":"system","subtype":"task_notification","task_id":"${TASK}","tool_use_id":"${CALL}","status":"completed","output_file":"/private/tmp/claude-501/tasks/${TASK}.output","summary":"Background command \\"Sleep 20 seconds then echo done\\" completed (exit code 0)","session_id":"${SID}"}`;
+  const woke = `{"type":"assistant","message":{"model":"claude-fable-5-1","role":"assistant","content":[{"type":"text","text":"The background sleep finished with exit code 0 and printed \`done\`."}]},"parent_tool_use_id":null,"session_id":"${SID}"}`;
+  const second = `{"type":"result","subtype":"success","is_error":false,"duration_ms":3600,"total_cost_usd":0.28360375,"result":"The background sleep finished with exit code 0 and printed \`done\`.","origin":{"kind":"task-notification"},"session_id":"${SID}","usage":{"input_tokens":4,"output_tokens":23}}`;
+  /** A second task beside it, for the counting and the two-task hold: this CLI reported one, so the pair is written. */
+  const two = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"${TASK}","task_type":"local_bash","description":"Sleep 20 seconds then echo done"},{"task_id":"b","task_type":"local_agent","description":"review"}],"session_id":"${SID}"}`;
+  const onlyB = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b","task_type":"local_agent","description":"review"}],"session_id":"${SID}"}`;
+  const notifiedB = `{"type":"system","subtype":"task_notification","task_id":"b","tool_use_id":"toolu_02","status":"completed","summary":"review completed","session_id":"${SID}"}`;
+
+  const dones = (events: readonly AdapterEvent[]) => events.filter((e): e is Extract<AdapterEvent, { type: "turn.done" }> => e.type === "turn.done");
+
+  /** Long enough for every line pushed so far to have been read, and for a turn that ended at its reply to have
+   * closed its channel and ended its process: what a case waits before reading that nothing was delivered. */
+  const drained = (): Promise<unknown> => new Promise(r => setTimeout(r, 80));
+
+  /** A turn whose stream the case feeds, on the exit window every case here runs with. `graceMs` is how long the
+   * process gets after the teardown, which a case that goes on feeding lines past the reply gives itself. */
+  function held(opts: { slowTeardown?: boolean; graceMs?: number } = {}) {
+    const m = manualExec(opts);
+    const adapter = createClaudeAdapter({ exec: m.factory, configDir: "/root/.claude-cfg", resultExitMs: 40, interruptGraceMs: opts.graceMs ?? 15 });
+    const { events, onEvent } = collect();
+    const session = adapter.start({ prompt: "run it in the background and say you are waiting", onEvent });
+    return { m, events, session };
+  }
+
+  it("is held: nothing is closed, ended or delivered until the task is done", async () => {
+    const { m, events, session } = held({ slowTeardown: true });
+    for (const line of [init, running, startedTask, handedBack, reply]) m.push(line);
+    // Past the window a finished turn's process gets: the turn is working, so nothing was delivered and the channel
+    // the agent takes a message on is still open.
+    await drained();
+    expect(dones(events)).toEqual([]);
+    expect(m.order).toEqual([]);
+    // The channel is open, so the turn takes a message: what a person or a parent thread sends lands in it.
+    expect(await session.steer("still there?")).toBe("accepted");
+
+    // The task ends and the CLI does not wake its agent: the words it already said are the turn's, with the task's
+    // end under them.
+    for (const line of [none, updated, notified]) m.push(line);
+    await until(() => dones(events).length === 1);
+    const result = dones(events)[0]!.result;
+    expect(result.status).toBe("completed");
+    expect(result.text).toMatch(/^Waiting for the background sleep to finish\.\n\n`Sleep 20 seconds then echo done` completed, \d+m?s after the reply$/);
+    expect(result).toMatchObject({ durationMs: 10657, costUsd: 0.26918 });
+    expect(await session.finished).toBe(result);
+    expect(m.order).toEqual(["write", "closeInput", "teardown", "kill"]);
+  });
+
+  it("ends when the task wakes the agent, and the agent's own next reply is the turn's", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, reply, none, updated, notified, woke, second] as const) m.push(line);
+    await until(() => dones(events).length === 1);
+    m.end(0);
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "completed", text: "The background sleep finished with exit code 0 and printed `done`.", durationMs: 3600, costUsd: 0.28360375 });
+    // One reply, and the woken agent's words reached the pane before it.
+    expect(dones(events)).toHaveLength(1);
+    const texts = events.filter(e => e.type === "turn.delta" && e.kind === "text").map(e => (e.type === "turn.delta" ? e.text : ""));
+    expect(texts).toEqual(["The background sleep finished with exit code 0 and printed `done`."]);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("delivered once: a reply the CLI wakes its agent for after the hold is over is not a second reply", async () => {
+    const { m, events, session } = held({ slowTeardown: true, graceMs: 5_000 });
+    for (const line of [init, running, startedTask, reply, none, updated, notified]) m.push(line);
+    // Nothing woke the agent inside the window, so the words it gave are the turn's and the reply is out.
+    await until(() => dones(events).length === 1);
+    const delivered = dones(events)[0]!.result;
+
+    // The CLI wakes its agent anyway, later. Its words reach the pane; the turn's reply does not change.
+    m.push(woke);
+    m.push(second);
+    await until(() => events.some(e => e.type === "turn.delta" && e.kind === "text" && e.text.startsWith("The background sleep finished")));
+    await drained();
+    expect(dones(events)).toHaveLength(1);
+    expect(dones(events)[0]!.result).toBe(delivered);
+    expect(delivered.costUsd).toBe(0.26918);
+
+    m.end(0);
+    expect(await session.finished).toBe(delivered);
+    expect(events.filter(e => e.type === "session.end")).toHaveLength(1);
+  });
+
+  it("takes a message: a send during the hold steers the agent, and its next reply ends the hold", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, reply]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+    expect(await session.steer("also say ok")).toBe("accepted");
+    expect(m.writes).toContain(userMessageLine("also say ok", SID));
+    expect(dones(events)).toEqual([]);
+
+    m.push(none);
+    m.push(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"session_id":"${SID}"}`);
+    m.push(`{"type":"result","subtype":"success","is_error":false,"duration_ms":900,"result":"ok","session_id":"${SID}","usage":{"input_tokens":2,"output_tokens":2}}`);
+    await until(() => dones(events).length === 1);
+    expect(dones(events)[0]!.result).toMatchObject({ status: "completed", text: "ok" });
+  });
+
+  it("reports the CLI's own count to the runtime on every change", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, two, none]) m.push(line);
+    await until(() => events.filter(e => e.type === "turn.tasks").length === 3);
+    m.push(`{"type":"result","subtype":"success","is_error":false,"duration_ms":5,"result":"done","session_id":"${SID}","usage":{"input_tokens":1,"output_tokens":1}}`);
+    m.end(0);
+    await session.finished;
+    expect(events.filter(e => e.type === "turn.tasks").map(e => (e.type === "turn.tasks" ? e.running : -1))).toEqual([1, 2, 0]);
+    // The count rides its own event and no client's: nothing about it reaches the reply.
+    expect(dones(events)[0]!.result).toMatchObject({ status: "completed", text: "done" });
+  });
+
+  it("is held until the last task is gone, and every task that finished is under the reply", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, two, reply, notified, onlyB]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+
+    m.push(notifiedB);
+    m.push(none);
+    await until(() => dones(events).length === 1);
+    m.end(0);
+    const result = await session.finished;
+    expect(result.text?.split("\n").slice(2)).toEqual([
+      expect.stringMatching(/^`Sleep 20 seconds then echo done` completed, \d+m?s after the reply$/) as unknown as string,
+      expect.stringMatching(/^`review` completed, \d+m?s after the reply$/) as unknown as string,
+    ]);
+  });
+
+  it("cut with its process reads failed with the count and keeps the reply", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, reply]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+    m.end(null);
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "failed", error: "ended with 1 background task running", text: "Waiting for the background sleep to finish." });
+    expect(dones(events)).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("stopped by the person reads interrupted and keeps the reply", async () => {
+    const { m, events, session } = held({ slowTeardown: true });
+    for (const line of [init, running, startedTask, reply]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+    await session.interrupt();
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "interrupted", text: "Waiting for the background sleep to finish." });
+    expect(m.order).toEqual(["teardown", "kill"]);
+    expect(dones(events)).toHaveLength(1);
   });
 });
 

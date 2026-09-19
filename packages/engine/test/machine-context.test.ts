@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { TURN_END_WORDS, backgroundTasksLine, fmtBytes } from "@wsp/protocol";
+import { TURN_END_WORDS, TURN_WALL_MS, fmtBytes } from "@wsp/protocol";
 import {
   ALIAS_PROBES,
   BROWSER_SHIM_PATH,
@@ -205,7 +205,7 @@ describe("the document", () => {
     expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2 GB free");
     expect(doc).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
-    expect(doc).toContain(`- ${TURN_END_WORDS}; a reply given with a command still running in the background reads failed (${backgroundTasksLine(1)}), and nothing wakes you when that command finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.`);
+    expect(doc).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
     expect(doc).not.toContain("does not move the thread");
     expect(doc).not.toContain("persists across");
     const claude = renderMachineContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("claude") });
@@ -252,7 +252,7 @@ describe("the document", () => {
     expect(short).toContain("The wsp-machine skill has the full picture");
     expect(short).toContain("dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.");
     expect(short).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
-    expect(short).toContain(`- ${TURN_END_WORDS}; a reply given with a command still running in the background reads failed (${backgroundTasksLine(1)}), and nothing wakes you when that command finishes. Only a server you mean to keep serving is detached with setsid nohup; every other command runs in the foreground and you wait for it.`);
+    expect(short).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
     expect(short).not.toContain("lasts for that command only");
     expect(short).not.toContain("persists across");
     expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("claude") })).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder. A cd moves your own shell, which persists across your tool calls, not the thread's folder, and the files pane follows that shell's folder unless you pinned the panes.");

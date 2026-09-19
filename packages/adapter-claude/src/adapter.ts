@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, titlePrompt } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -84,7 +84,8 @@ export interface AdapterDeps {
   oauthToken?: string;
   interruptGraceMs?: number;
   /** How long the CLI gets to exit on the EOF its result closed the channel with, before its process and its tree
-   * are ended for it. */
+   * are ended for it. The same window it gets to wake its agent in once the background tasks of a held reply are
+   * done, for the same reason: it is how long this adapter waits on a CLI that has something left to do. */
   resultExitMs?: number;
   /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
    * for how it is signed in; it differs between the person's own computer and a machine, which only the caller
@@ -254,15 +255,31 @@ function subagentLaunch(event: Record<string, unknown>): { agentId: string; tool
   return agentId === undefined || toolUseId === undefined ? undefined : { agentId, toolUseId };
 }
 
-/** The CLI's own count of its live background tasks (commands and subagents the agent did not wait for), sent whole
- * each time the set changes; a CLI from before the signal never sends it, and its turns are never flagged. */
-function backgroundTasksOf(event: Record<string, unknown>): number | undefined {
+/** The CLI's own live background tasks (commands and subagents the agent did not wait for), sent whole each time the
+ * set changes, each with the CLI's own handle and its one phrase for the command; a CLI from before the signal never
+ * sends it, and a turn on such a CLI is never held. A line whose payload is not a set reads as the empty set, which
+ * is what it says: nothing of the agent's is running. */
+function backgroundTasksOf(event: Record<string, unknown>): { id: string; description: string }[] | undefined {
   if (str(event.type) !== "system" || str(event.subtype) !== "background_tasks_changed") return undefined;
-  return Array.isArray(event.tasks) ? event.tasks.length : 0;
+  if (!Array.isArray(event.tasks)) return [];
+  return event.tasks.flatMap(raw => {
+    const task = rec(raw);
+    const id = str(task?.task_id);
+    return id === undefined ? [] : [{ id, description: str(task?.description) ?? id }];
+  });
 }
 
-/** A success that arrived while the agent's background tasks still ran is a turn that ended before its work did: the
- * CLI kills those tasks on exit and no completion ever reaches the thread. The reply stays; the error says why. */
+/** One background task the CLI says is over, with how it ended in its own word. */
+function taskFinishedOf(event: Record<string, unknown>): { id: string; status: string } | undefined {
+  if (str(event.type) !== "system" || str(event.subtype) !== "task_notification") return undefined;
+  const id = str(event.task_id);
+  const status = str(event.status);
+  return id === undefined || status === undefined ? undefined : { id, status };
+}
+
+/** A reply whose process was cut while the agent's background tasks still ran: the CLI kills them with itself, so
+ * the turn ended before the work it started did. The reply stays; the error says why. A reply given while they run
+ * holds the turn open instead, so this is the word of a turn stopped from outside, the wall among the causes. */
 function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
   if (result.status !== "completed" || backgroundTasks === 0) return result;
   return { ...result, status: "failed", error: backgroundTasksLine(backgroundTasks) };
@@ -386,6 +403,21 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
     let backgroundTasks = 0;
+    /** The reply the agent gave while the CLI still reported work it started running: the turn is not over, so the
+     * reply is kept here and delivered once nothing it started is left running. */
+    let heldReply: TurnResult | undefined;
+    /** When that reply came, so a task finishing after it says how long after. Wall clock here and not the CLI's
+     * own: on a turn re-opened after a host restart the run's log is replayed from its first byte, so the figure a
+     * finished line carries is measured from the replay and not from the words the person read an hour ago. */
+    let heldAt = 0;
+    /** The CLI's one phrase for each background task it has reported, by its own handle for it: only the set lines
+     * carry it, and the line a finished task gets is written from it. */
+    const taskNames = new Map<string, string>();
+    /** One line per task that finished after the held reply, in the order the CLI reported them. */
+    const finishedAfter: string[] = [];
+    /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
+     * wake its agent in before that reply is the turn's. */
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     /** What the last error the CLI wrote into the stream itself was for, null where wsp claims no cause for it;
      * undefined until it writes one. */
     let refusalCause: TurnRefusal | null | undefined;
@@ -416,10 +448,53 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome, ...(optionId !== undefined ? { optionId } : {}) });
     };
 
+    const exitMs = deps.resultExitMs ?? RUN_EXIT_MS;
+
+    /** Everything the turn's reply being final comes to, wherever the reply came from: the CLI waits for more input
+     * after its result and EOF is what lets it exit; the channel is shut, so a request still unanswered will never
+     * be and the caller is told now rather than waiting minutes on a CLI that lingers; a CLI that does not go on its
+     * own is ended with its tree once the wait passes rather than left for the idle cut. */
+    const deliver = (result: TurnResult, sessionId = claudeSessionId): void => {
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = undefined;
+      heldReply = undefined;
+      sawResult = true;
+      stream.closeInput();
+      settleAsked("gone");
+      void endAfterResult(stream, exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+      // Held until the process exits, since the CLI writes its reason to stderr after the result.
+      if (answeredNothing(result)) {
+        emptyResult = result;
+        return;
+      }
+      turnResult = result;
+      onEvent({ type: "turn.done", sessionId, result });
+    };
+
+    /** A held reply with one line under it per task that finished after it: the road where the CLI reported the
+     * exits and never woke its agent, so these lines are the turn's own report of them. Where it did wake the agent,
+     * that reply is the turn's and none of this is added. */
+    const heldWithFinished = (result: TurnResult): TurnResult =>
+      finishedAfter.length === 0 ? result : { ...result, text: [result.text ?? "", "", ...finishedAfter].join("\n") };
+
+    /** The window the CLI gets to wake its agent in once a held reply's tasks are done. Any line it prints starts
+     * the window again, since a CLI that is saying something is about to reply; silence through it means the tasks
+     * ended with nobody woken, and the words the agent already gave are the turn's. */
+    const armSettle = (): void => {
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = undefined;
+        if (heldReply !== undefined && backgroundTasks === 0) deliver(heldWithFinished(heldReply));
+      }, exitMs);
+    };
+
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
       try {
         for await (const raw of stream.lines) {
+          // A held reply waiting on nothing but silence: this line is the CLI saying something, so the window it has
+          // to wake its agent in starts again.
+          if (heldReply !== undefined && backgroundTasks === 0) armSettle();
           const event = parseLine(raw);
           if (event === undefined) {
             const text = raw.trim();
@@ -465,7 +540,20 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
           const tasks = backgroundTasksOf(event);
           if (tasks !== undefined) {
-            backgroundTasks = tasks;
+            for (const task of tasks) taskNames.set(task.id, task.description);
+            backgroundTasks = tasks.length;
+            // The runtime reads this to know the turn is working while the agent waits, which holds its idle clock.
+            onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks });
+            if (heldReply !== undefined && backgroundTasks === 0) armSettle();
+            if (backgroundTasks > 0 && settleTimer !== undefined) {
+              clearTimeout(settleTimer);
+              settleTimer = undefined;
+            }
+            continue;
+          }
+          const over = taskFinishedOf(event);
+          if (over !== undefined) {
+            if (heldReply !== undefined) finishedAfter.push(taskFinishedLine(taskNames.get(over.id) ?? over.id, over.status, Date.now() - heldAt));
             continue;
           }
           const cause = apiErrorCause(event);
@@ -488,21 +576,23 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               }
             }
             if (normalized.type === "turn.done") {
-              sawResult = true;
-              // The CLI waits for more input after its result; EOF is what lets it exit, and a CLI that does not go
-              // on its own is ended with its tree once the wait passes rather than left for the idle cut.
-              stream.closeInput();
-              // The channel is shut, so a request still unanswered will never be: the caller is told now rather
-              // than waiting on the process to go, which is minutes on a harness that lingers.
-              settleAsked("gone");
-              void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
-              normalized.result = endedEarly(normalized.result, backgroundTasks);
-              // Held until the process exits, since the CLI writes its reason to stderr after the result.
-              if (answeredNothing(normalized.result)) {
-                emptyResult = normalized.result;
+              // The turn's reply is already out: the tasks ended in silence, the window passed and the held words
+              // went as the turn's, and this is the CLI waking its agent after that. One turn is one reply, so it
+              // is not delivered a second time; its cost would be added to the row again, its notify line sent
+              // again and its reply row written again, and the agent's later words are already in the pane as
+              // their own lines.
+              if (sawResult) continue;
+              if (backgroundTasks > 0) {
+                // The agent replied while the CLI still reports work it started. The turn is not over: ending it
+                // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
+                // channel stays open and the stream goes on being read until nothing of the agent's is running.
+                heldReply = normalized.result;
+                heldAt = Date.now();
+                finishedAfter.length = 0;
                 continue;
               }
-              turnResult = normalized.result;
+              deliver(normalized.result, normalized.sessionId);
+              continue;
             }
             onEvent(normalized);
           }
@@ -511,12 +601,21 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         // The transport ended the turn itself and its message says why; that message is the turn's error.
         streamError = cause instanceof Error ? cause.message : String(cause);
       }
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = undefined;
       const exitCode = await stream.exited;
       exited = true;
       // The process is gone, so nothing can answer these; the rows say so rather than waiting for an answer that
       // has nowhere to land.
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
       settleAsked("gone");
+      if (turnResult === undefined && heldReply !== undefined) {
+        // The hold ended with the process. Tasks still in the set were cut with it, which is the wall and every stop
+        // from outside; the words the agent gave stand whichever it was.
+        sawResult = true;
+        turnResult = interruptRequested ? { ...heldReply, status: "interrupted" } : backgroundTasks > 0 ? endedEarly(heldReply, backgroundTasks) : heldWithFinished(heldReply);
+        onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
+      }
       if (turnResult === undefined) {
         turnResult =
           emptyResult !== undefined
