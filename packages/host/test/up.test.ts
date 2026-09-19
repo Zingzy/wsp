@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
+import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
 import { NO_PROJECT_YET } from "../src/verbs.js";
@@ -385,6 +385,20 @@ describe("wsp up", () => {
     const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
     await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+    expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
+    expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
+  });
+
+  it("a state whose shape document does not parse is refused before anything is minted", async () => {
+    // The reading this is from: a copy of the live state had its $shape set to the bare number by hand, and the
+    // host served it, minted its key and dialled the provider off a file it could not say the shape of.
+    stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: 3 });
+    // A reading that serves the copy hands back a host, which goes into the teardown rather than staying up.
+    const start = up(quietIO(), { port: 0, wsPort: 0, statePath, webDir }).then(handle => {
+      handles.push(handle);
+      return handle;
+    });
+    await expect(start).rejects.toThrow(stateShapeUnreadableLine(statePath, 3));
     expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
     expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
   });
