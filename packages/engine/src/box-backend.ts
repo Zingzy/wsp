@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { moveTimedOutLine, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
@@ -291,13 +291,6 @@ const stillRestoring = (e: unknown): boolean => {
 
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
-}
-
-/** What a fetch is given to end it early: the cap, the caller's own signal, or both. A fresh timeout per attempt. */
-function abort(capMs: number | undefined, signal: AbortSignal | undefined): { signal?: AbortSignal } {
-  const caps = capMs === undefined ? undefined : AbortSignal.timeout(capMs);
-  if (caps === undefined) return signal === undefined ? {} : { signal };
-  return { signal: signal === undefined ? caps : AbortSignal.any([caps, signal]) };
 }
 
 interface RequestOpts {
