@@ -10,7 +10,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLine, unmergeServers, type ServerPort } from "@wsp/engine";
+import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname, join } from "node:path";
 import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
@@ -272,7 +272,7 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       removed.push(`${held.words} ${held.unit.name} (${refused === undefined ? "stopped" : runFailureLine(refused)})`);
     }
   }
-  for (const out of unmerged) removed.push(serversOutLine(out));
+  for (const out of unmerged) removed.push(...serversOutLines(out));
   // Every file wsp itself landed in an agent's home here whose bytes are still the ones wsp left. A file the
   // person has written since hashes differently, so the read never named it and it stays where it is.
   for (const rel of own) {

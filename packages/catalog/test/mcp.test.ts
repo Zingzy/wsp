@@ -344,7 +344,7 @@ describe("remove", () => {
     const merged = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED()).text;
     const withHome = MCP_SERVERS_JSON.merge(LIB, { keep: ["zed"], drop: [], replace: [], project: { from: HOME, to: "/root" } }, merged, CLAUDE_TRAVELLED()).text;
 
-    const gone = MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]);
+    const gone = MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]).text;
     const root = JSON.parse(gone) as { numStartups: number; oauthAccount: unknown; projects: Record<string, { mcpServers?: Record<string, unknown> }>; mcpServers: Record<string, unknown> };
     expect(Object.keys(root.mcpServers)).toEqual(["mine"]);
     expect(root.numStartups).toBe(41);
@@ -353,30 +353,43 @@ describe("remove", () => {
     // The home folder's servers are the person's own scope and are named there, not under the root key.
     expect(root.projects["/root"]!.mcpServers).toEqual({ zed: { command: "/root/.local/bin/zed", args: [] } });
     const both = MCP_SERVERS_JSON.remove(gone, ["zed"], "/root");
-    expect((JSON.parse(both) as { projects: Record<string, { mcpServers: Record<string, unknown> }> }).projects["/root"]!.mcpServers).toEqual({});
+    expect((JSON.parse(both.text) as { projects: Record<string, { mcpServers: Record<string, unknown> }> }).projects["/root"]!.mcpServers).toEqual({});
+    // Nothing of this file was ever a comment, so the rewrite lost none.
+    expect([...[MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]), both].map(r => r.commentsDropped)]).toEqual([false, false]);
 
     // A name the file does not define, a scope it has nothing under, and a file with no servers at all: the text
     // stands as it is rather than being rewritten for nothing.
-    expect(MCP_SERVERS_JSON.remove(withHome, ["nobody"])).toBe(withHome);
-    expect(MCP_SERVERS_JSON.remove(withHome, ["gsc"], "/root/elsewhere")).toBe(withHome);
-    expect(MCP_SERVERS_JSON.remove('{ "theme": "x" }', ["gsc"])).toBe('{ "theme": "x" }');
+    expect(MCP_SERVERS_JSON.remove(withHome, ["nobody"]).text).toBe(withHome);
+    expect(MCP_SERVERS_JSON.remove(withHome, ["gsc"], "/root/elsewhere").text).toBe(withHome);
+    expect(MCP_SERVERS_JSON.remove('{ "theme": "x" }', ["gsc"]).text).toBe('{ "theme": "x" }');
     expect(() => MCP_SERVERS_JSON.remove("[]", ["gsc"])).toThrow("the file is not a JSON object");
   });
 
   it("OpenCode's JSON: the named keys go from under its own key and the rest of the file is written back as the merge writes it", () => {
     const own = '{\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] }, "mine": { "type": "local", "command": ["mine"] } }\n}\n';
     const gone = OPENCODE_JSON.remove(own, ["wsp"]);
-    expect(JSON.parse(gone)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
-    expect(OPENCODE_JSON.remove(own, ["nobody"])).toBe(own);
+    expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
+    expect(gone.commentsDropped).toBe(false);
+    expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
+  });
+
+  it("a jsonc file says the comments its rewrite could not keep, the same loss a merge into it answers, and says nothing of them where it takes no key out", () => {
+    const own = '{\n  // my own servers\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] } }\n}\n';
+    const gone = OPENCODE_JSON.remove(own, ["wsp"]);
+    expect(gone.commentsDropped).toBe(true);
+    expect(gone.text).not.toContain("my own servers");
+    expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: {} });
+    // A name that file does not define leaves it byte for byte, comments and all, so nothing is lost and nothing said.
+    expect(OPENCODE_JSON.remove(own, ["nobody"])).toEqual({ text: own, commentsDropped: false });
   });
 
   it("Codex's TOML: the named tables go with their sub-tables, and the person's trust tables, hooks state and own server stay byte for byte", () => {
     const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
     expect(landed).toContain("[mcp_servers.context7.env]");
-    expect(CODEX_TOML.remove(landed, ["context7"])).toBe(CODEX_OWN);
+    expect(CODEX_TOML.remove(landed, ["context7"])).toEqual({ text: CODEX_OWN, commentsDropped: false });
     // A name no table stands for leaves the file exactly as it was, comments and spacing with it.
-    expect(CODEX_TOML.remove(landed, ["nobody"])).toBe(landed);
-    expect(CODEX_TOML.remove(landed, ["mine"])).not.toContain("[mcp_servers.mine]");
-    expect(CODEX_TOML.remove(landed, ["mine"])).toContain('[projects."/private/tmp/proof-907/repo"]');
+    expect(CODEX_TOML.remove(landed, ["nobody"]).text).toBe(landed);
+    expect(CODEX_TOML.remove(landed, ["mine"]).text).not.toContain("[mcp_servers.mine]");
+    expect(CODEX_TOML.remove(landed, ["mine"]).text).toContain('[projects."/private/tmp/proof-907/repo"]');
   });
 });

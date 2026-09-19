@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
-import { CODEX_TOML, MCP_SERVERS_JSON, type McpFormat } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat } from "@wsp/catalog";
 import {
   SERVER_MARK,
   agentStateFile,
@@ -23,13 +23,13 @@ import {
   parseLanded,
   provisionFiles,
   serverDigest,
-  serversOutLine,
+  serversOutLines,
   unmergeServers,
   type FilesSay,
   type ProvisionLanding,
   type ServerPort,
 } from "../src/provision-files.js";
-import type { McpPlan } from "../src/golden-mcp.js";
+import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
@@ -487,9 +487,12 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
     const { port, wrote } = fakePort(files, keys);
 
     const took = await unmergeServers(port, "/root");
-    expect(took).toEqual([{ path: CLAUDE, names: ["gsc", "zed"] }, { path: CODEX, names: ["context7"] }]);
+    expect(took).toEqual([
+      { path: CLAUDE, names: ["gsc", "zed"], commentsDropped: false },
+      { path: CODEX, names: ["context7"], commentsDropped: false },
+    ]);
     expect(wrote.sort()).toEqual([CODEX, CLAUDE].sort());
-    expect(serversOutLine(took[1]!)).toBe(`context7 (out of ${CODEX})`);
+    expect(serversOutLines(took[1]!)).toEqual([`context7 (out of ${CODEX})`]);
 
     const claude = JSON.parse(files[CLAUDE]!) as { numStartups: number; mcpServers: Record<string, unknown>; projects: Record<string, { mcpServers?: Record<string, unknown>; history?: unknown }> };
     expect(Object.keys(claude.mcpServers)).toEqual(["mine", "notes"]);
@@ -498,6 +501,28 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
     expect(claude.numStartups).toBe(41);
     // Codex's file loses wsp's table and nothing else: the trust table and the person's own server stand.
     expect(files[CODEX]).toBe(['[projects."/root/repo"]', 'trust_level = "trusted"', "", "[mcp_servers.mine]", 'command = "/usr/local/bin/mine"', ""].join("\n"));
+  });
+
+  it("says the comments a jsonc file loses as it is written back, in the one sentence that loss has, and says nothing of them for a plain JSON file", async () => {
+    const opencode = "/root/.config/opencode/opencode.json";
+    const commented = '{\n  // my own servers\n  "theme": "dark",\n  "mcp": { "docs": { "type": "local", "command": ["npx", "docs-mcp"] } }\n}\n';
+    const files = { [opencode]: commented, [CLAUDE]: claudeText() };
+    const keys = {
+      [`${MCP_ID_PREFIX}opencode/docs`]: digestIn(commented, OPENCODE_JSON, "docs"),
+      [`${MCP_ID_PREFIX}claude/gsc`]: digestIn(files[CLAUDE]!, MCP_SERVERS_JSON, "gsc"),
+    };
+    const { port } = fakePort(files, keys);
+
+    const took = await unmergeServers(port, "/root");
+    expect(took).toEqual([
+      { path: CLAUDE, names: ["gsc"], commentsDropped: false },
+      { path: opencode, names: ["docs"], commentsDropped: true },
+    ]);
+    // The leave's lines for that file: what came out of it, then the one sentence for the comments it lost.
+    expect(serversOutLines(took[1]!)).toEqual([`docs (out of ${opencode})`, commentsDroppedLine(opencode)]);
+    expect(files[opencode]).not.toContain("my own servers");
+    // The file that held no comment says nothing of them.
+    expect(serversOutLines(took[0]!)).toEqual([`gsc (out of ${CLAUDE})`]);
   });
 
   it("writes nothing where the list holds no key of that agent's, where the file is not there, and where every entry has changed", async () => {

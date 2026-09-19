@@ -27,6 +27,13 @@ export interface Placed {
   commentsDropped: boolean;
 }
 
+/** What a remove came to: the file as it should stand, the text as it was where the file defines none of the
+ * names, and whether the rewrite could not keep the comments it held, which is the same loss a merge answers. */
+export interface McpRemoved {
+  text: string;
+  commentsDropped: boolean;
+}
+
 /** One config on the machine as its editor gets it: the kept and dropped server names, and for a format with
  * per-folder servers, the laptop folder whose servers now belong to the machine's home. */
 export interface McpEditScope {
@@ -107,9 +114,9 @@ export interface McpFormat {
   merge(lib: McpEditLib, scope: McpMergeScope, own: string | undefined, travelled: string): McpMerged;
   /** The agent's own file with the named servers taken out from under this format's own key, every other key,
    * table and line of theirs as it was; `project` is the folder whose own servers the names sit under, for a
-   * format that keeps servers per folder. The text stands where it defines none of them. Throws when the text is
-   * not the format. */
-  remove(text: string, names: readonly string[], project?: string): string;
+   * format that keeps servers per folder. The text stands where it defines none of them, and the comments it
+   * held are answered the way a merge answers them. Throws when the text is not the format. */
+  remove(text: string, names: readonly string[], project?: string): McpRemoved;
 }
 
 export interface McpConfig {
@@ -242,17 +249,18 @@ function jsonMerger(key: string): McpFormat["merge"] {
  * empty or not: it is the agent's own key, not wsp's to take. */
 function jsonRemover(key: string): McpFormat["remove"] {
   return (text, names, project) => {
-    const root = tree(readJsonc(text).value);
+    const held = readJsonc(text);
+    const root = tree(held.value);
     if (root === undefined) throw new Error("the file is not a JSON object");
     const table = project === undefined ? tree(root[key]) : tree(tree(tree(root.projects)?.[project])?.[key]);
-    if (table === undefined) return text;
+    if (table === undefined) return { text, commentsDropped: false };
     let took = false;
     for (const name of names) {
       if (table[name] === undefined) continue;
       delete table[name];
       took = true;
     }
-    return took ? `${JSON.stringify(root, null, 2)}\n` : text;
+    return took ? { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: held.comments } : { text, commentsDropped: false };
   };
 }
 
@@ -666,7 +674,7 @@ function codexMerge(lib: McpEditLib, scope: McpMergeScope, own: string | undefin
 /** The remove: each named server's tables go with their sub-tables and the blank lines under them, the way a
  * dropped name goes in the merge, and every other line of the file, the trust tables and the hooks state
  * included, stays byte for byte. */
-function removeCodex(text: string, names: readonly string[]): string {
+function removeCodex(text: string, names: readonly string[]): McpRemoved {
   let lines = text.split("\n");
   let took = false;
   for (const name of names) {
@@ -675,7 +683,7 @@ function removeCodex(text: string, names: readonly string[]): string {
     lines = lines.filter((_, i) => !at.has(i));
     took = true;
   }
-  return took ? lines.join("\n") : text;
+  return { text: took ? lines.join("\n") : text, commentsDropped: false };
 }
 
 export const CODEX_TOML: McpFormat = {

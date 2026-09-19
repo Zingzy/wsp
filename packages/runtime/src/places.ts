@@ -66,7 +66,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLine, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedLoginOf } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
@@ -1004,7 +1004,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     if (home === undefined) return [];
     const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
     const took = await bounded(unmergeServers(machineServerPort(machine), home), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
-    return took.map(serversOutLine);
+    return took.flatMap(serversOutLines);
   };
 
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
