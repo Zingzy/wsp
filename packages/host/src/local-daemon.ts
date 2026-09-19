@@ -14,7 +14,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
@@ -22,6 +22,7 @@ import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
 import { LOOPBACK, daemonListeningLine, daemonVersionOf, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
 import { daemonBinaryHere } from "./assets.js";
+import { pidAlive } from "./host-lock.js";
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
  * it never expires; the view's expiry is a number, so it carries the furthest one. */
@@ -30,6 +31,35 @@ const NEVER = Number.MAX_SAFE_INTEGER;
 /** How long the binary gets to print its listening line, and how long it gets to leave on SIGTERM before SIGKILL. */
 const START_MS = 10_000;
 const STOP_MS = 5_000;
+
+/** What every local daemon's own folder is called, and the pid read back off one. The pid in the name is the
+ * process whose close removes the folder, so a folder whose process is gone can be named as such by any later
+ * start. A folder written before the pid was in the name matches nothing here and is left where it is. */
+const OWN_DIR_PREFIX = "wsp-local-daemon-";
+const OWN_DIR_PID = new RegExp(`^${OWN_DIR_PREFIX}(\\d+)-`);
+
+/** The token folders of hosts this computer no longer runs, taken away. A host that is killed runs no close, so
+ * its folder and the token in it sit under the temp dir until something removes them, and seventeen of them were
+ * counted on one Mac. Two starts in the same second sweep the same dead folders and never each other's, whose pids
+ * are alive. Best effort throughout: a temp dir this process may not read, and a folder another login left behind
+ * on a computer where the temp dir is shared, are stepped over rather than taking the start down with them. */
+function sweepDeadOwnDirs(at: string): void {
+  let names: readonly string[];
+  try {
+    names = readdirSync(at);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const pid = OWN_DIR_PID.exec(name)?.[1];
+    if (pid === undefined || pidAlive(Number(pid))) continue;
+    try {
+      rmSync(join(at, name), { recursive: true, force: true });
+    } catch {
+      continue;
+    }
+  }
+}
 
 /** The listening line as a pattern that reads the port off it, whatever address the daemon printed. */
 const LISTENING = new RegExp(
@@ -140,7 +170,8 @@ export class LocalDaemon {
     // made in a folder of this daemon's own, never beside the host's files under the person's home. The manifest
     // of what a person started sits beside it: every file the daemon reads or writes is named, and nothing is left
     // to a default under /root this computer has not got.
-    const ownDir = mkdtempSync(join(tmpdir(), "wsp-local-daemon-"));
+    sweepDeadOwnDirs(tmpdir());
+    const ownDir = mkdtempSync(join(tmpdir(), `${OWN_DIR_PREFIX}${process.pid}-`));
     const tokenPath = opts.tokenPath ?? join(ownDir, "token");
     mkdirSync(dirname(tokenPath), { recursive: true });
     writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });

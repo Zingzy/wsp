@@ -54,7 +54,7 @@ function errnoCode(e: unknown): string | undefined {
 }
 
 /** EPERM means the pid exists under another user, so it counts as alive. */
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
