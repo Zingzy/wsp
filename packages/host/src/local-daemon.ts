@@ -169,8 +169,7 @@ export class LocalDaemon {
     // The daemon reads its token off a file at every auth frame and takes none on its command line, so the file is
     // made in a folder of this daemon's own, never beside the host's files under the person's home. The manifest
     // of what a person started sits beside it: every file the daemon reads or writes is named, and nothing is left
-    // to a default under /root this computer has not got. The folder carries the pid of the process that removes
-    // it, and the folders of processes that are gone are taken away first.
+    // to a default under /root this computer has not got.
     sweepDeadOwnDirs(tmpdir());
     const ownDir = mkdtempSync(join(tmpdir(), `${OWN_DIR_PREFIX}${process.pid}-`));
     const tokenPath = opts.tokenPath ?? join(ownDir, "token");

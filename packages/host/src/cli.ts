@@ -1803,8 +1803,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       if (picked === undefined) return EXIT_CODES.provider;
       const handle = await up(io, { ...opts, ...picked.ports });
       // "Serving on 4401" is a claim about a host that serves, so it is said once one does: the state read, the
-      // keys, the second lock read and the bind itself all refuse after the ports are picked, and a person read
-      // the claim above the refusal that said nothing had started.
+      // keys, the second lock read and the bind itself all refuse after the ports are picked.
       if (picked.moved !== undefined) io.log(portsPickedLine({ port: handle.port, wsPort: handle.wsPort }, picked.moved.port, picked.moved.holder));
       stopOnSignals(handle, io);
       return 0;

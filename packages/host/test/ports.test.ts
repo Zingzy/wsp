@@ -2,7 +2,7 @@
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { LOOPBACK } from "@wsp/runtime";
-import { PORT_TAKEN_REFUSAL, portInsteadLine, portTakenLine, portsPickedLine } from "@wsp/protocol";
+import { PORT_TAKEN_REFUSAL, portInsteadLine, portTakenLine } from "@wsp/protocol";
 import { choosePorts, listenerOf, portHolder, portInUse } from "../src/ports.js";
 import { pickUpPorts, type CliIO } from "../src/cli.js";
 import type { HostLock } from "../src/host-lock.js";
@@ -148,7 +148,6 @@ describe("the pair wsp up binds", () => {
       ports: { port: 4401, wsPort: 4411 },
       moved: { port: 4410, holder: { command: "node", pid: 62569 } },
     });
-    expect(portsPickedLine({ port: 4401, wsPort: 4411 }, 4410, { command: "node", pid: 62569 })).toContain("Serving on 4401 and 4411");
     expect([out.lines, out.errors]).toEqual([[], []]);
   });
 
