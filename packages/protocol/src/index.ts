@@ -3946,7 +3946,7 @@ export const provisionPackedLine = (paths: number, p: { bytes: number; files?: n
 };
 
 /** What one part of that archive came to on the way over: the bytes it carried, and the pieces the road cut it
- * into where the bytes travel as text in one exec each, which is how a computer you own is reached. */
+ * into where the bytes travel on one exec frame each, which is how a computer you own is reached. */
 export const provisionShippedLine = (p: { part: number; parts: number; bytes: number; total: number; pieces?: number }): string => {
   const took = p.pieces === undefined ? "" : ` in ${plural(p.pieces, "piece")}`;
   return p.parts === 1 ? `shipped: ${fmtBytes(p.total)}${took}` : `shipped part ${p.part} of ${p.parts}: ${fmtBytesOfTotal(p.bytes, p.total)}${took}`;
@@ -4172,10 +4172,14 @@ function base64Bytes(text: string): number {
   return (text.length / 4) * 3 - pad;
 }
 
+/** How long the base64 of so many bytes is, its padding counted: what bytes cost on a road that carries them as
+ * text, read by the schemas below and by whoever bounds a frame by what its bytes take to cross. */
+export const base64Length = (bytes: number): number => Math.ceil(bytes / 3) * 4;
+
 const base64 = (bytes: number) =>
   z
     .string()
-    .max(4 * Math.ceil((bytes + 2) / 3))
+    .max(base64Length(bytes))
     .regex(/^[A-Za-z0-9+/]+={0,2}$/)
     .refine(text => text.length % 4 === 0 && base64Bytes(text) === bytes, `must be ${bytes} bytes, base64`);
 
