@@ -2679,7 +2679,8 @@ export const PlaceView = z.object({
    * this host holds for the row. Absent on a place that offers no pick of its own, which is every computer the
    * person owns. A picker reads the row it is under, never one provider's list against another's prices. */
   sizes: z.array(MachineSizeOffer).optional(),
-  /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
+  /** How many forks run there and how many more a create can take now, by forkRoom; a napping fork runs nothing and
+   * takes no room, and the workspace list is where it is counted. Absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
   /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined, which boots the
    * image or it is not joined at all. False is the computer the app itself runs on, which runs threads in its own
