@@ -44,6 +44,9 @@ function titledAdapter(
     reply?: string;
     /** Held open, the turn runs until the test lets it end. */
     hold?: () => Promise<void>;
+    /** What an interrupt does to a turn held open. A real harness ends the turn when the host interrupts it, which
+     * is what a delete does to every thread on the workspace before the machine goes. */
+    endsOnInterrupt?: boolean;
     /** Every start's options, so a test can read what the launch carried. */
     starts?: HarnessStartOptions[];
   } = {},
@@ -69,14 +72,18 @@ function titledAdapter(
       const sessionId = o.resume ?? SESSION;
       const result: TurnResult = { status: "completed", text: options.reply ?? "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
+      let interrupted!: () => void;
+      const ended = new Promise<void>(resolve => {
+        interrupted = resolve;
+      });
       const finished = (async () => {
         if (options.announces !== false) emit({ type: "session.start", sessionId });
-        await options.hold?.();
+        await (options.endsOnInterrupt === true && options.hold !== undefined ? Promise.race([options.hold(), ended]) : options.hold?.());
         emit({ type: "turn.done", sessionId, result });
         emit({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       })();
-      return { localId: options.rekeys === true ? randomUUID() : sessionId, finished, interrupt: async () => {} };
+      return { localId: options.rekeys === true ? randomUUID() : sessionId, finished, interrupt: async () => interrupted() };
     },
   });
 }
@@ -667,5 +674,55 @@ describe("the agents whose store keeps a name", () => {
     // The row came from the table, so it is no answer yet; the same row from the machine is a no.
     expect(keepsRename(row!)).toBe(true);
     expect(keepsRename({ ...row!, source: "harness" })).toBe(false);
+  });
+});
+
+describe("a turn the host ended for its machine going away", () => {
+  it("asks that machine for no title, so a delete writes no line about a read that could not land", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const turn = gate<void>();
+    const { backend, reads } = titledBackend(() => "Building the server");
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: titledAdapter({ hold: () => turn.wait, endsOnInterrupt: true }) } });
+    // Read off the stored index rather than the listing: a listing of its own asks the harness for the titles it
+    // is missing, and what this case is about is the read the turn's own ending starts.
+    const rows = async (): Promise<{ status: string }[]> => ((await store.get("sessions", ws.id)) as { sessions: { status: string }[] } | undefined)?.sessions ?? [];
+    let ws!: { id: string };
+    try {
+      ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      await rt.sessions.start(ws.id, { prompt: "build it" });
+      await until(async () => (await rows())[0]?.status === "running");
+
+      // The machine is taken down after the threads on it are ended, and that window is where the read used to
+      // land: the record is still live here, so the title would be asked of a machine on its way out.
+      const machine = backend.machines[0]!;
+      const kill = gate<void>();
+      const killed = machine.kill.bind(machine);
+      machine.kill = async () => {
+        await kill.wait;
+        await killed();
+      };
+      // The one read a turn pays for at its start, which is the harness's own name for the session: what this
+      // case counts is every read after the delete began.
+      await until(async () => reads.length === 1);
+      const asked = reads.length;
+      const deleted = rt.workspaces.delete(ws.id);
+      await until(async () => (await rows())[0]?.status !== "running");
+      // A window wide enough for the read the turn's ending would have started, with the record still live and
+      // the machine still there to answer it.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(reads).toHaveLength(asked);
+      kill.open();
+      await deleted;
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(reads).toHaveLength(asked);
+      expect(machine.execLog.filter(cmd => cmd.startsWith(TITLE_COMMAND))).toHaveLength(asked);
+      expect(warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("no title for session"))).toEqual([]);
+    } finally {
+      turn.open();
+      warn.mockRestore();
+      await rt.close();
+    }
   });
 });

@@ -180,6 +180,11 @@ export interface MachineBackend {
   /** Optional: what a machine of each kind boots from on this provider when nothing names a template. Absent leaves
    * the built-in names the engine knows. */
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
+  /** Whether a machine of this backend boots under the workspace's own name, so nothing above names it again: a
+   * computer the person owns writes the name into the machine's specification at every boot, where a provider's
+   * fork comes up as localhost. It sits beside the capabilities rather than inside them because that object is the
+   * daemon's own wire shape, and this is this host's reading of a kind. Absent is a backend that names none. */
+  readonly namesWorkspace?: boolean;
   /** Optional: where the computer holding this backend keeps the logins every workspace on it shares, absolute.
    * Only a computer the person owns answers one; a provider holds no file of theirs. */
   readonly logins?: string;

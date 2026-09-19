@@ -7,6 +7,7 @@ import { loginPathLine } from "@wsp/protocol";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { up, type CliIO } from "../src/cli.js";
+import { stateWriterHere } from "../src/version.js";
 import { LAUNCHD_PATH, needsLoginPath, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -144,7 +145,7 @@ describe("the login shell PATH", () => {
       wsPort: 0,
       statePath,
       webDir,
-      runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {} }),
+      runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {} }),
     });
     if (handle === undefined) throw new Error("up refused a state with a sealed golden");
     try {

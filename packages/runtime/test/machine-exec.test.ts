@@ -947,3 +947,84 @@ describe("machineExecStream polling a script that ends at once", () => {
     expect(results).toEqual(Array.from({ length: 20 }, () => ({ lines: ["hi"], exited: 0 })));
   }, 60_000);
 });
+
+describe("a reader that lets go of a run still going", () => {
+  it("ends its poll where it stands, settles nothing, reaps nothing, and the run is left on the machine", async () => {
+    const { backend, machine } = await makeMachine();
+    // A run that prints nothing and never ends, which is what a turn left running on a machine is.
+    const guest = scriptGuest(backend, []);
+    const reading = new Set<() => void>();
+    const factory = machineExecStream(machine, { pollMs: 10, reading });
+    const stream = factory("claude -p hi", { env: {} });
+    const polls = (): number => guest.calls.filter(c => c.includes("__WSP_EOF_")).length;
+    // Nothing awaits this: the reader is the poll, and letting go is what this case is about.
+    void (async () => {
+      for await (const line of stream.lines) void line;
+    })();
+    await vi.waitFor(() => expect(polls()).toBeGreaterThan(1));
+    // The reader registered itself with the wiring that made the factory, as the call that stops it.
+    expect(reading.size).toBe(1);
+
+    for (const stop of [...reading]) stop();
+    expect(reading.size).toBe(0);
+    const after = polls();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(polls()).toBe(after);
+    // The turn is not written off: nothing was signalled, nothing reaped, and the stream settles for nobody, so
+    // whoever owns that turn reads its log from the first byte when it opens it again.
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+    expect(guest.files()).toContain(`${stream.run!}.sh`);
+    const settled = await Promise.race([stream.exited.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("still running"), 50))]);
+    expect(settled).toBe("still running");
+  });
+
+  it("is dropped from the set the moment its run ends, so a close after that stops nothing", async () => {
+    const { backend, machine } = await makeMachine();
+    scriptGuest(backend, [{ append: "done\n", exit: 0 }, {}]);
+    const reading = new Set<() => void>();
+    const stream = machineExecStream(machine, { pollMs: 5, reading })("claude -p hi", { env: {} });
+    for await (const line of stream.lines) void line;
+    expect(await stream.exited).toBe(0);
+    expect(reading.size).toBe(0);
+  });
+});
+
+describe("a reader let go of while its poll is in flight", () => {
+  it("starts no timer for the poll it comes back to, so nothing it held outlives the close", async () => {
+    // Counted, not named: the runner holds timers of its own, and what this case is about is the one this poll
+    // would add after it was let go. The poll is slow enough that such a timer is still there to be counted.
+    const timers = (): number => process.getActiveResourcesInfo().filter(kind => kind === "Timeout").length;
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, []);
+    const inner = backend.execImpl;
+    let inFlight = false;
+    let answer: (() => void) | undefined;
+    const holding = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    backend.execImpl = async (m, cmd) => {
+      if (cmd.includes("__WSP_EOF_") && answer !== undefined) {
+        inFlight = true;
+        await holding;
+      }
+      return inner(m, cmd);
+    };
+    const reading = new Set<() => void>();
+    const stream = machineExecStream(machine, { pollMs: 5_000, reading })("claude -p hi", { env: {} });
+    void (async () => {
+      for await (const line of stream.lines) void line;
+    })();
+    await vi.waitFor(() => expect(inFlight).toBe(true));
+
+    const before = timers();
+    for (const stop of [...reading]) stop();
+    answer!();
+    answer = undefined;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(timers(), `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+    // And the run is left as it was, as a dropped reader always leaves it.
+    expect(guest.kills).toEqual([]);
+    expect(guest.childAlive()).toBe(true);
+  });
+});

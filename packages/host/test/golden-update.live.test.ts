@@ -15,6 +15,7 @@ import { createRuntime, jsonFileStore, type GoldenImport, type Runtime } from "@
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
+import { stateWriterHere } from "../src/version.js";
 import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import { deltaFor } from "../src/init-upgrade.js";
@@ -76,7 +77,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
     const imp = importOf(rows);
     const rt = createRuntime({
       backend,
-      store: jsonFileStore(statePath),
+      store: jsonFileStore(statePath, stateWriterHere()),
       adapters: {},
       goldenRecipe: goldenRecipeFor(rows, { import: imp, deployDaemon: async m => deployDaemon(m).then(() => DAEMON_DEPLOYED_LINE) }),
       hostId: "golden-update-live",

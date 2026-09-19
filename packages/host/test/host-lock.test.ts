@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cli, serve, type CliIO } from "../src/cli.js";
+import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -109,6 +109,15 @@ describe("serve takes host.lock next to the state file", () => {
     const first = await start();
     writeFileSync(lockPath, JSON.stringify({ ...readLock(lockPath), startedBy: "verb" }));
     await expect(start()).rejects.toThrow("wsp down stops it, or point --state at a different file.");
+    expect((await fetch(`http://127.0.0.1:${first.port}/`)).status).toBe(200);
+  });
+
+  it("names wsp down for the service's own host too, since wsp down is what stops that one", async () => {
+    const first = await start();
+    writeFileSync(lockPath, JSON.stringify({ ...readLock(lockPath), startedBy: "service" }));
+    await expect(start()).rejects.toThrow("wsp down stops it, or point --state at a different file.");
+    expect(hostRoadWord("service")).toBe("the service");
+    expect(hostStoppedLine("service", 42, lockPath)).toBe(`stopped the host the service started (pid 42); nothing serves ${lockPath} now`);
     expect((await fetch(`http://127.0.0.1:${first.port}/`)).status).toBe(200);
   });
 

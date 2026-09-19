@@ -2,7 +2,7 @@
 // protocol client; it never drives the engine directly, proving the runtime
 // embeds cleanly (the hosted control plane wraps the same runtime).
 
-import { HERE_PLACE_ID } from "@wsp/protocol";
+import { DAEMON_VERSION, HERE_PLACE_ID } from "@wsp/protocol";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -66,7 +66,10 @@ export function makeRuntime(root = repoRoot()): { rt: Runtime; envs: Record<stri
   const backend = new SolariBackend({ apiKey: env.SOLARI_API_KEY });
   const rt = createRuntime({
     backend,
-    store: jsonFileStore(join(root, ".wsp", "state.json")),
+    // Who wrote this state file, for a host that later meets a record it cannot read: this is the dev command
+    // line over an embedded runtime and prints no version of its own, so it says its name and the binary it ran
+    // from, which is what a person would have to run again.
+    store: jsonFileStore(join(root, ".wsp", "state.json"), { wsp: "wspx", daemon: DAEMON_VERSION, bin: process.argv[1] ?? process.execPath }),
     adapters: HARNESS_ADAPTERS,
     hostId: hostIdentity(),
   });

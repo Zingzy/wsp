@@ -9,8 +9,8 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, exitClassOf } from "@wsp/protocol";
 import { cli, HOST_STARTS_ITSELF, localWiring, serve, type CliIO } from "../src/cli.js";
-import { hostLogPath, lockPathFor, servingHost, type HostLock } from "../src/host-lock.js";
-import { hostStarter, noHostAnsweredLine, startedByVerb, startingHostLine, STARTED_BY_ENV, type HostStarter } from "../src/host-start.js";
+import { hostLogPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, type HostLock } from "../src/host-lock.js";
+import { hostStarter, noHostAnsweredLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
 import { dialer } from "../src/mcp.js";
 import { dialHost, noHostServingLine } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
@@ -95,6 +95,7 @@ describe("a verb starts the host when none serves", () => {
       env: { PATH: "/bin" },
       waitMs: 2_000,
       answers: () => Promise.resolve(true),
+      registered: () => undefined,
     });
     const said: string[] = [];
     expect(await start(statePath, line => said.push(line))).toEqual(lock);
@@ -111,7 +112,7 @@ describe("a verb starts the host when none serves", () => {
     mkdirSync(join(dir, "state"), { recursive: true });
     writeFileSync(hostLogPath(statePath), "Error: EADDRINUSE 4400\n");
     const fake = fakeSpawn(() => {});
-    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 0, answers: () => Promise.resolve(false) });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 0, answers: () => Promise.resolve(false), registered: () => undefined });
     const refused = await start(statePath, () => {}).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message.split("\n")).toEqual([noHostAnsweredLine(statePath, 0), "Error: EADDRINUSE 4400"]);
@@ -201,7 +202,7 @@ describe("a verb starts the host when none serves", () => {
 
   it("a host started by a verb records it in its lock, and one a person started records nothing", async () => {
     vi.stubEnv(STARTED_BY_ENV, "verb");
-    expect(startedByVerb(process.env)).toBe(true);
+    expect(startedByEnv(process.env)).toBe("verb");
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
     expect((JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).startedBy).toBe("verb");
@@ -209,8 +210,56 @@ describe("a verb starts the host when none serves", () => {
     await rt.close();
 
     vi.stubEnv(STARTED_BY_ENV, "");
+    expect(startedByEnv(process.env)).toBeUndefined();
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
     expect(JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).not.toHaveProperty("startedBy");
+
+    // The unit this computer's manager holds starts a host too, and its lock says which road that was, so wsp
+    // down stops it and every other client knows whose host it met.
+    for (const h of handles.splice(0)) await h.close();
+    await rt.close();
+    vi.stubEnv(STARTED_BY_ENV, "service");
+    expect(startedByEnv(process.env)).toBe("service");
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
+    expect((JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).startedBy).toBe("service");
+  });
+
+  it("starts nothing on a state file this computer's own manager is registered to serve, and says the one line that starts it", async () => {
+    // The incident: the live host was down for a moment, and the first client that needed one started a host from
+    // its own build on the state file the service owns, which rewrote records in that build's shape.
+    const fake = fakeSpawn(() => {});
+    const service = { unit: { name: "com.wsp.host.af639035", path: join(dir, "com.wsp.host.af639035.plist") }, words: "launchd agent" };
+    const start = hostStarter({
+      spawn: fake.spawn,
+      wsp: { command: "wsp", args: [] },
+      env: {},
+      waitMs: 0,
+      answers: () => Promise.resolve(false),
+      registered: path => (path === statePath ? service : undefined),
+    });
+    const said: string[] = [];
+    const refused = await start(statePath, line => said.push(line)).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(`${statePath} is served by the launchd agent com.wsp.host.af639035, which is not running; wsp up --service --state ${statePath} starts it again`);
+    expect(serviceServesStateLine(statePath, service)).toBe((refused as Error).message);
+    // Nothing was spawned and nothing was said about starting one.
+    expect(said).toEqual([]);
+    expect(existsSync(hostLogPath(statePath))).toBe(false);
+
+    // A state file no unit of this computer's names is started for as it always was.
+    const other = join(dir, "other", "state.json");
+    mkdirSync(join(dir, "other"), { recursive: true });
+    const lock: HostLock = { pid: process.pid, port: 1, wsPort: 2, startedAt: new Date().toISOString() };
+    const free = fakeSpawn(() => writeFileSync(lockPathFor(other), JSON.stringify(lock)));
+    const starter = hostStarter({
+      spawn: free.spawn,
+      wsp: { command: "wsp", args: [] },
+      env: {},
+      waitMs: 2_000,
+      answers: () => Promise.resolve(true),
+      registered: path => (path === statePath ? service : undefined),
+    });
+    expect(await starter(other, () => {})).toEqual(lock);
   });
 });
