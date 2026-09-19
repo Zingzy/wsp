@@ -395,6 +395,24 @@ describe("wsp up", () => {
     }
   });
 
+  it("a host the service started records the mark in its lock and carries it into nothing it starts", async () => {
+    // The reading this rule is from: every thread on this Mac inherited the service's mark from the host that
+    // started it, so the host's own tests read red inside a thread and a wsp up typed in one passed the ownership
+    // check as the service.
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    vi.stubEnv(STARTED_BY_ENV, "service");
+    // Made while the mark stands and read after: this wiring answers the environment as it is when it is asked,
+    // which is the one a turn on this computer runs under.
+    const wiring = localWiring(home);
+    expect(wiring.env()[STARTED_BY_ENV]).toBe("service");
+
+    await answered(await started([]));
+
+    expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("service");
+    expect(STARTED_BY_ENV in process.env).toBe(false);
+    expect(STARTED_BY_ENV in wiring.env()).toBe(false);
+  });
+
   it("wsp up refuses a flag it does not answer in and starts nothing", async () => {
     const errors: string[] = [];
     const code = await cli(["up", "--json", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
