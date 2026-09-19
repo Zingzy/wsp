@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
+import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
 import { NO_PROJECT_YET } from "../src/verbs.js";
@@ -81,6 +81,37 @@ describe("wsp up", () => {
     mkdirSync(join(home, "state"), { recursive: true });
     writeFileSync(statePath, JSON.stringify(data));
   }
+
+  /** A state holding this computer's own workspace, running on a project folder: listing the workspaces writes this
+   * host's roots file and dials the daemon here, which is what a start must not reach before it is refused. */
+  function localWorkspaceState(folder: string): void {
+    stateFile({
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: folder }, path: folder, remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
+      workspaces: {
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
+      },
+    });
+  }
+
+  /** The lock of a host that is alive, this process standing in for it, since the pid is what a second start reads. */
+  function lockHeldHere(): HostLock {
+    const lock: HostLock = { pid: process.pid, port: 4400, wsPort: 4410, address: "127.0.0.1", startedBy: "up", startedAt: new Date().toISOString() };
+    mkdirSync(join(home, "state"), { recursive: true });
+    writeFileSync(join(home, "state", "host.lock"), JSON.stringify(lock));
+    return lock;
+  }
+
+  /** Where this case's own temp folders go, so the daemon folders it counts are its own and not another run's on
+   * the same computer. */
+  function ownTmp(): string {
+    const at = join(dir, "tmp");
+    mkdirSync(at, { recursive: true });
+    vi.stubEnv("TMPDIR", at);
+    return at;
+  }
+
+  /** The folder a local daemon makes for its token and its manifest, which it removes when it closes. */
+  const daemonFolders = (at: string): string[] => readdirSync(at).filter(name => name.startsWith("wsp-local-daemon-"));
 
   /** A host that has answered once, which is how every case here settles one before its teardown closes it: a
    * close that lands inside the first milliseconds of a start races the runtime's own listener. */
@@ -315,12 +346,7 @@ describe("wsp up", () => {
     // own wsp home and pointed a file there at itself, so for that minute a bare wsp line dialled the other host.
     const user = join(dir, "user");
     const folder = localWorkFolder(home);
-    stateFile({
-      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: folder }, path: folder, remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
-      workspaces: {
-        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
-      },
-    });
+    localWorkspaceState(folder);
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, process.env, undefined, statePath) });
     runtimes.push(rt);
     handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
@@ -363,10 +389,62 @@ describe("wsp up", () => {
     expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
   });
 
+  it("a state whose shape document does not parse is refused before anything is minted", async () => {
+    // The reading this is from: a copy of the live state had its $shape set to the bare number by hand, and the
+    // host served it, minted its key and dialled the provider off a file it could not say the shape of.
+    stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: 3 });
+    // A reading that serves the copy hands back a host, which goes into the teardown rather than staying up.
+    const start = up(quietIO(), { port: 0, wsPort: 0, statePath, webDir }).then(handle => {
+      handles.push(handle);
+      return handle;
+    });
+    await expect(start).rejects.toThrow(stateShapeUnreadableLine(statePath, 3));
+    expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
+    expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
+  });
+
   it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {
     stateFile({ goldens: { default: SEALED_GOLDEN } });
     await answered(await started([]));
     expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("up");
+  });
+
+  it("a second wsp up beside a serving host is refused before it picks ports, reads keys or builds anything", async () => {
+    // The reading this rule is from: the second start printed the lock's sentence and had by then stepped to the
+    // next pair of ports, rewritten the roots file under the live home and started a daemon of its own against it.
+    const folder = localWorkFolder(home);
+    localWorkspaceState(folder);
+    const lock = lockHeldHere();
+    const tmp = ownTmp();
+    const lines: string[] = [];
+    const errors: string[] = [];
+
+    expect(await cli(["up", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO(lines, errors))).not.toBe(0);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(`(pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort})`);
+    expect(lines.join("\n")).not.toContain("Serving on");
+    // The home is as the refusal found it: no roots file this start wrote, no pairing key it minted.
+    expect(readdirSync(join(home, "state")).sort()).toEqual(["host.lock", "state.json"]);
+    expect(daemonFolders(tmp)).toEqual([]);
+  });
+
+  it("a start refused after it built its runtime closes what it built, so nothing is left running", async () => {
+    const folder = localWorkFolder(home);
+    localWorkspaceState(folder);
+    const lock = lockHeldHere();
+    const tmp = ownTmp();
+    const children = (): number => process.getActiveResourcesInfo().filter(r => r === "ChildProcess").length;
+    const before = children();
+
+    await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(`(pid ${lock.pid}) is already serving ${statePath}`);
+
+    // The refusal reaches the caller only once the runtime it was thrown past has been closed: the daemon sync this
+    // start fired as it listed the workspaces has run to its end, which its roots file is the trace of, and the
+    // daemon it dialled is closed with its folder. A start that leaves one leaves the shell waiting on it.
+    expect(existsSync(join(home, "state", "roots"))).toBe(true);
+    expect(daemonFolders(tmp)).toEqual([]);
+    expect(children()).toBeLessThanOrEqual(before);
   });
 
   it("wsp up on a state file this computer's manager is registered to serve starts nothing and names the line that starts the service", async () => {

@@ -168,8 +168,12 @@ export function servingHost(statePath: string): HostLock | undefined {
 }
 
 /** One state file, one host. A lock whose pid is gone is a crash leftover and
- * gives way; a lock this process cannot parse is treated the same. */
-function refuseIfServed(lockPath: string, statePath: string): void {
+ * gives way; a lock this process cannot parse is treated the same. Read twice
+ * on the road a start takes: once before it picks ports or builds anything, so
+ * a host already serving costs the second start nothing, and again in takeLock
+ * as the last read before its write, which is what settles two starts that both
+ * passed the first one. */
+export function refuseIfServed(lockPath: string, statePath: string): void {
   const held = readLock(lockPath);
   if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
 }

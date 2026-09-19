@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
-import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type Store } from "../src/store.js";
+import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
 /** Who a store in this file says wrote its file: every caller names a build, and this one is the suite. */
@@ -98,6 +98,79 @@ describe("the shape a state file was written in", () => {
     expect(readFileSync(path, "utf8")).toBe(before);
     // The document itself is still readable, since the refusal has to name the build that wrote the file.
     expect(await store.shape()).toEqual(wrote);
+  });
+
+  it("refuses every read and write of a file that is present and does not parse, in one sentence naming the path, and leaves its bytes alone", async () => {
+    // A hand edit with a trailing comma, a copy torn by a machine that died mid-write: the file read as an empty
+    // store and the next save wrote this build's document over it, holding the one record that save was making.
+    const path = join(dir, "does-not-parse.json");
+    const bytes = '{"workspaces": {"a": {"id": "a"}},}';
+    writeFileSync(path, bytes);
+    // The parser's own words, read off the same bytes, since node words them differently from version to version.
+    let why = "";
+    try {
+      JSON.parse(bytes);
+    } catch (e) {
+      why = (e as Error).message;
+    }
+    const store = jsonFileStore(path, writer);
+    const refusal = stateUnreadableLine(path, why);
+    await expect(store.get("workspaces", "a")).rejects.toThrow(refusal);
+    await expect(store.list("workspaces")).rejects.toThrow(refusal);
+    await expect(store.keys("workspaces")).rejects.toThrow(refusal);
+    await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
+    await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
+    await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
+    await expect(store.shape()).rejects.toThrow(refusal);
+    expect(readFileSync(path, "utf8")).toBe(bytes);
+
+    // A path with no file behind it is not this rule: that is the first wsp up on a fresh home, which reads an
+    // empty store and writes one at its first save.
+    const fresh = join(dir, "fresh-home", "state.json");
+    const first = jsonFileStore(fresh, writer);
+    expect(await first.keys("workspaces")).toEqual([]);
+    await first.put("workspaces", "a", { id: "a" });
+    expect(await first.get("workspaces", "a")).toEqual({ id: "a" });
+  });
+
+  it("refuses a file whose bytes parse and are no state file, naming what it holds, and leaves its bytes alone", async () => {
+    // Every top-level name of a state file is a collection of documents by id, so a number, a string, a list or
+    // null leaves nothing to read records out of; each read as an empty store, and the next save wrote over it.
+    for (const held of [3, null, [{ id: "a" }], "state"]) {
+      const path = join(dir, `not-a-state-${typeof held}-${Array.isArray(held) ? "list" : String(held)}.json`);
+      writeFileSync(path, JSON.stringify(held));
+      const before = readFileSync(path, "utf8");
+      const store = jsonFileStore(path, writer);
+      const refusal = stateNotAnObjectLine(path, held);
+      await expect(store.get("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.list("workspaces")).rejects.toThrow(refusal);
+      await expect(store.keys("workspaces")).rejects.toThrow(refusal);
+      await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
+      await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
+      await expect(store.shape()).rejects.toThrow(refusal);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
+  });
+
+  it("refuses every read and write of a file whose shape document does not parse, and leaves its bytes alone", async () => {
+    // The reading this is from: a copy of a state file had its $shape set to the bare number 3 by hand, and the
+    // host served it as a file written before the document existed, which is the one case the guard is for.
+    for (const document of [3, null, { shape: STATE_SHAPE }]) {
+      const path = join(dir, `shape-not-a-document-${JSON.stringify(document)}.json`);
+      writeFileSync(path, JSON.stringify({ workspaces: { a: { id: "a" } }, [STATE_SHAPE_KEY]: document }, null, 2));
+      const before = readFileSync(path, "utf8");
+      const store = jsonFileStore(path, writer);
+      const refusal = stateShapeUnreadableLine(path, document);
+      await expect(store.get("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.list("workspaces")).rejects.toThrow(refusal);
+      await expect(store.keys("workspaces")).rejects.toThrow(refusal);
+      await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
+      await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
+      await expect(store.shape()).rejects.toThrow(refusal);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
   });
 
   it("reads a file written before the document existed as it always did, and writes the document at its next save", async () => {
