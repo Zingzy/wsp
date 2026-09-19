@@ -73,6 +73,31 @@ fn found_at(name: &str, path: &str) -> Option<PathBuf> {
         .find(|at| std::fs::metadata(at).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false))
 }
 
+/// Where the agents on this computer are looked for: the one tools PATH every process inside a workspace here
+/// starts with, which is the list the recipe's presence read runs on, and the PATH this daemon's own unit was
+/// given after it. A unit's PATH is the distribution's default, which names neither Homebrew's bins nor the
+/// directory an agent's own installer writes into, so an agent the recipe installed sits on no line of it and a
+/// report read on it alone leaves that agent and its version out. One list, so what the recipe puts on a computer
+/// and what the report says about it cannot disagree.
+pub(crate) fn agents_path() -> String {
+    agents_path_over(numbers::TOOLS_PATH, &std::env::var("PATH").unwrap_or_default())
+}
+
+/// The two lists as one, the tools first: a command on both is read from where a workspace here would run it.
+/// Written apart from the reading above so a case can hand it a unit PATH of its own.
+fn agents_path_over(tools: &str, unit: &str) -> String {
+    if unit.is_empty() {
+        return tools.to_owned();
+    }
+    format!("{tools}:{unit}")
+}
+
+/// Which of the agents asked for stand on this computer, by catalog id. The one reading behind the report's list
+/// and the version read, so an agent on one of them is on the other.
+fn agents_on(agents: &[AgentBin], path: &str) -> Vec<String> {
+    agents.iter().filter(|agent| found_at(&agent.bin, path).is_some()).map(|agent| agent.id.clone()).collect()
+}
+
 /// What the last version read of one agent found: the file it ran, as that file was then, and what it printed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AgentRead {
@@ -289,7 +314,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         login: [
             ("HOME".to_owned(), input.home.to_string_lossy().into_owned()),
             ("USER".to_owned(), user_name()),
-            ("PATH".to_owned(), path.clone()),
+            ("PATH".to_owned(), path),
         ]
         .into_iter()
         .collect(),
@@ -304,7 +329,9 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         daemon_port: std::num::NonZeroU16::new(input.daemon_port),
         wsp,
         dialed: input.dialed.to_owned(),
-        agents: input.agents.iter().filter(|a| found_at(&a.bin, &path).is_some()).map(|a| a.id.clone()).collect(),
+        // Read on the tools PATH before the unit's own, while the login above carries the unit's PATH as it
+        // stands: what this daemon was started with is a fact about the unit, and where its agents are is not.
+        agents: agents_on(input.agents, &agents_path()),
         agent_versions: input.agent_versions.clone(),
         // Read at every dial, since a sign-in on this computer changes it between one link and the next.
         logins: Some(logins_present(input.runtime_root)),
@@ -623,6 +650,42 @@ mod tests {
         assert!(held.lines().is_empty());
     }
 
+    /// The agents are looked for where the recipe puts the tools, not where this daemon's unit looks: a place
+    /// daemon runs under a service unit whose PATH is the distribution's default, and an agent installed by
+    /// Homebrew or by its own installer under /root/.local/bin is on no line of it. Both readers take the one
+    /// list, so an agent on the report always has its version beside it.
+    #[test]
+    fn the_agents_are_read_on_the_tools_path_before_the_units_own() {
+        let tools = tempfile::tempdir().unwrap();
+        let counter = tools.path().join("runs");
+        fake_bin(tools.path(), "claude", "2.1.270 (Claude Code)", &counter);
+        let agents = parse_agents(&["claude=claude".to_owned()]);
+        // The unit's PATH on its own, which is the hole: the agent is on no report and has no version line.
+        assert!(agents_on(&agents, "/nonexistent").is_empty());
+        let mut unit_only = AgentVersions::default();
+        unit_only.refresh(&agents, "/nonexistent", VERSION_DEADLINE);
+        assert!(unit_only.lines().is_empty());
+
+        // The list both readers take: the agent stands, and its binary answered the version flag.
+        let path = agents_path_over(&tools.path().to_string_lossy(), "/nonexistent");
+        assert_eq!(agents_on(&agents, &path), vec!["claude".to_owned()]);
+        let mut held = AgentVersions::default();
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.270 (Claude Code)"));
+
+        // The tools first: a command on both lists is read from where a thread inside a workspace would run it.
+        let unit = tempfile::tempdir().unwrap();
+        fake_bin(unit.path(), "claude", "0.0.1 (the unit's own)", &counter);
+        let both = agents_path_over(&tools.path().to_string_lossy(), &unit.path().to_string_lossy());
+        assert_eq!(found_at("claude", &both), Some(tools.path().join("claude")));
+
+        // And what this daemon hands them is that one list over the PATH its unit gave it, in that order.
+        let live = agents_path();
+        assert!(live.starts_with(numbers::TOOLS_PATH), "{live}");
+        assert!(live.ends_with(&std::env::var("PATH").unwrap_or_default()), "{live}");
+        assert_eq!(agents_path_over(numbers::TOOLS_PATH, ""), numbers::TOOLS_PATH);
+    }
+
     #[test]
     fn a_version_read_that_hangs_costs_its_deadline_and_says_nothing_for_that_agent() {
         let dir = tempfile::tempdir().unwrap();
@@ -707,6 +770,9 @@ mod tests {
         assert_eq!(report.agent_versions, versions);
         assert_eq!(report.logins, Some(logins_present(&home.path().join("runtime"))));
         assert_eq!(report.login["HOME"], home.path().to_string_lossy());
+        // The PATH the row carries is the one this daemon was started with, as it stands: where its agents are
+        // looked for is a reading of its own and not something to write into the login the host reads.
+        assert_eq!(report.login["PATH"], std::env::var("PATH").unwrap_or_default());
         assert_eq!(report.daemon_port.map(|p| p.get()), Some(4321));
         assert_eq!(report.dialed, "http://h:1");
         assert!(report.shape.cpu > 0.0 && report.shape.mem_mb > 0);
