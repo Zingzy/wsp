@@ -89,23 +89,37 @@ jobs:
       - name: The runtime's tests in the shipped profile
         run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl -p wsp-runtime
       # The live cases drive the kernel as root, so they run on a box and nowhere else, and a box carries no
-      # toolchain to build them with. Built here as one static test executable and uploaded beside the daemon, so
+      # toolchain to build them with. Built here as static test executables and uploaded beside the daemon, so
       # the proof on a box is a download and a run rather than a Rust install on a computer serving something.
-      - name: The live test executable for a box
+      # One per crate that owns live cases, since each reaches functions of its own crate and neither can hold
+      # the other's: the daemon binary's carries the machine ops against the kernel and the network's cases, the
+      # runtime crate's the mount cases and the two claim cases. A box runs each with --ignored, which is the
+      # gate: the runs above read them ignored.
+      - name: The live test executables for a box
         run: |
           LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl \
             -p wsp-daemon-bin --test runtime_live --no-run --message-format=json > /tmp/runtime-live.json
+          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl \
+            -p wsp-runtime --lib --no-run --message-format=json > /tmp/wsp-runtime-lib.json
           built=$(jq -r 'select(.executable != null) | select(.target.name == "runtime_live") | .executable' /tmp/runtime-live.json | tail -1)
           test -n "$built"
           cp "$built" "runtime_live-x86_64-unknown-linux-musl"
-          file "runtime_live-x86_64-unknown-linux-musl"
-          sha256sum "runtime_live-x86_64-unknown-linux-musl" > "runtime_live-x86_64-unknown-linux-musl.sha256"
+          # The lib target of the runtime crate, whose name carries the underscore cargo gives it.
+          lib=$(jq -r 'select(.executable != null) | select(.target.name == "wsp_runtime") | select(.target.kind | index("lib")) | .executable' /tmp/wsp-runtime-lib.json | tail -1)
+          test -n "$lib"
+          cp "$lib" "wsp_runtime-tests-x86_64-unknown-linux-musl"
+          for made in runtime_live wsp_runtime-tests; do
+            file "$made-x86_64-unknown-linux-musl"
+            sha256sum "$made-x86_64-unknown-linux-musl" > "$made-x86_64-unknown-linux-musl.sha256"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: runtime-live-x86_64-unknown-linux-musl
           path: |
             daemon/runtime_live-x86_64-unknown-linux-musl
             daemon/runtime_live-x86_64-unknown-linux-musl.sha256
+            daemon/wsp_runtime-tests-x86_64-unknown-linux-musl
+            daemon/wsp_runtime-tests-x86_64-unknown-linux-musl.sha256
           if-no-files-found: error
       - uses: pnpm/action-setup@v4
         with:

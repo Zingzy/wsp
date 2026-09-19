@@ -3687,6 +3687,7 @@ const DAEMON_CONTENTS = [
   "7deddf539fb438f49cc68e299e5d3e08413202f7325a73d7d815a532ac1e96c7",
   "1e3ca55474038b943e69a5a91ddf720df24e9f8a5fff8aa05028527cbb0605f2",
   "863d552bfaeeff40212778a4f175bf821f8ff5cdd7829e6922866bf70dcdbe5e",
+  "376bdbce753a06ef57dfdda1e50f1cb761a728538dd85851db285168e4d1e568",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3849,7 +3850,11 @@ const DAEMON_CONTENTS = [
  * the computer's own home.
  * Version 56 writes the mount points a boot makes into the create's own claim before anything is mounted, and the record
  * carries them at the end, so a create that fails between the point and its record leaves the points to the open's sweep
- * of unfinished claims and nothing of a workspace's mounts stays on the computer's own home. */
+ * of unfinished claims and nothing of a workspace's mounts stays on the computer's own home.
+ * Version 57 reads the mount points a neighbouring boot has claimed and not yet recorded, so two workspaces sharing one
+ * login that boot at the same moment both own its point and the last one to go takes it off, and writes every record,
+ * claim and network file to a sibling and renames it into place, so a daemon that dies inside a write leaves no torn
+ * file for the next open to refuse, which takes a dead create's torn claim away instead. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
