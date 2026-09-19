@@ -123,13 +123,18 @@ export const folderOnCopyRefusal = (computer: string): string =>
 /** What a remove says on the computer the app runs on: the folder is the project, so nothing of it moves. */
 export const projectRemovedHereLine = (name: string): string => `${name} is no longer a project here; its code is where it was`;
 
+/** What a remove leaves behind on the computer that held the project: the memory sits where the agent on that
+ * computer reads it, which is the agent's own work. One clause, read by the sentence the remove answers with and
+ * by the words the tool is described in, so a person asking for a remove and a person reading one are told the
+ * same rule. */
+export const MEMORY_KEPT_CLAUSE = "the memory its agent keeps on that computer stays";
+
 /** What a remove says on a computer the person owns: the folder wsp itself made there at the add goes with the
- * record, and nothing else on that computer is touched. The project's memory is not in it: it sits where the
- * agent on that computer reads it, which is the agent's own work and stays. That half of the sentence is said
- * only where such a folder stands on the computer, read by the remove itself: a project no agent ever ran on
- * there has no memory, and naming one would name a thing that is not there. */
+ * record, and nothing else on that computer is touched. The memory clause is said only where such a folder stands
+ * on the computer, read by the remove itself: a project no agent ever ran on there has no memory, and naming one
+ * would name a thing that is not there. */
 export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string, memoryStands: boolean): string =>
-  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout${memoryStands ? ", and the memory its agent keeps on that computer stays" : ""}`;
+  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout${memoryStands ? `, and ${MEMORY_KEPT_CLAUSE}` : ""}`;
 
 /** What a remove says for a project a provider keeps in an image: nothing runs on any machine, and the image
  * stays where it is, since no verb deletes one yet. */

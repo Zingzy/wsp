@@ -230,7 +230,8 @@ describe("sshRoad", () => {
 
   it("a box serving a moved home is forwarded and paired for the host that home runs, with the probe run by a real sh", async () => {
     // The box's folders are real here and the probe script is run by sh over them, so what the road forwards to is
-    // the home the box's own wsp host pair would work on and not a second reading of the pointer.
+    // the home the box's own wsp host pair would work on. A moved home is named on the login, in the variable both
+    // spellings of the reading take first.
     const dir = mkdtempSync(join(tmpdir(), "wsp-ssh-box-"));
     dirs.push(dir);
     const bin = join(dir, "bin");
@@ -238,20 +239,20 @@ describe("sshRoad", () => {
     const moved = join(dir, "moved");
     for (const d of [bin, join(user, ".wsp"), moved]) mkdirSync(d, { recursive: true });
     writeFileSync(join(bin, "wsp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    writeFileSync(join(user, ".wsp", "current-home"), `${moved}\n`);
     const wsp = join(bin, "wsp");
+    // The login this box is reached over carries the moved home, as a login on a box whose home was moved does.
     const box = (args: string[], child: FakeChild): void => {
       if (isForward(args)) return;
       const command = remote(args);
       if (isProbe(args)) {
-        const ran = spawnSync("/bin/sh", ["-c", command], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: user }, encoding: "utf8" });
+        const ran = spawnSync("/bin/sh", ["-c", command], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: user, WSP_HOME: moved }, encoding: "utf8" });
         return child.say(ran.stdout, ran.status ?? 0);
       }
       if (command === `${wsp} host pair`) return child.say("code        ABCDEFGH\n");
       child.fail(`unexpected: ${command}`);
     };
 
-    // Nothing serves yet, on either home: the pointer alone is no host to reach.
+    // Nothing serves yet on that home: a moved home with no host is no host to reach.
     const cold = fakeDeps(box);
     await expect(sshRoad(cold).reach({ address: "maya@box" })).rejects.toThrow(/no wsp host is serving on maya@box/);
 
@@ -263,10 +264,20 @@ describe("sshRoad", () => {
     expect(d.spawned.map(remote).filter(c => c.startsWith(wsp))).toEqual([`${wsp} host pair`]);
     road.closeAll();
 
-    // The moved home's host is gone: the pointer goes unfollowed and the box's own home is what answers.
+    // The moved home's host is gone, and a login carrying no home reads the box's own home instead.
     writeFileSync(join(moved, "host.lock"), JSON.stringify({ pid: deadPid(), port: 4400, wsPort: 4410, startedAt: "2026-09-11T10:00:00.000Z" }));
     writeFileSync(join(user, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4700, wsPort: 4710, startedAt: "2026-09-11T10:00:00.000Z" }));
-    const after = fakeDeps(box);
+    const own = (args: string[], child: FakeChild): void => {
+      if (isForward(args)) return;
+      const command = remote(args);
+      if (isProbe(args)) {
+        const ran = spawnSync("/bin/sh", ["-c", command], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: user }, encoding: "utf8" });
+        return child.say(ran.stdout, ran.status ?? 0);
+      }
+      if (command === `${wsp} host pair`) return child.say("code        ABCDEFGH\n");
+      child.fail(`unexpected: ${command}`);
+    };
+    const after = fakeDeps(own);
     const second = sshRoad(after);
     expect(await second.reach({ address: "maya@box" })).toBe("http://127.0.0.1:52001");
     expect(forwardTarget(after.spawned.find(isForward)!)).toBe("127.0.0.1:52001:127.0.0.1:4700");

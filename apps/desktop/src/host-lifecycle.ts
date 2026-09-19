@@ -27,10 +27,8 @@ export interface HostSession {
 export interface Located {
   /** Where keys and state are read from when no host is serving. */
   home: string;
-  /** A host already serving: through the pointer, the lock, or the port. */
+  /** A host already serving: through the lock, or the port. */
   session?: HostSession;
-  /** current-home named this home, but nothing serves it any more. */
-  stalePointer?: string;
 }
 
 /** How this app was launched, as everything that decides where its state file sits reads it. */
@@ -45,8 +43,6 @@ export interface Launch {
 
 export interface LocateOptions extends Launch {
   port: number;
-  /** What ~/.wsp/current-home says, when it exists. */
-  pointer?: string;
 }
 
 export interface OpenHostOptions {
@@ -104,23 +100,18 @@ async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   return held !== undefined && (await probeHost(held.port)) === "wsp" ? attached(held.port) : undefined;
 }
 
-/** Runs before the setup gate: a serving host is the proof of setup, wherever
- * its home is. WSP_HOME wins when set; otherwise the pointer is tried first,
- * then ~/.wsp's own lock, then the port. A pointer to a dead host is reported,
- * not followed: its home may be gone, and the truth of setup left with the host. */
+/** Runs before the setup gate: a serving host is the proof of setup. WSP_HOME
+ * names the home when it is set, else this computer's own; the lock beside that
+ * home's state file is read first, then the port. A window that should open on
+ * another home is launched with WSP_HOME naming it, which is the one way any
+ * road here says which home it means. */
 export async function locateHost(opts: LocateOptions): Promise<Located> {
   const env = homeNamed(opts.env);
   const home = env !== undefined ? resolve(env) : defaultHomeIn(homedir());
-  let stalePointer: string | undefined;
-  if (env === undefined && opts.pointer !== undefined) {
-    const pointed = await lockedHost(statePathIn(opts.pointer, opts));
-    if (pointed !== undefined) return { home: opts.pointer, session: pointed };
-    stalePointer = opts.pointer;
-  }
   const session =
     (await lockedHost(statePathIn(home, opts))) ??
     (opts.port !== 0 && (await probeHost(opts.port)) === "wsp" ? attached(opts.port) : undefined);
-  return { home, ...(session !== undefined ? { session } : {}), ...(stalePointer !== undefined ? { stalePointer } : {}) };
+  return { home, ...(session !== undefined ? { session } : {}) };
 }
 
 /** Attaches to the host already serving this state file (its lock names the

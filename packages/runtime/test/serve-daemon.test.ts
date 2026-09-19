@@ -239,6 +239,7 @@ describe("who may open a channel", () => {
       execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),
       home: () => join(localRoot!, ".claude"),
       homeDir: localRoot,
+      rootsPath: join(localRoot, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
       daemonRoad: async () => road,

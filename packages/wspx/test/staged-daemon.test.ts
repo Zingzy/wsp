@@ -43,7 +43,7 @@ describe("the daemon staged beside this command", () => {
     }
     const root = mkdtempSync(join(tmpdir(), "wsp-staged-daemon-"));
     made.push(root);
-    const daemon = await LocalDaemon.start({ root, workFolder: root });
+    const daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox") });
     try {
       expect(daemon.version).toBe(DAEMON_VERSION);
     } finally {

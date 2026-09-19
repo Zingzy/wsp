@@ -2485,12 +2485,13 @@ describe("a fork on a computer you joined", () => {
     await until(async () => second.tunnels.some(t => t.port === 32768));
   });
 
-  it("counts a napping fork in the column too, so it agrees with the workspace list", async () => {
+  it("a napping fork is not counted as one that runs, and the room is what a create can take now", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, {
       code: await code(),
       name: "srv",
-      // One running and one napping machine on that computer, as its own backend counts them under a stopping nap.
+      // One running and one napping machine on that computer, as its own backend counts them under a stopping nap:
+      // the napping one holds the disk its copy takes and no cpu or memory, so it takes no slot from a create.
       answers: c =>
         forks(c, {
           cores: 4,
@@ -2504,7 +2505,7 @@ describe("a fork on a computer you joined", () => {
     });
     sockets.push(client.ws);
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.forks !== undefined);
-    expect((await placesOf()).find(p => p.id === placeId)!.forks).toEqual({ running: 2, room: 2 });
+    expect((await placesOf()).find(p => p.id === placeId)!.forks).toEqual({ running: 1, room: 2 });
   });
 
   it("shows how many forks a place holds of how many it takes", async () => {

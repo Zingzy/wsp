@@ -18,8 +18,8 @@
 // computer where several builders and a person's own host are running at once.
 //
 // Nothing here touches the person's own ~/.wsp. HOME and WSP_HOME both point
-// inside the lab's home, which is what keeps the host's current-home pointer
-// out of theirs, and the provider is the one that answers out of memory, so a
+// inside the lab's home, which is where every file the host writes for itself
+// then lands, and the provider is the one that answers out of memory, so a
 // fixture's forks are served without a key and without dialling anything.
 //
 // What a run served is written down: the commit the checkout stood on, a hash

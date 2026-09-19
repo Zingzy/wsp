@@ -207,6 +207,7 @@ import {
   portsWord,
   kindForComputer,
   computerKindWord,
+  MEMORY_KEPT_CLAUSE,
   nameTheProjectLine,
   noSuchProjectLine,
   sourceKind,
@@ -2597,7 +2598,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there and the memory its threads kept. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.",
+      description: `Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and ${MEMORY_KEPT_CLAUSE}. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.`,
       input: { project: z.string().describe("the project's name, or its id when two share a name") },
       output: { project: ProjectView, said: z.string() },
       call: async ({ project: ref }, deps) => {

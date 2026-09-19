@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
-import { LOOPBACK, daemonListeningLine, daemonVersionOf, rootsPathIn, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
+import { LOOPBACK, daemonListeningLine, daemonVersionOf, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
 import { daemonBinaryHere } from "./assets.js";
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
@@ -44,6 +44,11 @@ export interface LocalDaemonOptions {
   root: string;
   /** The folder turns write in, whose volume the Machine tab's disk row reads. */
   workFolder: string;
+  /** The file this daemon reads the folders it may browse as projects from, named by whatever started it: the host
+   * keeps it beside the state file it serves, so two hosts on this computer write two files rather than one. */
+  rootsPath: string;
+  /** The folder a file handed to a turn lands in for this daemon to see, made here before the watch reads it. */
+  inboxDir: string;
   /** The binary to spawn; this computer's own out of the daemon asset when none is named. */
   binary?: string;
   /** The file this daemon reads its token from, for a daemon whose token something else rotates: a stand-in
@@ -130,8 +135,7 @@ export class LocalDaemon {
     const bin = opts.binary ?? daemonBinaryHere();
     const token = randomBytes(24).toString("hex");
     // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
-    const inboxDir = join(opts.root, ".wsp-inbox");
-    mkdirSync(inboxDir, { recursive: true });
+    mkdirSync(opts.inboxDir, { recursive: true });
     // The daemon reads its token off a file at every auth frame and takes none on its command line, so the file is
     // made in a folder of this daemon's own, never beside the host's files under the person's home. The manifest
     // of what a person started sits beside it: every file the daemon reads or writes is named, and nothing is left
@@ -140,12 +144,14 @@ export class LocalDaemon {
     const tokenPath = opts.tokenPath ?? join(ownDir, "token");
     mkdirSync(dirname(tokenPath), { recursive: true });
     writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
-    // This daemon's root is the person's home, so rootsPathIn names its roots file; the binary's default names the
-    // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op. Loopback
-    // only, and port 0: the machine picks, and the listening line says which. The kind is what picks the modules the
-    // Live rows and the Processes tab read: this computer answers for itself, with ps, df and the memory road the
-    // platform has, where a guest daemon reads the /proc a Mac does not have.
-    const argv = ["--kind", "local", "--host", LOOPBACK, "--port", "0", "--token-path", tokenPath, "--root", opts.root, "--roots-path", rootsPathIn(opts.root), "--inbox", inboxDir, "--work-folder", opts.workFolder, "--manifest", join(ownDir, "manifest.json")];
+    // The roots file and the inbox are named by the caller and never defaulted from the root: the root is the
+    // person's home, which is one folder however many hosts run on this computer, while these two are each host's
+    // own. The binary's own defaults name the guest's, /root, which on a Linux computer is another user's folder
+    // and answers EACCES on every op. Loopback only, and port 0: the machine picks, and the listening line says
+    // which. The kind is what picks the modules the Live rows and the Processes tab read: this computer answers
+    // for itself, with ps, df and the memory road the platform has, where a guest daemon reads the /proc a Mac
+    // does not have.
+    const argv = ["--kind", "local", "--host", LOOPBACK, "--port", "0", "--token-path", tokenPath, "--root", opts.root, "--roots-path", opts.rootsPath, "--inbox", opts.inboxDir, "--work-folder", opts.workFolder, "--manifest", join(ownDir, "manifest.json")];
     const child = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
     const said: string[] = [];
     child.stderr!.setEncoding("utf8");

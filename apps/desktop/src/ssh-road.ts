@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The ssh road to a host on a box the person owns. One login runs one sh
-// script there: it finds wsp where PATH or npm put it, and reads the lock the
-// way servingHost does, following current-home. When nothing serves, the host
+// script there: it finds wsp where PATH or npm put it, and reads the lock of
+// the host serving the home a line there works on. When nothing serves, the host
 // is started as that computer's own service; the box's port is forwarded to a
 // free one here; wsp host pair over there prints the code the ordinary pairing then
 // spends. A saved host is reached by reading the lock again, so a service that
@@ -63,7 +63,8 @@ export const forwardKey = (login: Login): string => (login.port !== undefined ? 
 /** What the box is asked, as one sh script so the login's own shell is not read: where wsp is (PATH first, then the
  * npm prefix, then the folders npm i -g lands in when PATH has not been told), and the lock of the host serving the
  * box's wsp home. Which home that is comes from the host package, in the sh spelling of the reading every wsp line
- * on the box takes, so the probe and the box's own pair cannot pick different homes. */
+ * on the box takes, so the probe and the box's own pair cannot pick different homes; a box whose home was moved is
+ * reached by a login carrying WSP_HOME, which both spellings read first. */
 const PROBE_SCRIPT = [
   'found=""',
   'if command -v wsp >/dev/null 2>&1; then found=$(command -v wsp); fi',

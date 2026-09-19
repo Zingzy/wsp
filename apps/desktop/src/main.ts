@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
@@ -192,8 +192,7 @@ function refreshMenu(): void {
 }
 
 function locate(): Promise<Located> {
-  const pointer = currentHome();
-  return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch(), ...(pointer !== undefined ? { pointer } : {}) });
+  return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch() });
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
@@ -371,7 +370,6 @@ app
     // agents on this computer: a window opened from Finder or the Dock was handed launchd's PATH.
     await adoptLoginPath(line => io.log(line));
     const located = await locate();
-    if (located.stalePointer !== undefined) io.error(`~/.wsp/current-home names ${located.stalePointer}, but no host is serving it; opening ${located.home}`);
     if (!(await showApp(located))) await showOnboarding(located);
   })
   .catch((e: unknown) => {
