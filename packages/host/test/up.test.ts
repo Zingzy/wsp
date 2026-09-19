@@ -355,8 +355,7 @@ describe("wsp up", () => {
   });
 
   it("a start that refuses its state mints no key, so the home is as the refusal found it", async () => {
-    // The reading: a person who points an older command line at a newer state got the refusal and a pairing key
-    // minted beside the file for a host that never ran.
+    // The key is the place wiring's, minted beside the state at its first read, so a start that refuses before it wires places leaves none.
     const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
     await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
@@ -407,17 +406,16 @@ describe("wsp up", () => {
   });
 
   it("a host the service started records the mark in its lock and carries it into nothing it starts", async () => {
-    // The reading this rule is from: every thread on this Mac inherited the service's mark from the host that
-    // started it, so the host's own tests read red inside a thread and a wsp up typed in one passed the ownership
-    // check as the service.
+    // Everything this host starts inherits the environment of its own process, the threads it runs and the daemon its panes dial alike.
     stateFile({ goldens: { default: SEALED_GOLDEN } });
     vi.stubEnv(STARTED_BY_ENV, "service");
-    // Made while the mark stands and read after: this wiring answers the environment as it is when it is asked,
-    // which is the one a turn on this computer runs under.
-    const wiring = localWiring(home);
+    // The wiring a turn on this computer runs under, made while the mark stands: it answers the environment as it is when it is asked.
+    const wiring = localWiring(home, process.env, undefined, statePath);
     expect(wiring.env()[STARTED_BY_ENV]).toBe("service");
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
+    runtimes.push(rt);
 
-    await answered(await started([]));
+    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
 
     expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("service");
     expect(STARTED_BY_ENV in process.env).toBe(false);
