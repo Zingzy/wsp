@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
@@ -753,7 +753,9 @@ describe("taking wsp off the computer it is typed on", () => {
       return sh(script);
     };
     await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: watched });
-    expect(read).toBe(1);
+    // Two reads of that list, both before the folder holding it goes: which files here are wsp's own copies, and
+    // which servers in the agents' own files are its own keys.
+    expect(read).toBe(2);
     expect(existsSync(ledger)).toBe(false);
     expect(existsSync(join(home, rows[0]!.rel))).toBe(false);
   });
@@ -861,6 +863,29 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(swept.removed).toContain(`systemd user unit ${name} (stopped)`);
     // That login's own systemd is the one told to forget it: a machine-scoped disable never reaches this unit.
     expect(runner.ran).toContainEqual(["systemctl", "--user", "disable", name]);
+  });
+
+  it("takes the servers wsp merged into an agent's own file here back out of it, and leaves that file's every other line", async () => {
+    const home = tmp("leave-servers");
+    const at = placeProvisionPaths(home);
+    mkdirSync(at.dir, { recursive: true });
+    const config = join(home, ".codex", "config.toml");
+    mkdirSync(dirname(config), { recursive: true });
+    const theirs = ['model = "gpt-5"', "", '[projects."/root/repo"]', 'trust_level = "trusted"', "", "[mcp_servers.mine]", 'command = "/usr/local/bin/mine"', ""];
+    const text = [...theirs, "[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', ""].join("\n");
+    writeFileSync(config, text);
+    const digest = createHash("sha256").update(CODEX_TOML.entryOf(text, "context7")!).digest("hex");
+    // What the servers round wrote down: the key it merged in, and one whose entry the agent has rewritten since.
+    writeFileSync(at.landed, `${MCP_ID_PREFIX}codex/context7\t${digest}\t${digest}\n${MCP_ID_PREFIX}codex/mine\tdeadbeef\tdeadbeef\n`);
+
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: shWithSha256sum() });
+    // The file is the agent's own and stays; wsp's table is out of it and every other line is where it was.
+    expect(readFileSync(config, "utf8")).toBe(theirs.join("\n"));
+    expect(swept.removed).toContain(`context7 (out of ${config})`);
+    expect(swept.removed.some(took => took.includes("mine"))).toBe(false);
+    // Nothing of wsp's own is left beside the file it wrote back.
+    expect(existsSync(`${config}.wsp-new`)).toBe(false);
+    expect(existsSync(placeDaemonPaths(home).wsp)).toBe(false);
   });
 
   it("takes nothing off a computer that took nothing: the sweep is every path named and no more", async () => {

@@ -66,7 +66,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, plainPath, provisionCountsOf, putFiles, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedLoginOf } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
@@ -664,6 +664,11 @@ const UPDATE_WAIT_MS = 60_000;
 /** How often the record is read while that wait runs. */
 const UPDATE_POLL_MS = 500;
 
+/** How long the servers wsp merged into the agents' own files on a computer get to come out before the leave goes
+ * on without them: a leave is a decision already made, and one frame of the several this takes may sit out the
+ * whole link wait on a computer that is connected and answering nothing. */
+const UNMERGE_MS = 60_000;
+
 export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
@@ -990,6 +995,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * agents, not a join or an update that failed after the daemon landed. */
   const startedOrSaid = (placeId: string, addId: string): Promise<{ provision?: PlaceProvision; said?: string }> =>
     startProvision(placeId, addId).catch((e: unknown) => ({ said: (e instanceof Error ? e.message : String(e)).split("\n")[0]! }));
+
+  /** The servers wsp merged into the agents' own files on that computer, taken back out over the link before the
+   * leave takes the rest: the computer itself driven as a machine, the way the recipe's job drives it. Nothing
+   * here fails the leave, which is a decision already made by the time it runs. */
+  const unmergedOver = async (placeId: string, held: PlaceRecord): Promise<string[]> => {
+    const home = held.report.login["HOME"];
+    if (home === undefined) return [];
+    const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
+    const took = await bounded(unmergeServers(machineServerPort(machine), home), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
+    return took.flatMap(serversOutLines);
+  };
 
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
    * that is up: the read behind this writes the record whenever the answer lands, so a computer slower than
@@ -1753,8 +1769,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           note = loginRoad?.said === undefined ? placeStillInstalledLine(held.name) : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${placeStillInstalledLine(held.name)}`;
         } else {
           try {
+            // Before the folder holding the list goes with the leave: the servers wsp merged into the agents' own
+            // files there are keys inside files that are theirs, which the daemon knows no format to take out.
+            const took = await unmergedOver(placeId, held);
             const answer = await reach.request("place.leave");
-            swept = Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [];
+            swept = [...took, ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
             if (loginRoad !== undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {
             const failed = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;

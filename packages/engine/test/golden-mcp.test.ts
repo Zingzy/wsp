@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpEditor, type McpFormat } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpEditor, type McpFormat, type McpRemoved } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
 import { guardedRoad, type ToolResult } from "../src/golden-tools.js";
@@ -371,7 +371,8 @@ describe("applyMcp", () => {
     });
     return { text: `${lines.join("\n")}\n`, results: [...results, ...dropped], commentsDropped: false };
   };
-  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor, entryOf: (text, name) => lineOf(text, name), merge: linesMerge };
+  const linesRemove = (text: string, names: readonly string[]): McpRemoved => ({ text: text.split("\n").filter(l => !names.includes(l.split(" ")[0] ?? "")).join("\n"), commentsDropped: false });
+  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor, entryOf: (text, name) => lineOf(text, name), merge: linesMerge, remove: linesRemove };
 
   it("a format the catalog gains is one module: the stage runs the module's editor over the text it read and reports through it, with no format of its own", async () => {
     const { root, cmds, machine } = guest(["alpha"]);

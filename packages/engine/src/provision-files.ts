@@ -7,7 +7,9 @@
 // itself put there it may replace, which is what the list beside the job
 // records; nothing outside an agent's own paths travels at all. The file an
 // agent writes for itself is the one thing that lands once and then stands:
-// what wsp owns in it is the server keys the servers step wrote, not its bytes.
+// what wsp owns in it is the server keys the servers step wrote, not its bytes,
+// and a leave takes those keys back out of it one by one.
+import { createHash } from "node:crypto";
 import {
   MCP_ID_PREFIX,
   agentOfRow,
@@ -19,11 +21,11 @@ import {
   shellQuote,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackedFiles } from "./golden.js";
-import { parseMcpId } from "./golden-mcp.js";
+import { READ_MS, commentsDroppedLine, landConfigs, parseConfigs, parseMcpId, readConfigsCmd, type ScopeFile } from "./golden-mcp.js";
 import type { Machine } from "./machine.js";
 import { importInto } from "./vault.js";
 
@@ -80,6 +82,18 @@ export const LAND_MARK = "wsp-land";
  * printed. One spelling for the landing, the reads of the list and the close. */
 const TAB = "\\t";
 const NL = "\\n";
+
+/** What a line's digest fields read where the round no longer owns that name: a key line with this in place of a
+ * digest is a tombstone, which the close takes out along with every earlier line for the same id. */
+export const NO_DIGEST = "-";
+
+/** The shell test for a line of the list that names a key in an agent's own file rather than a path under the
+ * home: its row id carries the servers' own prefix. One spelling for every reader written here. The twin the
+ * daemon carries of the ownership read tells the two apart by whether a file stands at the path, which is the
+ * same answer for a line whose id names no path. */
+function keyTest(): string[] {
+  return ["wsp_key() {", `  case "$1" in (${shellQuote(MCP_ID_PREFIX)}*) return 0 ;; esac`, "  return 1", "}"];
+}
 
 /** The shell test for a path that lands once: a case of the destinations themselves, each quoted so a path holding
  * a glob character or a backslash is read as the path it is, and a folder covering what is under it. One spelling
@@ -154,11 +168,12 @@ export function landedServersScript(home: string): string {
   const at = placeProvisionPaths(home);
   return [
     "set -u",
+    ...keyTest(),
     `ledger=${shellQuote(at.landed)}`,
     '[ -f "$ledger" ] || exit 0',
     `tab=$(printf "${TAB}")`,
     'while IFS="$tab" read -r id from at; do',
-    `  case "$id" in (${shellQuote(MCP_ID_PREFIX)}*) printf '${SERVER_MARK}${TAB}%s${TAB}%s${NL}' "$at" "$id" ;; esac`,
+    `  wsp_key "$id" && printf '${SERVER_MARK}${TAB}%s${TAB}%s${NL}' "$at" "$id"`,
     'done < "$ledger"',
     "exit 0",
   ].join("\n");
@@ -202,6 +217,7 @@ export function closeFilesScript(home: string, once: readonly string[] = []): st
   return [
     "set -u",
     ...onceTest(once),
+    ...keyTest(),
     `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}; log=${q(at.log)}`,
     // A path an older road appended to carries one marker per append and nothing swept them: a hundred and
     // seventeen stood beside one job's log on a box after two updates. The sweep is the first thing here, so a
@@ -214,8 +230,9 @@ export function closeFilesScript(home: string, once: readonly string[] = []): st
     ': > "$ledger.new" || exit 1',
     'while IFS="$tab" read -r rel from at; do',
     // A line the servers step wrote names a key in an agent's own file and carries the digest of what wsp left
-    // under that name: it goes through as it is, since no file on that computer holds those bytes alone.
-    `  if [ -n "$at" ]; then printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue; fi`,
+    // under that name: it goes through as it is, since no file on that computer holds those bytes alone. A
+    // tombstone rides the same road and is taken out below, once it has shadowed the lines before it.
+    `  if wsp_key "$rel"; then printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue; fi`,
     '  dest="$home/$rel"',
     '  [ -f "$dest" ] || continue',
     `  printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"`,
@@ -226,8 +243,9 @@ export function closeFilesScript(home: string, once: readonly string[] = []): st
     `  wsp_once "$rel" || printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"`,
     'done < "$ledger"',
     // One line per path, this round's first: both readers of the list take the first line a path has, so a path
-    // this round wrote again keeps one line and a path it did not touch keeps the line it had.
-    `awk -F"${TAB}" '!seen[$1]++' "$ledger.new" > "$ledger.keep" || exit 1`,
+    // this round wrote again keeps one line and a path it did not touch keeps the line it had. A tombstone is
+    // read first and kept out, which is how a name this round no longer owns leaves the list with its old line.
+    `awk -F"${TAB}" '!seen[$1]++ && $3 != "${NO_DIGEST}"' "$ledger.new" > "$ledger.keep" || exit 1`,
     'mv "$ledger.keep" "$ledger"',
     'rm -f "$ledger.new"',
     'rm -rf "$stage" "$landing"',
@@ -334,20 +352,119 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
   };
 }
 
+/** The digest one key in the list is owned by: the entry standing under that name, in the shape its format keeps
+ * when the agent writes the file again. Nothing for a name the text does not define. One rule for the round that
+ * writes a key line and for the leave that reads one back. */
+export const serverDigest = (entry: string | undefined): string | undefined => (entry === undefined ? undefined : createHash("sha256").update(entry).digest("hex"));
+
+/** What the read of the list's key lines printed: the digest of the entry wsp left, by row id. A line that is not
+ * the mark's is not an answer. */
+export function parseLandedServers(stdout: string): Map<string, string> {
+  return new Map(
+    stdout.split("\n").flatMap(line => {
+      const words = line.split("\t");
+      return words[0] === SERVER_MARK && words.length > 2 ? [[words.slice(2).join("\t"), words[1]!] as const] : [];
+    }),
+  );
+}
+
 /** What wsp owns in the agents' own files on that computer, off the list beside the job: one entry per server it
  * wrote there, with the digest of that entry as it left it. Empty where the computer has no list yet or would not
  * answer, which reads every server in those files as the agent's own and leaves them. */
 export async function landedServers(machine: Machine, home: string, say: FilesSay): Promise<Map<string, string>> {
   const res = await machine.run(landedServersScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
   if (res === undefined || res.exitCode !== 0) return new Map();
-  const keys = new Map(
-    res.stdout.split("\n").flatMap(line => {
-      const words = line.split("\t");
-      return words[0] === SERVER_MARK && words.length > 2 ? [[words.slice(2).join("\t"), words[1]!] as const] : [];
-    }),
-  );
+  const keys = parseLandedServers(res.stdout);
   say(provisionListReadLine(keys.size));
   return keys;
+}
+
+/** The three things taking wsp's servers back out needs of the computer they are on. The host has them over the
+ * link that computer's daemon holds; the wsp on that computer has them in its own hands. */
+export interface ServerPort {
+  /** Runs a script there and answers what it printed; nothing where it would not run. */
+  run(script: string): Promise<string>;
+  /** The first of an agent's files that is there, with its text; nothing where none of them is. */
+  read(files: readonly string[]): Promise<ScopeFile | undefined>;
+  /** That file with this text, its mode kept, and an agent launching in that moment reading one whole copy of it
+   * or the other. */
+  write(path: string, text: string): Promise<void>;
+}
+
+/** The port over a machine: the same read of a config off it and the same landing, pour and rename the servers
+ * round writes one back with. */
+export function machineServerPort(machine: Machine): ServerPort {
+  return {
+    run: async script => {
+      const res = await machine.run(script, { deadlineMs: LAND_MS }).catch(() => undefined);
+      return res === undefined || res.exitCode !== 0 ? "" : res.stdout;
+    },
+    read: async files => {
+      // The answer is that file whole, the servers' env and headers with it, so it goes by the road that says its
+      // output is not a log's.
+      const asked = [{ files }];
+      const res = await machine.run(readConfigsCmd(asked), { deadlineMs: READ_MS, unlogged: true }).catch(() => undefined);
+      return res === undefined || res.exitCode !== 0 ? undefined : parseConfigs(res.stdout, asked)?.[0];
+    },
+    write: async (path, text) => {
+      const failure = await landConfigs(machine, [], new Map([[path, text]]));
+      if (failure !== undefined) throw new Error(failure);
+    },
+  };
+}
+
+/** One agent's own file on that computer with wsp's servers taken back out of it. */
+export interface ServersOut {
+  path: string;
+  names: string[];
+  /** Writing that file back could not keep the comments it held, the same loss a merge into it answers. */
+  commentsDropped: boolean;
+}
+
+/** What a leave says it took out of one agent's own file: the names and the file they came out of, and where the
+ * rewrite could not keep that file's comments, the one sentence for that loss after it. */
+export const serversOutLines = (out: ServersOut): string[] => [`${out.names.join(", ")} (out of ${out.path})`, ...(out.commentsDropped ? [commentsDroppedLine(out.path)] : [])];
+
+/** Takes the servers wsp merged into the agents' own files on a computer back out of them, which is what a leave
+ * cannot do by taking a path: those files are the agents' own and only the keys in them are wsp's. The list
+ * beside the job says which keys those are and what wsp left under each, and a key whose entry there still reads
+ * as that is wsp's to take; one the agent or the person has written since reads differently and stays, the same
+ * rule by which the merge never writes over one. Nothing else in the file moves. A file that will not parse or
+ * will not be written keeps its servers and the agents beside it still lose theirs. */
+export async function unmergeServers(port: ServerPort, home: string): Promise<ServersOut[]> {
+  const keys = parseLandedServers(await port.run(landedServersScript(home)));
+  const out: ServersOut[] = [];
+  for (const agent of MCP_AGENTS) {
+    const mine = [...keys].flatMap(([id, digest]) => {
+      const key = parseMcpId(id);
+      return key?.agent === agent.id ? [{ ...key, digest }] : [];
+    });
+    if (mine.length === 0) continue;
+    try {
+      const file = await port.read(agent.mcp.files.map(f => `${home}/${f.slice(2)}`));
+      if (file === undefined) continue;
+      let text = file.text;
+      let commentsDropped = false;
+      const took: string[] = [];
+      // The user scope and, for a format that keeps servers per folder, the machine's own home folder: the same
+      // two scopes the merge wrote them under.
+      for (const scoped of [false, true]) {
+        const project = scoped ? home : undefined;
+        const names = mine.filter(k => k.home === scoped && serverDigest(agent.mcp.format.entryOf(text, k.name, project)) === k.digest).map(k => k.name);
+        if (names.length === 0) continue;
+        const removed = agent.mcp.format.remove(text, names, project);
+        text = removed.text;
+        commentsDropped ||= removed.commentsDropped;
+        took.push(...names);
+      }
+      if (took.length === 0 || text === file.text) continue;
+      await port.write(file.path, text);
+      out.push({ path: file.path, names: took, commentsDropped });
+    } catch {
+      continue;
+    }
+  }
+  return out;
 }
 
 /** The paths the ownership read answered with, home-relative and in the order the list named them. A line that is

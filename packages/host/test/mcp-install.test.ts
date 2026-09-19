@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
+import { commentsDroppedLine } from "@wsp/engine";
 import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
@@ -308,7 +309,13 @@ describe("installing the MCP server for a local agent", () => {
 
   it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {
     expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
-    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual(["Gemini CLI now has the wsp tools: ~/.gemini/settings.json", "The file held comments; the rewrite is plain JSON, so they are gone.", "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md"]);
+    // The sentence about the comments is the engine's one export, which the row a merge writes on a joined
+    // computer reads too: one loss, one wording, whichever road wrote the file.
+    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual([
+      "Gemini CLI now has the wsp tools: ~/.gemini/settings.json",
+      commentsDroppedLine("~/.gemini/settings.json"),
+      "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md",
+    ]);
     expect(installLines({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" })).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
     expect(installLines({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md", docs: ["/p/AGENTS.md"] }).at(-1)).toBe("The wsp section is in /p/AGENTS.md");
     expect(removeLines({ agent: "Claude Code", docs: ["/p/AGENTS.md", "/p/CLAUDE.md"] })).toEqual(["Claude Code: the wsp section is out of /p/AGENTS.md and /p/CLAUDE.md"]);
@@ -344,7 +351,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(await cli(["mcp", "install", "--agent", "gemini", "--state", statePath], commented)).toBe(0);
     expect(commented.lines).toEqual([
       "Gemini CLI now has the wsp tools: ~/.gemini/settings.json",
-      "The file held comments; the rewrite is plain JSON, so they are gone.",
+      commentsDroppedLine("~/.gemini/settings.json"),
       "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md",
       `The wsp section is in ${join(project, "AGENTS.md")}`,
       commandLine(registered),

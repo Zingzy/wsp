@@ -38,6 +38,7 @@ import {
   placeNoLinkLine,
   placeNoHomeLine,
   placeNoRecipeLine,
+  MCP_ID_PREFIX,
   placeProvisionPaths,
   placeProvisioningLine,
   placeStillInstalledLine,
@@ -53,10 +54,10 @@ import {
   type PlaceView,
   type TurnResult,
 } from "@wsp/protocol";
-import { MCP_SERVERS_JSON } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
-import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
+import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -716,6 +717,19 @@ describe("the list of every place", () => {
   });
 });
 
+/** A computer that answers the frames a remove sends it: the reads of what wsp merged into the agents' own files
+ * there, which on a computer with no list beside its job come back with nothing to take, and the sweep with what
+ * its own leave took. */
+function answersLeave(client: WsClient, swept: readonly string[], asked?: string[]): void {
+  client.ws.on("message", raw => {
+    const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
+    if (frame.op === "exec") return void client.ws.send(JSON.stringify({ id: frame.id, ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false }));
+    if (frame.op !== "place.leave") return;
+    asked?.push("place.leave");
+    client.ws.send(JSON.stringify({ id: frame.id, ok: true, swept: [...swept] }));
+  });
+}
+
 async function remove(placeId: string): Promise<Record<string, unknown>> {
   const c = await WsClient.connect(srv!.port, { token: "host-token" });
   const answer = await c.request("places.remove", { placeId });
@@ -879,14 +893,50 @@ describe("taking a place back out", () => {
     const { client, placeId } = await join(hostKey, { code: await code() });
     sockets.push(client.ws);
     // The place answers place.leave with what its own sweep took; the host never guesses that list.
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
-      if (frame.op === "place.leave") client.ws.send(JSON.stringify({ id: frame.id, ok: true, swept: ["the systemd user unit", "/home/maya/.wsp/place.json"] }));
-    });
+    answersLeave(client, ["the systemd user unit", "/home/maya/.wsp/place.json"]);
     const answer = await remove(placeId);
     expect(answer["removed"]).toBe(true);
     expect(answer["swept"]).toEqual(["the systemd user unit", "/home/maya/.wsp/place.json"]);
     expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
+  });
+
+  it("takes the servers wsp merged into the agents' own files there back out before it asks that computer to leave", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    const home = report().login["HOME"]!;
+    const config = `${home}/.codex/config.toml`;
+    const theirs = ['[projects."/root/repo"]', 'trust_level = "trusted"', ""];
+    const text = [...theirs, "[mcp_servers.context7]", 'command = "npx"', ""].join("\n");
+    const digest = createHash("sha256").update(CODEX_TOML.entryOf(text, "context7")!).digest("hex");
+    // What that computer answers the two long reads of the unmerge with, in the order it makes them: the key
+    // lines of the list beside its job, then the file that key sits in.
+    const reads = [`${SERVER_MARK}\t${digest}\t${MCP_ID_PREFIX}codex/context7`, `${MCP_READ_MARK} 0 0 ${Buffer.from(text).toString("base64")}`];
+    /** One poll of a detached run, as a guest answers it: the exit code, the output so far, and the run gone. */
+    const polled = (out: string): string => ["WSP_POLL", "0", Buffer.from(`${out}\n`).toString("base64"), "", "down", "WSP_POLL_END"].join("\n");
+    const order: string[] = [];
+    client.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { id?: number; op?: string; cmd?: string };
+      const say = (body: Record<string, unknown>): void => client.ws.send(JSON.stringify({ id: frame.id, ok: true, ...body }));
+      if (frame.op === "exec") {
+        const cmd = String(frame.cmd);
+        order.push(cmd);
+        const stdout = cmd.includes(HANDSHAKE.launched) ? `${HANDSHAKE.launched}\n` : cmd.includes("WSP_POLL") ? polled(reads.shift() ?? "") : "";
+        return say({ exitCode: 0, stdout, stderr: "", truncated: false });
+      }
+      if (frame.op === "place.leave") {
+        order.push("place.leave");
+        say({ swept: [`${home}/.wsp`] });
+      }
+    });
+
+    const answer = await remove(placeId);
+    // What came out of the agent's own file is said beside what the place's own sweep took.
+    expect(answer["swept"]).toEqual([`context7 (out of ${config})`, `${home}/.wsp`]);
+    // And the file was written back over the link before the leave took the folder holding the list.
+    const wrote = order.findIndex(cmd => cmd.includes(`${config}.wsp-new`));
+    expect(wrote, order.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(wrote).toBeLessThan(order.indexOf("place.leave"));
   });
 
   it("says the agent is still installed when the place was not connected to sweep", async () => {
@@ -1038,12 +1088,7 @@ describe("taking a place back out over the login the install used", () => {
           over.box = client;
           sockets.push(client.ws);
           // The agent as it answers a leave on the link: it sweeps the files it owns and says what it took.
-          client.ws.on("message", raw => {
-            const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
-            if (frame.op !== "place.leave") return;
-            askedOverLink.push("place.leave");
-            client.ws.send(JSON.stringify({ id: frame.id, ok: true, swept: overLink }));
-          });
+          answersLeave(client, overLink, askedOverLink);
           await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
           return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
         },
