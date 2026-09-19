@@ -84,6 +84,13 @@ impl Layout {
     pub fn record(&self, id: &str) -> PathBuf {
         self.workspace(id).join("workspace.json")
     }
+    /// The mount points this boot has made on the computer's own disk, written under the claim before the
+    /// container is created and taken away by the record write that carries them: between those two moments the
+    /// claim is the only thing naming what the boot put on the computer's home, so a create that fails there, or
+    /// a daemon that dies there, still leaves the remove and the open's sweep something to take off.
+    pub fn points(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("points.json")
+    }
     /// The workspace's network: its link, its addresses and the ports published for it.
     pub fn net(&self, id: &str) -> PathBuf {
         self.workspace(id).join("net.json")
@@ -206,7 +213,8 @@ pub struct Workspace {
     /// A shared login is bound at the agent's own path inside, and under /root that path is the computer's own
     /// home, so the empty file the bind lands on is made on the computer's disk: kept here so the stop and the
     /// remove take off what this workspace put there and nothing the person had. A record written before this
-    /// reads as a workspace that made none.
+    /// reads as a workspace that made none. Until this record is written the claim's own points file carries
+    /// them, and what the take-off reads is the two together.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub made_points: Vec<String>,
 }
@@ -777,6 +785,17 @@ fn unescaped(word: &str) -> String {
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     let text = serde_json::to_vec_pretty(value).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) })?;
     fs::write(path, text).map_err(at(path))
+}
+
+/// The mount points a boot wrote under its claim, or none where the record has taken them over and the file is
+/// gone. This daemon wrote it and no other program reads it, so a name in it the record already carries costs
+/// the take-off nothing: what that removes is an empty file no running record has bound.
+pub fn read_points(path: &Path) -> Result<Vec<String>, Error> {
+    match fs::read(path) {
+        Ok(text) => serde_json::from_slice(&text).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) }),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(Error { path: path.to_owned(), source: e }),
+    }
 }
 
 pub fn read_record(path: &Path) -> Result<Option<Workspace>, Error> {
