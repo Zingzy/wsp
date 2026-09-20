@@ -14,18 +14,21 @@
 //! that names; the profile is held to `DROPPED_CAPS` by a test. Read on every platform the daemon builds for, so
 //! every list is held to the same test wherever the suite runs.
 
-use std::fs;
-use std::path::Path;
-
 /// Never in a workspace's bounding set, whatever the profile is copied from: the three that let a process out of
 /// its namespaces or into the box's kernel, and the one that makes a device node. Named here and nowhere else, and
 /// the profile is held to this list rather than the other way round.
 pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS_BOOT", "CAP_MKNOD"];
 
 /// Every path inside a workspace the box's own directory may not show through, covered with the workspace's own
-/// empty one where the box keeps something there. Two rows: what a workspace reads under the box's own system
-/// directories is `TREES` and `ETC_ALLOWED` below, so the password hashes, the host keys and the engine's own
-/// folders are not inside to cover.
+/// empty one, and whether the box keeps a file or a directory there. Two rows: what a workspace reads under the
+/// box's own system directories is `TREES` and `ETC_ALLOWED` below, so the password hashes, the host keys and the
+/// engine's own folders are not inside to cover.
+///
+/// Read off this list and never off the rootfs, and a link met on one of these paths refuses the boot, which is
+/// the rule `ROOT_RUN_COVERS` carries and for the same reason. A box root that keeps `.ssh` as a link would
+/// otherwise have the cover land on what the link leads to and the keys read inside by name; a box root with no
+/// `.ssh` at all would otherwise have no cover, and a workspace making `/root/.ssh/authorized_keys` would be
+/// making it on the home the box root shares with it, which is a login into the box as root.
 ///
 /// /home covers every other home on the box: the trees are /usr, /etc, /opt, /var and /srv, so a workspace's
 /// /home is the skeleton's own empty directory, and the row is what keeps it empty the day a build binds the box's
@@ -41,7 +44,7 @@ pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS
 /// inside is root in its own namespaces already, so the box's rules grant it nothing, and an empty
 /// `/etc/sudoers` is a file sudo reads as granting nobody anything, which breaks every `sudo` a script inside
 /// types for no credential kept back.
-pub const EMPTY_BINDS: [&str; 2] = ["/home", "/root/.ssh"];
+pub const EMPTY_BINDS: [(&str, bool); 2] = [("/home", false), ("/root/.ssh", false)];
 
 /// How one of the trees a workspace's rootfs takes from the box is built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,7 +158,10 @@ pub const ETC_ALLOWED: &[&str] = &[
     "passwd",
     "pip.conf",
     "pki/ca-trust",
+    "pki/tls/cert.pem",
     "pki/tls/certs",
+    "pki/tls/ct_log_list.cnf",
+    "pki/tls/openssl.cnf",
     "profile",
     "profile.d",
     "protocols",
@@ -211,6 +217,12 @@ pub const ETC_ALLOWED: &[&str] = &[
 /// whose root keeps one of these inside a dotfiles checkout keeps the checkout and puts the file itself at the
 /// name, which the refusal says.
 ///
+/// What that costs, said plainly: a folder above one of these names counts too, so a box whose root keeps
+/// `.config` as a link into a dotfiles checkout, which is the common layout, refuses every boot until `.config`
+/// is a folder of its own with the checkout's files in it. That is a bigger ask than moving one file, and it is
+/// the price of the name itself being the thing a login reads. A share's path is the other road and is followed
+/// once, so a linked `.config` a workspace is given as a share still boots.
+///
 /// What this does not close, said plainly: the box root's own `.bashrc` and `.profile` source files in the shared
 /// home beyond these names, an nvm or a cargo environment line, a completion file under `.local/share`, and they
 /// put `.local/bin` and `bin` on the PATH. A plant in one of those still runs at the box root's next login. What
@@ -253,103 +265,58 @@ pub struct Cover {
     pub own: bool,
 }
 
-/// Every cover this rootfs asks for, read off the rootfs itself rather than assumed: a path the box keeps nothing
-/// at gets nothing, since a bind needs something to land on and a path that is not there shows nothing anyway.
+/// Every cover the boot binds, read off the two lists and never off the rootfs: a path the box keeps nothing at is
+/// covered all the same, since a workspace that could make it there would be making it on the home the box root
+/// shares with it, and the walk that opens each of these makes what is missing.
 ///
-/// A path that is a symlink is passed over rather than bound. An absolute link under a rootfs is resolved by the
-/// kernel against this process's own root, not against the rootfs, so a bind that followed one would land on the
-/// box's own file: `/var/run` is a link to `/run` on every stock Ubuntu, and a cover of `/var/run/docker.sock`
-/// would have bound an empty file over the box's own engine socket. What such a link leads to inside is the
-/// workspace's own empty /run in any case.
+/// A link met on a cover's path refuses the boot rather than being followed. Both lists carry that rule: what is
+/// bound over a link's target leaves the name itself a link in a folder the workspace is uid 0 in, which it may
+/// unlink and write in its place, so the road the cover closes would stay open.
 ///
-/// Called after the boot's own binds are up, so the person's home is there to read: the cover of `/root/.ssh` is
-/// of the home the bind brought in, not of the empty directory the skeleton made.
-pub fn covered(rootfs: &Path) -> Vec<Cover> {
-    let mut out: Vec<Cover> = Vec::new();
-    for at in EMPTY_BINDS {
-        if let Some(cover) = cover_of(rootfs, at) {
-            out.push(cover);
-        }
-    }
-    // Read off the list and not off the rootfs: a path the box keeps nothing at is covered too, since a workspace
-    // that could make it there would have the box root's next login run it.
-    for (at, file) in ROOT_RUN_COVERS {
-        out.push(Cover { at: at.to_owned(), file, own: true });
-    }
+/// The cost, said plainly: on a box that keeps nothing at one of these paths, the boot makes the empty file or
+/// folder the bind lands on, on the home the box root shares, and nothing takes it off when the workspace goes.
+/// They are the mount point and never the content.
+pub fn covered() -> Vec<Cover> {
+    let mut out: Vec<Cover> = EMPTY_BINDS.iter().map(|(at, file)| Cover { at: (*at).to_owned(), file: *file, own: false }).collect();
+    out.extend(ROOT_RUN_COVERS.iter().map(|(at, file)| Cover { at: (*at).to_owned(), file: *file, own: true }));
     // One cover per path, in one order: what the boot mounts is read by a person in a log line and by a test.
     out.sort();
     out.dedup_by(|a, b| a.at == b.at);
     out
 }
 
-/// What the rootfs keeps at the path, where a cover can land on it at all.
-fn cover_of(rootfs: &Path, at: &str) -> Option<Cover> {
-    let held = fs::symlink_metadata(rootfs.join(at.trim_start_matches('/'))).ok()?;
-    if held.file_type().is_symlink() {
-        return None;
-    }
-    Some(Cover { at: at.to_owned(), file: held.is_file(), own: false })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A rootfs as a boot leaves it, with what the box lends showing through: the /etc view, the person's home
-    /// under the bind, and another person's home beside it.
-    fn a_rootfs(root: &Path) -> std::path::PathBuf {
-        let rootfs = root.join("rootfs");
-        for dir in ["etc/sudoers.d", "home/someone", "root/.ssh", "var/lib", "run"] {
-            fs::create_dir_all(rootfs.join(dir)).unwrap();
-        }
-        for (file, text) in [
-            ("etc/sudoers", "root ALL=(ALL:ALL) ALL\n"),
-            ("etc/passwd", "root:x:0:0:root:/root:/bin/bash\n"),
-            ("root/.ssh/authorized_keys", "the key that opens the box\n"),
-        ] {
-            fs::write(rootfs.join(file), text).unwrap();
-        }
-        rootfs
-    }
-
     #[test]
-    fn every_path_the_box_keeps_something_at_is_covered_and_nothing_else_is() {
-        let dir = tempfile::tempdir().unwrap();
-        let rootfs = a_rootfs(dir.path());
-        let covers = covered(&rootfs);
-        // The covers read off the rootfs itself; the ones read off `ROOT_RUN_COVERS` are the case below. Two, and
-        // no more: what the box's own /etc and /var used to show through is not inside to cover.
+    fn every_row_of_both_lists_is_covered_whatever_the_box_keeps_there() {
+        let covers = covered();
+        // The two rows that are not the box root's own startup files. Two, and no more: what the box's own /etc
+        // and /var used to show through is not inside to cover.
         let at: Vec<&str> = covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect();
         assert_eq!(at, ["/home", "/root/.ssh"]);
         // A file is covered with a file and a directory with a directory: a bind of one over the other is refused
-        // by the kernel, and what the box keeps there is what decides.
+        // by the kernel, and the row itself is what says which.
         let file_at = |path: &str| covers.iter().find(|c| c.at == path).unwrap().file;
-        assert!(!file_at("/home") && !file_at("/root/.ssh"));
+        assert!(!file_at("/home") && !file_at("/root/.ssh") && file_at("/root/.bashrc"));
+        // Every row of both lists, nothing read off a rootfs and nothing left out: a box that keeps nothing at one
+        // of these paths is a box where a workspace could make it, on the home the box root shares with it.
+        assert_eq!(covers.len(), EMPTY_BINDS.len() + ROOT_RUN_COVERS.len());
+        for (row, _) in EMPTY_BINDS.iter().chain(ROOT_RUN_COVERS.iter()) {
+            assert!(covers.iter().any(|c| c.at == *row), "{row} is not covered");
+        }
         // The box's sudo rules are left as they are: a turn inside is root in its own namespaces, so they grant
         // it nothing, and a file sudo reads as granting nobody anything would break every sudo typed inside.
         assert!(!at.iter().any(|path| path.contains("sudoers")), "{at:?}");
-        // No path twice, whatever the lists hold.
+        // No path twice, and no row under another: a bind of one would hide the other and which of the two won
+        // would be the order they were made in.
         let every: Vec<&str> = covers.iter().map(|c| c.at.as_str()).collect();
         let once: std::collections::BTreeSet<&str> = every.iter().copied().collect();
         assert_eq!(once.len(), every.len());
-    }
-
-    #[test]
-    fn a_path_the_box_keeps_nothing_at_is_not_covered_and_a_link_is_passed_over() {
-        let dir = tempfile::tempdir().unwrap();
-        let rootfs = dir.path().join("bare");
-        fs::create_dir_all(rootfs.join("etc")).unwrap();
-        // Nothing of the two is there: no cover read off the rootfs, and the boot mounts none of them.
-        assert!(covered(&rootfs).iter().all(|c| c.own));
-        // A path the box keeps as a link: the cover would follow it out of the rootfs, since the kernel resolves
-        // an absolute link against this process's own root, and land on the box's own file.
-        fs::create_dir_all(rootfs.join("run/nothing")).unwrap();
-        std::os::unix::fs::symlink("/run/nothing", rootfs.join("home")).unwrap();
-        fs::create_dir_all(rootfs.join("root/.ssh")).unwrap();
-        let covers = covered(&rootfs);
-        assert_eq!(covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect::<Vec<_>>(), ["/root/.ssh"]);
-        // And the link itself is still a link: nothing here writes through one.
-        assert!(fs::symlink_metadata(rootfs.join("home")).unwrap().file_type().is_symlink());
+        for at in &every {
+            assert!(!every.iter().any(|other| *other != *at && at.starts_with(&format!("{other}/"))), "{at} sits under another row");
+        }
     }
 
     /// What a workspace reads of the box's own system directories is a list of what it needs: the table says how
@@ -392,6 +359,9 @@ mod tests {
             "security/pam_env.conf",
             "pki/tls/certs",
             "pki/ca-trust",
+            "pki/tls/openssl.cnf",
+            "pki/tls/ct_log_list.cnf",
+            "pki/tls/cert.pem",
         ] {
             assert!(ETC_ALLOWED.contains(&named), "{named} is not on the list");
         }
@@ -435,7 +405,7 @@ mod tests {
             assert!(rows.iter().all(|row| !row.ends_with('/')), "{rows:?}");
         }
         // And the covers left are the two the trees do not answer for.
-        assert_eq!(EMPTY_BINDS, ["/home", "/root/.ssh"]);
+        assert_eq!(EMPTY_BINDS.map(|(at, _)| at), ["/home", "/root/.ssh"]);
     }
 
     /// What the box root's own login and its systemd run by name is the workspace's own copy or its own folder,
@@ -443,17 +413,10 @@ mod tests {
     /// a workspace that could make it there would have the box root run it.
     #[test]
     fn what_the_box_roots_shell_runs_by_name_is_covered_with_the_workspaces_own() {
-        let dir = tempfile::tempdir().unwrap();
-        let rootfs = a_rootfs(dir.path());
-        for (file, text) in [("root/.bashrc", "# the box's own\n"), ("root/.bash_aliases", "alias x=y\n"), ("root/.profile", "# box\n")] {
-            fs::write(rootfs.join(file), text).unwrap();
-        }
-        fs::create_dir_all(rootfs.join("root/.config/systemd/user")).unwrap();
-        fs::write(rootfs.join("root/.config/systemd/user/x.service"), "[Service]\n").unwrap();
-        let covers = covered(&rootfs);
+        let covers = covered();
         let cover = |at: &str| covers.iter().find(|c| c.at == at).unwrap_or_else(|| panic!("{at} is not covered: {covers:?}")).clone();
 
-        // The files the box keeps: the workspace's own copy of each, which the boot seeds and keeps.
+        // The files a login reads by name: the workspace's own copy of each, which the boot seeds and keeps.
         for at in ["/root/.bashrc", "/root/.bash_aliases", "/root/.profile"] {
             assert_eq!(cover(at), Cover { at: at.to_owned(), file: true, own: true });
         }

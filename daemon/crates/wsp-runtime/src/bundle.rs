@@ -595,15 +595,14 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     // directory: one per path, so what a workspace writes at one of them is not what it writes at another. Read
     // off the rootfs here rather than listed here, and read last: the person's home and the box's /etc are both
     // among the trees being covered, and both are only there to read once the mounts above are up.
-    for cover in hardening::covered(&rootfs) {
+    for cover in hardening::covered() {
         let source = if cover.own { layout.own_at(id, &cover.at) } else { layout.empty_at(id, &cover.at) };
-        // A cover over a name the box root's own login runs follows no link of the box root's either: what is
-        // bound over a link's target leaves that name a link the workspace may unlink and write in its place.
-        let shared = if cover.own { BoxLink::Refused } else { BoxLink::FollowedOnce };
+        // Every cover refuses a link on its path, the box root's own as much as the workspace's: what is bound
+        // over a link's target leaves that name a link the workspace may unlink and write in its place.
         if cover.file {
-            bind_file_over(&place, &source, &cover.at, cover.own, shared)?;
+            bind_file_over(&place, &source, &cover.at, cover.own)?;
         } else {
-            bind_over(&place, &source, &cover.at, shared)?;
+            bind_over(&place, &source, &cover.at, BoxLink::Refused)?;
         }
     }
     // Last, and after the covers: the Homebrew prefix sits under /home, which a cover has just emptied, so a bind
@@ -947,9 +946,10 @@ fn bind_over(place: &Inside, source: &Path, at_path: &str, shared: BoxLink) -> R
 /// The same for a path the box keeps a file at: a file bind wants a file at both ends, so the workspace's own one
 /// is made here and the one inside is made by the walk where the box keeps none. Where the cover is the
 /// workspace's own copy, the first boot that finds no copy takes the bytes the box keeps there, read through the
-/// same descriptor the bind lands on and never through the path a second time.
-fn bind_file_over(place: &Inside, source: &Path, at_path: &str, own: bool, shared: BoxLink) -> Result<(), Error> {
-    let opened = open_inside(place, at_path, Want::File, shared)?;
+/// same descriptor the bind lands on and never through the path a second time. Every caller is a cover, so a link
+/// met on the way refuses the boot rather than being followed.
+fn bind_file_over(place: &Inside, source: &Path, at_path: &str, own: bool) -> Result<(), Error> {
+    let opened = open_inside(place, at_path, Want::File, BoxLink::Refused)?;
     if let Some(dir) = source.parent() {
         fs::create_dir_all(dir).map_err(at(dir))?;
     }
@@ -1290,7 +1290,7 @@ mod tests {
 
     /// A workspace to open paths inside, on a rootfs made by hand: the uppers beside it, as a layout puts them.
     fn place_at(root: &Path, id: &str) -> Inside {
-        Inside { rootfs: root.join("rootfs"), uppers: [root.join("upper"), root.join("upper").join(Layout::LENT)], id: id.to_owned() }
+        Inside { rootfs: root.join("rootfs"), uppers: Layout::new(root).upper_roots(id), id: id.to_owned() }
     }
 
     /// The one reader of a claim's points takes a file that does not parse as no points, so a file an older
@@ -1348,7 +1348,7 @@ mod tests {
         assert_eq!(l.empty_at("wsp-a", "/var/lib/docker"), PathBuf::from("/wsp/run/wsp-a/empty/var/lib/docker"));
         // An empty directory per path and no two of them one directory: what a workspace writes at one of them
         // is not what it writes at another.
-        let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
+        let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|(at, _)| l.empty_at("wsp-a", at)).collect();
         assert_eq!(empties.len(), hardening::EMPTY_BINDS.len());
         // The workspace's own copies of what the box root's shell runs by name sit apart from the empty ones, one
         // directory per path and all of them under the workspace's own folder, so a stop keeps them.
@@ -1357,7 +1357,7 @@ mod tests {
         assert_eq!(owned.len(), hardening::ROOT_RUN_COVERS.len());
         assert!(owned.iter().all(|made| made.starts_with(l.workspace("wsp-a")) && !made.starts_with(l.empty_at("wsp-a", "/"))));
         // Every one of them under the workspace's own folder, so a stop keeps them and a remove takes them all.
-        for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", hardening::EMPTY_BINDS[0]), l.upper("wsp-a")] {
+        for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", hardening::EMPTY_BINDS[0].0), l.upper("wsp-a")] {
             assert!(made.starts_with(l.workspace("wsp-a")), "{}", made.display());
         }
         // The mark a copy being made carries is written and read in one place.
@@ -1842,6 +1842,21 @@ mod tests {
         let refused = open_inside(&place, "/root/.config/systemd", Want::Dir, BoxLink::Refused).unwrap_err().to_string();
         assert!(refused.contains("/root/.config") && refused.contains("replace the link with a folder"), "{refused}");
 
+        // The two rows that are not the box root's own startup files take the same word. A box root that keeps
+        // .ssh as a link refuses, since the cover would land on what the link leads to and the keys would read
+        // inside by the name itself.
+        std::os::unix::fs::symlink("/var/tmp/dotfiles/ssh", place.rootfs.join("root/.ssh")).unwrap();
+        let refused = open_inside(&place, "/root/.ssh", Want::Dir, BoxLink::Refused).unwrap_err().to_string();
+        assert!(refused.contains("/root/.ssh") && refused.contains("replace the link with a folder"), "{refused}");
+        assert!(!place.rootfs.join("var/tmp/dotfiles/ssh").exists());
+        // And a box root with no .ssh at all gets the folder made and covered, so an authorized_keys a workspace
+        // writes lands in the workspace's own folder and never on the home the box root shares with it.
+        fs::remove_file(place.rootfs.join("root/.ssh")).unwrap();
+        let made = open_inside(&place, "/root/.ssh", Want::Dir, BoxLink::Refused).unwrap();
+        assert!(made.made, "the walk found a folder where the box keeps none");
+        assert_eq!(made.landed, "/root/.ssh");
+        assert!(place.rootfs.join("root/.ssh").is_dir());
+
         // The other road, which a share takes: the same link followed once and landing beneath the rootfs.
         let opened = open_inside(&place, "/root/.bashrc", Want::File, BoxLink::FollowedOnce).unwrap();
         assert_eq!(opened.landed, "/var/tmp/dotfiles/bashrc");
@@ -2026,7 +2041,7 @@ mod tests {
         // workspace's own empty file or directory over the box's, so the box's logins, its sudo rules, its ssh
         // host keys, the keys that open it and every other home on it show nothing inside.
         assert!(mounted(&rootfs.join("root")));
-        let covers = hardening::covered(&rootfs);
+        let covers = hardening::covered();
         for named in ["/root/.ssh", "/home"] {
             assert!(covers.iter().any(|c| c.at == named), "{named} is not covered: {covers:?}");
         }
