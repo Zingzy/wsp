@@ -926,10 +926,11 @@ async fn a_request_framed_both_ways_is_refused_before_a_byte_crosses() {
 #[tokio::test]
 async fn a_hijack_route_the_engine_did_not_hand_over_ends_the_engines_connection() {
     let w = world();
-    // Detached: the engine answers and keeps its connection, handing nothing over.
+    // Detached, and so asking for no upgrade: the engine answers and keeps its connection, handing nothing
+    // over, and the route being a hijack route is what left this side of it open.
     let body = r#"{"Detach":true,"Tty":false}"#;
     let request = format!(
-        "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
     let answered = tokio::time::timeout(std::time::Duration::from_secs(10), w.raw(request.as_bytes()))
