@@ -35,6 +35,7 @@ import {
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
   THREAD_OPS,
+  SCOPED_TOKEN_ROAD_REFUSAL,
   TICKET_ORIGIN,
   UNAUTHORIZED,
   WS_PATH,
@@ -87,6 +88,12 @@ export interface ServeOptions {
    * serves the page: a page drives only the host it was served by. Without it every upgrade is taken, which is
    * what a runtime served with no page in front of it means. */
   originAllowed?: (req: IncomingMessage) => boolean;
+  /** Whether a request reached this host over the road it serves its own workspaces' guests on, read off the
+   * request by the host that serves this runtime. A token scoped to a thread is minted into one turn and comes
+   * back through that road alone, so one presented from any other is a copy carried out of a machine and opens
+   * nothing. Without it every road is the host's own, which is what a runtime served with no host in front of it
+   * means. */
+  ownRoad?: (req: IncomingMessage) => boolean;
   /** The door computers you own dial, when the host that serves this runtime opens one; without it places.door is
    * refused rather than answering a port nothing listens on. */
   door?: PlaceDoorControl;
@@ -255,6 +262,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const held = new Set<{ deviceId: string; cut: () => void }>();
 
   const originAllowed = opts.originAllowed ?? ((): boolean => true);
+  /** The host's own reading of the road a request arrived on, handed in above. Named apart from the `ownRoad()` a
+   * socket carries below, which says what that socket is rather than where its bytes came from. */
+  const dialledHere: (req: IncomingMessage) => boolean = opts.ownRoad ?? (() => true);
   const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port, verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req) });
   const attachTo = opts.attach === undefined ? [] : Array.isArray(opts.attach) ? opts.attach : [opts.attach];
   const attached = attachTo.length === 0 ? undefined : new WebSocketServer({ noServer: true });
@@ -457,6 +467,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           if (msg.op !== "auth") return refuse(UNAUTHORIZED);
           const who = await whoIs(msg.token).catch(() => undefined);
           if (who === undefined) return refuse(UNAUTHORIZED);
+          // Read before this socket is authed and before the device is bound or its last seen moved: a token the
+          // host minted into a turn reaches it over the guest road its own workspace is served on, so one arriving
+          // by any other is a copy somebody carried out of a machine and nothing of it stands.
+          if (who.kind === "device" && who.device.scope !== undefined && !dialledHere(req)) return refuse(SCOPED_TOKEN_ROAD_REFUSAL);
           authed = true;
           if (who.kind === "device") {
             bind(who.device);

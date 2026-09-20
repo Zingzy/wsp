@@ -170,6 +170,15 @@ function throughConnector(req: IncomingMessage): boolean {
   return req.headers["cf-connecting-ip"] !== undefined || req.headers["cf-ray"] !== undefined;
 }
 
+/** Whether a request reached this host over the road it serves its own workspaces' guests on: a process on the
+ * computer this host runs on, dialling the loopback the guest tool server and the guest command line dial once the
+ * guest door has read which workspace the token was minted for. A request the connector forwarded, and one from
+ * beyond this computer, are other roads. Written once and read by the socket door and by the JSON routes alike, so
+ * neither can stay open while the other closes. */
+function ownRoad(req: IncomingMessage): boolean {
+  return !throughConnector(req) && isLoopback((req.socket.remoteAddress ?? "").replace(/^::ffff:/, ""));
+}
+
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
  * what this host bound. A request naming nothing has no name here, and everything below reads that as not here. */
 function hostnameAsked(req: IncomingMessage): string | undefined {
@@ -406,7 +415,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
     if (who === undefined) return here ? {} : undefined;
     const scope = who.kind === "device" ? who.device.scope : undefined;
-    return scope === undefined ? {} : { caller: { origin: "relayed", by: scope } };
+    if (scope === undefined) return {};
+    // A token scoped to a thread is minted into one turn and comes back over the guest road; one presented from
+    // any other road is a copy carried out of a machine, and it names nobody here.
+    return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -563,6 +575,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       host: address,
       attach: [server, doorServer],
       originAllowed: originAllows,
+      ownRoad,
       door: { open: openDoor },
       devices: rt.devices,
       authToken,

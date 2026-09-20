@@ -11,6 +11,7 @@ import { HERE_PLACE_ID,
   HOST_URL_ENV,
   MCP_SERVER_NAME,
   RUNTIME_OPS,
+  SCOPED_TOKEN_ROAD_REFUSAL,
   THREAD_OPS,
   threadOpRefusal,
   workspaceIdOf,
@@ -628,6 +629,42 @@ describe("agents spawning agents", () => {
       held.end(0);
       await onTheirs.finished;
       await onMine.finished;
+      await rt.close();
+    }
+  });
+
+  it("a thread's token opens the socket door on the host's own road alone, and a token with no scope on any road", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
+    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
+    const code = await rt.devices.issue({ now: Date.now(), ttlMs: 60_000 });
+    const paired = (await rt.devices.redeem(code.code, "a computer of the person's", Date.now()))!;
+    // The road the host reads off each upgrade, as the host that serves the page builds it: the connector's own
+    // headers say a request was forwarded here rather than typed on this computer.
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices, ownRoad: req => req.headers["cf-ray"] === undefined });
+    const connector = { "cf-ray": "8e0f4a1b2c3d4e5f-BOM", "cf-connecting-ip": "203.0.113.7" };
+    try {
+      // The copy carried out of a machine and dialled from off this computer: refused at the auth frame, in one
+      // sentence, and the socket closed with nothing of the thread bound to it.
+      const carried = await WsClient.connectTo(`ws://127.0.0.1:${srv.port}/`, { headers: connector });
+      const refused = await carried.request("auth", { token });
+      expect(refused["ok"]).toBe(false);
+      expect(refused["error"]).toBe(SCOPED_TOKEN_ROAD_REFUSAL);
+      expect(await carried.closed()).toBe(4401);
+      // The same token on the road this host serves its own workspaces' guests on drives that thread's tree.
+      const own = await WsClient.connect(srv.port, { token });
+      expect(((await own.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["lead"]);
+      own.close();
+      // A device the person paired carries no scope, so neither road is shut to it.
+      const theirs = await WsClient.connectTo(`ws://127.0.0.1:${srv.port}/`, { headers: connector });
+      expect((await theirs.request("auth", { token: paired.deviceToken }))["ok"]).toBe(true);
+      theirs.close();
+    } finally {
+      await srv.close();
+      held.end(0);
+      await handle.finished;
       await rt.close();
     }
   });

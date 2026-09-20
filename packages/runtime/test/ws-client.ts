@@ -39,14 +39,15 @@ export class WsClient {
     });
   }
 
-  static connect(port: number, opts: { token?: string; ticket?: string } = {}): Promise<WsClient> {
+  static connect(port: number, opts: { token?: string; ticket?: string; headers?: Record<string, string> } = {}): Promise<WsClient> {
     const qs = opts.ticket ? `/?ticket=${encodeURIComponent(opts.ticket)}` : "/";
     return WsClient.connectTo(`ws://127.0.0.1:${port}${qs}`, opts);
   }
 
-  /** The same dial at a URL the caller spells out, for the runtime served on an HTTP server's own port and path. */
-  static async connectTo(url: string, opts: { token?: string } = {}): Promise<WsClient> {
-    const ws = new WebSocket(url);
+  /** The same dial at a URL the caller spells out, for the runtime served on an HTTP server's own port and path.
+   * `headers` ride the upgrade, which is where a request's road is read. */
+  static async connectTo(url: string, opts: { token?: string; headers?: Record<string, string> } = {}): Promise<WsClient> {
+    const ws = new WebSocket(url, opts.headers === undefined ? undefined : { headers: opts.headers });
     await new Promise<void>((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);

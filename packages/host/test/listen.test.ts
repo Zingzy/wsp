@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, API_UNAUTHORIZED, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -304,6 +304,33 @@ describe("a host that listens beyond this computer", () => {
     expect(made.status).toBe(500);
     expect((await made.json()) as { error: string }).toEqual({ error: agentsOffRefusal("lead", "fork") });
     expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
+  });
+
+  it("a thread's token forks over the write route on the host's own road alone", async () => {
+    const { handle: h, runtime } = await up("0.0.0.0");
+    const project = await projectOn(runtime);
+    const own = await createOn(runtime, { project: project.id, golden: GOLDEN.versions[0]!.snapshotId, name: "lead", agents: AGENTS_ON });
+    const thread = await runtime.devices.mint("thread abcd1234", { kind: "thread", threadId: "t_1", workspaceId: own.id, rootThreadId: "t_1" }, Date.now());
+    const auth = { authorization: `Bearer ${thread.deviceToken}`, "content-type": "application/json" };
+    const post = (headers: Record<string, string>, name: string): Promise<Response> =>
+      fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers, body: JSON.stringify({ name }) });
+
+    // A copy of the token carried out of the machine and dialled at the address this host advertises: nobody here.
+    const carried = await post({ ...auth, ...THROUGH_CONNECTOR }, "carried");
+    expect(carried.status).toBe(401);
+    expect((await carried.json()) as { error: string }).toEqual({ error: API_UNAUTHORIZED });
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
+
+    // The same token over the road this host serves its own workspaces' guests on forks under that thread.
+    const made = await post(auth, "builder");
+    expect(made.status).toBe(200);
+    expect(((await made.json()) as { workspace: { rootThreadId?: string } }).workspace.rootThreadId).toBe("t_1");
+
+    // A device the person paired carries no scope, so the connector's road is still its own.
+    const code = await pairCode(h.wsPort, h.authToken);
+    const { deviceToken } = await redeem(h.port, code);
+    const theirs = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${deviceToken!}`, ...THROUGH_CONNECTOR } });
+    expect(theirs.status).toBe(200);
   });
 
   it("pairs whatever a request carries, since the connector's headers are not what opened that road", async () => {
