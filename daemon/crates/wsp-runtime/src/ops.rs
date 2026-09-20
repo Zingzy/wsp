@@ -418,12 +418,6 @@ impl Ops {
             // Off the map before the stop road runs: the stop takes the watch off, and a task that aborted
             // itself in the middle of one would leave the workspace half torn down.
             ops.deaths.lock().unwrap_or_else(|held| held.into_inner()).remove(&watched);
-            let Ok(Some(record)) = bundle::read_record(&ops.layout.record(&watched)) else { return };
-            // A record naming a live init is a workspace a wake booted again since, and not the one that died.
-            if runtime::alive(&record.init) {
-                return;
-            }
-            let _ = ops.stop(&record).await;
         });
         if let Some(old) = self.deaths.lock().unwrap_or_else(|held| held.into_inner()).insert(id.to_owned(), task) {
             old.abort();
