@@ -74,7 +74,8 @@ pub fn boot_cmd() -> Vec<String> {
 /// What every exec carries ahead of its command: the home and the user every wsp guest exec sets, and the
 /// compose project of a workspace that asked for an engine. A tenant starts from the workspace's own boot
 /// environment, which the container crate takes off the spec and the builder's own entries override by name, so
-/// the PATH and the recipe's knobs are there already; this line is what holds where a create carried none.
+/// the PATH and the recipe's knobs are there already; this line is what holds for a workspace booted by an older
+/// daemon and taken over by this one, whose spec carries neither.
 pub fn exec_env(record: &Workspace) -> String {
     match record.engine {
         true => format!("{EXEC_ENV} COMPOSE_PROJECT_NAME={}", compose_project(&record.id)),
@@ -1010,8 +1011,8 @@ impl Ops {
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
         // The compose project of a workspace with an engine, in the environment its daemon and every thread
-        // under it inherits; the exec road sets the same name, which is what holds for a workspace whose spec
-        // carried none.
+        // under it inherits; the exec road sets the same name, which is what holds for a workspace booted by an
+        // older daemon and taken over by this one.
         let compose_name = record.engine.then(|| compose_project(&id));
         let cgroup = self.layout.cgroup_name(&id);
         let config = Config {

@@ -434,7 +434,8 @@ const sh = (place: DaemonPlace, path: string): string => (place.quotePaths ? she
  * symlinked into a dotfiles checkout stays a symlink (measured 2026-09-11, where a move turned one into a plain
  * file). grep says by its exit code whether it selected nothing or could not read the file at all, and only the
  * first of those writes, so a read that failed leaves them neither an empty login file nor a file of wsp's beside
- * their own. Every line of it exits 0, since the deploy runs under set -e. */
+ * their own. Every line of it exits 0, since the deploy runs under set -e. What the take-out writes back is the
+ * file line by line, so a last line the person left without a trailing newline comes back with one. */
 function unsourceStep(place: DaemonPlace, file: string): string {
   const copy = `${file}.wsp-out`;
   const named = shellQuote(place.profileFile);

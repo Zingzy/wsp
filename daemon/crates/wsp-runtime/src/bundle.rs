@@ -1005,17 +1005,21 @@ fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
 /// lines onto the init this workspace already carries read-only, which is the same binary the daemon out here is.
 /// The computer's own wsp, where it has one at all, is a command under the wsp folder every workspace covers, so
 /// a workspace that was not given this word has none.
-///
-/// Written through the descriptor of the folder it sits in, and a link the computer keeps at that name is removed
-/// rather than written through: an absolute link under a rootfs is resolved by the kernel against this process's
-/// own root, so a write that followed one would land on the computer's own file instead.
 pub fn write_wsp_shim_inside(place: &Inside) -> Result<(), Error> {
-    let path = wsp_frames::numbers::GUEST_WSP_PATH;
-    let (folder, name) = path.rsplit_once('/').expect("the shim's path names a folder");
+    write_file_inside(place, wsp_frames::numbers::GUEST_WSP_PATH, wsp_frames::guest_wsp_shim(profile::INIT_PATH).as_bytes(), 0o755)
+}
+
+/// One file of the boot's own written inside a workspace, at the mode given: the folder it sits in opened beneath
+/// the rootfs with no link of the workspace's followed, the file opened through that descriptor rather than
+/// through its path again, and a link the computer keeps at the name taken off rather than written through. An
+/// absolute link under a rootfs is resolved by the kernel against this process's own root, so a write that
+/// followed one would land on the computer's own file instead. Every file the boot puts inside goes through here,
+/// so that rule has one home.
+pub fn write_file_inside(place: &Inside, path: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
+    let (folder, name) = path.rsplit_once('/').expect("a file written inside names the folder it sits in");
     let dir = open_inside(place, folder, Want::Dir, BoxLink::FollowedOnce)?;
-    let shim = wsp_frames::guest_wsp_shim(profile::INIT_PATH);
     let made = |flags: OFlag| {
-        openat(dir.fd(), name, flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::from_bits_truncate(0o755))
+        openat(dir.fd(), name, flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::from_bits_truncate(mode))
     };
     let file = match made(OFlag::O_CREAT | OFlag::O_TRUNC) {
         // A link at the name: taken off through the same descriptor and the file written in its place.
@@ -1028,8 +1032,8 @@ pub fn write_wsp_shim_inside(place: &Inside) -> Result<(), Error> {
     .map_err(nix_at(&dir.named(place).join(name)))?;
     let landed = dir.named(place).join(name);
     let mut file = std::fs::File::from(file);
-    file.write_all(shim.as_bytes()).map_err(at(&landed))?;
-    file.set_permissions(fs::Permissions::from_mode(0o755)).map_err(at(&landed))
+    file.write_all(bytes).map_err(at(&landed))?;
+    file.set_permissions(fs::Permissions::from_mode(mode)).map_err(at(&landed))
 }
 
 /// Where the login shell inside a workspace reads its PATH from: a file of the workspace's own under the /etc
@@ -1041,33 +1045,12 @@ pub const WORKSPACE_PROFILE_INSIDE: &str = "/etc/profile.d/wsp-workspace.sh";
 /// commands already carry. Nothing else is in it: the recipe's knobs ride the boot's environment, which the shell
 /// inherits, and nothing in a login file unsets them.
 ///
-/// Written through the descriptor of the folder inside, as the wsp shim beside it is, and a link the computer
-/// keeps at that name is removed rather than written through: an absolute link under a rootfs is resolved by the
-/// kernel against this process's own root, so a write that followed one would land on the computer's own file.
-///
 /// The person's own login file still has the last word, as it would on any machine of theirs: bash reads the
 /// first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` after `/etc/profile`, and each of those is the
 /// workspace's own copy of what the box root keeps.
 pub fn write_workspace_profile_inside(place: &Inside) -> Result<(), Error> {
-    let (folder, name) = WORKSPACE_PROFILE_INSIDE.rsplit_once('/').expect("the profile file's path names a folder");
-    let dir = open_inside(place, folder, Want::Dir, BoxLink::FollowedOnce)?;
     let line = format!("export PATH={}\n", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
-    let made = |flags: OFlag| {
-        openat(dir.fd(), name, flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::from_bits_truncate(0o644))
-    };
-    let file = match made(OFlag::O_CREAT | OFlag::O_TRUNC) {
-        // A link at the name: taken off through the same descriptor and the file written in its place.
-        Err(Errno::ELOOP) => {
-            nix::unistd::unlinkat(dir.fd(), name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&dir.named(place)))?;
-            made(OFlag::O_CREAT | OFlag::O_EXCL)
-        }
-        other => other,
-    }
-    .map_err(nix_at(&dir.named(place).join(name)))?;
-    let landed = dir.named(place).join(name);
-    let mut file = std::fs::File::from(file);
-    file.write_all(line.as_bytes()).map_err(at(&landed))?;
-    file.set_permissions(fs::Permissions::from_mode(0o644)).map_err(at(&landed))
+    write_file_inside(place, WORKSPACE_PROFILE_INSIDE, line.as_bytes(), 0o644)
 }
 
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own

@@ -2085,6 +2085,14 @@ describe("wsp's own login files on a computer already joined, written by every u
     expect(frames[0]!["cmd"]).toBe(FILES);
   });
 
+  it("refuses a computer it holds no road to, on an update that carries no binary as on one that does", async () => {
+    // A computer joined by a code holds no ssh login, so a link that is down leaves this nothing to run the
+    // lines over: an update of a computer that cannot be reached is refused rather than passed over quietly.
+    await expect(
+      placeUpdater({ daemonDir: daemonDir() })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: false }),
+    ).rejects.toThrow(placeNoUpdateRoadLine("spoo"));
+  });
+
   it("passes over a computer whose report records no home, on either kind of update", async () => {
     const bare = reportOf({ login: { USER: "maya", PATH: "/usr/bin" } });
     const none = fakeLink();

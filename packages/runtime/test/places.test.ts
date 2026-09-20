@@ -1028,6 +1028,30 @@ describe("moving a place onto the daemon this host deploys", () => {
     expect(String(nowhere["error"])).toContain("p_nothing");
   });
 
+  it("hands back the updater's own refusal for a computer that is away, on an update that carries no binary", async () => {
+    // What the host's own updater does with the road it has not got: a computer joined by a code holds no ssh
+    // login, so an ask that arrives with neither a link nor one is refused there rather than run nowhere.
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const away = "srv is not connected and this wsp has no login for it";
+    const { hostKey } = await serving({
+      update: async req => {
+        asked.push({ req });
+        if (req.link === undefined && req.ssh === undefined) throw new Error(away);
+        return undefined;
+      },
+    });
+    const level = report("srv", { daemonVersion: DAEMON_VERSION });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: level });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === false);
+    const answer = await update(placeId);
+    // The person reads the road's own sentence and the recipe is not started behind it: a computer that is off
+    // takes neither wsp's login files nor its recipe until it is back.
+    expect(answer.ok).toBe(false);
+    expect(answer["error"]).toBe(away);
+    expect(asked.map(a => a.req.daemon)).toEqual([false]);
+  });
+
   it("says so plainly on a host wired with no road to put a daemon on a computer", async () => {
     const { hostKey } = await serving();
     const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
@@ -3661,6 +3685,12 @@ describe("a project on a computer you joined", () => {
     // One workspace of that computer did the work and was stopped; the clone ran inside it.
     expect(place.created).toHaveLength(1);
     expect(place.killed).toHaveLength(1);
+    // And it read what a workspace there reads: a computer that keeps no image is worked in a copy of its own
+    // directories with the shared home bound in, so the install runs on the prefix's order and its knobs rather
+    // than finding whatever stands under that home.
+    const envs = place.created[0]!["envs"] as Record<string, string>;
+    expect(envs["PATH"]).toBe(PLACE_WORKSPACE_PATH);
+    expect(envs).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
     // The remove runs one command on the computer itself, over the same link, and says what went.
     const { said } = await runtime!.projects.remove(project.id);
     // That one command reads whether the agent there kept memory for this project and then takes wsp's own
