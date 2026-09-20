@@ -9,7 +9,7 @@
 // opened the first time, how a saved one is reached again, and what it holds
 // open; adding a road is its entry and nothing else here.
 import { connectCommand, disconnectCommand, aliasFrom, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
-import { HOST_WORDS, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
+import { HOST_WORDS, PAIR_CODE_LENGTH, PAIR_NO_KEY_REFUSAL, isUrl, readJoinToken, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
 import type { HostSession } from "./host-lifecycle.js";
 import { forwardKey, type SshRoad } from "./ssh-road.js";
 
@@ -109,7 +109,15 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
   const opts = { statePath: deps.statePath, home: deps.home };
 
   const direct: Road<Extract<HostConnectAsk, { road: "direct" }>> = {
-    check: ask => (!isUrl(ask.url) ? { ok: false, at: "url", error: ADDRESS_LINE } : ask.code.length !== PAIR_CODE_LENGTH ? { ok: false, at: "code", error: CODE_LINE } : undefined),
+    // What wsp host pair prints is one word: the code and the fingerprint of the key that host proves. Both
+    // halves are read here, since a word missing either one would be dialled and refused over there with a
+    // sentence this sheet could not put under a field.
+    check: ask => {
+      if (!isUrl(ask.url)) return { ok: false, at: "url", error: ADDRESS_LINE };
+      const typed = readJoinToken(ask.code);
+      if (typed.code.length !== PAIR_CODE_LENGTH) return { ok: false, at: "code", error: CODE_LINE };
+      return typed.hostKey === undefined ? { ok: false, at: "code", error: PAIR_NO_KEY_REFUSAL } : undefined;
+    },
     open: async ask => ({ url: ask.url, code: ask.code, alias: aliasFrom(new URL(ask.url).hostname), label: new URL(ask.url).host, road: "direct" }),
     reach: async (_alias, record) => record.url,
     at: e => (isAuth(e) ? "code" : "url"),

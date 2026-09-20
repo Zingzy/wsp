@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
-import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
+import { keyFingerprint } from "@wsp/engine";
+import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
-import { newPlaceKeyPair, type PlaceRecord } from "../src/places.js";
+import { newPlaceKeyPair, verifyPlaceBytes, type PlaceKeyPair, type PlaceRecord } from "../src/places.js";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { serveRuntime, type ForwardsSource, type PlaceDoctor, type RuntimeServer } from "../src/serve.js";
 import { daemonTokenFor } from "../src/daemon-token.js";
 import { memoryStore } from "../src/store.js";
@@ -61,6 +64,87 @@ describe("serveRuntime auth", () => {
     const ok = await c.request("workspaces.list");
     expect(ok.ok).toBe(true);
     c.close();
+  });
+});
+
+describe("the key a native client pins before it sends anything", () => {
+  /** A runtime with the place wiring every host a person starts has, and the pair it proves itself with. */
+  const served = (): { hostKey: PlaceKeyPair; runtime: Runtime } => {
+    const hostKey = newPlaceKeyPair();
+    return { hostKey, runtime: createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: { hostKey, provider: () => undefined, here: () => ({ name: "this-mac" }), hostName: () => "this-mac" } }) };
+  };
+
+  /** What a client does before its token crosses: its nonce and its half of a key agreement out, the host's key,
+   * nonce, half and signature back, both checked, and the seal every frame after it rides inside. */
+  const openSeal = async (c: WsClient, hostKey: PlaceKeyPair): Promise<Record<string, unknown>> => {
+    const mine = freshEphemeral();
+    const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+    const answer = await c.request("seal.open", { nonce, ephemeral: mine.publicKey });
+    if (answer.ok !== true) return answer;
+    const reply = SealOpenReply.parse(answer);
+    expect(reply.hostPublicKey).toBe(hostKey.publicKey);
+    expect(keyFingerprint(reply.hostPublicKey)).toBe(keyFingerprint(hostKey.publicKey));
+    expect(verifyPlaceBytes(reply.hostPublicKey, placeLinkTranscript("host", SEAL_CLIENT, nonce, reply.nonce, { challenger: mine.publicKey, answerer: reply.ephemeral }), reply.signature)).toBe(true);
+    c.seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, reply.ephemeral), SEAL_CLIENT), "place");
+    return answer;
+  };
+
+  it("answers the key, the nonce, the half and a signature over the client's transcript, and seals every frame after it", async () => {
+    const { hostKey, runtime } = served();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret", devices: runtime.devices });
+    const c = await WsClient.connect(srv.port);
+    await openSeal(c, hostKey);
+    // The token crosses inside the seal, and the reply comes back inside it: a plaintext frame either way from
+    // here on is somebody carrying the bytes writing into this socket.
+    expect((await c.request("auth", { token: "secret" })).ok).toBe(true);
+    expect((await c.request("workspaces.list")).ok).toBe(true);
+    // The bytes on the wire are not the frame: a reader of the road sees no op and no token.
+    const raw: Buffer[] = [];
+    c.ws.on("message", data => raw.push(Buffer.from(data as Buffer)));
+    await c.request("workspaces.list");
+    expect(raw.every(bytes => !bytes.toString("utf8").includes("workspaces"))).toBe(true);
+    c.close();
+  });
+
+  it("agrees one key per socket and closes a second ask, and refuses one on a socket already through the door", async () => {
+    const { hostKey, runtime } = served();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret", devices: runtime.devices });
+    const first = await WsClient.connect(srv.port);
+    await openSeal(first, hostKey);
+    void first.request("seal.open", { nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(await first.closed()).toBe(4401);
+
+    const authed = await WsClient.connect(srv.port, { token: "secret" });
+    const late = await authed.request("seal.open", { nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(late.ok).toBe(false);
+    authed.close();
+  });
+
+  it("refuses a place's own handshake on a socket that already agreed a key, so one key stands per socket", async () => {
+    const { hostKey, runtime } = served();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret", devices: runtime.devices });
+    const c = await WsClient.connect(srv.port);
+    await openSeal(c, hostKey);
+    // A link's own agreement would replace the one this socket already counts its frames under, and a place has
+    // no need of a socket a client opened: the frame is refused and the socket ends.
+    const refused = await c.request("place.auth", { placeId: "p_1", nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(refused.ok).toBe(false);
+    expect(await c.closed()).toBe(4401);
+
+    const second = await WsClient.connect(srv.port);
+    await openSeal(second, hostKey);
+    const join = await second.request("place.join", { publicKey: newPlaceKeyPair().publicKey, nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(join.ok).toBe(false);
+    expect(await second.closed()).toBe(4401);
+  });
+
+  it("says in one sentence that a runtime holding no key of its own cannot prove itself, and closes the socket", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port);
+    const refused = await c.request("seal.open", { nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(refused.ok).toBe(false);
+    expect(refused["error"]).toBe(SEAL_UNSERVED);
+    expect(await c.closed()).toBe(4401);
   });
 });
 

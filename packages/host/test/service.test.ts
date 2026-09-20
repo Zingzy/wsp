@@ -33,6 +33,9 @@ import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
+/** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
 runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -741,7 +744,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("wsp status takes --host and reports the host it is aimed at, reading neither this computer's lock nor its manager", async () => {
     const hostsHome = join(home, ".wsp");
-    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", pairedAt: "2026-09-11T00:00:00.000Z" });
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z" });
     // The flag comes off the one shared parse every other flag of a command comes off, so there is no second
     // reading of --host beside the one the verbs take.
     expect(parseArgs({ args: ["status", "--host", "box"], options: SHARED_OPTIONS, allowPositionals: true }).values.host).toBe("box");
@@ -781,7 +784,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("a bare wsp status answers for this computer even where a default alias would send every verb to a box", async () => {
     const hostsHome = join(home, ".wsp");
-    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", pairedAt: "2026-09-11T00:00:00.000Z" });
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z" });
     setDefaultHost(hostsHome, "box");
     const here = { statePath, home: hostsHome, env: {} };
     // Nothing serves this state file, which is the one moment a person runs this line; the default alias answering
