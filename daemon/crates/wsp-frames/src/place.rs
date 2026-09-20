@@ -163,6 +163,16 @@ pub struct PlaceAuthReply {
     pub ephemeral: PlaceEphemeral,
 }
 
+/// What a host that holds no place by the id a computer named puts on its refusal of the first frame: its own
+/// key and a signature over the refusal transcript. Absent from a host older than this, which reads as a refusal
+/// that proved nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceAuthRefusal {
+    pub host_public_key: PlacePublicKey,
+    pub signature: PlaceSignature,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum PlaceProveTag {
     #[serde(rename = "place.prove")]
@@ -228,6 +238,13 @@ pub struct LinkEphemerals<'a> {
 pub fn place_link_transcript(role: LinkRole, place_id: &str, challenge: &str, answer: &str, ephemerals: LinkEphemerals<'_>) -> Vec<u8> {
     let LinkEphemerals { challenger, answerer } = ephemerals;
     format!("wsp place link v2\n{}\n{place_id}\n{challenge}\n{answer}\n{challenger}\n{answerer}\n", role.word()).into_bytes()
+}
+
+/// The bytes a host signs to refuse a place at its first frame, as the protocol's placeRefusalTranscript builds
+/// them: the place id it named, the nonce it challenged with and the sentence, each on its own line. The nonce is
+/// inside, so one dial's refusal cannot be replayed at the next; the sentence is inside, so it cannot be bent.
+pub fn place_refusal_transcript(place_id: &str, place_nonce: &str, sentence: &str) -> Vec<u8> {
+    format!("wsp place refusal v1\n{place_id}\n{place_nonce}\n{sentence}\n").into_bytes()
 }
 
 /// What a computer joined as a place keeps about the wsp it belongs to, as wsp join writes it and the agent reads

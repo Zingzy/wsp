@@ -7,7 +7,7 @@ import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
 import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
-import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
+import { BOX_KEY_ENV, PROVIDER_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
 
 /** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
  * is where every layer a key is read through puts it. */
@@ -159,6 +159,21 @@ describe("provider modules", () => {
     expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
+  });
+
+  it("the pick rides the same layers as the keys: the word wsp add wrote in a file is read, the shell and the line in front of it", () => {
+    const beside = { WSP_PROVIDER: "box" };
+    // The layers as a host reads them: the environment it started in, its folder's .env, then the file beside its
+    // state. A word written into that file is the pick, which is what wsp add's own sentence promises.
+    expect(providerEnvWith({}, {}, [{}, {}, beside])[PROVIDER_ENV]).toBe("box");
+    expect(wiredProviderId(providerEnvWith({}, {}, [{}, {}, beside]))).toBe("box");
+    // The shell wins over the file, and the word typed on the line wins over both.
+    expect(providerEnvWith({}, { WSP_PROVIDER: "solari" }, [{ WSP_PROVIDER: "solari" }, {}, beside])[PROVIDER_ENV]).toBe("solari");
+    expect(providerEnvWith({ provider: "solari" }, {}, [{}, {}, beside])[PROVIDER_ENV]).toBe("solari");
+    // A stand-in's own variables are the run's to name and are never taken out of a file.
+    expect(providerEnvWith({}, {}, [{}, {}, { [FAKE_AS_ENV]: "solari" }])[FAKE_AS_ENV]).toBeUndefined();
+    // An empty line is no pick, as it is no key.
+    expect(providerEnvWith({}, {}, [{}, {}, { WSP_PROVIDER: "" }])[PROVIDER_ENV]).toBeUndefined();
   });
 
   it("the environment a provider is picked out of carries every registered row's key, taken from the first layer that holds it", () => {

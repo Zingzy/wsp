@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
 import { stateWriterHere } from "../src/version.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
+import { noProviderStorageLine } from "../src/storage.js";
 import type { HostHandle } from "../src/server.js";
 import { fakeSsh } from "../../runtime/test/fake-ssh.js";
 import { PAGE, captured } from "./verbs-fixture.js";
@@ -75,7 +76,9 @@ describe("a computer with no machine provider key", () => {
     expect(served.errors).toEqual([]);
     // A workspace is one project's copy, so a start records none and the first line says what records one.
     expect(served.lines[0]).toBe(NO_PROJECT_YET);
-    expect(served.lines[1]).toBe(`app         http://127.0.0.1:${handle!.port}`);
+    // Then the line where a storage listing would have been: this host has no provider to ask and does not ask.
+    expect(served.lines[1]).toBe(noProviderStorageLine(statePath));
+    expect(served.lines[2]).toBe(`app         http://127.0.0.1:${handle!.port}`);
     // A folder of the person's own, worked in place, is the workspace here.
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-keyless-")));
     execFileSync("git", ["init", "-q", folder]);

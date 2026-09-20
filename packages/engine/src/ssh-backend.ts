@@ -649,8 +649,3 @@ export class SshBackend implements MachineBackend {
     return this.knownHosts(reach);
   }
 }
-
-/** The dial behind a machine handle, read off its id, which is the same fact whoever holds the handle. */
-export function sshReachOf(machine: Machine): SshReach | undefined {
-  return parseSshMachineId(machine.id);
-}

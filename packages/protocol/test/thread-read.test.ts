@@ -46,6 +46,55 @@ describe("a thread's messages", () => {
     ]);
   });
 
+  it("reads the harness's two messages as two rows: the reply given while a background command ran and the one it was woken for", () => {
+    const rows = threadMessages(
+      [
+        { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "hold for 90 seconds" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1_000, kind: "text", text: "Waiting for the hold to complete.", messageId: "msg_a" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 91_000, kind: "text", text: "Done. ", messageId: "msg_b" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 91_500, kind: "text", text: "It ended with exit code 0.", messageId: "msg_b" },
+      ],
+      "t1",
+    );
+    expect(rows).toEqual([
+      { who: "person", at: AT, text: "hold for 90 seconds" },
+      { who: "agent", at: AT + 1_000, text: "Waiting for the hold to complete." },
+      { who: "agent", at: AT + 91_000, text: "Done. It ended with exit code 0." },
+    ]);
+  });
+
+  it("leaves a harness's note out: a read is the words of a thread, and the note is the harness talking about itself", () => {
+    const rows = threadMessages(
+      [
+        { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "say ready" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1, kind: "note", text: "loading hooks from both files; prefer a single representation for this layer" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 2, kind: "text", text: "ready" },
+      ],
+      "t1",
+    );
+    expect(rows).toEqual([
+      { who: "person", at: AT, text: "say ready" },
+      { who: "agent", at: AT + 2, text: "ready" },
+    ]);
+  });
+
+  it("keeps the pieces of one message in one row, and text a harness named no message for appends as it always did", () => {
+    const pieces = (first: Partial<{ messageId: string }>, second: Partial<{ messageId: string }>): string[] =>
+      threadMessages(
+        [
+          { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "go" },
+          { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1, kind: "text", text: "half a ", ...first },
+          { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 2, kind: "text", text: "sentence", ...second },
+        ],
+        "t1",
+      )
+        .filter(row => row.who === "agent")
+        .map(row => row.text);
+    expect(pieces({ messageId: "msg_a" }, { messageId: "msg_a" })).toEqual(["half a sentence"]);
+    expect(pieces({}, {})).toEqual(["half a sentence"]);
+    expect(pieces({}, { messageId: "msg_a" })).toEqual(["half a sentence"]);
+  });
+
   it("reads only the named thread's events, and none of a row the runtime stamped no thread on", () => {
     const other: SessionEvent[] = [
       { type: "session.start", workspaceId: "w1", sessionId: "s2", threadId: "t2", at: AT, prompt: "someone else's task" },

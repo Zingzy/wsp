@@ -32,6 +32,11 @@ export function describeOwners(s: SnapshotStorage): string {
   return parts.filter(([g]) => g.count > 0).map(([g, words]) => `${g.count} ${words}, ${gb(g.bytes)}`).join("; ");
 }
 
+/** What a host wired to no provider says where the storage line would have been: it asks no listing, because
+ * there is no account to ask and no key to ask with. The state file is named because the key is read beside it. */
+export const noProviderStorageLine = (statePath?: string): string =>
+  `storage: nothing listed; this host is wired to no provider${statePath === undefined ? "" : ` (no key beside ${statePath})`}`;
+
 export function describeStorage(s: SnapshotStorage): string {
   const cost = s.monthlyUsd > 0 ? `${perMonth(s.monthlyUsd)} above the free ${s.freeGb} GB from ${s.billedFrom}` : `inside the free ${s.freeGb} GB, nothing to pay from ${s.billedFrom}`;
   const owners = describeOwners(s);
