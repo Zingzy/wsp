@@ -338,16 +338,16 @@ impl Ops {
 
     /// The workspace's socket bound in its directory and its accept loop started over the box's engine; one already
     /// served is replaced. What the fence may bind for a container comes from this record and from no file inside
-    /// the workspace, and the staging directory those binds land in is emptied first: an earlier life of this
-    /// fence numbered its entries from the same place, and a container still running holds its own copy of the
-    /// mount and is untouched by the detach.
+    /// the workspace. Every entry an earlier life of this fence staged stands: this runs at every boot and again
+    /// for every running workspace at a daemon restart, and the engine still holds the containers that mount
+    /// them, each naming the entry the life that made it was given. This life's entries take their names from
+    /// this life's own init and sit beside them, and the remove is what takes them all.
     async fn serve_engine(&self, record: &Workspace) -> Result<(), OpError> {
         let id = record.id.as_str();
         let socket = engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         let listener = engine::bind(&self.layout.engine(id))?;
         let binds = self.layout.binds(id);
-        clear_binds(&binds)?;
-        fs::create_dir_all(&binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
+        ready_binds(&binds)?;
         let fence = Fence::new(
             id.to_owned(),
             self.layout.rootfs(id),
@@ -1444,6 +1444,13 @@ fn life_of(init: &Init) -> String {
     format!("{hash:016x}")
 }
 
+/// The staging directory ready for the fence about to serve: made where it is not there, and left exactly as it
+/// is where it is. Nothing is detached and nothing removed here, since a container the engine still holds mounts
+/// the entry its own life was given and its next start resolves that entry again.
+fn ready_binds(binds: &Path) -> Result<(), OpError> {
+    fs::create_dir_all(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))
+}
+
 /// Every bind the fence staged detached and the directory holding them gone.
 fn clear_binds(binds: &Path) -> Result<(), OpError> {
     bundle::unmount_inside(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
@@ -1779,6 +1786,10 @@ mod tests {
         let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let binds = ops.layout.binds("wsp-a");
         fs::create_dir_all(binds.join("earlier-0")).unwrap();
+        // What a wake and a daemon restart run before the fence serves again: the directory is made where it is
+        // not there and every entry of the life before stands, since the engine still holds what mounts them.
+        ready_binds(&binds).unwrap();
+        assert!(binds.join("earlier-0").is_dir(), "the road a restore takes emptied the entries of the life before");
         ops.stop_engine("wsp-a").await;
         assert!(binds.join("earlier-0").is_dir(), "a stop took the entry a container made in an earlier life mounts");
         clear_binds(&binds).unwrap();
