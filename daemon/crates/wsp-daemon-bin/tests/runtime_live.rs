@@ -1667,28 +1667,55 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
         eprintln!("== the box pulled the image first:\n{said}");
     }
     let outside_id = container_id(&started).unwrap_or_else(|| panic!("no container id on stdout: {started:?}"));
-    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-665-engine-{key}") }))).await;
-    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
-    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
-    let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
-    show("the socket inside the workspace made with --engine", code, &out, &err);
-    assert_eq!(code, 0);
+    // The project the compose stack is run from: a checkout on the box, copied into the workspace by the create.
+    // What a container of this workspace may bind is that copy and nothing else, off the record the create wrote,
+    // so nothing the workspace writes inside decides it.
+    let from = root().join("projects").join(format!("live-compose-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    fs::create_dir_all(from.join("html")).unwrap();
+    fs::write(from.join("html/index.html"), b"hello-from-workspace\n").unwrap();
     // Both services wear this suite's own label, so a person sweeping the box after a run that died finds them
     // by one filter: a compose stack's containers are named after its project and not after this suite.
     let compose_file = format!(
         "services:\n  db:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_PASSWORD: wsp\n    labels:\n      {LIVE_LABEL}: \"1\"\n  web:\n    image: nginx:alpine\n    ports:\n      - \"18080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    labels:\n      {LIVE_LABEL}: \"1\"\n    depends_on: [db]\n"
     );
+    fs::write(from.join("compose.yaml"), compose_file.as_bytes()).unwrap();
+    let project = "/live-compose";
+    let id = w
+        .create(spec(json!({
+            "engine": true,
+            "copy": { "from": from.display().to_string(), "at": project },
+            "idempotencyKey": format!("live-engine-{key}")
+        })))
+        .await;
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
+    let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
+    show("the socket inside the workspace made with --engine", code, &out, &err);
+    assert_eq!(code, 0);
+    // The staging directory the fence binds a source into is beside the socket's on the box and inside nowhere.
+    assert!(!out.contains("binds"), "the staging directory shows inside the workspace: {out}");
+    // The file the allowlist used to live in, written by the workspace to say it may bind the whole box.
     let (code, _, err) = w
         .exec(
             &id,
-            &format!(
-                "mkdir -p /var/tmp/demo/html /root/.wsp && echo hello-from-workspace > /var/tmp/demo/html/index.html && printf '%s' '{compose_file}' > /var/tmp/demo/compose.yaml && echo /var/tmp/demo > /root/.wsp/roots && docker version --format 'client {{{{.Client.Version}}}} server {{{{.Server.Version}}}}'"
-            ),
+            "mkdir -p /root/.wsp && echo / > /root/.wsp/roots && docker version --format 'client {{.Client.Version}} server {{.Server.Version}}'",
         )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (code, out, err) = w.exec(&id, "docker run --rm -v /etc:/x alpine ls /x 2>&1").await;
+    show("docker run -v /etc:/x after writing / into the roots file, from inside", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains(&format!("({project}), and /etc does not")), "{out}");
+    // A link the workspace plants under its own project, which the engine would resolve at the container's start.
+    let (code, _, err) = w.exec(&id, &format!("ln -sfn /etc {project}/html2")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (code, out, err) = w.exec(&id, &format!("docker run --rm -v {project}/html2:/x alpine ls /x 2>&1")).await;
+    show("docker run -v <project>/html2:/x where html2 is a link, from inside", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains("is reached through a link inside the workspace"), "{out}");
     let started = Instant::now();
-    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo up -d 2>&1").await;
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo up -d 2>&1")).await;
     show("docker compose up -d, from inside", code, &out, &err);
     // The pull has happened, so the ids this case brought are the ids it removes at its end.
     images.pulled();
@@ -1708,9 +1735,14 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     show("docker run -v /:/host, from inside", code, &out, &err);
     assert_ne!(code, 0);
     assert!(
-        out.contains("a bind mount's source must sit under a project folder of this workspace (/var/tmp/demo), and / does not"),
+        out.contains(&format!("a bind mount's source must sit under a project folder of this workspace ({project}), and / does not")),
         "{out}"
     );
+    // The bind the stack's own service asked for: staged under the workspace's own run folder on the box, which
+    // is where the engine read it from, and nothing of the copy's own path handed over.
+    let staged = root().join("run").join(&id).join("binds");
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(mounts.contains(staged.to_str().unwrap()), "no staged bind under {}", staged.display());
     // The page is asked for once the service listens, not once `up -d` has returned. Measured on a box: nginx
     // answers 1.2 to 2.0 s after its container starts, and until it does the engine's published port on the
     // box's loopback accepts the connection and closes it with no byte, which reads exactly like a forward that
@@ -1758,11 +1790,11 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     eprintln!("== cost: docker ps through the fence {fenced} ms, straight at the engine {straight} ms (mean of 20, from the box)");
     let status = fs::read_to_string("/proc/self/status").unwrap();
     eprintln!("== this process VmRSS with the proxy and forwards up: {}", status.lines().find(|l| l.starts_with("VmRSS")).unwrap_or(""));
-    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo down -v 2>&1").await;
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo down -v 2>&1")).await;
     show("docker compose down -v, from inside", code, &out, &err);
     assert_eq!(code, 0);
     // A workspace made without the engine: no socket, and the client says so.
-    let plain = w.create(spec(json!({ "idempotencyKey": format!("live-665-noengine-{key}") }))).await;
+    let plain = w.create(spec(json!({ "idempotencyKey": format!("live-noengine-{key}") }))).await;
     put_file(&w, &plain, &docker, "/usr/local/bin/docker").await;
     let (code, out, err) = w.exec(&plain, "ls -la /var/run/docker.sock /run/wsp 2>&1; docker ps 2>&1").await;
     show("a workspace made without --engine: the socket and docker ps", code, &out, &err);
@@ -1776,6 +1808,9 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     eprintln!("== after the kill, on the box: containers [{}] networks [{}]", left.trim(), networks.trim());
     assert_eq!((left.trim(), networks.trim()), ("", ""), "the killed workspace left containers on the engine");
     assert!(!socket.exists(), "the socket stays after the kill");
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(!mounts.contains(staged.to_str().unwrap()), "a staged bind stays mounted after the kill");
+    assert!(!staged.exists(), "the staging directory stays after the kill");
     let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
     assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
 }
@@ -1817,12 +1852,7 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
     // The label every container this suite makes on the box wears, so a person sweeping the box after a run that
     // died can find them by one filter rather than by name.
     let stack = format!("services:\n  quiet:\n    image: alpine\n    command: sleep 600\n    labels:\n      {LIVE_LABEL}: \"1\"\n");
-    let (code, _, err) = w
-        .exec(
-            &id,
-            &format!("mkdir -p /var/tmp/stack /root/.wsp && printf '%s' '{stack}' > /var/tmp/stack/compose.yaml && echo /var/tmp/stack > /root/.wsp/roots"),
-        )
-        .await;
+    let (code, _, err) = w.exec(&id, &format!("mkdir -p /var/tmp/stack && printf '%s' '{stack}' > /var/tmp/stack/compose.yaml")).await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
     // No project named on the command line: what compose uses is the name in the environment, and without one it
     // would be the directory's, which every workspace of one project shares.

@@ -10,6 +10,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
+use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -109,6 +110,13 @@ impl Layout {
     /// The directory holding the workspace's fenced engine socket, bound into it where it asked for an engine.
     pub fn engine(&self, id: &str) -> PathBuf {
         self.workspace(id).join("engine")
+    }
+    /// Where the fence stages the sources a container of this workspace binds, one entry per source: the fence
+    /// opens the source beneath the rootfs with no link followed and binds it here, and this is the path the
+    /// engine is handed. Beside the engine socket's directory and bound into the workspace nowhere, so nothing
+    /// inside reaches an entry to unlink it and put a link of its own in its place before the container starts.
+    pub fn binds(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("binds")
     }
     /// youki's own root: `<root>/state/<id>` holds its state.json and notify sockets.
     pub fn state(&self) -> PathBuf {
@@ -689,6 +697,13 @@ pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     mount_bind(source, target)
 }
 
+/// A source already opened as a descriptor, bound at a path of this daemon's own: the mount lands on the inode
+/// the descriptor holds, so a path swapped underneath between the open and the mount mounts nothing. The target
+/// is the caller's to make, since a bind wants a directory at both ends or a file at both.
+pub fn bind_opened(source: &impl AsFd, target: &Path) -> Result<(), Error> {
+    mount_bind(Path::new(&format!("/proc/self/fd/{}", source.as_fd().as_raw_fd())), target)
+}
+
 /// The two calls of one bind, made in the one order: every bind under a rootfs goes through here, so neither road
 /// can make one and forget the propagation that makes it receive only.
 fn mount_bind(source: &Path, target: &Path) -> Result<(), Error> {
@@ -901,6 +916,12 @@ mod tests {
         assert_eq!(l.wsp_home("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home"));
         assert_ne!(l.wsp_home("wsp-a"), l.wsp_home("wsp-b"));
         assert_eq!(l.empty_at("wsp-a", "/var/lib/docker"), PathBuf::from("/wsp/run/wsp-a/empty/var/lib/docker"));
+        // The fence's staging directory sits beside the engine socket's and under neither: what is bound into
+        // the workspace is the socket's directory alone, so nothing inside reaches a staged bind.
+        assert_eq!(l.binds("wsp-a"), PathBuf::from("/wsp/run/wsp-a/binds"));
+        assert!(l.binds("wsp-a").starts_with(l.workspace("wsp-a")));
+        assert_ne!(l.binds("wsp-a"), l.engine("wsp-a"));
+        assert!(!l.binds("wsp-a").starts_with(l.engine("wsp-a")) && !l.engine("wsp-a").starts_with(l.binds("wsp-a")));
         // An empty directory per path and no two of them one directory: what a workspace writes at one of them
         // is not what it writes at another.
         let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
@@ -992,6 +1013,14 @@ mod tests {
         let with_engine = config_json(&Config { engine: Some(Path::new("/wsp/run/wsp-a/engine")), ..c });
         let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
         assert_eq!(socket_dir["source"], "/wsp/run/wsp-a/engine");
+        // The socket's directory and nothing beside it: the fence's staging directory is bound in nowhere, so
+        // a workspace reaches no entry the engine is about to mount for it.
+        let staging = Layout::new(Path::new("/wsp")).binds("wsp-a");
+        assert!(
+            with_engine["mounts"].as_array().unwrap().iter().all(|m| !Path::new(m["source"].as_str().unwrap_or("")).starts_with(&staging)),
+            "{:?}",
+            with_engine["mounts"]
+        );
         // The compose project is the workspace's own, and it is the last word in the environment: a workspace
         // with an engine runs compose against the box's engine through the fence, and two workspaces of one
         // project share no network there only because their project names differ.

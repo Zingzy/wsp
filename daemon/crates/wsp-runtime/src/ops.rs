@@ -327,7 +327,7 @@ impl Ops {
         let running = running_ids(&self.layout)?;
         self.net.restore(&running).await?;
         for record in self.records()? {
-            if record.engine && running.contains(&record.id) && self.serve_engine(&record.id).await.is_ok() {
+            if record.engine && running.contains(&record.id) && self.serve_engine(&record).await.is_ok() {
                 self.join_ports(&record).await;
             }
         }
@@ -335,16 +335,25 @@ impl Ops {
     }
 
     /// The workspace's socket bound in its directory and its accept loop started over the box's engine; one already
-    /// served is replaced.
-    async fn serve_engine(&self, id: &str) -> Result<(), OpError> {
+    /// served is replaced. What the fence may bind for a container comes from this record and from no file inside
+    /// the workspace, and the staging directory those binds land in is emptied first: an earlier life of this
+    /// fence numbered its entries from the same place, and a container still running holds its own copy of the
+    /// mount and is untouched by the detach.
+    async fn serve_engine(&self, record: &Workspace) -> Result<(), OpError> {
+        let id = record.id.as_str();
         let socket = engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         let listener = engine::bind(&self.layout.engine(id))?;
-        let fence = Fence {
-            workspace: id.to_owned(),
-            rootfs: self.layout.rootfs(id),
-            engine: socket,
-            ports: Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
-        };
+        let binds = self.layout.binds(id);
+        clear_binds(&binds)?;
+        fs::create_dir_all(&binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
+        let fence = Fence::new(
+            id.to_owned(),
+            self.layout.rootfs(id),
+            bind_roots(&self.layout, record),
+            binds,
+            socket,
+            Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
+        );
         let task = tokio::spawn(engine::serve(listener, Arc::new(fence)));
         if let Some(old) = self.engines.lock().await.insert(id.to_owned(), task) {
             old.abort();
@@ -362,12 +371,14 @@ impl Ops {
         }
     }
 
-    /// The accept loop ended and the socket file gone; the directory stays with the bundle.
+    /// The accept loop ended, the socket file gone and every bind this fence staged for the engine detached and
+    /// taken away; the socket's directory stays with the bundle.
     async fn stop_engine(&self, id: &str) {
         if let Some(task) = self.engines.lock().await.remove(id) {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
+        let _ = clear_binds(&self.layout.binds(id));
     }
 
     /// The daemon takes the workspaces over from here: every boot and every stop after this is told as it
@@ -1031,7 +1042,7 @@ impl Ops {
             freeze::throttle_at(&cgroup, mem_mb)?;
         }
         if record.engine {
-            self.serve_engine(&id).await?;
+            self.serve_engine(&record).await?;
         }
         self.runtime.start(&id).await?;
         // Ready is the boot command running, not the start returning: the start execs the workspace's first
@@ -1385,6 +1396,25 @@ fn make_points(layout: &Layout, id: &str, wanted: &[Share], held: &[String]) -> 
 /// that was there before any workspace asked for it is the person's and is never recorded.
 fn point_is_ours(target: &str, stood: bool, held: &[String]) -> bool {
     bundle::under_computer_tree(target).is_some() && (!stood || held.iter().any(|point| point == target))
+}
+
+/// Where this workspace's containers may bind from, off its own record: the copy of a checkout at the path it is
+/// mounted inside, and every folder of this computer's the create bound in, each paired with the directory on the
+/// box behind it. Nothing a workspace writes is read here, which is what makes the allowlist an authority.
+fn bind_roots(layout: &Layout, record: &Workspace) -> Vec<(String, PathBuf)> {
+    let mut roots: Vec<(String, PathBuf)> = record.copy.iter().map(|made| (made.at.clone(), layout.copy_of(&record.id))).collect();
+    roots.extend(record.binds.iter().map(|bind| (bind.target.clone(), PathBuf::from(&bind.source))));
+    roots
+}
+
+/// Every bind the fence staged detached and the directory holding them gone.
+fn clear_binds(binds: &Path) -> Result<(), OpError> {
+    bundle::unmount_under(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
+    match fs::remove_dir_all(binds) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(OpError::plain(format!("{}: {e}", binds.display()))),
+    }
 }
 
 /// The join of a container's published port to the workspace's loopback, made off the proxy's own task once the

@@ -30,7 +30,6 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use wsp_frames::numbers::DAEMON_ROOTS_PATH;
 
 use crate::doctor::{Engine, Facts};
 
@@ -426,28 +425,94 @@ pub fn filtered_query(query: Option<&str>, workspace: &str) -> Result<String, St
     Ok(parts.join("&"))
 }
 
-/// The box path the engine mounts for a bind source inside the workspace: the path under the rootfs, resolved, and
-/// only where it sits under one of the project folders the roots file names, resolved too, so a link inside pointing
-/// out of the workspace is refused as the box path it would reach.
-pub fn map_bind(rootfs: &Path, roots_file: &Path, source: &str) -> Result<PathBuf, String> {
-    let roots: Vec<String> = fs::read_to_string(roots_file)
-        .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect())
-        .unwrap_or_default();
+/// A path opened beneath a directory with no link followed anywhere in it: the kernel refuses the open where a
+/// component is a link or a magic link and where the path would leave the directory, so what the descriptor
+/// holds is the inode at that path under that directory and nothing else. Opened for its path alone, which is
+/// what a bind mounts through and what a stat reads.
+fn open_beneath(dir: &Path, at: &str) -> io::Result<std::os::fd::OwnedFd> {
+    let under = at.trim_start_matches('/');
+    let under = if under.is_empty() { "." } else { under };
+    let how = nix::fcntl::OpenHow::new().flags(nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_CLOEXEC).resolve(
+        nix::fcntl::ResolveFlag::RESOLVE_BENEATH
+            | nix::fcntl::ResolveFlag::RESOLVE_NO_SYMLINKS
+            | nix::fcntl::ResolveFlag::RESOLVE_NO_MAGICLINKS,
+    );
+    let root = fs::File::open(dir)?;
+    nix::fcntl::openat2(&root, under, how).map_err(io::Error::from)
+}
+
+/// The same, with the one sentence a bind source is refused with: a link met on the way and a path that would
+/// leave the directory are the road this fence closes, and anything else is the path not being there.
+fn beneath(dir: &Path, at: &str, source: &str) -> Result<std::os::fd::OwnedFd, String> {
+    open_beneath(dir, at).map_err(|e| {
+        let loop_or_out = [nix::errno::Errno::ELOOP as i32, nix::errno::Errno::EXDEV as i32];
+        if e.raw_os_error().is_some_and(|code| loop_or_out.contains(&code)) {
+            format!("{source} is reached through a link inside the workspace, and a container binds nothing through a link")
+        } else {
+            format!("{source} is not there in the workspace")
+        }
+    })
+}
+
+/// One bind source staged for the engine: the entry it is bound at, which is the path the create carries on,
+/// and the descriptor the source was opened at, which is the inode the bind lands on.
+#[derive(Debug)]
+pub struct Staged {
+    pub at: PathBuf,
+    pub source: std::os::fd::OwnedFd,
+}
+
+/// Where the engine mounts a bind source from, for a source inside the workspace. Three walls in order: the
+/// source is a plain path and opens beneath the rootfs with no link followed, so nothing the workspace planted
+/// under its own project resolves out of it; its path sits under one of the folders the workspace's own record
+/// says its containers may bind; and the remainder opens beneath that folder on the box the same way and is
+/// staged at `binds/<at>`, an entry under a directory nothing inside the workspace reaches. What the engine is
+/// handed is that entry: the engine resolves a bind source again at every container start, so a path this fence
+/// only read would be a path the workspace swapped in between.
+pub fn map_bind(rootfs: &Path, roots: &[(String, PathBuf)], binds: &Path, at: usize, source: &str) -> Result<Staged, String> {
     if roots.is_empty() {
         return Err(format!("this workspace has no project folder yet, so a container can bind nothing of it; {source} is refused"));
     }
-    if !source.starts_with('/') {
+    if !wsp_frames::is_plain_path(source) {
         return Err(format!("a bind mount's source is an absolute path inside the workspace, and {source} is not"));
     }
-    let mapped =
-        fs::canonicalize(rootfs.join(source.trim_start_matches('/'))).map_err(|_| format!("{source} is not there in the workspace"))?;
-    for root in &roots {
-        let Ok(real) = fs::canonicalize(rootfs.join(root.trim_start_matches('/'))) else { continue };
-        if mapped == real || mapped.starts_with(&real) {
-            return Ok(mapped);
-        }
-    }
-    Err(format!("a bind mount's source must sit under a project folder of this workspace ({}), and {source} does not", roots.join(", ")))
+    drop(beneath(rootfs, source, source)?);
+    let under = |root: &str| {
+        let rest = source.strip_prefix(root)?;
+        (rest.is_empty() || rest.starts_with('/')).then(|| rest.trim_start_matches('/').to_owned())
+    };
+    let Some((rest, root)) = roots.iter().find_map(|(inside, on_box)| Some((under(inside)?, on_box))) else {
+        let named: Vec<&str> = roots.iter().map(|(inside, _)| inside.as_str()).collect();
+        return Err(format!(
+            "a bind mount's source must sit under a project folder of this workspace ({}), and {source} does not",
+            named.join(", ")
+        ));
+    };
+    let opened = beneath(root, &rest, source)?;
+    let staged = stage(binds, at, &opened)?;
+    Ok(Staged { at: staged, source: opened })
+}
+
+/// The entry one bind source is staged at, made through a descriptor of the staging directory: a directory for
+/// a directory and an empty file for anything else, since a bind wants the same kind at both ends.
+fn stage(binds: &Path, at: usize, source: &std::os::fd::OwnedFd) -> Result<PathBuf, String> {
+    let held = nix::sys::stat::fstat(source).map_err(|e| format!("the bind source could not be read: {e}"))?;
+    let directory = nix::sys::stat::SFlag::from_bits_truncate(held.st_mode).contains(nix::sys::stat::SFlag::S_IFDIR);
+    let dir = fs::File::open(binds).map_err(|e| format!("{}: {e}", binds.display()))?;
+    let name = at.to_string();
+    let made = if directory {
+        nix::sys::stat::mkdirat(&dir, name.as_str(), nix::sys::stat::Mode::from_bits_truncate(0o700))
+    } else {
+        nix::fcntl::openat(
+            &dir,
+            name.as_str(),
+            nix::fcntl::OFlag::O_CREAT | nix::fcntl::OFlag::O_EXCL | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_WRONLY,
+            nix::sys::stat::Mode::from_bits_truncate(0o600),
+        )
+        .map(|_| ())
+    };
+    made.map_err(|e| format!("{}/{name}: {e}", binds.display()))?;
+    Ok(binds.join(name))
 }
 
 /// The ports a container's create asked for, joined to the box ports the engine bound: (inside, box) pairs.
@@ -479,17 +544,36 @@ pub trait Ports: Send + Sync {
 pub struct Fence {
     pub workspace: String,
     pub rootfs: PathBuf,
+    /// Where a container of this workspace may bind from: the path inside paired with the box directory bound
+    /// there, read off the workspace's own record. Not off a file inside the workspace, which the workspace
+    /// writes, so the allowlist is an authority of its own.
+    pub roots: Vec<(String, PathBuf)>,
+    /// Where those sources are staged for the engine.
+    pub binds: PathBuf,
     pub engine: PathBuf,
     pub ports: Arc<dyn Ports>,
+    /// The next staging entry's name. One entry per bind source per create, since the alternative is reusing an
+    /// inode a workspace may have replaced since.
+    staged: std::sync::atomic::AtomicUsize,
 }
 
 impl Fence {
-    fn roots_file(&self) -> PathBuf {
-        self.rootfs.join(DAEMON_ROOTS_PATH.trim_start_matches('/'))
+    pub fn new(
+        workspace: String,
+        rootfs: PathBuf,
+        roots: Vec<(String, PathBuf)>,
+        binds: PathBuf,
+        engine: PathBuf,
+        ports: Arc<dyn Ports>,
+    ) -> Fence {
+        Fence { workspace, rootfs, roots, binds, engine, ports, staged: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn map_bind(&self, source: &str) -> Result<PathBuf, String> {
-        map_bind(&self.rootfs, &self.roots_file(), source)
+        let at = self.staged.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let staged = map_bind(&self.rootfs, &self.roots, &self.binds, at, source)?;
+        crate::bundle::bind_opened(&staged.source, &staged.at).map_err(|e| format!("{source} could not be staged for the engine: {e}"))?;
+        Ok(staged.at)
     }
 }
 
@@ -1338,32 +1422,74 @@ mod tests {
         assert_eq!(fence_create(&mut from, "w", &no_binds).unwrap().containers, vec!["data"]);
     }
 
+    /// The allowlist is the record's and the source is opened by descriptor at both ends: what the engine is
+    /// handed is an entry under the daemon's own staging directory, never the box path the source sits at, and
+    /// a link anywhere on either side refuses the create.
     #[test]
-    fn a_bind_outside_the_project_folder_is_refused_with_the_mapping_functions_sentence() {
+    fn a_bind_is_read_off_the_record_opened_with_no_link_followed_and_staged() {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = dir.path().join("rootfs");
-        fs::create_dir_all(rootfs.join("root/demo/html")).unwrap();
-        fs::create_dir_all(rootfs.join("root/other")).unwrap();
-        fs::create_dir_all(rootfs.join("root/.wsp")).unwrap();
-        fs::create_dir_all(rootfs.join("etc")).unwrap();
-        let roots = rootfs.join("root/.wsp/roots");
-        let map = |source: &str| map_bind(&rootfs, &roots, source);
-        assert!(map("/root/demo").unwrap_err().contains("no project folder yet"));
-        fs::write(&roots, "/root/demo\n").unwrap();
-        assert_eq!(map("/root/demo/html").unwrap(), rootfs.join("root/demo/html").canonicalize().unwrap());
-        assert_eq!(map("/root/demo").unwrap(), rootfs.join("root/demo").canonicalize().unwrap());
-        let outside = map("/").unwrap_err();
-        assert_eq!(outside, "a bind mount's source must sit under a project folder of this workspace (/root/demo), and / does not");
-        assert!(map("/root/other").unwrap_err().contains("and /root/other does not"));
-        assert!(map("/root/demo/missing").unwrap_err().contains("is not there in the workspace"));
-        assert!(map("relative").unwrap_err().contains("absolute path"));
-        // A link inside the project folder that points out of the workspace is refused as the box path it reaches.
-        std::os::unix::fs::symlink("/", rootfs.join("root/demo/escape")).unwrap();
-        assert!(map("/root/demo/escape").unwrap_err().contains("and /root/demo/escape does not"));
+        let on_box = dir.path().join("copies/wsp-a");
+        let binds = dir.path().join("binds");
+        // Every path read below is there inside the workspace, so what answers is the allowlist and not the
+        // path being missing.
+        for made in [
+            rootfs.join("wsp/projects/demo/html"),
+            rootfs.join("wsp/projects/demo/link/x"),
+            rootfs.join("wsp/projects/demoted"),
+            rootfs.join("root/.wsp"),
+            rootfs.join("root/other"),
+            rootfs.join("etc"),
+        ] {
+            fs::create_dir_all(made).unwrap();
+        }
+        for made in [on_box.join("html"), on_box.join("elsewhere/x"), binds.clone()] {
+            fs::create_dir_all(made).unwrap();
+        }
+        // A link the workspace planted under its own project, on each side of the bind in turn.
+        std::os::unix::fs::symlink("/", rootfs.join("wsp/projects/demo/escape")).unwrap();
+        std::os::unix::fs::symlink("elsewhere", on_box.join("link")).unwrap();
+        let roots = vec![("/wsp/projects/demo".to_owned(), on_box.clone())];
+        let map = |at: usize, source: &str| map_bind(&rootfs, &roots, &binds, at, source);
+
+        let staged = map(0, "/wsp/projects/demo/html").unwrap();
+        assert_eq!(staged.at, binds.join("0"), "the engine is handed the staging entry");
+        assert!(staged.at.is_dir() && !staged.at.starts_with(&on_box), "{}", staged.at.display());
+        assert_eq!(map(1, "/wsp/projects/demo").unwrap().at, binds.join("1"), "the project folder itself is a source");
+        // A link met on the rootfs side, and one met on the box side behind a path the rootfs side holds whole.
+        for through in ["/wsp/projects/demo/escape", "/wsp/projects/demo/link/x"] {
+            let refused = map(2, through).unwrap_err();
+            assert_eq!(
+                refused,
+                format!("{through} is reached through a link inside the workspace, and a container binds nothing through a link")
+            );
+        }
+        let outside = map(2, "/").unwrap_err();
+        assert_eq!(outside, "a bind mount's source must sit under a project folder of this workspace (/wsp/projects/demo), and / does not");
+        assert!(map(2, "/etc").unwrap_err().contains("and /etc does not"));
+        assert!(map(2, "/root/other").unwrap_err().contains("and /root/other does not"));
+        // A name that merely begins with the folder's own is not under it.
+        assert!(map(2, "/wsp/projects/demoted").unwrap_err().contains("and /wsp/projects/demoted does not"));
+        assert!(map(2, "/wsp/projects/demo/missing").unwrap_err().contains("is not there in the workspace"));
+        assert!(map(2, "relative").unwrap_err().contains("absolute path"));
+        assert!(map(2, "/wsp/projects/demo/../../etc").unwrap_err().contains("absolute path"));
+        // The roots file the workspace owns says nothing here, however it is written.
+        fs::write(rootfs.join("root/.wsp/roots"), "/\n/etc\n").unwrap();
+        assert!(map(2, "/etc").unwrap_err().contains("and /etc does not"));
+        // A workspace the record gives no folder binds nothing at all.
+        let none = map_bind(&rootfs, &[], &binds, 2, "/wsp/projects/demo/html").unwrap_err();
+        assert!(none.contains("no project folder yet"), "{none}");
+
+        let next = std::sync::atomic::AtomicUsize::new(3);
+        let mapped = |source: &str| map(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed), source).map(|staged| staged.at);
         let mut body = json!({ "Image": "alpine", "HostConfig": { "Binds": ["/:/host"] } });
-        assert_eq!(fence_create(&mut body, "w", &map).unwrap_err(), outside);
+        assert_eq!(fence_create(&mut body, "w", &mapped).unwrap_err(), outside);
         let mut mount = json!({ "Image": "alpine", "HostConfig": { "Mounts": [{ "Type": "bind", "Source": "/etc", "Target": "/x" }] }});
-        assert!(fence_create(&mut mount, "w", &map).unwrap_err().contains("and /etc does not"));
+        assert!(fence_create(&mut mount, "w", &mapped).unwrap_err().contains("and /etc does not"));
+        let mut fine = json!({ "Image": "alpine", "HostConfig": { "Binds": ["/wsp/projects/demo/html:/usr/share/nginx/html:ro"] } });
+        let entry = next.load(std::sync::atomic::Ordering::Relaxed);
+        fence_create(&mut fine, "w", &mapped).unwrap();
+        assert_eq!(fine["HostConfig"]["Binds"][0], format!("{}:/usr/share/nginx/html:ro", binds.join(entry.to_string()).display()));
     }
 
     #[test]

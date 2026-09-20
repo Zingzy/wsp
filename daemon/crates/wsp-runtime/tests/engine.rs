@@ -201,24 +201,34 @@ struct World {
     socket: PathBuf,
     seen: Record,
     joined: Arc<Joined>,
-    rootfs: PathBuf,
     _dir: tempfile::TempDir,
 }
 
-/// The proxy over the fake engine, its rootfs holding one project folder `/root/demo` named in the roots file.
+/// The proxy over the fake engine, its record naming one project folder `/root/demo`, the copy behind it on the
+/// box side, and the staging directory the fence binds a source into.
 fn world() -> World {
     let dir = tempfile::tempdir().unwrap();
     let (engine, seen) = fake_engine(dir.path());
     let rootfs = dir.path().join("rootfs");
-    std::fs::create_dir_all(rootfs.join("root/demo/html")).unwrap();
-    std::fs::create_dir_all(rootfs.join("root/.wsp")).unwrap();
-    std::fs::create_dir_all(rootfs.join("etc")).unwrap();
-    std::fs::write(rootfs.join("root/.wsp/roots"), "/root/demo\n").unwrap();
+    let on_box = dir.path().join("copies/wsp-a");
+    let binds = dir.path().join("binds");
+    for made in [rootfs.join("root/demo/html"), rootfs.join("root/.wsp"), rootfs.join("etc"), on_box.join("html"), binds.clone()] {
+        std::fs::create_dir_all(made).unwrap();
+    }
+    // What a workspace writes where the allowlist used to live, which nothing reads now.
+    std::fs::write(rootfs.join("root/.wsp/roots"), "/\n").unwrap();
     let joined = Arc::new(Joined(Mutex::new(Vec::new())));
     let listener = engine::bind(&dir.path().join("ws")).unwrap();
-    let fence = Fence { workspace: WORKSPACE.into(), rootfs: rootfs.clone(), engine, ports: Arc::clone(&joined) as Arc<dyn Ports> };
+    let fence = Fence::new(
+        WORKSPACE.into(),
+        rootfs.clone(),
+        vec![("/root/demo".to_owned(), on_box)],
+        binds,
+        engine,
+        Arc::clone(&joined) as Arc<dyn Ports>,
+    );
     tokio::spawn(engine::serve(listener, Arc::new(fence)));
-    World { socket: dir.path().join("ws").join(engine::SOCKET_NAME), seen, joined, rootfs, _dir: dir }
+    World { socket: dir.path().join("ws").join(engine::SOCKET_NAME), seen, joined, _dir: dir }
 }
 
 impl World {
@@ -295,7 +305,7 @@ async fn a_container_create_reaches_the_engine_labelled_with_its_ports_on_the_lo
     let w = world();
     let body = json!({
         "Image": "nginx:alpine",
-        "HostConfig": { "Binds": ["/root/demo/html:/usr/share/nginx/html:ro"], "PortBindings": { "80/tcp": [{ "HostIp": "", "HostPort": "18080" }] }, "NetworkMode": "netours1" },
+        "HostConfig": { "PortBindings": { "80/tcp": [{ "HostIp": "", "HostPort": "18080" }] }, "NetworkMode": "netours1" },
         "NetworkingConfig": { "EndpointsConfig": { "netours1": {} } }
     });
     let (status, _, _) = w.call("POST", "/v1.55/containers/create?name=web", Some(&body)).await;
@@ -306,8 +316,6 @@ async fn a_container_create_reaches_the_engine_labelled_with_its_ports_on_the_lo
     assert_eq!(reached["Labels"][LABEL], WORKSPACE);
     assert_eq!(reached["Labels"][PORTS_LABEL], "80/tcp=18080");
     assert_eq!(reached["HostConfig"]["PortBindings"]["80/tcp"], json!([{ "HostIp": "127.0.0.1", "HostPort": "" }]));
-    let mapped = w.rootfs.join("root/demo/html").canonicalize().unwrap();
-    assert_eq!(reached["HostConfig"]["Binds"], json!([format!("{}:/usr/share/nginx/html:ro", mapped.display())]));
     // The network it joins was checked for the label first, once, though the create names it twice.
     assert_eq!(w.reached().iter().filter(|r| r.method == "GET" && r.path == "/networks/netours1").count(), 1);
 }
@@ -329,7 +337,7 @@ async fn a_create_naming_another_workspaces_network_or_container_is_not_found_an
 #[tokio::test]
 async fn every_refused_field_answers_one_sentence_and_nothing_reaches_the_engine() {
     let w = world();
-    let cases: [(Value, &str); 9] = [
+    let cases: [(Value, &str); 10] = [
         (json!({ "Privileged": true }), "a privileged container is root on this computer, so a workspace cannot ask for one"),
         (json!({ "CapAdd": ["SYS_ADMIN"] }), "a workspace's container runs with the engine's default capabilities; CapAdd is refused"),
         (
@@ -346,6 +354,10 @@ async fn every_refused_field_answers_one_sentence_and_nothing_reaches_the_engine
         (
             json!({ "Binds": ["/:/host"] }),
             "a bind mount's source must sit under a project folder of this workspace (/root/demo), and / does not",
+        ),
+        (
+            json!({ "Binds": ["/etc:/host"] }),
+            "a bind mount's source must sit under a project folder of this workspace (/root/demo), and /etc does not",
         ),
         (
             json!({ "PublishAllPorts": true }),
