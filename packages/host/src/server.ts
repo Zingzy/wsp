@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -170,6 +170,16 @@ function throughConnector(req: IncomingMessage): boolean {
   return req.headers["cf-connecting-ip"] !== undefined || req.headers["cf-ray"] !== undefined;
 }
 
+/** Whether a request reached this host over the road it serves its own workspaces' guests on: a process on the
+ * computer this host runs on, dialling the loopback the guest tool server and the guest command line dial once the
+ * guest door has read which workspace the token was minted for. A token scoped to a thread is minted into one turn
+ * and comes back by that road alone, so one arriving by any other is a copy carried out of a machine and names
+ * nobody here. The one home of that rule: the socket door and the JSON routes both read this, so neither can stay
+ * open while the other closes. */
+function ownRoad(req: IncomingMessage): boolean {
+  return !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
+}
+
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
  * what this host bound. A request naming nothing has no name here, and everything below reads that as not here. */
 function hostnameAsked(req: IncomingMessage): string | undefined {
@@ -305,7 +315,9 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
       return rt.workspaces.create(
         {
           project: project.id,
-          ...(head !== undefined ? { golden: head.snapshotId } : {}),
+          // A thread forks the image its own workspace's project runs and is refused where it names one, so the
+          // head this host holds rides only the person's own create.
+          ...(head !== undefined && scopeOf(caller) === undefined ? { golden: head.snapshotId } : {}),
           name,
           ...(opts.workspaceEnvs !== undefined && head !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
@@ -404,7 +416,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
     if (who === undefined) return here ? {} : undefined;
     const scope = who.kind === "device" ? who.device.scope : undefined;
-    return scope === undefined ? {} : { caller: { origin: "relayed", by: scope } };
+    if (scope === undefined) return {};
+    return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -561,6 +574,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       host: address,
       attach: [server, doorServer],
       originAllowed: originAllows,
+      ownRoad,
       door: { open: openDoor },
       devices: rt.devices,
       authToken,

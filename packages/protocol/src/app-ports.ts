@@ -57,6 +57,13 @@ export function joinAddressWord(url: string): string {
   }
 }
 
+/** A peer's address as the person on the other screen would write it: an IPv4 address that arrived over a
+ * dual-stack listener wears the ::ffff: prefix, which nobody typed. Read here and nowhere else, so the door that
+ * shows a peer and the rule that reads one cannot disagree about what the peer is. */
+export function peerAddress(address: string | undefined): string {
+  return (address ?? "").replace(/^::ffff:/, "");
+}
+
 /** Whether an address reaches no further than the computer it runs on. This decides whether the page is served
  * with the host token inlined and whether the JSON routes ask for a device token, so it is read once here and
  * nowhere else: two readings would let one road stay open while the other closed. A whole IPv4 literal in 127/8
