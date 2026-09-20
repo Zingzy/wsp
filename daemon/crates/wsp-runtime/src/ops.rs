@@ -114,7 +114,7 @@ pub fn box_full_refusal(need_mb: u64, free_mb: u64, quietest: Option<(String, u6
 }
 
 /// What a computer whose kernel opens no watch on a workspace's init reads on the daemon's own log: the
-/// workspace runs as it did, and its door stands until the next stop, as it did before the watch.
+/// workspace runs as it did, and its door stands until the next stop.
 fn init_not_watched(id: &str, reason: &str) -> String {
     format!("wsp-runtime: the init of {id} is not watched, so its death is read at the next listing: {reason}")
 }

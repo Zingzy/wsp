@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_frames::{
     is_http_url, numbers, place_link_transcript, place_refusal_transcript, words, Base64Bytes, LinkEphemerals, LinkRole, PlaceAuthRefusal,
-    PlaceAuthReply, PlaceAuthRequest, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, RequestId,
+    PlaceAuthReply, PlaceAuthRequest, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, PlacePublicKey, PlaceSignature, RequestId,
 };
 
 use crate::door::{self, Ended};
@@ -91,14 +91,21 @@ fn refusal_line(frame: &Value) -> &str {
     frame.get("error").and_then(Value::as_str).unwrap_or(words::HOST_REFUSED_PLACE)
 }
 
-/// Whether a refusal of the first frame is the host's own word: the key on it is the one this computer pinned at
-/// join, and the signature stands over this attempt's own refusal transcript, which carries the nonce this dial
-/// challenged with and the sentence itself. Read before any wait is spent on it, so a peer that proved nothing
-/// cannot buy ten minutes with a frame, and a refusal of an earlier dial cannot be played back at this one.
+/// Whether a frame is the host's own word: the key it carries is the one this computer pinned at join, and the
+/// signature on it stands over the bytes the caller built. The one reading of a host's proof, for the challenge
+/// it answers a dial with and for the refusal it gives in place of one; each caller brings its own transcript.
+fn stands_for_the_host(file: &PlaceFile, key: &PlacePublicKey, bytes: &[u8], signature: &PlaceSignature) -> bool {
+    key.as_str() == file.host_public_key && place::verify_place_bytes(key, bytes, signature)
+}
+
+/// Whether a refusal of the first frame is the host's own word, over this attempt's own refusal transcript, which
+/// carries the nonce this dial challenged with and the sentence itself. Read before any wait is spent on it, so a
+/// peer that proved nothing cannot buy ten minutes with a frame, and a refusal of an earlier dial cannot be
+/// played back at this one.
 fn is_the_hosts_word(file: &PlaceFile, nonce: &str, sentence: &str, frame: &Value) -> bool {
     let Ok(signed) = serde_json::from_value::<PlaceAuthRefusal>(frame.clone()) else { return false };
-    signed.host_public_key.as_str() == file.host_public_key
-        && place::verify_place_bytes(&signed.host_public_key, &place_refusal_transcript(&file.place_id, nonce, sentence), &signed.signature)
+    let bytes = place_refusal_transcript(&file.place_id, nonce, sentence);
+    stands_for_the_host(file, &signed.host_public_key, &bytes, &signed.signature)
 }
 
 /// Whole seconds as node's Math.round gives them for the two sentences that name a wait.
@@ -334,9 +341,7 @@ impl Link {
                     let ephemerals = LinkEphemerals { challenger: ephemeral.as_str(), answerer: reply.ephemeral.as_str() };
                     let host_bytes =
                         place_link_transcript(LinkRole::Host, &file.place_id, nonce.as_str(), reply.nonce.as_str(), ephemerals);
-                    let proved = reply.host_public_key.as_str() == file.host_public_key
-                        && place::verify_place_bytes(&reply.host_public_key, &host_bytes, &reply.signature);
-                    if !proved {
+                    if !stands_for_the_host(file, &reply.host_public_key, &host_bytes, &reply.signature) {
                         // Nothing of this computer's has been sent yet: the report and the place's own signature
                         // are the next frame, and the attempt ends before it.
                         self.log(&words::host_key_refusal(url));

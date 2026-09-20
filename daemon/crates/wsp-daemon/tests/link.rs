@@ -81,7 +81,7 @@ struct HostOpts {
 /// Whose word a refusal of the first frame is given as, and over which bytes.
 #[derive(Clone, Copy, Default, PartialEq)]
 enum SignRefusal {
-    /// Nothing signed, which is every host before this and every peer that answers at the address.
+    /// Nothing signed, which is what any peer that answers at the address can say.
     #[default]
     Not,
     /// The host's own key over this dial's place id, nonce and sentence.

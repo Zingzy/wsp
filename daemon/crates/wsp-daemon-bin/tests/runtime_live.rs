@@ -2903,7 +2903,7 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
 
 /// A workspace whose init ends on its own ends the way a stop ends it: the daemon that took the workspaces over
 /// hears the same word, so the door inside goes, its socket file goes with it, and the workspace reads as a nap
-/// the wake boots from. Before this the door stood on a workspace that was gone until the next stop.
+/// the wake boots from.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_whose_init_is_killed_loses_its_door_and_reads_as_a_nap() {
