@@ -714,3 +714,35 @@ async fn a_volume_create_naming_a_driver_option_is_refused_and_never_reaches_the
         WORKSPACE
     );
 }
+
+/// A named volume is the workspace's own or it is not there: a sibling's, named in a create, answers the same
+/// sentence the engine answers for a volume nobody made, and a name nothing holds yet is made here labelled
+/// before the create goes on.
+#[tokio::test]
+async fn a_create_attaches_the_workspaces_own_volumes_alone() {
+    let w = world();
+    let attaching = |name: &str| json!({ "Image": "alpine", "HostConfig": { "Binds": [format!("{name}:/var/lib/postgresql/data")] } });
+    let (status, _, body) = w.call("POST", "/v1.55/containers/create", Some(&attaching("voltheirs1"))).await;
+    assert_eq!((status, World::message(&body).as_str()), (404, "No such volume: voltheirs1"));
+    assert!(w.engine_saw("POST", "/v1.55/containers/create").is_none(), "{:?}", w.reached());
+    // A volume of the workspace's own reaches the create, and nothing is made for it.
+    let (status, _, _) = w.call("POST", "/v1.55/containers/create", Some(&attaching("volours1"))).await;
+    assert_eq!(status, 200);
+    assert!(w.engine_saw("POST", "/v1.55/containers/create").is_some());
+    assert!(w.engine_saw("POST", "/volumes/create").is_none(), "{:?}", w.reached());
+    // A name the engine holds nothing under: made first, wearing the label the next attach reads it by.
+    let (status, _, _) = w.call("POST", "/v1.55/containers/create", Some(&attaching("dbdata"))).await;
+    assert_eq!(status, 200);
+    let made = w.engine_saw("POST", "/volumes/create").expect("the volume was made before the create");
+    assert_eq!(serde_json::from_str::<Value>(&made.body).unwrap(), json!({ "Name": "dbdata", "Labels": { LABEL: WORKSPACE } }));
+    // A mount names one the same way, and an anonymous one names none.
+    let mounted = json!({
+        "Image": "alpine",
+        "HostConfig": { "Mounts": [
+            { "Type": "volume", "Source": "voltheirs1", "Target": "/data" },
+            { "Type": "volume", "Target": "/anon" }
+        ] }
+    });
+    let (status, _, body) = w.call("POST", "/v1.55/containers/create", Some(&mounted)).await;
+    assert_eq!((status, World::message(&body).as_str()), (404, "No such volume: voltheirs1"));
+}

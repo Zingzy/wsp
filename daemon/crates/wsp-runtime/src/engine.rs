@@ -177,13 +177,14 @@ pub fn route(method: &str, path: &str) -> Route {
     }
 }
 
-/// What a fenced create body named beyond itself: the containers and networks it joins, each checked for the label
-/// before the create goes, and the ports it asked for on the workspace's loopback.
+/// What a fenced create body named beyond itself: the containers, networks and named volumes it attaches, each
+/// checked for the label before the create goes, and the ports it asked for on the workspace's loopback.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Fenced {
     pub ports: BTreeMap<String, u16>,
     pub containers: Vec<String>,
     pub networks: Vec<String>,
+    pub volumes: Vec<String>,
 }
 
 fn non_empty(v: Option<&Value>) -> bool {
@@ -272,6 +273,7 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
             let mapped = map_bind(source)?;
             binds.push(Value::String(format!("{}:{rest}", mapped.display())));
         } else {
+            fenced.volumes.push(source.to_owned());
             binds.push(bind.clone());
         }
     }
@@ -287,6 +289,11 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
             "volume" => {
                 let config = mount.pointer("/VolumeOptions/DriverConfig");
                 plain_volume(word(config.and_then(|c| c.get("Name"))), config.and_then(|c| c.get("Options")))?;
+                // An anonymous volume names none and goes with the container, as the engine makes it.
+                let named = word(mount.get("Source"));
+                if !named.is_empty() {
+                    fenced.volumes.push(named.to_owned());
+                }
             }
             "tmpfs" => {}
             other => {
@@ -327,7 +334,7 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
         }
     }
     // Compose names its network in NetworkMode and in EndpointsConfig both; each name is checked once.
-    for named in [&mut fenced.containers, &mut fenced.networks] {
+    for named in [&mut fenced.containers, &mut fenced.networks, &mut fenced.volumes] {
         named.sort_unstable();
         named.dedup();
     }
@@ -676,9 +683,33 @@ async fn owned_network(fence: &Fence, id: &str) -> Result<bool, Error> {
     Ok(status == 200 && inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str()))
 }
 
-async fn owned_volume(fence: &Fence, name: &str) -> Result<bool, Error> {
+/// What the engine holds under a volume name.
+#[derive(Debug, PartialEq, Eq)]
+enum Volume {
+    Ours,
+    Another,
+    Nothing,
+}
+
+async fn held_volume(fence: &Fence, name: &str) -> Result<Volume, Error> {
     let (status, inspect) = ask(&fence.engine, "GET", &format!("/volumes/{}", encoded(name)), None).await?;
-    Ok(status == 200 && inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str()))
+    if status != 200 {
+        return Ok(Volume::Nothing);
+    }
+    let ours = inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str());
+    Ok(if ours { Volume::Ours } else { Volume::Another })
+}
+
+/// A named volume a create asked for that the engine holds nothing under, made here wearing the workspace's
+/// label: `docker run -v data:/x` on a name nothing has made yet is the common road, and the label is what the
+/// next attach, the sweep and the remove read it by.
+async fn make_volume(fence: &Fence, name: &str) -> Result<(), Error> {
+    let body = json!({ "Name": name, "Labels": { LABEL: fence.workspace.clone() } });
+    let (status, answer) = ask(&fence.engine, "POST", "/volumes/create", Some(&body)).await?;
+    if status != 201 && status != 200 {
+        return Err(Error(format!("the volume {name} this create attaches was not made: {status} {answer}")));
+    }
+    Ok(())
 }
 
 /// The container an exec belongs to, when the engine knows the exec.
@@ -879,6 +910,22 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                     Err(e) => return failed(e),
                 }
             }
+            let mut missing = Vec::new();
+            for name in &fenced.volumes {
+                match held_volume(fence, name).await {
+                    Ok(Volume::Ours) => {}
+                    Ok(Volume::Nothing) => missing.push(name.clone()),
+                    Ok(Volume::Another) => return Verdict::Answer(no_such("volume", name)),
+                    Err(e) => return failed(e),
+                }
+            }
+            // Every name read before any volume is made, so a create this fence refuses leaves the engine as it
+            // found it.
+            for name in missing {
+                if let Err(e) = make_volume(fence, &name).await {
+                    return failed(e);
+                }
+            }
             let text = body.to_string().into_bytes();
             Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
         }
@@ -963,9 +1010,11 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
             }
             Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
         }
-        Route::Volume { name } => match owned_volume(fence, &name).await {
-            Ok(true) => Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None },
-            Ok(false) => Verdict::Answer(no_such("volume", &name)),
+        Route::Volume { name } => match held_volume(fence, &name).await {
+            Ok(Volume::Ours) => {
+                Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
+            }
+            Ok(_) => Verdict::Answer(no_such("volume", &name)),
             Err(e) => failed(e),
         },
     }
@@ -1200,6 +1249,7 @@ mod tests {
         let fenced = fence_create(&mut body, "wsp-a", &no_binds).unwrap();
         assert_eq!(fenced.ports, BTreeMap::from([("80/tcp".to_owned(), 18080)]));
         assert_eq!(fenced.networks, vec!["demo_default"], "named in NetworkMode and EndpointsConfig both, checked once");
+        assert_eq!(fenced.volumes, vec!["dbdata", "v"], "a bind whose source is no path and a volume mount both name one");
         assert!(fenced.containers.is_empty());
         assert_eq!(body["Labels"][LABEL], "wsp-a");
         assert_eq!(body["Labels"][PORTS_LABEL], "80/tcp=18080");
@@ -1363,10 +1413,11 @@ mod tests {
             "Image": "alpine",
             "HostConfig": { "Mounts": [
                 { "Type": "tmpfs", "Target": "/scratch" },
-                { "Type": "volume", "Source": "data", "Target": "/data" }
+                { "Type": "volume", "Source": "data", "Target": "/data" },
+                { "Type": "volume", "Target": "/anon" }
             ] }
         });
-        assert!(fence_create(&mut fine, "w", &no_binds).is_ok());
+        assert_eq!(fence_create(&mut fine, "w", &no_binds).unwrap().volumes, vec!["data"], "an anonymous volume names none");
     }
 
     #[test]
