@@ -14,7 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
@@ -69,6 +69,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
 } from "@wsp/protocol";
 import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -78,7 +79,7 @@ import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
-import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
+import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { placeLink, sharedAgentsOn, sharedOn, signInOnBox, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
@@ -98,7 +99,7 @@ import {
 } from "./service.js";
 import { dialHost, hostPlatform, sshAsked, table, type DialOpts, type HostClient } from "./verbs.js";
 import type { HostStarter } from "./host-start.js";
-import { writeEnvFile } from "./env-keys.js";
+import { envFileFor, writeEnvFile } from "./env-keys.js";
 import { collect, nodeHost } from "@wsp/collect";
 import { readBrewTable } from "./init-brew.js";
 import { placeProvisioner } from "./place-provision.js";
@@ -134,9 +135,7 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
     }
   }
   const made = newPlaceKeyPair();
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(made, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(path, 0o600);
+  writeOwn(dirname(path), basename(path), `${JSON.stringify(made, null, 2)}\n`);
   return made;
 }
 
@@ -1079,7 +1078,7 @@ async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDe
   }
   // A check nothing answered says nothing about the key: it is taken, and the first fork says its own piece.
   if (said !== undefined) io.error(said);
-  writeEnvFile(join(wspHome(opts.env), ".env"), { [PROVIDER_ENV]: id });
+  writeEnvFile(envFileFor(opts.statePath), { [PROVIDER_ENV]: id });
   const { pricing } = backend;
   io.log(providerPlaceLine(id, pricing.rateUsdPerHour(pricing.defaultSize)));
   if (servingHost(opts.statePath) !== undefined) io.log(`the host serving ${opts.statePath} reads that at its next start; wsp down and wsp up pick it up now.`);

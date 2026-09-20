@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 61;
+pub const DAEMON_VERSION: u32 = 64;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -33,10 +33,11 @@ pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
 pub const XDG_OPEN_PATH: &str = "/usr/local/bin/xdg-open";
 pub const OPEN_SOCKET_PATH: &str = "/root/.wsp/open.sock";
 
-/// The computer's own system directories a workspace on a computer somebody owns reads through an overlay of its
-/// own: its /usr is the box's /usr, and what it writes there the box does not have. A directory outside these and
-/// outside /root is in no workspace of that computer unless a shared tool root below brings it in. The bundle
-/// mounts these and the doctor reads them, both off this one list.
+/// The computer's own system directories a workspace on a computer somebody owns reads through a tree of its own,
+/// which is what a daemon root may not sit under: a workspace's upper would otherwise sit inside the tree it
+/// reads through. A directory outside these and outside /root is in no workspace of that computer unless a shared
+/// tool root below brings it in. How each of the five is built is the runtime's own table; this list is what the
+/// doctor holds a root away from.
 pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
 /// Where Homebrew on Linux keeps its own user's home, and the prefix under it every formula is installed into.
 pub const HOMEBREW_HOME: &str = "/home/linuxbrew";

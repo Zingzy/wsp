@@ -264,6 +264,7 @@ describe("runtime session history", () => {
       start: (cwd?: string) => onEvent!({ type: "session.start", sessionId, model: "claude-sonnet-4-5", ...(cwd !== undefined ? { cwd } : {}) }),
       tool: (command: string, cwd?: string) =>
         onEvent!({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify({ command }), toolName: "Bash", toolUseId: "t1", ...(cwd !== undefined ? { cwd } : {}) }),
+      say: (text: string, messageId?: string) => onEvent!({ type: "turn.delta", sessionId, kind: "text", text, ...(messageId !== undefined ? { messageId } : {}) }),
       done: (text: string) => onEvent!({ type: "turn.done", sessionId, result: { status: "completed", text } }),
       end: () => {
         onEvent!({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -891,6 +892,23 @@ describe("runtime session history", () => {
     await handle.finished;
     const history = await rt.sessions.history(ws.id);
     expect(history.filter(e => e.type === "session.delta").map(e => (e.type === "session.delta" ? e.cwd : null))).toEqual([undefined, "/root/2048"]);
+    await rt.close();
+  });
+
+  it("the transcript keeps the harness's message id on each piece of text, so a reader folds the turn's replies apart", async () => {
+    const m = manual();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hold for 90 seconds" });
+    m.start();
+    m.say("Waiting for the hold to complete.", "msg_a");
+    m.say("Done.", "msg_b");
+    m.tool("ls");
+    m.done("Done.");
+    m.end();
+    await handle.finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(history.filter(e => e.type === "session.delta").map(e => (e.type === "session.delta" ? e.messageId : null))).toEqual(["msg_a", "msg_b", undefined]);
     await rt.close();
   });
 

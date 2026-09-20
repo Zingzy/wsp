@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   creationAwaits,
+  vaultMemberRefusal,
+  vaultUnlistedRefusal,
   WORKSPACE_GLYPHS,
   lookWord,
   Recipe,
@@ -1217,12 +1219,10 @@ describe("daemon files and diff ops", () => {
     expect(Object.values(at).filter(path => !path.startsWith("/home/maya/"))).toEqual([]);
   });
 
-  it("says a machine over ssh carries no daemon yet, and names no verb, since nobody can type one", () => {
-    // Recorded but not deployed is what the sentence is for. Nothing a person types puts a daemon on a machine
-    // already recorded, so the line says what the host does on its own rather than naming a verb that is not there.
-    // Later rather than at every start: a machine that answered with what it lacks is left alone until its window
-    // is out, so a line promising a try at every start would be one the host does not keep.
-    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; this host offers it again later on its own");
+  it("says a machine over ssh is served no road to a daemon, and names no verb, since nobody can type one", () => {
+    // What the host does, not what the machine has: a daemon may be running there and nothing dials it. So the
+    // line names no verb and promises no later try, neither of which anybody here would keep.
+    expect(noSshDaemonLine("box")).toBe("box is a computer over ssh, and this host opens no road to a daemon on one, so its terminal, files and ports are not served");
     expect(noSshDaemonLine("box")).not.toContain("daemon update");
     // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
     // refused with the one command that turns that off.
@@ -1291,6 +1291,39 @@ describe("goldenImage", () => {
     expect(wire.GoldenVersion.parse(v).templateId).toBeUndefined();
     expect(wire.GoldenVersion.parse({ ...v, templateId: "tpl_a" }).templateId).toBe("tpl_a");
     expect(wire.GoldenStage.options).toContain("promoting");
+  });
+});
+
+describe("the sentences a vault archive is refused with", () => {
+  it("the member refusal names the member, the reason and what that refusal did in the room it is read in", () => {
+    const why = "it lands at /etc/cron.d/x, which is not one of the paths the seal asked for or under one";
+    for (const road of ["seal", "import"] as const) {
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("etc/cron.d/x");
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("not one of the paths the seal asked for");
+    }
+    // Nothing was ever going to be imported at the seal, and no copy is what the import stopped.
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).toContain("the seal is refused and no version is recorded");
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).not.toContain("imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).toContain("nothing of it was imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).not.toContain("the seal is refused");
+  });
+
+  it("the unlisted refusal names the image and its version and says to cut the next one", () => {
+    const line = vaultUnlistedRefusal("default", 1);
+    expect(line).toContain("default v1");
+    expect(line).toContain("cut the next version");
+  });
+
+  it("neither sentence carries a path of the computer the record sits on", () => {
+    for (const line of [vaultMemberRefusal("seal", "root/.codex/auth.json", "it points at /etc"), vaultMemberRefusal("import", "root/.codex/auth.json", "it points at /etc"), vaultUnlistedRefusal("default", 2)]) {
+      expect(line).not.toMatch(/\/Users\/|\/home\/|\.wsp|state\.json/);
+    }
+  });
+
+  it("a sealed vault reads with the paths it held, and one sealed before the list was kept reads without", () => {
+    const vault = { sha256: "a".repeat(64), bytes: 10, paths: 2, takenAt: "2026-09-01T00:00:00Z" };
+    expect(wire.SealedVault.parse(vault).held).toBeUndefined();
+    expect(wire.SealedVault.parse({ ...vault, held: ["/root/.codex/auth.json"] }).held).toEqual(["/root/.codex/auth.json"]);
   });
 });
 

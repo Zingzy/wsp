@@ -5,6 +5,10 @@
 // what it runs on top of, and how the install reads to a person. The stages
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
+// Where each manager installs is one answer here too, installHomes(): the
+// machine's own home for a job with no prefix, and a folder of wsp's own under
+// /opt for a computer somebody owns, whose daemon resolves no command through
+// a folder the workspaces there can write.
 import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
 import { APT_ENV, GUEST_HOME, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
@@ -31,7 +35,7 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
    * roots are the trees a workspace has to be able to see, coarse on purpose, and these are where a command put
    * there by this road answers from. Read to tell a row this road installed from a row of the same name another
    * road put somewhere else, and for nothing about visibility. Empty where the road cannot say. */
-  bins(road: R): readonly string[];
+  bins(road: R, homes?: InstallHomes): readonly string[];
   /** One shell test that reads whether the road's argument is already on the machine, for a road whose own
    * reading is not the command it puts on PATH: Homebrew's prefix keeps a link per formula it installed, and a
    * command of that name is another road's work. Absent leaves the step's own check and its command as the read. */
@@ -48,10 +52,14 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   after?: string;
   /** The road a recipe's tools row under this manager takes; absent for a road no manager row names. */
   fromRow?(row: ToolRow): R;
-  /** The bash line that puts the road's argument on the machine, or why nothing can; `bin` is the command it puts on PATH. */
-  install(road: R, bin: string): string | { note: string };
+  /** The bash line that puts the road's argument on the machine, or why nothing can; `bin` is the command it puts
+   * on PATH and `homes` where this job's managers install. */
+  install(road: R, bin: string, homes?: InstallHomes): string | { note: string };
   /** The line that takes it off again, or why it stays. */
-  uninstall(road: R, bin: string): { cmd: string } | { note: string };
+  uninstall(road: R, bin: string, homes?: InstallHomes): { cmd: string } | { note: string };
+  /** The knobs this road's manager reads for where it installs, for the one line every script of the job exports;
+   * absent for a road whose install reads none. */
+  env?(homes: InstallHomes): Readonly<Record<string, string>>;
   /** The package names a recipe's tools row may carry for the road's argument. */
   names(road: R): readonly string[];
   /** The command the install puts on PATH when the road alone knows it. */
@@ -60,7 +68,7 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   at?(road: R, version: string): R;
   /** One bash line that prints the installed version, in the form `at` takes, on the tools PATH once the row is on
    * the machine; nothing printed reads as unread. Absent for a road whose install line prints it itself. */
-  installed?(road: R, bin: string): string;
+  installed?(road: R, bin: string, homes?: InstallHomes): string;
 }
 
 /** Whether a copy built from this road's pin gets the version the seal read: the road installs at one (`at`), or
@@ -98,8 +106,122 @@ const listedVersion = (list: string, pkg: string): string => `${list} 2>/dev/nul
  * and what a script row on the catalog names for the installer it carries. */
 export const LOCAL_BIN = "/usr/local/bin";
 export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
-export const CARGO_BIN = `${GUEST_HOME}/.cargo/bin`;
+const CARGO_HOME = `${GUEST_HOME}/.cargo`;
+export const CARGO_BIN = `${CARGO_HOME}/bin`;
+const GO_BIN = `${GUEST_HOME}/go/bin`;
 export const APT_BIN = "/usr/bin";
+
+/** The folder of wsp's own every manager installs under on a computer somebody owns: under /opt, which the
+ * protocol's WORKSPACE_OVERLAID brings into every workspace there through an overlay of its own, so a tool
+ * installed here answers inside a workspace while no process in one writes it on the computer itself. The
+ * daemon on such a computer resolves every command through a fixed PATH that holds no folder under the home
+ * the workspaces share, which is why nothing may install there. A machine wsp forked takes no prefix: its
+ * home is root's alone and each manager keeps its own folder under it. */
+export const TOOL_PREFIX = "/opt/wsp";
+
+/** Where one manager keeps what it installs, and where a command it installed answers from. */
+export interface InstallHome {
+  /** The folder it keeps its environments, its caches and its packages under. */
+  home: string;
+  /** The folder a command it installed answers from: the one the manager links into where it takes a knob for
+   * that, and the one `links` below is linked into where it takes none. */
+  bin: string;
+  /** The manager's own command folder, for a manager with no knob naming where its commands go: its install ends
+   * by linking every command there into `bin`, and its own lines run with it ahead of the job's PATH, since pnpm
+   * refuses to install a global while the folder it links into is off PATH. Absent where a knob does the work. */
+  links?: string;
+  /** The knobs a job exports so this manager reads this home, by name; empty where the manager's own defaults
+   * already are it. */
+  env: Readonly<Record<string, string>>;
+}
+
+/** The managers whose install folder a job can move, in the order the job's own line exports their knobs. */
+export const INSTALL_HOMES = ["pnpm", "bun", "uv", "pipx", "cargo", "go"] as const;
+export type InstallHomeName = (typeof INSTALL_HOMES)[number];
+export type InstallHomes = { readonly [K in InstallHomeName]: InstallHome };
+
+/** Where every manager installs for one job: under `prefix` with every command in /usr/local/bin for a computer
+ * somebody owns, and under the machine's home for a machine wsp forked, which is each manager's own default and
+ * what an image is built with. Every module's bins, its version read and its knobs come off this one answer, so
+ * no two of them can name different folders, and the knobs are the line the job exports on every script it sends. */
+export function installHomes(prefix?: string): InstallHomes {
+  if (prefix === undefined) {
+    return {
+      // pnpm alone has no folder of its own by default, so its knob rides every job, image included.
+      pnpm: { home: PNPM_HOME, bin: PNPM_HOME, env: { PNPM_HOME } },
+      bun: { home: `${GUEST_HOME}/.bun`, bin: `${GUEST_HOME}/.bun/bin`, env: {} },
+      uv: { home: `${GUEST_HOME}/.local`, bin: HOME_BIN, env: {} },
+      pipx: { home: `${GUEST_HOME}/.local`, bin: HOME_BIN, env: {} },
+      cargo: { home: CARGO_HOME, bin: CARGO_BIN, env: {} },
+      go: { home: `${GUEST_HOME}/go`, bin: GO_BIN, env: {} },
+    };
+  }
+  const at = (name: string): string => `${prefix}/${name}`;
+  return {
+    // pnpm links what it installs globally into its home's own bin folder and takes no knob for another, so that
+    // folder is linked onto the fixed PATH; rustup's toolchain rides cargo's home and cargo install takes none either.
+    pnpm: { home: at("pnpm"), bin: LOCAL_BIN, links: `${at("pnpm")}/bin`, env: { PNPM_HOME: at("pnpm") } },
+    bun: { home: at("bun"), bin: LOCAL_BIN, env: { BUN_INSTALL: at("bun"), BUN_INSTALL_BIN: LOCAL_BIN } },
+    uv: { home: at("uv"), bin: LOCAL_BIN, env: { UV_TOOL_DIR: `${at("uv")}/tools`, UV_TOOL_BIN_DIR: LOCAL_BIN, UV_PYTHON_INSTALL_DIR: `${at("uv")}/python` } },
+    pipx: { home: at("pipx"), bin: LOCAL_BIN, env: { PIPX_HOME: at("pipx"), PIPX_BIN_DIR: LOCAL_BIN } },
+    cargo: { home: at("cargo"), bin: LOCAL_BIN, links: `${at("cargo")}/bin`, env: { CARGO_HOME: at("cargo"), RUSTUP_HOME: at("rustup") } },
+    go: { home: at("go"), bin: LOCAL_BIN, env: { GOPATH: at("go"), GOBIN: LOCAL_BIN } },
+  };
+}
+
+/** The homes a job with no prefix runs on, which is every manager's own: the default every module reads where a
+ * caller names none, and what a folder a row carries is read against. */
+const OWN_HOMES = installHomes();
+
+/** The homes a job on a computer somebody owns runs on, since one prefix is wsp's: read by the modules' roots, so
+ * the folders a road writes are named once here and once there. */
+const PREFIX_HOMES = installHomes(TOOL_PREFIX);
+
+/** A manager's own command folder and the folder every command in it is linked into, for a manager whose commands
+ * the job's homes put where no PATH of the job looks. */
+interface LinkedCommands {
+  links: string;
+  bin: string;
+}
+
+/** That pair for one manager's home, or nothing where the manager puts its commands where it is told. */
+const linkedOf = (home: InstallHome): LinkedCommands | undefined => (home.links === undefined ? undefined : { links: home.links, bin: home.bin });
+
+/** The pair for the manager that keeps its commands in this folder and links them out of it under this job's
+ * homes, which is cargo's own folder and pnpm's. Nothing for any other folder a row names, which is the row's own
+ * and stands, and nothing at all for a job with no prefix, where no manager links. `/root/.local/bin` is the
+ * folder uv and pipx are told to link into rather than one either of them keeps, and it is what the harness
+ * installer's row names too, so it answers here only if one of those two is ever given a folder of its own. */
+function movedHome(dir: string, homes: InstallHomes): LinkedCommands | undefined {
+  for (const name of INSTALL_HOMES) {
+    if (homes[name].links !== undefined && OWN_HOMES[name].bin === dir) return linkedOf(homes[name]);
+  }
+  return undefined;
+}
+
+/** The folders a row's own installer links into, under this job's homes: a folder a manager keeps its commands in
+ * moves with that manager, and the commands there are linked onto the fixed PATH, so both folders answer for it. */
+export const homeBins = (bins: readonly string[], homes: InstallHomes): readonly string[] =>
+  bins.flatMap(dir => {
+    const moved = movedHome(dir, homes);
+    return moved === undefined ? [dir] : [moved.links, moved.bin];
+  });
+
+/** Every command in that folder, linked into the folder the daemon's fixed PATH holds: the last line of the
+ * install of a manager's own row, and of a row whose installer writes into such a folder. Nothing where no folder
+ * moved, which is every job on a machine wsp forked. */
+const linkCommands = (at: LinkedCommands | undefined): string[] => (at === undefined ? [] : [`find ${at.links} -maxdepth 1 -type f -perm -u+x -exec ln -sfn {} ${at.bin}/ ';'`]);
+
+/** The link one command answers by, taken off again where the install put one there. */
+const unlinkCommand = (home: InstallHome, bin: string): string[] => (home.links === undefined ? [] : [`rm -f ${home.bin}/${shellQuote(bin)}`]);
+
+/** What a step reads a row of this manager back by: the folder its commands answer from, with the manager's own
+ * folder ahead of it where the install links them out of one the PATH does not name. */
+const binsOf = (home: InstallHome): readonly string[] => (home.links === undefined ? [home.bin] : [home.links, home.bin]);
+
+/** One line of a manager's own, run with its command folder ahead of the job's PATH where the manager reads its
+ * own commands there and would otherwise refuse. */
+const inHome = (home: InstallHome, cmd: string): string => (home.links === undefined ? cmd : `export PATH=${home.links}:$PATH; ${cmd}`);
 
 /** The pseudo step every apt row waits on: the index read once, before the first of them. */
 export const APT_INDEX = "apt-index";
@@ -215,22 +337,26 @@ const npm: RoadModule<Road<"npm">> = {
 /** pnpm and bun keep npm's global shape under their own verbs; bun lists its globals as a tree and keeps no root command. */
 const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
-  roots: [road === "pnpm" ? PNPM_HOME : `${GUEST_HOME}/.bun`],
-  bins: () => [road === "pnpm" ? PNPM_HOME : `${GUEST_HOME}/.bun/bin`],
+  roots: [OWN_HOMES[road].home, PREFIX_HOMES[road].home],
+  bins: (_r, homes = OWN_HOMES) => binsOf(homes[road]),
+  env: homes => homes[road].env,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => `${road} add -g ${pinned(r.package, versionOf(r), "@")}`,
-  uninstall: r => ({ cmd: `${road} remove -g ${r.package}` }),
+  install: (r, _bin, homes = OWN_HOMES) => [inHome(homes[road], `${road} add -g ${pinned(r.package, versionOf(r), "@")}`), ...linkCommands(linkedOf(homes[road]))].join("\n"),
+  uninstall: (r, bin, homes = OWN_HOMES) => ({ cmd: [inHome(homes[road], `${road} remove -g ${r.package}`), ...unlinkCommand(homes[road], bin)].join("\n") }),
   names: r => [r.package],
   at: atVersion,
-  installed: r => (road === "bun" ? `bun pm ls -g 2>/dev/null | grep -oE "(^| )${r.package}@[^[:space:]]+" | head -n 1 | sed 's/.*@//'` : nodeGlobalVersion("pnpm root -g", r.package)),
+  installed: (r, _bin, homes = OWN_HOMES) =>
+    inHome(homes[road], road === "bun" ? `bun pm ls -g 2>/dev/null | grep -oE "(^| )${r.package}@[^[:space:]]+" | head -n 1 | sed 's/.*@//'` : nodeGlobalVersion("pnpm root -g", r.package)),
 });
 
 /** uv and pipx install a Python tool into its own environment, pinned the pip way. */
 const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
-  // Both install a tool into an environment under the machine's home and link its command into /root/.local/bin.
-  roots: [`${GUEST_HOME}/.local`],
-  bins: () => [HOME_BIN],
+  // Both install a tool into an environment of its own and link its command beside it: under the machine's home
+  // by default, and under the prefix with the command in /usr/local/bin where the job names one.
+  roots: [OWN_HOMES[road].home, PREFIX_HOMES[road].home],
+  bins: (_r, homes = OWN_HOMES) => binsOf(homes[road]),
+  env: homes => homes[road].env,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `${cmd} install ${pinned(r.package, versionOf(r), "==")}`,
   uninstall: r => ({ cmd: `${cmd} uninstall ${r.package}` }),
@@ -239,24 +365,23 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
   installed: r => listedVersion(road === "uv" ? "uv tool list" : "pipx list --short", r.package),
 });
 
-const CARGO_HOME = `${GUEST_HOME}/.cargo`;
-
 const cargo: RoadModule<Road<"cargo">> = {
   words: "with cargo",
-  roots: [CARGO_HOME],
-  bins: () => [CARGO_BIN],
+  roots: [OWN_HOMES.cargo.home, PREFIX_HOMES.cargo.home],
+  bins: (_r, homes = OWN_HOMES) => binsOf(homes.cargo),
+  env: homes => homes.cargo.env,
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => {
+  // cargo install writes its command into the cargo home's own bin folder and takes no knob for another, so a job
+  // that moved that home links what it left there onto the PATH the daemon resolves through.
+  install: (r, _bin, homes = OWN_HOMES) => {
     const version = versionOf(r);
-    return version === undefined ? `cargo install ${r.package}` : `cargo install ${r.package} --version ${version}`;
+    return [inHome(homes.cargo, `cargo install ${r.package}${version === undefined ? "" : ` --version ${version}`}`), ...linkCommands(linkedOf(homes.cargo))].join("\n");
   },
-  uninstall: r => ({ cmd: `cargo uninstall ${r.package}` }),
+  uninstall: (r, bin, homes = OWN_HOMES) => ({ cmd: [inHome(homes.cargo, `cargo uninstall ${r.package}`), ...unlinkCommand(homes.cargo, bin)].join("\n") }),
   names: r => [r.package],
   at: atVersion,
-  installed: r => listedVersion("cargo install --list", r.package),
+  installed: (r, _bin, homes = OWN_HOMES) => inHome(homes.cargo, listedVersion("cargo install --list", r.package)),
 };
-
-const GO_BIN = `${GUEST_HOME}/go/bin`;
 
 /** The collector puts a Go binary's `path@version` in its first path; recipes saved
  * before that carried it in the label as `name (path@version)`. */
@@ -277,19 +402,20 @@ export function goBinary(module: string): string {
 
 const go: RoadModule<Road<"go">> = {
   words: "with go install",
-  roots: [GO_BIN],
-  bins: () => [GO_BIN],
+  roots: [OWN_HOMES.go.home, PREFIX_HOMES.go.home],
+  bins: (_r, homes = OWN_HOMES) => binsOf(homes.go),
+  env: homes => homes.go.env,
   fromRow: r => {
     const mod = goModule(r);
     return mod === undefined ? { road: "go" } : { road: "go", module: mod.path, version: r.version ?? mod.version };
   },
   install: r => (r.module === undefined ? { note: "no module to install from" } : `go install ${pinned(r.module, versionOf(r), "@")}`),
-  uninstall: () => ({ note: `go has no uninstall; the binary stays in ${GO_BIN}` }),
+  uninstall: (_r, _bin, homes = OWN_HOMES) => ({ note: `go has no uninstall; the binary stays in ${homes.go.bin}` }),
   names: () => [],
   bin: r => (r.module === undefined ? undefined : goBinary(r.module)),
   at: atVersion,
   // The module's version as the binary records it, with its v: what `go install path@version` takes.
-  installed: (_r, bin) => `go version -m ${GO_BIN}/${shellQuote(bin)} 2>/dev/null | awk '$1=="mod"{print $3}'`,
+  installed: (_r, bin, homes = OWN_HOMES) => `go version -m ${homes.go.bin}/${shellQuote(bin)} 2>/dev/null | awk '$1=="mod"{print $3}'`,
 };
 
 // --- releases ------------------------------------------------------------------
@@ -398,8 +524,11 @@ const script: RoadModule<Road<"script">> = {
   // Every script is its vendor's own and they link where they please: five of the catalogue's land in
   // /usr/local/bin, docker's apt half in /usr/bin, rustup in the cargo home and Claude Code's installer under
   // the machine's home, so the directories ride each script's own row and the module reads them off it.
-  bins: r => r.bins ?? [],
-  install: r => r.script,
+  bins: (r, homes = OWN_HOMES) => homeBins(r.bins ?? [], homes),
+  // A row whose installer writes into a manager's own command folder writes into that manager's folder under the
+  // prefix once the job tells it so, which no PATH names, so its commands are linked from there as the manager's
+  // own rows are: rustup's toolchain is the row this is for.
+  install: (r, _bin, homes = OWN_HOMES) => [r.script, ...(r.bins ?? []).flatMap(dir => linkCommands(movedHome(dir, homes)))].join("\n"),
   uninstall: (_r, bin) => ({ note: `${bin} has no uninstaller; left on the machine` }),
   names: () => [],
   // The command's own version line, cut to its version token: what a script leaves is whatever its vendor prints.
@@ -420,6 +549,15 @@ export const ROAD_MODULES: { readonly [K in RoadName]: RoadModule<Road<K>> } = {
   apt,
   script,
 };
+
+/** Every knob the managers read for one job's homes, in the order the modules stand: what the one line each
+ * script of the job exports carries beside its PATH, so an install, a presence read and a version read all reach
+ * the same folders. */
+export function installEnv(homes: InstallHomes): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const road of ROADS) Object.assign(out, ROAD_MODULES[road].env?.(homes) ?? {});
+  return out;
+}
 
 /** The reader a manager's own module has for a tools row filed under that manager's id, or nothing where it has
  * none. Every caller that turns such a row into a road goes through this one, so the plan of a row the collector

@@ -14,6 +14,24 @@ use tokio_tungstenite::tungstenite::Message;
 
 const BIN: &str = env!("CARGO_BIN_EXE_wsp-daemon");
 
+/// What the daemon says about its two kernel knobs before the ready line, per platform: a platform that has
+/// neither says nothing at all about them, and on Linux each knob a run may not set says so with the reason,
+/// which root, the user a joined computer runs the daemon as, sets both of.
+fn knob_lines(said: &[String]) {
+    #[cfg(not(target_os = "linux"))]
+    assert!(said.is_empty(), "a platform with neither knob said {said:?}");
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: geteuid reads one integer of this process and touches no memory of ours.
+        let root = unsafe { libc::geteuid() } == 0;
+        let want: &[&str] = if root { &[] } else { &["oom_score_adj not set: ", "priority not set: "] };
+        assert_eq!(said.len(), want.len(), "{said:?}");
+        for (line, starts) in said.iter().zip(want) {
+            assert!(line.starts_with(starts) && line.len() > starts.len(), "no reason on {line}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn binds_prints_the_listening_line_writes_the_port_file_and_serves_the_door() {
     let dir = tempfile::tempdir().unwrap();
@@ -36,16 +54,17 @@ async fn binds_prints_the_listening_line_writes_the_port_file_and_serves_the_doo
     let line = tokio::time::timeout(Duration::from_secs(10), stdout.next_line()).await.unwrap().unwrap().unwrap();
     let port: u16 = line.strip_prefix("wsp-daemon listening on 127.0.0.1:").expect("the listening line").parse().unwrap();
     assert_eq!(std::fs::read_to_string(&port_file).unwrap(), format!("{port}\n"));
-    // Not root, or no Linux /proc: the two score lines come first and say so, then the ready line.
     let mut stderr = BufReader::new(child.stderr.take().unwrap()).lines();
+    let mut before = Vec::new();
     let ready = loop {
         let line = tokio::time::timeout(Duration::from_secs(5), stderr.next_line()).await.unwrap().unwrap().unwrap();
-        if line.starts_with("oom_score_adj not set: ") || line.starts_with("priority not set: ") {
-            continue;
+        if line.starts_with("ready in ") {
+            break line;
         }
-        break line;
+        before.push(line);
     };
-    assert!(ready.starts_with("ready in ") && ready.ends_with(" ms"), "{ready}");
+    assert!(ready.ends_with(" ms"), "{ready}");
+    knob_lines(&before);
 
     let (mut ws, _) = connect_async(format!("ws://127.0.0.1:{port}/")).await.unwrap();
     ws.send(Message::text(json!({ "id": 1, "op": "auth", "token": "bin-token" }).to_string())).await.unwrap();

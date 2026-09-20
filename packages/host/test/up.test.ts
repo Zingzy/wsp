@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, DEFAULT_PORT, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
+import { BOX_API_URL } from "@wsp/engine";
+import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { noProviderStorageLine } from "../src/storage.js";
 import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
@@ -152,6 +155,16 @@ describe("wsp up", () => {
       `state       ${statePath}`,
       noClaudeKeyNote(false),
     ]);
+    expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
+  });
+
+  it("the token file is this user's alone, and one an older build left at 0644 is replaced rather than rewritten", async () => {
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    const tokenPath = join(home, "state", "host-token");
+    writeFileSync(tokenPath, "an older build's token\n");
+    chmodSync(tokenPath, 0o644);
+    const handle = await started([]);
+    expect(statSync(tokenPath).mode & 0o777).toBe(0o600);
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
 
@@ -529,6 +542,58 @@ describe("wsp up", () => {
     expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("service");
     expect(STARTED_BY_ENV in process.env).toBe(false);
     expect(STARTED_BY_ENV in wiring.env()).toBe(false);
+  });
+
+  describe("a host on a state file in another folder", () => {
+    /** A state file away from the wsp home, with the home's own .env holding a key and a pick, as a person's live
+     * home does. Every dial this start could make is recorded rather than made. */
+    function elsewhere(beside?: string): { state: string; folder: string; dialled: string[] } {
+      writeFileSync(join(home, ".env"), `SOLARI_API_KEY=slr_live_fake_home_key\nWSP_PROVIDER=box\n`);
+      const folder = join(dir, "elsewhere");
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
+      if (beside !== undefined) writeFileSync(join(folder, ".env"), beside);
+      // Nothing of a provider in this shell either: the files are the only places a key or a pick is, so a shell
+      // that exported one cannot decide a case here.
+      vi.stubEnv("SOLARI_API_KEY", undefined);
+      vi.stubEnv(BOX_KEY_ENV, undefined);
+      vi.stubEnv(PROVIDER_ENV, undefined);
+      const dialled: string[] = [];
+      vi.stubGlobal("fetch", (input: unknown) => {
+        dialled.push(String(input));
+        return Promise.reject(new Error("no request leaves this test"));
+      });
+      return { state: join(folder, "state.json"), folder, dialled };
+    }
+
+    /** The start every case here takes: the flags a person types, read into the environment every verb is handed. */
+    async function serving(state: string, lines: string[]): Promise<HostHandle> {
+      const handle = await up(quietIO(lines), { ...optsFor({ state, port: "0", "ws-port": "0" }, process.env), webDir });
+      handles.push(handle);
+      return handle;
+    }
+
+    it("reads no key of the wsp home's, so it is wired to no provider, asks no account anything and says so", async () => {
+      const { state, folder, dialled } = elsewhere();
+      const lines: string[] = [];
+      await serving(state, lines);
+      expect(dialled).toEqual([]);
+      expect(lines).toContain(noProviderStorageLine(state));
+      // Nothing of this host's keys was written beside its state either: the file is the person's to write.
+      expect(readdirSync(folder)).not.toContain(".env");
+    });
+
+    it("takes the pick out of the .env beside that state, and a wired provider gets no such line", async () => {
+      const { state, dialled } = elsewhere("WSP_PROVIDER=box\n");
+      const lines: string[] = [];
+      await serving(state, lines);
+      // Wired to a provider that forks machines, which is the note a person reads about their claude key.
+      expect(lines).toContain(noClaudeKeyNote(false));
+      expect(lines.join("\n")).not.toContain("wired to no provider");
+      // A pick with no key beside it still has an account to ask, and the one asked is the row the file named.
+      expect(dialled.length).toBeGreaterThan(0);
+      for (const at of dialled) expect(at.startsWith(BOX_API_URL)).toBe(true);
+    });
   });
 
   it("wsp up refuses a flag it does not answer in and starts nothing", async () => {

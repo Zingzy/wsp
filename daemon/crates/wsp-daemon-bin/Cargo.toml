@@ -19,6 +19,9 @@ wsp-runtime = { path = "../wsp-runtime" }
 tokio.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# setpriority, for the one knob the daemon sets on itself that is not a file; the other platform sets neither.
 libc = "0.2"
 
 [dev-dependencies]

@@ -6,6 +6,8 @@
 
 use std::fs;
 use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -190,23 +192,80 @@ pub fn sha_of(dir: &Path, reference: &str) -> Option<String> {
     read.ok().then(|| read.out().to_owned()).filter(|sha| !sha.is_empty())
 }
 
-/// The path-bound directories taken out of the copy so they rebuild where it now sits, and the ones that were
-/// there. A name is read as a path under the copy, so `node_modules/.cache` is one row, and a name that would
-/// climb out of the copy is refused rather than removing something beside it.
-pub fn exclude(to: &Path, names: &[String]) -> Result<Vec<String>, String> {
-    let mut gone = Vec::new();
+/// What the exclusion did: the path-bound directories that were there and went, and the rows it could not walk,
+/// each with the reason it left them standing.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Excluded {
+    pub gone: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+/// The path-bound directories taken out of the copy so they rebuild where it now sits. A name is read as a path
+/// under the copy, so `node_modules/.cache` is one row, and a name that would climb out of the copy is refused
+/// rather than removing something beside it.
+///
+/// Every folder above the last part is opened from the copy's own root following no link, so a row whose path
+/// runs through one is skipped whole: a checkout can carry a link where a folder is meant to be, left by a
+/// dependency or by the person, and what is under it is not this copy's to remove. The copy stands and the report
+/// says which rows were left. Once the walk has read every folder above it, the last part is the one entry
+/// removed, a link as a link and a folder with everything in it.
+pub fn exclude(to: &Path, names: &[String]) -> Result<Excluded, String> {
+    let mut out = Excluded::default();
     for name in names {
         let at = to.join(name);
         if !at.starts_with(to) || name.split('/').any(|part| part == "..") {
             return Err(format!("{name} is not a directory inside the copy"));
         }
-        if !at.exists() {
+        let mut parts: Vec<&str> = name.split('/').filter(|part| !part.is_empty()).collect();
+        if parts.pop().is_none() {
             continue;
         }
-        fs::remove_dir_all(&at).map_err(|e| format!("{}: {e}", at.display()))?;
-        gone.push(name.clone());
+        if let Some(why) = walked(to, &parts) {
+            out.skipped.push(format!("{name}: {why}"));
+            continue;
+        }
+        let Ok(held) = fs::symlink_metadata(&at) else { continue };
+        if !held.file_type().is_symlink() && !held.is_dir() {
+            out.skipped.push(format!("{name}: it is not a folder"));
+            continue;
+        }
+        let taken = if held.file_type().is_symlink() { fs::remove_file(&at) } else { fs::remove_dir_all(&at) };
+        taken.map_err(|e| format!("{}: {e}", at.display()))?;
+        out.gone.push(name.clone());
     }
-    Ok(gone)
+    Ok(out)
+}
+
+/// Nothing where every folder named is a folder of the copy's own, else the reason the row is left standing: the
+/// walk opens each one from the last with no link followed, so a link anywhere above the entry stops it.
+fn walked(to: &Path, parts: &[&str]) -> Option<String> {
+    let mut dir = folder(to).ok()?;
+    for part in parts {
+        match under(&dir, part) {
+            Ok(held) => dir = held,
+            // Nothing there is nothing to remove, which is not a row the report says anything about.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
+            Err(_) => return Some(format!("{part} is a link or not a folder, so nothing under it was removed")),
+        }
+    }
+    None
+}
+
+fn folder(at: &Path) -> io::Result<OwnedFd> {
+    fs::File::options().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW).open(at).map(OwnedFd::from)
+}
+
+/// One folder opened from another by name, following no link and taking nothing that is not a folder.
+fn under(dir: &OwnedFd, name: &str) -> io::Result<OwnedFd> {
+    let name = std::ffi::CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    // SAFETY: the descriptor is borrowed for this call and the name is a C string that outlives it.
+    let held =
+        unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if held < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: openat answered a descriptor nothing else owns.
+    Ok(unsafe { OwnedFd::from_raw_fd(held) })
 }
 
 /// The fetch of the copy's own default branch before it is reset, in the copy's own git directory and never the
@@ -336,10 +395,49 @@ mod tests {
         fs::create_dir_all(at.join(".next/cache")).unwrap();
         fs::create_dir_all(at.join("node_modules/.cache")).unwrap();
         fs::create_dir_all(at.join("node_modules/pkg")).unwrap();
-        let gone = exclude(&at, &[".venv".to_owned(), ".next".to_owned(), "node_modules/.cache".to_owned()]).unwrap();
-        assert_eq!(gone, vec![".next".to_owned(), "node_modules/.cache".to_owned()]);
+        let out = exclude(&at, &[".venv".to_owned(), ".next".to_owned(), "node_modules/.cache".to_owned()]).unwrap();
+        assert_eq!(out.gone, vec![".next".to_owned(), "node_modules/.cache".to_owned()]);
+        assert!(out.skipped.is_empty(), "{out:?}");
         assert!(!at.join(".next").exists() && !at.join("node_modules/.cache").exists());
         assert!(at.join("node_modules/pkg").exists(), "only what was named goes");
+    }
+
+    /// A checkout carrying a link where a folder is meant to be, which a dependency can leave behind: the row
+    /// whose path runs through it is skipped whole, nothing beside the copy is touched, and the report says so.
+    #[test]
+    fn a_row_whose_path_runs_through_a_link_is_skipped_and_nothing_outside_the_copy_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("work");
+        fs::create_dir_all(&at).unwrap();
+        // The folder beside the copy the link leads to, with what a build left in it.
+        let beside = dir.path().join("beside");
+        fs::create_dir_all(beside.join(".cache/webpack")).unwrap();
+        fs::write(beside.join(".cache/webpack/held"), b"outside the copy\n").unwrap();
+        std::os::unix::fs::symlink(&beside, at.join("node_modules")).unwrap();
+        fs::create_dir_all(at.join(".next/server")).unwrap();
+
+        let out = exclude(&at, &[".next".to_owned(), "node_modules/.cache".to_owned()]).unwrap();
+        // The row it could walk went; the row through the link was left standing and the report names it.
+        assert_eq!(out.gone, vec![".next".to_owned()]);
+        assert_eq!(out.skipped.len(), 1, "{out:?}");
+        assert!(out.skipped[0].starts_with("node_modules/.cache: node_modules is a link"), "{out:?}");
+        assert!(beside.join(".cache/webpack/held").is_file(), "the exclusion removed a folder beside the copy");
+        assert!(fs::symlink_metadata(at.join("node_modules")).unwrap().file_type().is_symlink());
+
+        // A row that is the link itself is unlinked as the link it is, and what it pointed at stays.
+        let out = exclude(&at, &["node_modules".to_owned()]).unwrap();
+        assert_eq!(out.gone, vec!["node_modules".to_owned()]);
+        assert!(out.skipped.is_empty(), "{out:?}");
+        assert!(!at.join("node_modules").exists() && beside.join(".cache/webpack/held").is_file());
+
+        // A row standing on a file rather than a folder is left standing too, and named.
+        fs::write(at.join("dist"), b"a file where a folder was named\n").unwrap();
+        let out = exclude(&at, &["dist".to_owned()]).unwrap();
+        assert!(out.gone.is_empty() && out.skipped == ["dist: it is not a folder"], "{out:?}");
+        assert!(at.join("dist").is_file());
+        // And a row that is not there at all is neither gone nor skipped, as it was before.
+        let out = exclude(&at, &[".venv".to_owned()]).unwrap();
+        assert_eq!(out, Excluded::default());
     }
 
     #[test]

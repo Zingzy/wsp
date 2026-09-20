@@ -540,7 +540,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    use wsp_frames::{place_link_transcript, LinkEphemerals, LinkRole};
+    use wsp_frames::{place_link_transcript, place_refusal_transcript, LinkEphemerals, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];
@@ -594,6 +594,14 @@ mod tests {
         assert_eq!(sign_place_bytes(&s("privateKeyPem"), &host_bytes).unwrap().as_str(), s("hostSignature"));
         assert_eq!(sign_place_bytes(&s("privateKeyPem"), &place_bytes).unwrap().as_str(), s("placeSignature"));
         assert!(verify_place_bytes(&public, &place_bytes, &Base64Bytes::parse(&s("placeSignature")).unwrap()));
+
+        // The refusal a host gives before it has proved anything, which this side verifies rather than signs.
+        let refusal = place_refusal_transcript(&s("placeId"), &s("placeNonce"), &s("refusalSentence"));
+        assert_eq!(refusal, b64("refusalTranscript"));
+        let signature = Base64Bytes::parse(&s("refusalSignature")).unwrap();
+        assert!(verify_place_bytes(&public, &refusal, &signature));
+        // The nonce is in the bytes, so one dial's refusal proves nothing at the next.
+        assert!(!verify_place_bytes(&public, &place_refusal_transcript(&s("placeId"), &s("hostNonce"), &s("refusalSentence")), &signature));
     }
 
     #[test]

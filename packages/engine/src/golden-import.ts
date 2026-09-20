@@ -6,9 +6,9 @@
 // runs the plan on the builder.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, PNPM_HOME, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
+import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -690,25 +690,25 @@ const asksOf = (road: InstallRoad): { asks?: string } => {
 /** What a step carries off its road for reading it back later: the road's own presence test where it has one, and
  * the directories that road links its commands into. One reader, so every step planned on a road answers the same
  * two questions however it was planned. */
-export function roadReads(road: InstallRoad, bin: string): { present?: string; bins?: readonly string[] } {
+export function roadReads(road: InstallRoad, bin: string, prefix?: string): { present?: string; bins?: readonly string[] } {
   const mod = roadModule(road);
   const present = mod.present?.(road, bin);
-  const bins = mod.bins(road);
+  const bins = mod.bins(road, installHomes(prefix));
   return { ...(present !== undefined ? { present } : {}), ...(bins.length > 0 ? { bins } : {}) };
 }
 
 /** What a step reads off its road: `roadReads`, and the road's own check where the road has one of its own. Read
  * by the steps whose reads are the road's word and nothing else, a formula the plan installs and a row outside the
  * catalog whose manager names a road, so both answer the same questions however the row reached the plan. */
-export function roadStepReads(road: InstallRoad, bin: string): { present?: string; bins?: readonly string[]; check?: string } {
+export function roadStepReads(road: InstallRoad, bin: string, prefix?: string): { present?: string; bins?: readonly string[]; check?: string } {
   const check = roadModule(road).check?.(road, bin);
-  return { ...roadReads(road, bin), ...(check !== undefined ? { check } : {}) };
+  return { ...roadReads(road, bin, prefix), ...(check !== undefined ? { check } : {}) };
 }
 
 /** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
-export function pinReadOf(road: InstallRoad, bin: string): PinRead {
+export function pinReadOf(road: InstallRoad, bin: string, prefix?: string): PinRead {
   const mod = roadModule(road);
-  const read = mod.installed?.(road, bin);
+  const read = mod.installed?.(road, bin, installHomes(prefix));
   return { ...(read !== undefined ? { read } : {}), fixed: fixesVersion(road), words: mod.words };
 }
 
@@ -793,10 +793,13 @@ export const MACOS_ONLY_FORMULAE: ReadonlySet<string> = new Set(["felixkratz/for
  * machine's own environment, login shells get it from profile.d, and a workspace on a computer somebody owns boots
  * with it. One PATH for a machine's tools, so it is the protocol's and neither side spells its own order. */
 export { TOOLS_PATH } from "@wsp/protocol";
-/** The line every script of a job exports its PATH with. The list is handed in rather than fixed: a machine wsp
- * forked is root's alone and takes the tools PATH, and a computer somebody owns shares its home with the
- * workspaces on it, so the job there runs on the probe list instead. */
-export const pathLine = (path: string): string => `export PATH=${path} PNPM_HOME=${PNPM_HOME}`;
+/** The line every script of a job exports its PATH and its managers' knobs with. Both are handed in rather than
+ * fixed: a machine wsp forked is root's alone and takes the tools PATH with each manager's own folders under its
+ * home, and a computer somebody owns shares its home with the workspaces on it, so the job there runs on the probe
+ * list and names the folder of wsp's own every manager installs under. One line for an install, a presence read
+ * and a version read alike, so no two of them reach different folders. */
+export const pathLine = (path: string, prefix?: string): string =>
+  ["export", `PATH=${path}`, ...Object.entries(installEnv(installHomes(prefix))).map(([name, value]) => `${name}=${value}`)].join(" ");
 export const PATH_LINE = pathLine(TOOLS_PATH);
 /** The guest runs as root, and its exec environment names no user (measured 2026-09-05): what every road that
  * hands the guest an environment says about who is logged in. */
@@ -805,7 +808,7 @@ export const GUEST_USER_ENV: Readonly<Record<string, string>> = { HOME: GUEST_HO
  * command PATH and nothing else, and the deploy's own install runs under the same gap. Written here, beside the
  * map it exports, so a road cannot spell it its own way. */
 export const EXEC_ENV = `export ${shellLine(Object.entries(GUEST_USER_ENV).map(([name, value]) => `${name}=${value}`))}`;
-const withPath = (cmd: string, path: string): string => `${pathLine(path)}\n${cmd}`;
+const withPath = (cmd: string, path: string, prefix?: string): string => `${pathLine(path, prefix)}\n${cmd}`;
 
 /** Where a login shell reads the tools PATH: a thread's terminal is one, and it inherits nothing from the stages. */
 export const PROFILE_PATH_FILE = "/etc/profile.d/wsp-golden.sh";
@@ -1024,14 +1027,14 @@ export interface PlannedRow {
 }
 
 /** How a removed tool comes off the machine: through its road's module, on the tools PATH; a row no road installed is noted. */
-export function toolUninstall(e: RecipeEntry, brew: BrewTable, path: string = TOOLS_PATH): { cmd: string } | { note: string } {
+export function toolUninstall(e: RecipeEntry, brew: BrewTable, path: string = TOOLS_PATH, prefix?: string): { cmd: string } | { note: string } {
   const base = baseRowFor(e, brew);
   if (base !== undefined) return { note: `${base.name} is part of the base and stays` };
-  if (isTap(e)) return { cmd: withPath(asLinuxbrew(`untap ${tapOf(e)}`), path) };
+  if (isTap(e)) return { cmd: withPath(asLinuxbrew(`untap ${tapOf(e)}`), path, prefix) };
   const planned = rowRoad(e, brew);
   if (planned === undefined) return { note: "no manager known for this row" };
-  const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e));
-  return "cmd" in r ? { cmd: withPath(r.cmd, path) } : r;
+  const r = roadModule(planned.road).uninstall(planned.road, planned.bin ?? packageOf(e), installHomes(prefix));
+  return "cmd" in r ? { cmd: withPath(r.cmd, path, prefix) } : r;
 }
 
 export interface ToolsPlan {
@@ -1047,7 +1050,7 @@ export const CUSTOM_PREFIX = "tools/custom/";
 
 /** What a custom row runs with: the catalog roads' own PATH and apt environment, and Homebrew's build environment,
  * which the shim on that PATH carries through to brew. */
-export const customPrelude = (path: string): string => [pathLine(path), APT_ENV, `export ${BREW_ENV}`].join("\n");
+export const customPrelude = (path: string, prefix?: string): string => [pathLine(path, prefix), APT_ENV, `export ${BREW_ENV}`].join("\n");
 
 /** The road a row outside the catalog installs by, read off the manager it names by that manager's own module;
  * nothing for a row that names no manager, or one whose module reads no row of its own (apt, on every machine
@@ -1060,16 +1063,16 @@ const customRoad = (c: RecipeCustomRow): InstallRoad | undefined => (c.manager =
  * frozen on the day it ran, and a recipe carries it unchanged for as long as the row lives. The row's own check
  * stands where no module reads the row. `after` is what the plan brings the row's manager by, when the row names
  * one and the plan brings it. */
-export function customInstallsFor(custom: readonly RecipeCustomRow[], after: (c: RecipeCustomRow) => string | undefined = () => undefined, path: string = TOOLS_PATH): ToolInstall[] {
+export function customInstallsFor(custom: readonly RecipeCustomRow[], after: (c: RecipeCustomRow) => string | undefined = () => undefined, path: string = TOOLS_PATH, prefix?: string): ToolInstall[] {
   return custom.map(c => {
     const waits = after(c);
     const road = customRoad(c);
-    const reads = road === undefined ? undefined : roadStepReads(road, c.name);
+    const reads = road === undefined ? undefined : roadStepReads(road, c.name, prefix);
     return {
       id: `${CUSTOM_PREFIX}${c.id}`,
       label: c.name,
       manager: "script" as const,
-      cmd: [customPrelude(path), ...c.install].join("\n"),
+      cmd: [customPrelude(path, prefix), ...c.install].join("\n"),
       ...reads,
       check: reads?.check ?? c.check,
       shown: shownOf(c.install),
@@ -1083,11 +1086,11 @@ export const shownOf = (lines: readonly string[]): string => lines.join("; ");
 
 /** A step's script and the line shown for it, through the road's module: the module's own line when the script is
  * not one a person reads, else the script itself. */
-export function viaRoad(road: InstallRoad, bin: string, path: string = TOOLS_PATH): { cmd: string; shown: string } | { note: string } {
+export function viaRoad(road: InstallRoad, bin: string, path: string = TOOLS_PATH, prefix?: string): { cmd: string; shown: string } | { note: string } {
   const mod = roadModule(road);
-  const line = mod.install(road, bin);
+  const line = mod.install(road, bin, installHomes(prefix));
   if (typeof line !== "string") return line;
-  return { cmd: withPath(line, path), shown: mod.shown?.(road, bin) ?? shownOf(line.split("\n")) };
+  return { cmd: withPath(line, path, prefix), shown: mod.shown?.(road, bin) ?? shownOf(line.split("\n")) };
 }
 
 /** The apt index read once, as a step every apt row waits on; the base and the recipe plan each have one. */
@@ -1099,8 +1102,8 @@ export function aptIndexStep(id: string, cmd: string): ToolInstall {
 export const brewTapCheck = (tap: string): string => `${asLinuxbrew("tap")} 2>/dev/null | grep -qx ${shellQuote(tap)}`;
 
 /** A formula's step, for the plan's own brew lines: the toolchain, a manager's formula. */
-function viaBrew(formula: string, path: string): { cmd: string; shown: string } {
-  const step = viaRoad({ road: "brew", formula }, formula, path);
+function viaBrew(formula: string, path: string, prefix?: string): { cmd: string; shown: string } {
+  const step = viaRoad({ road: "brew", formula }, formula, path, prefix);
   if (!("cmd" in step)) throw new Error(`${formula}: ${step.note}`);
   return step;
 }
@@ -1108,7 +1111,7 @@ function viaBrew(formula: string, path: string): { cmd: string; shown: string } 
 /** The road a row outside the catalog names as its manager, when it names one the catalog knows. */
 const managerRoad = (c: RecipeCustomRow): RoadName | undefined => ROADS.find(r => r === c.manager);
 
-export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTable = new Map(), custom: readonly RecipeCustomRow[] = [], path: string = TOOLS_PATH): ToolsPlan {
+export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTable = new Map(), custom: readonly RecipeCustomRow[] = [], path: string = TOOLS_PATH, prefix?: string): ToolsPlan {
   const brew = brewfileFor(entries, table);
   const installs: ToolInstall[] = [];
   const skipped: SkippedItem[] = [...brew.skipped];
@@ -1129,7 +1132,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const toolchain = BREW_TOOLCHAIN.reduce<{ steps: ToolInstall[]; last: string }>(
     (acc, f) => {
       const id = `tools/brew-toolchain/${f}`;
-      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f, path), after: acc.last, check: brewHasCheck(f) });
+      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f, path, prefix), after: acc.last, check: brewHasCheck(f) });
       return { steps: acc.steps, last: id };
     },
     { steps: [], last: "tools/homebrew" },
@@ -1159,10 +1162,10 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: toolRowId("npm", manager) });
     else if (formula !== undefined) {
-      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", ...viaBrew(formula, path), ...roadReads({ road: "brew", formula }, manager), after: toolchain.last, bin: manager } });
+      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", ...viaBrew(formula, path, prefix), ...roadReads({ road: "brew", formula }, manager, prefix), after: toolchain.last, bin: manager } });
       managerFormulae.push(formula);
     } else if (entry !== undefined) {
-      const step = viaRoad(entry.installRoad, entry.bin, path);
+      const step = viaRoad(entry.installRoad, entry.bin, path, prefix);
       if (!("cmd" in step)) throw new Error(`${entry.id}: ${step.note}`);
       managers.set(manager, { after: own, step: { id: own, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin } });
     }
@@ -1182,21 +1185,21 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
   if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
-    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap(), path), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew" });
+    installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap(), path, prefix), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew" });
     installs.push(...toolchain.steps);
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`), path), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`), path, prefix), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
     // The check reads the dependencies this step installs, not the formulae they belong to: a formula whose own
     // step failed is that row's failure, and this one did its work.
-    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae), path), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f, path), ...roadStepReads({ road: "brew", formula: f }, f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
+    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae), path, prefix), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f, path, prefix), ...roadStepReads({ road: "brew", formula: f }, f, prefix), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f, prefix) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
   // it, the manager's step otherwise; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
   const afterDep = (dep: string | undefined, road: RoadName): string | undefined => {
     if (dep === APT_INDEX) {
-      if (!installs.some(t => t.id === APT_STEP)) installs.push(aptIndexStep(APT_STEP, withPath(APT_UPDATE, path)));
+      if (!installs.some(t => t.id === APT_STEP)) installs.push(aptIndexStep(APT_STEP, withPath(APT_UPDATE, path, prefix)));
       return APT_STEP;
     }
     if (dep === HOMEBREW_STEP) return toolchain.last;
@@ -1222,14 +1225,14 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     return brings.after;
   }
   const plan = (e: RecipeEntry, planned: PlannedRow): void => {
-    const step = viaRoad(planned.road, planned.bin ?? packageOf(e), path);
+    const step = viaRoad(planned.road, planned.bin ?? packageOf(e), path, prefix);
     if (!("cmd" in step)) {
       skipped.push({ id: e.id, note: step.note });
       return;
     }
     const after = afterDep(depOf(planned), planned.road.road);
     const bin = planned.bin ?? packageOf(e);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...roadReads(planned.road, bin), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, bin) });
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...roadReads(planned.road, bin, prefix), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, bin, prefix) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);
@@ -1256,7 +1259,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   installs.push(...customInstallsFor(custom, c => {
     const road = managerRoad(c);
     return road === undefined ? undefined : afterRoad(road);
-  }, path));
+  }, path, prefix));
   return { installs, skipped, base: brew.base, brewfile: brew.text };
 }
 
@@ -1532,7 +1535,7 @@ export const nodeFloorCheck = (floor: number): string =>
  * nothing. The road is the step's manager, which is what bounds the run.
  *
  * The plan's own skipped rows are not here: they never became steps, and whoever runs the plan reports them. */
-export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CATALOG_AGENTS, path: string = TOOLS_PATH): ToolInstall[] {
+export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CATALOG_AGENTS, path: string = TOOLS_PATH, prefix?: string): ToolInstall[] {
   const out: ToolInstall[] = [];
   const node = plan.node;
   if (node !== undefined) {
@@ -1545,11 +1548,11 @@ export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CAT
       id: a.id,
       label: a.name,
       manager: a.road,
-      cmd: `${pathLine(path)}\n${NODE_PATH_LINE}\n${a.install}`,
+      cmd: `${pathLine(path, prefix)}\n${NODE_PATH_LINE}\n${a.install}`,
       shown: shownOf(a.install.split("\n")),
       check: a.smoke,
       ...waits,
-      ...(entry === undefined ? {} : { bin: entry.bin, ...roadReads(entry.installRoad, entry.bin), ...asksOf(entry.installRoad) }),
+      ...(entry === undefined ? {} : { bin: entry.bin, ...roadReads(entry.installRoad, entry.bin, prefix), ...asksOf(entry.installRoad) }),
       ...(a.pin === undefined ? {} : { pin: a.pin }),
     });
   }

@@ -76,7 +76,7 @@ describe("the vault step", () => {
     const outcomes = await run;
     expect(minted).toEqual(["claude setup-token"]);
     expect(outcomes).toEqual([{ id: "logins/claude", label: "Claude Code login", state: "signed-in", note: "token held on this computer" }]);
-    expect(savedEnv(dir)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
+    expect(savedEnv(join(dir, "state.json"))).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
     expect(statSync(env).mode & 0o777).toBe(0o600);
     expect(hidden).toEqual([TOKEN]);
     // The value is never on the screen.
@@ -98,7 +98,7 @@ describe("the vault step", () => {
     await t.press(...`Paste code here if prompted > ${TOKEN}`.split(""), KEY.enter);
     const outcomes = await run;
     expect(outcomes[0]!.state).toBe("not-signed-in");
-    expect(savedEnv(dir)).toEqual({});
+    expect(savedEnv(join(dir, "state.json"))).toEqual({});
   });
 
   it("refuses a paste that is not what the tool prints, and saves nothing for that row", async () => {
@@ -117,7 +117,7 @@ describe("the vault step", () => {
     const outcomes = await run;
     expect(outcomes[0]!.state).toBe("not-signed-in");
     expect(outcomes[0]!.note).toContain("not what claude setup-token prints");
-    expect(savedEnv(dir)).toEqual({});
+    expect(savedEnv(join(dir, "state.json"))).toEqual({});
   });
 
   it("asks nothing for a value the wsp home already holds, and nothing at all where nobody can type", async () => {

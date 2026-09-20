@@ -85,6 +85,10 @@ pub struct CopyReport {
     pub fetched: bool,
     pub carried: Carried,
     pub excluded: Vec<String>,
+    /// The rows the exclusion left standing and why: a path it could not walk without following a link, so
+    /// nothing under it was removed. Absent where every row it was given went.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// The folder's apparent size as the walk read it.
     pub bytes: u64,
     pub ms: u64,
@@ -135,13 +139,20 @@ mod tests {
             fetched: false,
             carried: Carried::DepsAndConfig,
             excluded: vec![".next".to_owned()],
+            skipped: Vec::new(),
             bytes: 7,
             ms: 8,
             fell_back: None,
         };
         let line = serde_json::to_string(&report).unwrap();
-        assert!(!line.contains("fellBack"), "{line}");
+        assert!(!line.contains("fellBack") && !line.contains("skipped"), "{line}");
         assert_eq!(serde_json::from_str::<CopyReport>(&line).unwrap(), report);
+        // A row the exclusion left standing rides the line, and a report written before the field reads as one
+        // whose every row went.
+        let left = CopyReport { skipped: vec!["node_modules/.cache: node_modules is a link".to_owned()], ..report };
+        let line = serde_json::to_string(&left).unwrap();
+        assert!(line.contains("\"skipped\""), "{line}");
+        assert_eq!(serde_json::from_str::<CopyReport>(&line).unwrap(), left);
     }
 
     #[test]

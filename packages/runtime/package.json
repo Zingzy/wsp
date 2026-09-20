@@ -12,6 +12,7 @@
     "@wsp/catalog": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/keys": "workspace:*",
+    "@wsp/own-file": "workspace:*",
     "@wsp/protocol": "workspace:*",
     "ws": "^8.21.3"
   },

@@ -591,6 +591,9 @@ export const CopyReport = z.object({
   fetched: z.boolean(),
   carried: Carried,
   excluded: z.array(z.string()),
+  /** The rows the exclusion left standing and why: a path it could not walk without following a link, so nothing
+   * under it was removed. Absent where every row it was given went. */
+  skipped: z.array(z.string()).optional(),
   bytes: z.number().int().nonnegative(),
   ms: z.number().int().nonnegative(),
   fellBack: z.string().optional(),
@@ -1253,7 +1256,10 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
 
 // --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
-export const DeltaKind = z.enum(["text", "thinking", "tool_use", "tool_result"]);
+/** What one piece of a turn's stream is. `note` is the harness's own line about itself, a warning about the
+ * person's configuration among them: not the agent's words, not a call, and never the turn's verdict, so a reader
+ * prints it as an aside and the word failed stays for a call that failed and for a turn that did. */
+export const DeltaKind = z.enum(["text", "thinking", "note", "tool_use", "tool_result"]);
 export type DeltaKind = z.infer<typeof DeltaKind>;
 
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
@@ -1325,6 +1331,12 @@ export const SessionDeltaEvent = z.object({
   ...sessionScope,
   kind: DeltaKind,
   text: z.string(),
+  /** The harness's own id for the message this piece of text belongs to, and the one home of the rule every reader
+   * of text follows: append to the message you have open, open another where this changes. That is what tells the
+   * reply an agent gave while a background command ran from the reply it gave when that command woke it, which the
+   * harness sends as two messages and every reader used to glue into one. Absent on a row written before the stamp
+   * existed and on every kind a harness names no message for, which append as they always did. */
+  messageId: z.string().optional(),
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),
   isError: z.boolean().optional(),
@@ -2334,6 +2346,9 @@ export const SealedVault = z.object({
   bytes: z.number().int().nonnegative(),
   /** How many guest paths the archive names; zero means the seal had nothing to hold and the copy will ask for sign-ins again. */
   paths: z.number().int().nonnegative(),
+  /** The guest paths the seal archived, absolute, which every member of the archive is judged against before a copy
+   * imports it. Absent on a record sealed before the list was kept, and such a record builds no copy. */
+  held: z.array(z.string()).optional(),
   takenAt: z.string(),
 });
 export type SealedVault = z.infer<typeof SealedVault>;
@@ -3584,6 +3599,21 @@ export const isJoinedComputer = (place: { id: string; kind: string }): boolean =
 export const placeBuildsNoImageLine = (place: string): string =>
   `${place} takes no copy of your image: a copy is built by forking a machine there and copying its disk, and ${place} does neither`;
 
+/** The two rooms the member rule is read in: the seal that takes the archive off a builder on the person's own
+ * place, and the import that lands it on a copy somewhere else. */
+export type VaultRoad = "seal" | "import";
+
+/** What a vault archive is refused with: where the reading stopped, why, and what that refusal did, which is not
+ * the same on the two roads. The archive is refused whole, since a builder that wrote one member nobody asked for
+ * wrote every other member too. */
+export const vaultMemberRefusal = (road: VaultRoad, member: string, why: string): string =>
+  `the image's sign-in archive is refused at ${member}: ${why}; ${road === "seal" ? "the seal is refused and no version is recorded" : "nothing of it was imported"}`;
+
+/** What a copy is refused with for a record whose vault kept no path list: sealed before the record held which
+ * paths its sign-ins live at, so no other place can tell a member the seal asked for from one it did not. */
+export const vaultUnlistedRefusal = (name: string, version: number): string =>
+  `${name} v${version} was sealed before its record kept which paths its sign-ins live at, so no other place can check its archive against them; cut the next version`;
+
 export const DaemonErrorCode = z.enum([
   "unsupported",
   "outside-root",
@@ -3714,6 +3744,9 @@ const DAEMON_CONTENTS = [
   "cec7af13cc254d8325bf77409aedc4daeb072d5dc0413b58aaf45f8428698721",
   "b1c827b22fbdade28b749f72899b610723d5f312e339e9546552da14840013c1",
   "7324cbd1f27eb8983b8ea302c3cd32a629a4eedae7e0d46458acca37440baf88",
+  "b83b671323ccc59fe9daa43da46dede2d640451c5b4f0c8e64ae2eef149ba694",
+  "5b5db8f843457bfac71002bb4741d98f0f98bfe11579e7891c1a0955c39eed0f",
+  "e10ddc035c5a0fb57b8b591da1fa220023e836e7c7598022c19d852e747bab46",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3892,7 +3925,15 @@ const DAEMON_CONTENTS = [
  * sent, seals every frame of the link at both ends so whoever carries it reads and writes nothing, resolves no command
  * through a folder a workspace can write, and holds a token of its own machine's rather than one every machine shares.
  * Version 61 bounds the guest bytes in flight per workspace on a place and per daemon inside a fork, queued and unsent
- * alike, and refuses a frame past the cap with a sentence of its own while the session stays open. */
+ * alike, and refuses a frame past the cap with a sentence of its own while the session stays open.
+ * Version 62 prints its two kernel knob lines only on Linux and nothing on a Mac start, closes the guest door of a
+ * workspace whose init died on its own by watching the init's pidfd and running the stop road, and stops redialling
+ * a host that refused its place under a signature over the pinned key.
+ * Version 63 counts the bytes a client buffers behind the WebSocket upgrade against the same pre-auth cap as the
+ * bytes after it, so nothing rides the upgrade past the door unweighed.
+ * Version 64 opens every path under a workspace's rootfs beneath it by descriptor with no link followed, covers the box
+ * root's startup files with the workspace's own copies, lets a workspace read under /etc, /var and /srv only what an
+ * allowlist names, and skips a linked row at the copy's exclude rather than removing outside the copy. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4373,6 +4414,13 @@ export type PlaceAuthRequest = z.infer<typeof PlaceAuthRequest>;
 export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
 export type PlaceAuthReply = z.infer<typeof PlaceAuthReply>;
 
+/** What a host puts on its refusal of that frame when it holds no place by the id it named: its own key and a
+ * signature over the refusal transcript. A place verifies it against the key it pinned at join and takes the long
+ * wait on it, since nothing changes until a person acts; a refusal carrying neither, or one the pinned key did not
+ * make, is a frame anybody who answers at the address can send and costs that computer no wait of its own. */
+export const PlaceAuthRefusal = z.object({ hostPublicKey: PlacePublicKey, signature: PlaceSignature });
+export type PlaceAuthRefusal = z.infer<typeof PlaceAuthRefusal>;
+
 /** The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
  * now. A join's prove carries the code it spends and the window it wants too, which is where they cross now that
  * the host has proved itself and nothing of the person's may travel before it. After this the socket is the place
@@ -4396,6 +4444,13 @@ export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
  * carrier that swapped either of them has signed nothing. */
 export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string, ephemerals: { challenger: string; answerer: string }): Uint8Array {
   return new TextEncoder().encode(`wsp place link v2\n${role}\n${placeId}\n${challenge}\n${answer}\n${ephemerals.challenger}\n${ephemerals.answerer}\n`);
+}
+
+/** What a host signs to refuse a place at its first frame, built by one function so the two sides cannot drift:
+ * the place id it named, the nonce it challenged with and the sentence it is refused by. The nonce is inside, so
+ * one dial's refusal cannot be replayed at the next; the sentence is inside, so it cannot be bent to another. */
+export function placeRefusalTranscript(placeId: string, placeNonce: string, sentence: string): Uint8Array {
+  return new TextEncoder().encode(`wsp place refusal v1\n${placeId}\n${placeNonce}\n${sentence}\n`);
 }
 
 /** What stands where a place id stands for a client's seal: a client is no place and holds no record here, so the

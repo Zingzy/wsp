@@ -342,6 +342,9 @@ importers:
       '@wsp/keys':
         specifier: workspace:*
         version: link:../keys
+      '@wsp/own-file':
+        specifier: workspace:*
+        version: link:../own-file
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -371,6 +374,12 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/own-file:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/protocol:
     dependencies:
       zod:
@@ -394,6 +403,9 @@ importers:
       '@wsp/keys':
         specifier: workspace:*
         version: link:../keys
+      '@wsp/own-file':
+        specifier: workspace:*
+        version: link:../own-file
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
