@@ -5,7 +5,7 @@
 // neither is a road a paired client or an agent can reach: a code hands out
 // access, and only somebody at the host's own terminal hands it out.
 import { networkInterfaces } from "node:os";
-import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, relayUrlOf, usageRefusal, type DeviceView } from "@wsp/protocol";
+import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, pairToken, relayUrlOf, SEAL_UNSERVED, usageRefusal, type DeviceView } from "@wsp/protocol";
 import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
@@ -77,11 +77,13 @@ export function hostReach(
   };
 }
 
-/** What wsp host pair prints: the code, how long it stands, and the addresses to hand the person at the other computer.
- * A host behind a relay leads with the address that works from anywhere, since that is the one to hand over. */
-export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt?: string): string[] {
+/** What wsp host pair prints: the token, how long it stands, and the addresses to hand the person at the other
+ * computer. The token is the code and the fingerprint of the key this host proves, as one word, so the computer
+ * that types it holds this host to that key before the code leaves it. A host behind a relay leads with the
+ * address that works from anywhere, since that is the one to hand over. */
+export function pairLines(token: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt?: string): string[] {
   return [
-    `code        ${code}`,
+    `code        ${token}`,
     `expires     in ${fmtDuration(Math.max(0, expiresAt - now))}, at ${new Date(expiresAt).toISOString()}`,
     ...(publicAt !== undefined ? [`open        ${relayUrlOf(publicAt)}`] : []),
     ...addresses.map(at => `open        http://${authority(at, port)}`),
@@ -129,11 +131,14 @@ export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly stri
   const address = lock?.address ?? LOOPBACK;
   const client = await deps.dial(opts.statePath, { aim });
   try {
-    const { code, expiresAt } = await client.request<{ code: string; expiresAt: number }>("pair.issue");
+    const { code, expiresAt, hostKey } = await client.request<{ code: string; expiresAt: number; hostKey?: string }>("pair.issue");
+    // A code with no key beside it is one no computer can spend: the client holds the host to that fingerprint
+    // before it sends the code, so a host that proves none has nothing to hand over.
+    if (hostKey === undefined) throw new Error(SEAL_UNSERVED);
     // A relay is a road in of its own, so a host on loopback alone behind one is reachable and the warning would be wrong.
     const publicAt = publicHostname(opts.statePath);
     if (isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
-    for (const line of pairLines(code, expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0, publicAt)) io.log(line);
+    for (const line of pairLines(pairToken(code, hostKey), expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0, publicAt)) io.log(line);
     return 0;
   } finally {
     client.close();

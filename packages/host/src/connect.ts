@@ -5,7 +5,7 @@
 // hands a token back and forgets it. Nothing here prints a token: a listing
 // that leaked one would open the host to whoever read the terminal.
 import { hostname } from "node:os";
-import { servedHostname, usageRefusal } from "@wsp/protocol";
+import { PAIR_NO_KEY_REFUSAL, readJoinToken, servedHostname, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { aliasFrom, checkedAlias, defaultHost, dialWindowMs, listHosts, noAnswerWithin, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostAim, type HostRecord } from "./hosts.js";
 import { relayHostUrl } from "./relay-link.js";
@@ -76,7 +76,12 @@ export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { cod
   if (readHost(opts.home, alias) !== undefined) {
     throw usageRefusal(`a host named ${alias} is already connected.`, `Run wsp host forget ${alias} first, or give this one another name with --name.`);
   }
-  const client = await deps.dial(opts.statePath, { host: url, home: opts.home, env: {}, redeem: { code: code.trim(), name: deps.deviceName() } });
+  // The code and the fingerprint of the key that host will prove, as one word off wsp host pair. A code carrying
+  // no fingerprint is refused here, before the dial: nothing would tell the host that printed it from whoever
+  // answers at the address a relay named, and the code would be spent finding out.
+  const typed = readJoinToken(code);
+  if (typed.hostKey === undefined) throw new Error(PAIR_NO_KEY_REFUSAL);
+  const client = await deps.dial(opts.statePath, { host: url, home: opts.home, env: {}, redeem: { code: typed.code, name: deps.deviceName(), hostKey: typed.hostKey } });
   let paired;
   try {
     paired = client.paired;
@@ -84,7 +89,7 @@ export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { cod
     client.close();
   }
   if (paired === undefined) throw new Error(`the host at ${url} answered the pairing code with no device token; it runs another version of wsp`);
-  const record: HostRecord = { url: url.replace(/\/+$/, ""), deviceId: paired.deviceId, deviceToken: paired.deviceToken, pairedAt: new Date(deps.now()).toISOString() };
+  const record: HostRecord = { url: url.replace(/\/+$/, ""), deviceId: paired.deviceId, deviceToken: paired.deviceToken, hostKey: typed.hostKey, pairedAt: new Date(deps.now()).toISOString() };
   writeHost(opts.home, alias, record);
   const madeDefault = defaultHost(opts.home) === undefined;
   if (madeDefault) setDefaultHost(opts.home, alias);

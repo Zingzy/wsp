@@ -7,7 +7,7 @@
 // are about, in a slot that is always there so nothing moves. On success the
 // sheet closes and the window is already on the new host.
 import { useState, type KeyboardEvent } from "react";
-import { HOST_WORDS, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad } from "@wsp/protocol";
+import { HOST_WORDS, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -15,7 +15,7 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { SetupScreen } from "../sidebar/cloud-setup/SetupScreen.js";
-import { sentCode, shownCode } from "./pairingCode.js";
+import { codeIsWhole, sentCode, shownCode } from "./pairingCode.js";
 
 const WORDS = HOST_WORDS.sheet;
 const ROADS = [
@@ -56,7 +56,7 @@ const SHEET_ROADS: { readonly [K in HostRoad]: SheetRoad } = {
     ],
     note: WORDS.directNote,
     held: WORDS.fillFirst,
-    ready: v => isUrl(v.url.trim()) && sentCode(v.code).length === PAIR_CODE_LENGTH,
+    ready: v => isUrl(v.url.trim()) && codeIsWhole(v.code),
     ask: v => ({ road: "direct", url: v.url.trim(), code: sentCode(v.code) }),
     fallback: "url",
   },

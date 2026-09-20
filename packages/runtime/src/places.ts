@@ -9,7 +9,7 @@
 // (PlaceNonce, PlacePublicKey, PlaceSignature) and the bytes they sign come
 // from placeLinkTranscript, so this file holds the host's half of the
 // handshake and no rule of its own about how it is spelled.
-import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, sign as signBytes, verify as verifyBytes } from "node:crypto";
+import { createPublicKey, randomBytes } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import {
   LOOPBACK,
@@ -17,11 +17,13 @@ import {
   NO_PLACE_INSTALLER,
   PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
+  PLACE_UNKNOWN_REFUSAL,
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
   forkRoom,
   placeLinkTranscript,
+  placeRefusalTranscript,
   isPlainPath,
   joinToken,
   absentComputer,
@@ -51,6 +53,7 @@ import {
   type MachineSizeOffer,
   type PlaceAddStep,
   type PlaceStageEvent,
+  type PlaceAuthRefusal,
   type PlaceAuthReply,
   type PlaceAuthRequest,
   type PlaceJoinReply,
@@ -80,7 +83,7 @@ import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import type { PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
-import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "./seal.js";
+import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import type { Store } from "./store.js";
 
 /** One document per joined computer, keyed by the id this host knows it by. */
@@ -88,13 +91,6 @@ const PLACES = "places";
 /** The one document naming which place a verb means when nobody says: the last one added. */
 const DEFAULT_COLLECTION = "place-default";
 const DEFAULT_ID = "default";
-
-/** An ed25519 pair as this host keeps it: the public half base64 SPKI DER, which is what travels, and the private
- * half as pkcs8 PEM, which never does. */
-export interface PlaceKeyPair {
-  publicKey: string;
-  privateKeyPem: string;
-}
 
 /** What the store keeps about a joined computer. The key is the whole of its identity: a computer whose key moved
  * is not this place, whatever address it dials from. */
@@ -327,13 +323,31 @@ export interface PlaceDoorOptions {
   now?: () => number;
 }
 
+/** The host's half of one handshake: what it answers the other end with, the bytes that end's own signature must
+ * cover, and the seal the frames after the answer ride inside. */
+export interface PlaceChallenge {
+  nonce: string;
+  hostPublicKey: string;
+  signature: string;
+  ephemeral: string;
+  expect: Uint8Array;
+  seal: Seal;
+}
+
 /** The host's side of the place link: the records, the keys, the handshake, the live links and what a remove takes. */
 export interface PlaceDoor {
+  /** The host's half of a handshake with whoever is on the other end, signed with the key this door holds and
+   * nobody outside it reads: a place under its own id, a native client under the client's word. Nothing where the
+   * other end sent no half of a key agreement, which only a wsp older than the seal does. */
+  answerChallenge(subject: string, nonce: string, ephemeral: string | undefined): PlaceChallenge | undefined;
   /** The first frame of a joining computer. Answers the reply and the bytes its prove must sign, or nothing when
    * the code is not one this host is holding. Throws with its own sentence for a key or a report it cannot take. */
   join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; seal: Seal; notice?: string } | undefined>;
-  /** The first frame of a place that already joined; nothing when this host holds no place by that id. */
-  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array; seal: Seal } | undefined>;
+  /** The first frame of a place that already joined. A place this host holds no record of is refused with this
+   * host's own key and a signature over the refusal transcript, which that computer verifies against the key it
+   * pinned at join: a refusal it can prove is one it waits ten minutes on rather than dialling every half minute
+   * for good. Throws with its own sentence for a computer this host cannot agree a key with. */
+  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array; seal: Seal } | { refusal: string; signed: PlaceAuthRefusal }>;
   /** The fingerprint of the key this door proves at every join, for the token a join line carries. Read off the
    * pair the handshake signs with, so a line can never name a key this door will not answer with. */
   hostKey(): string;
@@ -503,37 +517,11 @@ function bounded<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
   });
 }
 
-/** A fresh ed25519 pair in the two spellings the link uses. The one road that makes one, so the host's own key and
- * a joining computer's are the same kind of key written the same way. */
-export function newPlaceKeyPair(): PlaceKeyPair {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  return {
-    publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"),
-    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-  };
-}
-
-/** A signature over the bytes both sides build from one function; ed25519 takes no digest name. The host signs its
- * half with its own key here, and wsp join signs a joining computer's half with the key it just made.
- *
- * The place's half of this pair is the daemon's, in Rust; the two are held together by the vectors under
- * daemon/fixtures, which packages/daemon's suite regenerates here and the daemon's own test reads. What could
- * drift, the bytes that are signed and the encodings they are sent in, is in the protocol
- * (`placeLinkTranscript`, `PlaceSignature`, `PlacePublicKey`). */
-export function signPlaceBytes(privateKeyPem: string, bytes: Uint8Array): string {
-  return signBytes(null, bytes, createPrivateKey(privateKeyPem)).toString("base64");
-}
-
-/** Whether the key given made this signature: the key on a place's record here, and at a join the key the host sent
- * with its own challenge. A key that will not even parse is a refusal rather than a throw: it came off the wire. */
-export function verifyPlaceBytes(publicKeyBase64: string, bytes: Uint8Array, signatureBase64: string): boolean {
-  try {
-    const key = createPublicKey({ key: Buffer.from(publicKeyBase64, "base64"), format: "der", type: "spki" });
-    return verifyBytes(null, bytes, key, Buffer.from(signatureBase64, "base64"));
-  } catch {
-    return false;
-  }
-}
+/** The pair each end of a link proves itself with, the fingerprint a person copies and the signatures over the
+ * transcript both ends build: they live in their own package, since the command line holds a host to its key
+ * before it sends a token and cannot load this one to do it. Named here too, where every reader of the link
+ * already looks for them. */
+export { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair } from "@wsp/keys";
 
 /** Whether a public key off the wire is an ed25519 one this host can verify against later. Read before the code is
  * spent, so a key that opens nothing never costs somebody their join code. */
@@ -807,29 +795,39 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   };
   const markDefault = (placeId: string): Promise<void> => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
 
-  /** The host's half of the handshake, the one place it is built: a fresh nonce and a fresh key agreement, the
-   * signature over the transcript the place challenged with, the bytes the place's own signature must cover, and
-   * the seal every frame after this reply rides inside. The ephemerals are inside both transcripts, so the key
-   * the two ends agree is one both signatures cover and a carrier that swapped either has signed nothing.
-   * Nothing where the place sent no key of its own to agree with. */
-  const challenge = (placeId: string, placeNonce: string, placeEphemeral: string | undefined): { nonce: string; signature: string; ephemeral: string; expect: Uint8Array; seal: Seal } | undefined => {
-    if (placeEphemeral === undefined) return undefined;
+  /** The host's half of the handshake, the one place it is built and the one place its private key is read: a
+   * fresh nonce and a fresh key agreement, the signature over the transcript the other end challenged with, the
+   * bytes that end's own signature must cover, and the seal every frame after this reply rides inside. The
+   * ephemerals are inside both transcripts, so the key the two ends agree is one both signatures cover and a
+   * carrier that swapped either has signed nothing. `subject` is the place id for a link and the client's word
+   * for a native client, which holds no record here and signs nothing back. Nothing where the other end sent no
+   * key of its own to agree with. */
+  const challenge = (subject: string, theirNonce: string, theirEphemeral: string | undefined): PlaceChallenge | undefined => {
+    if (theirEphemeral === undefined) return undefined;
     const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
     const mine = freshEphemeral();
     let secret: Buffer;
     try {
-      secret = sharedSecret(mine.privateKey, placeEphemeral);
+      secret = sharedSecret(mine.privateKey, theirEphemeral);
     } catch {
       return undefined;
     }
     return {
       nonce,
+      hostPublicKey: wiring.hostKey.publicKey,
       ephemeral: mine.publicKey,
-      signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeLinkTranscript("host", placeId, placeNonce, nonce, { challenger: placeEphemeral, answerer: mine.publicKey })),
-      expect: placeLinkTranscript("place", placeId, nonce, placeNonce, { challenger: mine.publicKey, answerer: placeEphemeral }),
-      seal: makeSeal(sealKeys(secret, placeId), "host"),
+      signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeLinkTranscript("host", subject, theirNonce, nonce, { challenger: theirEphemeral, answerer: mine.publicKey })),
+      expect: placeLinkTranscript("place", subject, nonce, theirNonce, { challenger: mine.publicKey, answerer: theirEphemeral }),
+      seal: makeSeal(sealKeys(secret, subject), "host"),
     };
   };
+
+  /** This host's word on a refusal it sends before it has proved anything else: its key, and its signature over
+   * the place id, the nonce that dial challenged with and the sentence. */
+  const signedRefusal = (placeId: string, placeNonce: string, sentence: string): PlaceAuthRefusal => ({
+    hostPublicKey: wiring.hostKey.publicKey,
+    signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeRefusalTranscript(placeId, placeNonce, sentence)),
+  });
 
   const writeSeen = async (placeId: string, at: number): Promise<void> => {
     const held = await recordOf(placeId);
@@ -1250,6 +1248,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   };
 
   const door: PlaceDoor = {
+    answerChallenge: challenge,
+
     async join(req, _from, at) {
       // The key is read before anything else: a frame that names no key this host can hold is a join that was
       // never going to stand, and nothing of the person's has crossed yet either way.
@@ -1264,7 +1264,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       for (const [waiting, held] of joining) if (at - held.at > JOIN_PROVE_MS) joining.delete(waiting);
       joining.set(id, { publicKey: req.publicKey, at });
       return {
-        reply: { placeId: id, hostPublicKey: wiring.hostKey.publicKey, nonce: opened.nonce, signature: opened.signature, ephemeral: opened.ephemeral, hostName: wiring.hostName() },
+        reply: { placeId: id, hostPublicKey: opened.hostPublicKey, nonce: opened.nonce, signature: opened.signature, ephemeral: opened.ephemeral, hostName: wiring.hostName() },
         expect: opened.expect,
         seal: opened.seal,
       };
@@ -1272,12 +1272,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async auth(req) {
       const held = await recordOf(req.placeId);
-      if (held === undefined) return undefined;
+      // The sentence signed before it is sent: the key is this host's own and the place pinned it at join, so
+      // this host can give its word on a place it holds nothing of, which is the whole of what the refusal says.
+      if (held === undefined) {
+        return { refusal: PLACE_UNKNOWN_REFUSAL, signed: signedRefusal(req.placeId, req.nonce, PLACE_UNKNOWN_REFUSAL) };
+      }
       const opened = challenge(req.placeId, req.nonce, req.ephemeral);
       // A daemon older than the seal agrees no key: the row already says it is behind and why, and that is the
       // sentence its link is refused with rather than one about a field.
       if (opened === undefined) throw new Error(placeBehindLine(held.name, placeDaemonBehind(held.report) ?? ""));
-      return { reply: { nonce: opened.nonce, hostPublicKey: wiring.hostKey.publicKey, signature: opened.signature, ephemeral: opened.ephemeral }, expect: opened.expect, seal: opened.seal };
+      return { reply: { nonce: opened.nonce, hostPublicKey: opened.hostPublicKey, signature: opened.signature, ephemeral: opened.ephemeral }, expect: opened.expect, seal: opened.seal };
     },
 
     hostKey() {

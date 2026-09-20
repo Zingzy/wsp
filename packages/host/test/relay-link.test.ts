@@ -607,6 +607,9 @@ describe("the person's own client", () => {
 });
 
 describe("wsp host connect --relay", () => {
+  /** The fingerprint the code carried, which the dial holds the host at that address to. */
+  const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
   /** A host that answers the redeem, so this test is about which address the dial was handed and nothing else. */
   const paired: HostClient = {
     request: (async () => ({})) as HostClient["request"],
@@ -627,7 +630,7 @@ describe("wsp host connect --relay", () => {
 
     const dialled: DialOpts[] = [];
     const log: string[] = [];
-    const code = await connectCommand(io(log), { statePath, home }, { code: "QWAXC5GT", relay: "box" }, [], {
+    const code = await connectCommand(io(log), { statePath, home }, { code: `QWAXC5GT.${HOST_KEY}`, relay: "box" }, [], {
       dial: async (_statePath, opts) => {
         dialled.push(opts);
         return paired;
@@ -641,7 +644,10 @@ describe("wsp host connect --relay", () => {
     expect(code).toBe(0);
     expect(dialled).toHaveLength(1);
     expect(dialled[0]!.host).toBe("https://hbox1.boxes.example");
-    expect(dialled[0]!.redeem).toEqual({ code: "QWAXC5GT", name: "the Mac" });
+    // The relay names the address and nothing else: the key the dial holds that host to came off the code the
+    // person copied at its own terminal, so a relay that named another host's address is refused over there.
+    expect(dialled[0]!.redeem).toEqual({ code: "QWAXC5GT", name: "the Mac", hostKey: HOST_KEY });
+    expect(readHost(home, "box")!.hostKey).toBe(HOST_KEY);
     expect(readHost(home, "box")!.url).toBe("https://hbox1.boxes.example");
     expect(log.join("\n")).not.toContain("device-token");
   });

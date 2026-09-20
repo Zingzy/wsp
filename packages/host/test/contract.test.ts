@@ -30,6 +30,9 @@ import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
+/** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
 runsFromItsOwnFolder();
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -572,7 +575,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(VerbFailure.parse(JSON.parse(usage.stderr))).toMatchObject({ class: "usage", exit: 3 });
     // A host on another computer, which no line on this one starts: the road carries nothing and the failure is
     // the provider's. A state file nothing serves is no longer a failure at all, since the verb starts a host.
-    writeHost(join(dir, "home"), "nowhere", { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", pairedAt: new Date().toISOString() });
+    writeHost(join(dir, "home"), "nowhere", { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString() });
     const noHost = await outcome(["threads", "--json", "--host", "nowhere"]);
     expect(noHost.code).toBe(1);
     expect(noHost.stdout).toBe("");

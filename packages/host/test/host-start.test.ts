@@ -19,6 +19,9 @@ import { PAGE, captured } from "./verbs-fixture.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
+/** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
 runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -199,7 +202,7 @@ describe("a verb starts the host when none serves", () => {
     expect(here.calls).toEqual([statePath]);
 
     const there = servingStarter();
-    const nowhere = { kind: "alias" as const, alias: "box", record: { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", pairedAt: new Date().toISOString() } };
+    const nowhere = { kind: "alias" as const, alias: "box", record: { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString() } };
     await expect(dialHost(statePath, { aim: nowhere, start: there.start, deadlineMs: 500 })).rejects.toThrow();
     expect(there.calls).toEqual([]);
 

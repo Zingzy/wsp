@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { WS_PATH } from "@wsp/protocol";
+import { LAUNCHED_WITH, WS_PATH, hostNoKeyLine } from "@wsp/protocol";
 import { aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
 import { homeNamed } from "../src/serving-home.js";
 import { hostAddress, noHostServingLine } from "../src/verbs.js";
@@ -24,7 +24,10 @@ function tempDir(tag: string): string {
   return dir;
 }
 
-const record = (url: string, id = "d_1a2b3c4d"): HostRecord => ({ url, deviceId: id, deviceToken: `tok-${id}`, pairedAt: "2026-09-11T10:00:00.000Z" });
+/** The fingerprint a pairing pinned, as every record written since wsp pinned keys carries one. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
+const record = (url: string, id = "d_1a2b3c4d"): HostRecord => ({ url, deviceId: id, deviceToken: `tok-${id}`, hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z" });
 
 /** A state folder whose lock names this process, which is a host serving it as far as every reader is concerned. */
 function servedState(port = 4400): string {
@@ -173,8 +176,8 @@ describe("which host a line runs against", () => {
 
   it("takes the pair a turn's launch left in the environment over any state file or alias on this computer, under the flag and WSP_HOST", () => {
     const home = tempDir("hosts-home");
-    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token" };
-    const aimed = { kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" };
+    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token", WSP_HOST_KEY: HOST_KEY };
+    const aimed = { kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token", hostKey: HOST_KEY };
     const gone = join(tempDir("hosts-empty"), "state.json");
     // On a machine there is no hosts folder and no host of its own, so the pair is the only road there is.
     expect(aimedHost(gone, { env: carried, home })).toEqual(aimed);
@@ -194,10 +197,28 @@ describe("which host a line runs against", () => {
 
   it("gives a --host address the token the environment carries for that same address, and nothing for another", () => {
     const home = tempDir("hosts-none");
-    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token" };
-    expect(aimedHost("/nowhere/state.json", { host: "http://10.0.0.2:4700", env: carried, home })).toEqual({ kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" });
+    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token", WSP_HOST_KEY: HOST_KEY };
+    expect(aimedHost("/nowhere/state.json", { host: "http://10.0.0.2:4700", env: carried, home })).toEqual({ kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token", hostKey: HOST_KEY });
     expect(aimedHost("/nowhere/state.json", { host: "http://other.example:4700", env: carried, home })).toEqual({ kind: "url", url: "http://other.example:4700" });
     expect(hostAddress("/nowhere/state.json", { host: "http://10.0.0.2:4700", env: carried, home })).toEqual({ url: `ws://10.0.0.2:4700${WS_PATH}`, token: "scoped-token" });
+  });
+
+  it("refuses an aim at a host it holds no key for, whether a record wrote it or a launch carried it", () => {
+    const home = tempDir("hosts-home");
+    const { hostKey: _gone, ...keyless } = record("https://box.example", "d_old");
+    writeHost(home, "box", keyless);
+    // A record written before wsp pinned keys: the line says which record and what to do, and dials nothing.
+    expect(() => aimedHost("/nowhere/state.json", { host: "box", env: {}, home })).toThrow(hostNoKeyLine("box"));
+    // A turn a host older than this one launched: the same sentence, naming the launch rather than a record.
+    const carried = { WSP_HOST_URL: "https://box.example", WSP_HOST_TOKEN: "scoped-token" };
+    expect(() => aimedHost("/nowhere/state.json", { env: carried, home: tempDir("hosts-none") })).toThrow(hostNoKeyLine(LAUNCHED_WITH));
+    expect(() => aimedHost("/nowhere/state.json", { host: "https://box.example", env: carried, home: tempDir("hosts-none") })).toThrow(hostNoKeyLine("https://box.example"));
+    expect(hostNoKeyLine(LAUNCHED_WITH).split("\n")).toHaveLength(1);
+    // The host this computer serves itself, and a line the launch aimed at it over its own loopback: there is no
+    // road between two ports of one computer for anybody to stand on, and both dial with the token they hold.
+    const here = { WSP_HOST_URL: "http://127.0.0.1:4700", WSP_HOST_TOKEN: "scoped-token" };
+    expect(aimedHost("/nowhere/state.json", { env: here, home: tempDir("hosts-none") })).toEqual({ kind: "url", url: "http://127.0.0.1:4700", token: "scoped-token" });
+    expect(aimedHost(servedState(4800), { env: {}, home: tempDir("hosts-none") })).toEqual({ kind: "here" });
   });
 
   it("refuses an alias nothing is stored for in one sentence naming the ones that are", () => {
