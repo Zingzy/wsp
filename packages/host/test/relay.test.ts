@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH, type DaemonResponse, type ForwardEvent } from "@wsp/protocol";
-import { copyKey, DAEMON_TOKEN_SET, createRuntime, daemonTokenFor, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
-import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { guestDoor, type GuestOpening } from "../src/guest.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
@@ -22,9 +22,7 @@ runsFromItsOwnFolder();
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "0123456789abcdef".repeat(2);
-/** What this host writes the one machine these cases fork, which is the token its daemon must hold: a machine's
- * token is the seed's answer for that machine's id. */
-const MACHINE_TOKEN = daemonTokenFor(TOKEN, "m1");
+const MACHINE_TOKEN = machineDaemonToken(TOKEN, "m1");
 const GOLDEN: GoldenManifest = {
   head: 1,
   versions: [{ version: 1, snapshotId: "snap_gold", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } }],

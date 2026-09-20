@@ -7,9 +7,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PtyListReply, rootsPathIn, type PtyListEntry } from "@wsp/protocol";
-import { connectDaemon, createRuntime, daemonTokenFor, memoryStore, serveRuntime, type DaemonReach, type Runtime, type RuntimeServer } from "@wsp/runtime";
+import { connectDaemon, createRuntime, memoryStore, serveRuntime, type DaemonReach, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { fakeProcTree, setListeners, writeSys, type FakeListener, type FakeProc, type FakeSys } from "../../../packages/daemon/test/fake-proc.js";
-import { daemonUnderTest, type DaemonArgs, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
+import { daemonUnderTest, machineDaemonToken, type DaemonArgs, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
 import { stubBackend, tokenGuest, type StubBackend } from "../../../packages/runtime/test/stub-backend.js";
 import { makeApi, ProtocolClient, type Api } from "../src/protocol/client.js";
 import { createOn } from "../../../packages/runtime/test/stub-backend.js";
@@ -17,10 +17,9 @@ import { createOn } from "../../../packages/runtime/test/stub-backend.js";
 const HOST_TOKEN = "relay-harness-host-token";
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 
-/** The token this host writes one machine it serves, which is what that machine's daemon must hold: a machine's
- * token is the seed's answer for that machine's id, and the stub backend names its machines in the order they are
- * forked. A test writes it to a token file to play a machine that starts refusing it and then takes it. */
-export const harnessMachineToken = (machineId: string): string => daemonTokenFor(DAEMON_TOKEN, machineId);
+/** This harness's seed read for one machine, which a test writes to a token file to play a machine that starts
+ * refusing this host's token and then takes it. */
+export const harnessMachineToken = (machineId: string): string => machineDaemonToken(DAEMON_TOKEN, machineId);
 
 export interface RelayHarness {
   api: Api;

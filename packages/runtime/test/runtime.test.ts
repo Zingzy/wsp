@@ -2076,7 +2076,7 @@ describe("runtime daemon reach", () => {
 
     const first = (await rt.workspaces.daemonReach(one.id)).daemonToken!;
     const second = (await rt.workspaces.daemonReach(two.id)).daemonToken!;
-    // What the finding named: the token read off one box opened every other machine this host had rotated onto.
+    // The token read off one box opens no other machine this host rotated onto.
     expect(first).not.toBe(second);
     expect(written).toEqual([first, second]);
     // A machine keeps the token it was written; a second ask writes nothing and hands back the same one.
@@ -3389,8 +3389,8 @@ async function helloOf(port: number): Promise<number> {
   }
 }
 
-/** A real daemon on a loopback port for the runtime to ping, holding the token this seed gives the first machine a
- * runtime reaches, torn down with its inbox and its fake machine. */
+/** A real daemon on a loopback port for the runtime to ping, holding the first machine's own token, torn down with
+ * its inbox and its fake machine. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
   const { fakeProcTree } = await import("../../daemon/test/fake-proc.js");
   const { daemonUnderTest } = await import("../../daemon/test/harness.js");
@@ -3399,7 +3399,8 @@ async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
   const { join } = await import("node:path");
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
   const procRoot = fakeProcTree([]);
-  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: daemonTokenFor(TOKEN, "m1"), inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
+  const { machineDaemonToken } = await import("../../daemon/test/harness.js");
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: machineDaemonToken(TOKEN, "m1"), inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
   try {
     return await fn(daemon.port);
   } finally {

@@ -72,7 +72,7 @@ describe("the address the pair is bound on", () => {
 
   it("reads 127.x, ::1 and localhost as this computer, and the wildcard, a private address and a hostname as beyond it", () => {
     for (const at of [LOOPBACK, "127.0.0.2", "127.1.2.3", "::1", "[::1]", "localhost"]) expect(isLoopback(at), at).toBe(true);
-    for (const at of ["0.0.0.0", "::", "192.168.1.20", "100.64.0.3", "box.example.com", "1270.0.0.1"]) expect(isLoopback(at), at).toBe(false);
+    for (const at of ["0.0.0.0", "::", "192.168.1.20", "100.64.0.3", "box.example.com", "1270.0.0.1", "127.evil.example", "127.0.0.1.evil.example"]) expect(isLoopback(at), at).toBe(false);
   });
 
   it("says once, in one line with no em dash, that the page is reachable and pairing is the gate", () => {

@@ -223,7 +223,8 @@ describe("a page at a name this host does not answer at", () => {
       expect(boot.token, host).toBe(h.authToken);
       expect(boot.paired, host).toBe(true);
     }
-    for (const host of [`evil.example:${h.port}`, "wsp.example", `[2001:db8::5]:${h.port}`]) {
+    // A name is never this computer, however it begins: a rebinding attacker registers what it likes.
+    for (const host of [`evil.example:${h.port}`, "wsp.example", `127.evil.example:${h.port}`, `[2001:db8::5]:${h.port}`]) {
       const boot = await rawBootOf(h.port, { Host: host });
       expect(boot.token, host).toBeUndefined();
       expect(boot.paired, host).toBe(false);

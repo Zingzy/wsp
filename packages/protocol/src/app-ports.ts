@@ -57,11 +57,13 @@ export function joinAddressWord(url: string): string {
   }
 }
 
-/** Whether an address a host bound reaches no further than the computer it runs on. This decides whether the page
- * is served with the host token inlined and whether the JSON routes ask for a device token, so it is read once here
- * and nowhere else: two readings would let one road stay open while the other closed. */
+/** Whether an address reaches no further than the computer it runs on. This decides whether the page is served
+ * with the host token inlined and whether the JSON routes ask for a device token, so it is read once here and
+ * nowhere else: two readings would let one road stay open while the other closed. A whole IPv4 literal in 127/8
+ * and never a prefix, since this also reads the name a request asked for and `127.evil.example` is a name anyone
+ * may register and point at this computer's own port. */
 export function isLoopback(address: string): boolean {
-  return address === "localhost" || address === "::1" || address === "[::1]" || /^127\./.test(address);
+  return address === "localhost" || address === "::1" || address === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(address);
 }
 
 /** The address that binds every address this computer answers on: what the door a computer you own dials is bound

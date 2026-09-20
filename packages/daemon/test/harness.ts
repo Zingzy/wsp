@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { daemonListeningLine } from "@wsp/protocol";
 import { daemonBinaryHere } from "../../host/src/assets.js";
+import { daemonTokenFor } from "../../runtime/src/daemon-token.js";
 
 /** An agent to look for on the place's PATH at every link, as catalog id and command name. */
 export interface AgentBin {
@@ -125,6 +126,11 @@ export interface DaemonUnderTest {
 
 /** The flags, plus a token to write into a file for --token-path, since no daemon takes a token on its command line. */
 export type DaemonUnderTestArgs = DaemonArgs & { token?: string };
+
+/** The token a host writes one machine, which is what a daemon standing in for that machine must hold: a machine's
+ * token is the seed's answer for that machine's id, and the stub backend names its machines in the order they are
+ * forked. */
+export const machineDaemonToken = (seed: string, machineId: string): string => daemonTokenFor(seed, machineId);
 
 /** The binary the suite drives: the one WSP_DAEMON_BIN names, else this computer's own out of the daemon asset.
  * A checkout where nobody built it is told how, since no node build makes one. */

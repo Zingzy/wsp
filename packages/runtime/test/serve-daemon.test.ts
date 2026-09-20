@@ -9,10 +9,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LocalBackend } from "@wsp/engine";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
-import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { HERE_PLACE_ID, relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -37,9 +37,7 @@ let inboxDir: string | undefined;
 let procRoot: string | undefined;
 let localRoot: string | undefined;
 
-/** The token this suite's runtime writes the first machine it reaches, which is the one the daemon under test
- * must hold: a machine's token is the seed's answer for that machine's id. */
-const MACHINE_TOKEN = daemonTokenFor(DAEMON_TOKEN, "m1");
+const MACHINE_TOKEN = machineDaemonToken(DAEMON_TOKEN, "m1");
 
 async function startTestDaemon(token = MACHINE_TOKEN): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-serve-daemon-"));

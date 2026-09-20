@@ -26,8 +26,8 @@ describe("where a machine's daemon token is written", () => {
 
 describe("a machine's own daemon token", () => {
   it("is the seed's one answer for that machine: the same machine twice, never another machine's, never another seed's", () => {
-    // The road the finding named: one token per host process was rotated onto every machine, so a box that was
-    // taken over held the token every other machine of that host accepted.
+    // A token read off one machine opens that machine alone: one token rotated onto every machine let a box that
+    // was taken over hold what every other machine of that host accepts.
     expect(daemonTokenFor(TOKEN, "m1")).toBe(daemonTokenFor(TOKEN, "m1"));
     expect(daemonTokenFor(TOKEN, "m1")).not.toBe(daemonTokenFor(TOKEN, "m2"));
     expect(daemonTokenFor(TOKEN, "m1")).not.toBe(daemonTokenFor("beefcafe".repeat(3), "m1"));
