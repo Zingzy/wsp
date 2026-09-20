@@ -161,7 +161,7 @@ function itemDeltas(phase: string, item: Item, sessionId: string): AdapterEvent[
   const delta = (fields: Omit<Extract<AdapterEvent, { type: "turn.delta" }>, "type" | "sessionId">): AdapterEvent => ({ type: "turn.delta", sessionId, ...fields });
   switch (item.type) {
     case "agent_message":
-      return done ? [delta({ kind: "text", text: str(item.text) ?? "" })] : [];
+      return done ? [delta({ kind: "text", text: str(item.text) ?? "", messageId: item.id })] : [];
     case "reasoning":
       return done ? [delta({ kind: "thinking", text: str(item.text) ?? "" })] : [];
     case "command_execution": {
@@ -192,7 +192,9 @@ function itemDeltas(phase: string, item: Item, sessionId: string): AdapterEvent[
           ]
         : [];
     case "error":
-      return done ? [delta({ kind: "tool_result", text: str(item.message) ?? "", toolName: item.type, toolUseId: item.id, isError: true })] : [];
+      // The CLI's own note about itself, a warning about this machine's codex configuration among them, which it
+      // writes before its first output and goes on to answer past. Nothing of the turn failed here.
+      return done ? [delta({ kind: "note", text: str(item.message) ?? "" })] : [];
     default:
       return [];
   }

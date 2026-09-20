@@ -501,7 +501,7 @@ function deps(here: HereDeps): ServiceDeps {
     manager: undefined,
     run: () => Promise.resolve({ code: 1, output: "" }),
     waitMs: 0,
-    keys: { env: {}, cwd: tmpdir(), home: tmpdir() },
+    keys: { env: {}, cwd: tmpdir() },
     answers: () => Promise.resolve(false),
     dial: () => Promise.reject(new Error("a joined computer dials no host from this line")),
     stop: () => {},

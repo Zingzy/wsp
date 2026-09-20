@@ -23,7 +23,8 @@ import { guestMcp } from "./guest-mcp.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { describeStorage } from "./storage.js";
+import { NO_PROVIDER } from "./providers.js";
+import { describeStorage, noProviderStorageLine } from "./storage.js";
 import { VERSION } from "./version.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
@@ -73,6 +74,9 @@ export interface HostOptions {
   /** What the doctor's computer road reads on this host beside the runtime, for the places.doctor op; absent, the
    * op is refused and no computer this host holds is proved from here. */
   doctor?: HostDoctorReaders;
+  /** The provider row this host is wired to, read off the environment it picked its module out of. The row that
+   * holds no machine asks no account anything, so this start lists no snapshots and says so. */
+  provider?: string;
 }
 
 /** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
@@ -628,11 +632,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     else if (b.sealed !== undefined) log(describeSealed(b, b.sealed, rt.backend.pricing.rateUsdPerHour(b.size)));
     else if (b.sealable === true) log(describeKept(b, rt.backend.pricing.rateUsdPerHour(b.size)));
   }
-  try {
-    const storage = await rt.golden.storage();
-    if (storage !== undefined && storage.count > 0) log(describeStorage(storage));
-  } catch (e) {
-    log(`storage: snapshot listing failed (${e instanceof Error ? e.message : String(e)})`);
+  // No provider, no request: a host with no key has no account to list and says that where the line would be.
+  if (opts.provider === NO_PROVIDER) log(noProviderStorageLine(opts.statePath));
+  else {
+    try {
+      const storage = await rt.golden.storage();
+      if (storage !== undefined && storage.count > 0) log(describeStorage(storage));
+    } catch (e) {
+      log(`storage: snapshot listing failed (${e instanceof Error ? e.message : String(e)})`);
+    }
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
 

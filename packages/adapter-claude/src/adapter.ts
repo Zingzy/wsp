@@ -306,15 +306,20 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
       ];
     }
     case "assistant": {
-      const blocks = rec(event.message)?.content;
+      const message = rec(event.message);
+      const blocks = message?.content;
       if (!Array.isArray(blocks)) return [];
+      // The blocks of one message share its id, so a reply broken into several of them stays one message and only a
+      // message the CLI wrote later opens another.
+      const messageId = str(message?.id);
+      const said = messageId === undefined ? {} : { messageId };
       const deltas: AdapterEvent[] = [];
       for (const raw of blocks) {
         const block = rec(raw);
         if (block === undefined) continue;
         switch (str(block.type)) {
           case "text":
-            deltas.push({ type: "turn.delta", sessionId, kind: "text", text: str(block.text) ?? "", ...from });
+            deltas.push({ type: "turn.delta", sessionId, kind: "text", text: str(block.text) ?? "", ...said, ...from });
             break;
           case "thinking":
             deltas.push({

@@ -29,6 +29,7 @@ import {
   type ServiceRunner,
 } from "../src/service.js";
 import { setDefaultHost, stateIgnoredLine, writeHost } from "../src/hosts.js";
+import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -322,7 +323,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
       manager,
       run,
       waitMs: 0,
-      keys: { env: process.env, cwd: tmpdir(), home: tmpdir() },
+      keys: { env: process.env, cwd: tmpdir() },
       answers: () => Promise.resolve(true),
       dial: () => Promise.reject(new Error("this fake service dials nothing")),
       stop: pid => stopped.push(pid),
@@ -512,7 +513,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
   /** The fake with this test's own home as the layers a key is read from, so no .env beside the checkout wsp runs in
    * can answer for one of them. */
   const svc = (over: Partial<ServiceDeps> = {}): ReturnType<typeof fakeService> =>
-    fakeService({ keys: { env: process.env, cwd: home, home: join(home, ".wsp") }, ...over });
+    fakeService({ keys: { env: process.env, cwd: home }, ...over });
 
   it("installs the service, waits for the host it starts, and prints where it serves and how to stop it", async () => {
     keyInFile();
@@ -546,13 +547,44 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await upServiceCommand(quietIO([], errors), opts, fake.deps)).toBe(1);
     expect(errors[0]).toContain(`put it in ${join(home, ".wsp", ".env")} first`);
     expect(fake.ran).toEqual([]);
-    expect(keyOnlyInThisShell({ env: { SOLARI_API_KEY: KEY }, cwd: home, home: join(home, ".wsp") })).toBeDefined();
+    expect(keyOnlyInThisShell({ env: { SOLARI_API_KEY: KEY }, cwd: home, statePath })).toBeDefined();
     keyInFile();
-    expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
+    expect(keyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
+  });
+
+  it("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
+    // The reading this is from: the pick written beside the state file said box, the box key was exported in the
+    // installing shell alone, and the preflight read the row off the shell, saw no provider and let the unit
+    // through. The host it started wired box, its key gone with the shell, and forked with an empty one.
+    const folder = join(home, "elsewhere");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
+    writeFileSync(join(folder, ".env"), `${PROVIDER_ENV}=box\n`);
+    vi.stubEnv(BOX_KEY_ENV, "box_fake_shell_key");
+    const fake = svc();
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO([], errors), { ...opts, statePath: join(folder, "state.json") }, fake.deps)).toBe(1);
+    expect(errors[0]).toContain(`${BOX_KEY_ENV} is only in this shell's environment`);
+    expect(errors[0]).toContain(`put it in ${join(folder, ".env")} first`);
+    expect(fake.ran).toEqual([]);
+  });
+
+  it("names the .env beside the state file the unit will serve, not the wsp home's", async () => {
+    // A service installed for a state file somewhere else reads its key from beside that file, so the line that
+    // says where to put the key names the file its host will read.
+    const folder = join(home, "elsewhere");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
+    vi.stubEnv("SOLARI_API_KEY", KEY);
+    const fake = svc();
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO([], errors), { ...opts, statePath: join(folder, "state.json") }, fake.deps)).toBe(1);
+    expect(errors[0]).toContain(`put it in ${join(folder, ".env")} first`);
+    expect(fake.ran).toEqual([]);
   });
 
   it("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
-    const sources = (env: Record<string, string | undefined>) => ({ env, cwd: home, home: join(home, ".wsp") });
+    const sources = (env: Record<string, string | undefined>) => ({ env, cwd: home, statePath });
     // The row the run is wired to is the one the line is about: a host being installed for Box with the Box key
     // only in the installing shell loses that key, and the line names it rather than another provider's.
     const box = { WSP_PROVIDER: "box", BOX_API_KEY: "box_fake_key" };
@@ -576,7 +608,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(errors).toEqual([]);
     expect(lines[0]).toBe(`fake service fake.${serviceTag(statePath)} is loaded; it serves again at every login`);
     // A key no shell holds is not a key a service loses: there is none, and this computer is what it serves.
-    expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
+    expect(keyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
   it("refuses a computer with no service manager and a state file a host already holds", async () => {
@@ -873,10 +905,10 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(lines[0]).toContain("ANTHROPIC_API_KEY is only in this shell");
     expect(lines[0]).toContain(join(home, ".wsp", ".env"));
     expect(JSON.stringify(fake.plans[0])).not.toContain("sk-ant-only-here");
-    expect(claudeKeyOnlyInThisShell({ env: { ANTHROPIC_API_KEY: "sk-ant-only-here" }, cwd: home, home: join(home, ".wsp") })).toBeDefined();
+    expect(claudeKeyOnlyInThisShell({ env: { ANTHROPIC_API_KEY: "sk-ant-only-here" }, cwd: home, statePath })).toBeDefined();
     writeFileSync(join(home, ".wsp", ".env"), `SOLARI_API_KEY=${KEY}\nANTHROPIC_API_KEY=sk-ant-only-here\n`);
-    expect(claudeKeyOnlyInThisShell({ env: { ANTHROPIC_API_KEY: "sk-ant-only-here" }, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
-    expect(claudeKeyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
+    expect(claudeKeyOnlyInThisShell({ env: { ANTHROPIC_API_KEY: "sk-ant-only-here" }, cwd: home, statePath })).toBeUndefined();
+    expect(claudeKeyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
   it("reads the keys off the sources it was handed, not off whatever .env sits in the folder wsp was run from", async () => {
