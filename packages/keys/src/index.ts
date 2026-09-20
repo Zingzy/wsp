@@ -1,13 +1,67 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The seal over a place link: after the two ends have proved their ed25519
-// keys to each other, every frame between them travels inside one AEAD under
-// a key agreed in the same handshake, so whoever carries the bytes reads
-// nothing and writes nothing into the link. The carrier is real: a managed
-// tunnel ends TLS on the relay operator's account, and a plain http address
-// is open to anyone on the path. The daemon's twin is seal.rs and the fixture
+// What a wsp link is built out of: the ed25519 pair each end proves itself
+// with, the fingerprint of a key as a person copies it, and the seal every
+// frame after a handshake travels inside. Node crypto and nothing else, in a
+// package of its own with no dependencies, because the command line and the
+// tool server hold a host to its key before they send it a token and neither
+// of them may load the runtime, the engine or a provider's keys to do it.
+//
+// The seal: after the two ends have proved their ed25519 keys to each other,
+// every frame between them travels inside one AEAD under a key agreed in the
+// same handshake, so whoever carries the bytes reads nothing and writes
+// nothing into the link. The carrier is real: a managed tunnel ends TLS on the
+// relay operator's account, and a plain http address is open to anyone on the
+// path. The daemon's twin is seal.rs and the fixture
 // daemon/fixtures/place-link-seal.json holds the two to one derivation and
 // one set of bytes.
-import { createCipheriv, createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, type KeyObject } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, sign as signBytes, verify as verifyBytes, type KeyObject } from "node:crypto";
+
+/** A key's fingerprint as every ssh tool prints it: the SHA256 of the key's own bytes, base64 with the padding
+ * dropped, under the name of the hash. The bytes are the key as it travels, base64: the blob off a known_hosts
+ * line on one road, SPKI DER on a place's link key. Worked out here rather than by a second ssh-keygen, since it
+ * is a hash of what the caller already holds. */
+export function keyFingerprint(keyBase64: string): string {
+  return `SHA256:${createHash("sha256").update(Buffer.from(keyBase64, "base64")).digest("base64").replace(/=+$/, "")}`;
+}
+
+/** An ed25519 pair in the two spellings the link uses: the public key as it travels and the private key as it is
+ * kept on disk. */
+export interface PlaceKeyPair {
+  publicKey: string;
+  privateKeyPem: string;
+}
+
+/** A fresh ed25519 pair in the two spellings the link uses. The one road that makes one, so the host's own key and
+ * a joining computer's are the same kind of key written the same way. */
+export function newPlaceKeyPair(): PlaceKeyPair {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return {
+    publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  };
+}
+
+/** A signature over the bytes both sides build from one function; ed25519 takes no digest name. The host signs its
+ * half with its own key here, and wsp join signs a joining computer's half with the key it just made.
+ *
+ * The place's half of this pair is the daemon's, in Rust; the two are held together by the vectors under
+ * daemon/fixtures, which packages/daemon's suite regenerates here and the daemon's own test reads. What could
+ * drift, the bytes that are signed and the encodings they are sent in, is in the protocol
+ * (`placeLinkTranscript`, `PlaceSignature`, `PlacePublicKey`). */
+export function signPlaceBytes(privateKeyPem: string, bytes: Uint8Array): string {
+  return signBytes(null, bytes, createPrivateKey(privateKeyPem)).toString("base64");
+}
+
+/** Whether the key given made this signature: the key on a place's record here, and at a join the key the host sent
+ * with its own challenge. A key that will not even parse is a refusal rather than a throw: it came off the wire. */
+export function verifyPlaceBytes(publicKeyBase64: string, bytes: Uint8Array, signatureBase64: string): boolean {
+  try {
+    const key = createPublicKey({ key: Buffer.from(publicKeyBase64, "base64"), format: "der", type: "spki" });
+    return verifyBytes(null, bytes, key, Buffer.from(signatureBase64, "base64"));
+  } catch {
+    return false;
+  }
+}
 
 /** One info word per direction, so the two keys of a link can never be swapped for each other. */
 export const HOST_TO_PLACE_INFO = "wsp place link host to place";

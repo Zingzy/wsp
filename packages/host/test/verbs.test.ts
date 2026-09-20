@@ -10,12 +10,12 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
-import { placeWiring } from "../src/places.js";
+import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { awake, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
@@ -58,6 +58,9 @@ vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-
 /** This computer, as the places list names it: the word a person types after --on for the place their own agents
  * run on, which is the road wsp new --local used to take. */
 const HERE = hostname().toLowerCase();
+
+/** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
 
 /** What the codex here asks its machine; the stub guest answers nothing to it unless a test puts a catalog there. */
 const PROBE_CMD = "codex --describe";
@@ -824,7 +827,7 @@ describe("wsp verbs over the host", () => {
     // A host this computer really holds, so the answer is the sentence and not the refusal for a name nobody knows.
     // The aim reads the home off the run's own environment, which this file hands every verb.
     env["WSP_HOME"] = join(dir, "home");
-    writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", pairedAt: "2026-09-11T10:00:00.000Z" });
+    writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z" });
     const dest = join(dir, "elsewhere.wsp");
     const line = `${hostSideOnlyLine("image export", "box")} ${hostSideOnlyFix(HOST_SIDE_VAULT)}`;
     // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp host list marks.
@@ -2987,6 +2990,9 @@ describe("wsp verbs over the host", () => {
       const scoped = await rt.devices.mint(`thread ${threadId}`, { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId }, Date.now());
       env[HOST_URL_ENV] = `ws://127.0.0.1:${handle!.wsPort}`;
       env[HOST_TOKEN_ENV] = scoped.deviceToken;
+      // The fingerprint of the key this host proves rides the launch beside them, and the line holds the host to
+      // it before the token crosses: a turn on a machine reaches this host over a road somebody else carries.
+      env[HOST_KEY_ENV] = hostKeyHere(statePath);
     }
     /** A line as that thread types it: no --state, since the pair in its environment says which host it runs against. */
     async function line(...argv: string[]): Promise<{ code: number; io: Captured }> {
@@ -3652,8 +3658,9 @@ describe("the verbs never talk to the provider", () => {
   it("import the protocol, the catalog, the collector for the recipe verbs and the host's lock file only: no runtime, engine, backend or key loading", () => {
     const source = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
     const imports = [...source.matchAll(/ from "([^"]+)";$/gm)].map(m => m[1]!);
-    // The catalog is rows and ids alone (the agents a thread can take), so the agent argument's list reaches no provider.
-    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
+    // The catalog is rows and ids alone (the agents a thread can take), so the agent argument's list reaches no
+    // provider; the keys package is node crypto and nothing else, which is what a dial holds a host to its key with.
+    expect(imports.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/keys", "@wsp/protocol"]);
     expect(imports).not.toContain("@wsp/runtime");
     expect(imports).not.toContain("@wsp/engine");
     expect(source).not.toMatch(/SOLARI|ANTHROPIC|loadKeys|SolariBackend|getsolari/);

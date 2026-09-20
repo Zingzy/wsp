@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
-import { HOST_WORDS } from "@wsp/protocol";
+import { HOST_WORDS, PAIR_NO_KEY_REFUSAL, readJoinToken } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostSession } from "../src/host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type SwitcherDeps } from "../src/host-switch.js";
@@ -41,6 +41,10 @@ function local(): HostSession & { closes: number } {
 }
 
 const record = (url: string, over: Partial<HostRecord> = {}): HostRecord => ({ url, deviceId: "d_1", deviceToken: "tok-1", pairedAt: "2026-09-11T10:00:00.000Z", ...over });
+
+/** What wsp host pair prints as one word: the code and the fingerprint of the key that host proves. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+const TOKEN = `7K3MQP2X.${HOST_KEY}`;
 
 type Deps = Omit<SwitcherDeps, "local"> & { local: ReturnType<typeof local>; loaded: HostSession[] };
 
@@ -126,9 +130,12 @@ describe("hostSwitcher", () => {
       return 0;
     });
     const switcher = hostSwitcher({ ...d, connect });
-    expect(await switcher.connect({ road: "direct", url: "http://127.0.0.1:14400", code: "ABCDEFGH" })).toEqual({ ok: true });
+    expect(await switcher.connect({ road: "direct", url: "http://127.0.0.1:14400", code: TOKEN })).toEqual({ ok: true });
     expect(connect).toHaveBeenCalledOnce();
-    expect(connect.mock.calls[0]![2]).toEqual({ code: "ABCDEFGH", name: "127.0.0.1" });
+    // The whole word the person copied reaches the command line, the code and the fingerprint of the key that
+    // host proves: a code with the key shaped off it would be refused over there, and nothing would pair.
+    expect(connect.mock.calls[0]![2]).toEqual({ code: TOKEN, name: "127.0.0.1" });
+    expect(readJoinToken(TOKEN)).toEqual({ code: "7K3MQP2X", hostKey: HOST_KEY });
     expect(readHost(d.home, "127.0.0.1")).toMatchObject({ url: "http://127.0.0.1:14400", label: "127.0.0.1:14400", road: "direct" });
     expect(switcher.current()).toMatchObject({ url: "http://127.0.0.1:14400", alias: "127.0.0.1", label: "127.0.0.1:14400" });
   });
@@ -136,12 +143,21 @@ describe("hostSwitcher", () => {
   it("a refused code lands under the code, an address nothing answered at under the address, in the host's own words", async () => {
     const d = deps();
     const code = hostSwitcher({ ...d, connect: async () => { throw Object.assign(new Error("that pairing code is not one this host is waiting for"), { kind: "auth" }); } });
-    expect(await code.connect({ road: "direct", url: "http://127.0.0.1:14400", code: "AAAAAAAA" })).toEqual({ ok: false, at: "code", error: "that pairing code is not one this host is waiting for" });
+    expect(await code.connect({ road: "direct", url: "http://127.0.0.1:14400", code: `AAAAAAAA.${HOST_KEY}` })).toEqual({ ok: false, at: "code", error: "that pairing code is not one this host is waiting for" });
     const dead = hostSwitcher({ ...d, connect: async () => { throw new Error("the host at http://127.0.0.1:1 did not answer: connect ECONNREFUSED"); } });
-    expect(await dead.connect({ road: "direct", url: "http://127.0.0.1:1", code: "AAAAAAAA" })).toEqual({ ok: false, at: "url", error: "the host at http://127.0.0.1:1 did not answer: connect ECONNREFUSED" });
-    expect(await dead.connect({ road: "direct", url: "box", code: "AAAAAAAA" })).toMatchObject({ ok: false, at: "url" });
-    expect(await dead.connect({ road: "direct", url: "http://127.0.0.1:1", code: "AB" })).toMatchObject({ ok: false, at: "code" });
+    expect(await dead.connect({ road: "direct", url: "http://127.0.0.1:1", code: `AAAAAAAA.${HOST_KEY}` })).toEqual({ ok: false, at: "url", error: "the host at http://127.0.0.1:1 did not answer: connect ECONNREFUSED" });
+    expect(await dead.connect({ road: "direct", url: "box", code: `AAAAAAAA.${HOST_KEY}` })).toMatchObject({ ok: false, at: "url" });
+    expect(await dead.connect({ road: "direct", url: "http://127.0.0.1:1", code: `AB.${HOST_KEY}` })).toMatchObject({ ok: false, at: "code" });
     expect(d.loaded).toEqual([]);
+  });
+
+  it("a word carrying no key for the host is refused under the code before any road is walked", async () => {
+    const d = deps();
+    const connect = vi.fn(async () => 0);
+    const switcher = hostSwitcher({ ...d, connect });
+    expect(await switcher.connect({ road: "direct", url: "http://127.0.0.1:14400", code: "7K3MQP2X" })).toEqual({ ok: false, at: "code", error: PAIR_NO_KEY_REFUSAL });
+    expect(connect).not.toHaveBeenCalled();
+    expect(listHosts(d.home)).toEqual([]);
   });
 
   it("disconnecting the host the window is on hands the token back, drops the record and returns to this computer", async () => {

@@ -97,6 +97,29 @@ describe("the connect sheet", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
+  it("the whole word wsp host pair prints reaches the host, the code and the key the person pasted", async () => {
+    const hostKey = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+    const token = `7K3M-QP2X.${hostKey}`;
+    // The code half is shaped as it always was and the fingerprint rides behind it exactly as it was pasted:
+    // base64 is case sensitive, and a shaped one would name a key no host proves.
+    expect(shownCode(token)).toBe(token);
+    expect(shownCode(token.toLowerCase())).toBe(`7K3M-QP2X.${hostKey.toLowerCase()}`);
+    expect(sentCode(token)).toBe(`7K3MQP2X.${hostKey}`);
+    const bridge = fakeBridge();
+    const onClose = vi.fn();
+    render(<ConnectHostSheet onClose={onClose} />);
+    const connect = (): HTMLButtonElement => screen.getByRole("button", { name: new RegExp(HOST_WORDS.sheet.keycap) }) as HTMLButtonElement;
+    fireEvent.change(field(HOST_WORDS.sheet.address), { target: { value: "http://127.0.0.1:14400" } });
+    fireEvent.change(field(HOST_WORDS.sheet.code), { target: { value: token } });
+    expect(field(HOST_WORDS.sheet.code).value).toBe(token);
+    expect(connect().disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(connect());
+    });
+    expect(bridge.connectHost).toHaveBeenCalledWith({ road: "direct", url: "http://127.0.0.1:14400", code: `7K3MQP2X.${hostKey}` });
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
   it("a refusal lands under the field it is about, in the host's words, and the sheet stays", async () => {
     const bridge = fakeBridge({ connectHost: vi.fn(async () => ({ ok: false as const, at: "code" as const, error: "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one" })) });
     const onClose = vi.fn();
