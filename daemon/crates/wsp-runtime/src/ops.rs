@@ -433,9 +433,7 @@ impl Ops {
     /// The watch off, before a stop of this workspace runs: the init a stop kills is a death this computer asked
     /// for, and the stop road is not run twice for it.
     fn disarm(&self, id: &str) {
-        if let Some(task) = self.deaths.lock().unwrap_or_else(|held| held.into_inner()).remove(id) {
-            task.abort();
-        }
+        self.deaths.lock().unwrap_or_else(|held| held.into_inner()).remove(id);
     }
 
     /// The workspaces found stopped at open, their init gone.
