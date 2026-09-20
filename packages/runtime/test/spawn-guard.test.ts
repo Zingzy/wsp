@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend, type MachineBackend } from "@wsp/engine";
 import { HERE_PLACE_ID,
   AGENTS_ON,
+  HOST_KEY_ENV,
   HOST_TOKEN_ENV,
   HOST_URL_ENV,
   MCP_SERVER_NAME,
@@ -40,6 +41,8 @@ import { copyKey, createRuntime, type HarnessAdapterFactory, type HostReach, typ
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { keyFingerprint } from "@wsp/engine";
+import { newPlaceKeyPair } from "../src/places.js";
 import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -90,8 +93,18 @@ describe("agents spawning agents", () => {
   let store: Store;
   let localWiring: LocalWiring;
 
+  /** The pair this host proves itself with, as every host a person starts holds one: the launch hands a turn its
+   * fingerprint, and the wsp inside that turn refuses any host that proves another key. */
+  const hostKey = newPlaceKeyPair();
   const runtimeWith = (adapters: Record<string, HarnessAdapterFactory>, agents?: { reach?: HostReach; wspMcp?: McpServerSpec }, backend: MachineBackend = stubBackend()): Runtime =>
-    createRuntime({ backend, store, adapters, local: localWiring, ...(agents !== undefined ? { agents } : {}) });
+    createRuntime({
+      backend,
+      store,
+      adapters,
+      local: localWiring,
+      placeLinks: { hostKey, provider: () => undefined, here: () => ({ name: "this-mac" }), hostName: () => "this-mac" },
+      ...(agents !== undefined ? { agents } : {}),
+    });
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "wsp-spawn-"));
@@ -383,8 +396,10 @@ describe("agents spawning agents", () => {
       await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(noWorkspaceRefusal(word));
     }
     // Every id of this host starts ws_, so the start a thread would walk the whole host with answers off its own
-    // listing: one workspace there, never the two a bare prefix would name.
-    expect((await rt.workspaces.resolve(forked.id.slice(0, ID_PREFIX_MIN), asThread(scope))).id).toBe(forked.id);
+    // listing: the shortest prefix that names one workspace there, whatever the ids outside the tree share with it.
+    let n = ID_PREFIX_MIN;
+    while (mine.id.startsWith(forked.id.slice(0, n))) n++;
+    expect((await rt.workspaces.resolve(forked.id.slice(0, n), asThread(scope))).id).toBe(forked.id);
     // A name a workspace outside the tree holds is still taken, which is the thread's own word answered back.
     await expect(createOn(rt, { name: "theirs" }, asThread(scope))).rejects.toThrow(nameTakenRefusal("theirs"));
     // The very word the thread reads as absent is a workspace to the person, which is what makes it a rule and not
@@ -428,6 +443,9 @@ describe("agents spawning agents", () => {
     const launch = held.launches[0]!;
     expect(launch.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
     expect(launch.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    // The fingerprint of the key this host proves travels with them: the turn's own wsp holds the host to it
+    // before the token crosses, so a relay carrying the bytes or naming another host at that address gets nothing.
+    expect(launch.env[HOST_KEY_ENV]).toBe(keyFingerprint(hostKey.publicKey));
     held.end(0);
     await handle.finished;
     await gone(rt);
@@ -470,6 +488,7 @@ describe("agents spawning agents", () => {
     const handle = await rt.sessions.start(mac.id, { prompt: "hi" });
     expect(held.launches[0]!.env[HOST_URL_ENV]).toBeUndefined();
     expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toBeUndefined();
+    expect(held.launches[0]!.env[HOST_KEY_ENV]).toBeUndefined();
     expect(await rt.devices.list()).toEqual([]);
     held.end(0);
     await handle.finished;

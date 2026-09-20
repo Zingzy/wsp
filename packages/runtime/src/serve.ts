@@ -34,6 +34,8 @@ import {
   noSuchPlaceRefusal,
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
+  SEAL_CLIENT,
+  SEAL_UNSERVED,
   THREAD_OPS,
   peerAddress,
   SCOPED_TOKEN_ROAD_REFUSAL,
@@ -61,7 +63,7 @@ import {
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
-import { openFrame, type Seal } from "./seal.js";
+import { openFrame, type Seal } from "@wsp/keys";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -431,9 +433,26 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           }
           if (deciding) return refuse(UNAUTHORIZED);
           deciding = true;
+          if (msg.op === "seal.open") {
+            // A native client pinning this host's key before it sends the code or the token it came with. A second
+            // one on the same socket is a socket asking to agree a second key, which would leave the counters of
+            // the first behind: one key per socket, as one identity per socket.
+            if (seal !== undefined) return refuse(UNAUTHORIZED);
+            if (rt.places === undefined) return refuse(SEAL_UNSERVED);
+            const opened = places().answerChallenge(SEAL_CLIENT, msg.nonce, msg.ephemeral);
+            if (opened === undefined) return refuse(UNAUTHORIZED);
+            // The client proves nothing back: it holds no key this host learned, and the token or the code it
+            // sends next inside the seal is what names it. The gate opens for that frame.
+            deciding = false;
+            send({ id: msg.id, ok: true, nonce: opened.nonce, hostPublicKey: opened.hostPublicKey, signature: opened.signature, ephemeral: opened.ephemeral });
+            seal = opened.seal;
+            return;
+          }
           if (msg.op === "place.join" || msg.op === "place.auth") {
             // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
-            // frame must sign; a key or a report this host cannot work with refuses in the door's own words.
+            // frame must sign; a key or a report this host cannot work with refuses in the door's own words. One
+            // key per socket holds here too: a link's own agreement would replace the one a client already has.
+            if (seal !== undefined) return refuse(UNAUTHORIZED);
             let opened:
               | { reply: Record<string, unknown>; expect: Uint8Array; seal: Seal; notice?: string }
               | { refusal: string; signed: PlaceAuthRefusal }
@@ -510,13 +529,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PAIR_ISSUE_REFUSAL });
                 return;
               }
+              // The fingerprint of the key this host proves travels beside the code, so the computer taking it
+              // holds this host to that key before it spends it. A runtime wired with no place door proves none
+              // and answers the code alone, which the line that asked refuses to print in its own words.
+              const hostKey = rt.places?.hostKey();
               const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs });
-              send({ id: msg.id, ok: true, code, expiresAt });
+              send({ id: msg.id, ok: true, code, expiresAt, ...(hostKey === undefined ? {} : { hostKey }) });
               return;
             }
             case "pair.redeem":
               // The door above spends a code; a socket already through it is asking for a second identity.
               send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
+              return;
+            case "seal.open":
+              // The door above agrees the key, before this socket said who it is; one is agreed per socket and
+              // this one is already through.
+              send({ id: msg.id, ok: false, error: UNAUTHORIZED });
               return;
             case "place.join":
             case "place.auth":

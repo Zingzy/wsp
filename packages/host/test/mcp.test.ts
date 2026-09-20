@@ -1125,7 +1125,9 @@ describe("the MCP server never talks to the provider", () => {
     // catalog and the protocol and nothing else. The catalog is rows and ids alone (the agents a thread can take),
     // so the list the agent argument names reaches no provider either.
     expect(walked.get("mcp.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual([]);
-    expect(walked.get("verbs.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/protocol"]);
+    // The keys package is node crypto and nothing else: a tool server holds a host to the key it pinned before it
+    // sends that host a token, and loads no runtime, engine or provider key to do it.
+    expect(walked.get("verbs.ts")!.filter(i => i.startsWith("@wsp/"))).toEqual(["@wsp/catalog", "@wsp/collect", "@wsp/keys", "@wsp/protocol"]);
     expect([...walked.keys()].sort()).toContain("recipe-answer.ts");
     expect([...walked.keys()].sort()).toContain("init-layout.ts");
     // The adapter packages come from the one registry's list of agents, so a new agent is banned here without an edit.

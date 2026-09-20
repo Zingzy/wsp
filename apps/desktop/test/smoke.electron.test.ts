@@ -8,8 +8,8 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LAUNCHD_PATH, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, fmtSize, hereWord, kindWords } from "@wsp/protocol";
+import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, fmtSize, hereWord, kindWords, pairToken } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -109,7 +109,10 @@ const LABS_ON = { WSP_LABS: "1" };
 function testRuntime(seedGolden = false, env: Record<string, string> = {}): Runtime {
   const store = memoryStore();
   if (seedGolden) void store.put("goldens", "default", GOLDEN);
-  return createRuntime({ backend: stubBackend(), store, adapters: {}, env });
+  // The place wiring every host a person starts has: the key it proves is what a pairing code names and what the
+  // computer taking that code holds it to, so a fixture host without one hands out a code nothing can spend.
+  const statePath = join(mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-state-")), "state.json");
+  return createRuntime({ backend: stubBackend(), store, adapters: {}, env, placeLinks: placeWiring(statePath, {}) });
 }
 
 function fixtureHost(): Promise<HostHandle> {
@@ -295,7 +298,8 @@ async function refused(url: string): Promise<boolean> {
   }
 }
 
-/** A pairing code off a host, the way wsp host pair gets one: one socket with the host's own token, one pair.issue. */
+/** The word wsp host pair prints off a host, the way it gets one: one socket with the host's own token, one
+ * pair.issue. It is the code and the fingerprint of the key that host proves, which is what a person copies. */
 async function pairingCodeOf(host: HostHandle): Promise<string> {
   const ws = new WebSocket(`ws://127.0.0.1:${host.port}${WS_PATH}`);
   await new Promise<void>((done, fail) => {
@@ -310,7 +314,7 @@ async function pairingCodeOf(host: HostHandle): Promise<string> {
   await ask({ id: 1, op: "auth", token: host.authToken });
   const issued = await ask({ id: 2, op: "pair.issue" });
   ws.close();
-  return issued["code"] as string;
+  return pairToken(issued["code"] as string, issued["hostKey"] as string);
 }
 
 interface MenuRow {
@@ -720,14 +724,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.waitForSelector("[data-host-foot]");
     const here = hereWord(process.platform === "darwin");
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
-    // The code as wsp host pair mints it, over the second host's own socket with its own token.
+    // The word wsp host pair prints, over the second host's own socket with its own token: the code and the
+    // fingerprint of the key that host proves, both of which the field carries through to the command line.
     const code = await pairingCodeOf(existing);
     // The menu bar's Hosts menu opens the sheet, the road a person takes.
     await hostsMenu(launched.app, HOST_WORDS.connectMenu);
     const dialog = win.getByRole("dialog");
     await dialog.waitFor();
     await dialog.locator("#connect-url").fill(`http://127.0.0.1:${existing.port}`);
-    await dialog.locator("#connect-code").fill(code.toLowerCase());
+    // Typed as a person types a code, in lower case; the fingerprint is pasted as it was printed, since base64 is
+    // case sensitive and a shaped one would name a key no host proves.
+    await dialog.locator("#connect-code").fill(code.replace(/^[^.]*/, half => half.toLowerCase()));
     expect(await dialog.locator("#connect-code").inputValue()).toBe(code);
     await dialog.locator("[data-k=primary]").click();
     await win.waitForURL(`http://127.0.0.1:${existing.port}/`);

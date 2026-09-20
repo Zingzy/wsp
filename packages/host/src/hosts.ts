@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { authRefusal, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
 import { defaultHomeIn, homeNamed } from "./serving-home.js";
 
@@ -22,6 +22,9 @@ export interface HostRecord {
   deviceId: string;
   deviceToken: string;
   pairedAt: string;
+  /** The fingerprint of the key that host proved when this computer paired with it, which every later dial holds
+   * it to before it sends the token. A record written before wsp pinned keys carries none and is refused. */
+  hostKey?: string;
   /** What the desktop shows for this host; the alias stands in when a record from the command line carries none. */
   label?: string;
   /** How the desktop reached it; a record the command line wrote carries none and is read as an address. */
@@ -178,7 +181,7 @@ export { wsUrlOf } from "@wsp/protocol";
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
  * typed on the line, which carries no token and is only a road for wsp host connect. */
-export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string };
+export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string; hostKey?: string };
 
 /** An aim at a host on another computer: what a reading that takes the name a line gave hands back, since only the
  * fallbacks under that name can land on this one. */
@@ -289,7 +292,7 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   // guest's default state file is a path nothing serves, and a turn on this computer under a host that does serve
   // it was still given its own token and not the host's. What a person types on the line still wins above.
   const carried = hostFromEnv(env);
-  if (carried !== undefined) return { kind: "url", url: carried.url, token: carried.token };
+  if (carried !== undefined) return keyed({ kind: "url", url: carried.url, token: carried.token, ...(carried.hostKey === undefined ? {} : { hostKey: carried.hostKey }) }, LAUNCHED_WITH);
   if (servingHost(statePath) !== undefined) return { kind: "here" };
   const fallback = defaultHost(home);
   return fallback === undefined ? { kind: "here" } : aimAt(fallback, home, env);
@@ -300,11 +303,33 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
   // road wsp host connect takes, since nothing else on this computer holds a token for it.
   if (isUrl(named)) {
     const carried = hostFromEnv(env);
-    return { kind: "url", url: named, ...(carried?.url === named ? { token: carried.token } : {}) };
+    const here = carried?.url === named ? carried : undefined;
+    return keyed({ kind: "url", url: named, ...(here === undefined ? {} : { token: here.token, ...(here.hostKey === undefined ? {} : { hostKey: here.hostKey }) }) }, named);
   }
   const record = readHost(home, named);
   if (record === undefined) throw usageRefusal(noSuchHostLine(named, home), "Run wsp host list to read the names this computer knows.");
-  return { kind: "alias", alias: named, record };
+  return keyed({ kind: "alias", alias: named, record }, named);
+}
+
+/** The one rule for an aim that carries a token: this computer holds the fingerprint of the key that host proves
+ * before it sends the token anywhere, so a relay that named the address, or anyone else on the road, is answered
+ * by the host itself or by nobody. Every road an aim comes by is read here, the record a person named and the
+ * launch a turn started with alike, and `where` names which so the person knows what to pair again. An address on
+ * this computer's own loopback is what a line aimed at the host here is, and dials as one: there is no road
+ * between two ports of one computer for anybody to stand on. */
+function keyed(aim: AimElsewhere, where: string): AimElsewhere {
+  const held = aimHolds(aim);
+  if (held.token === undefined || held.hostKey !== undefined) return aim;
+  const at = servedHostname(aimAddress(aim));
+  if (at !== undefined && isLoopback(at)) return aim;
+  throw authRefusal(hostNoKeyLine(where));
+}
+
+/** What an aim at a host elsewhere holds for it: the token it would present, and the fingerprint of the key it
+ * holds that host to. One reading, so the rule above that refuses an aim with no key and the dial that pins the
+ * key before it sends the token cannot disagree about what a record or a launch carried. */
+export function aimHolds(aim: AimElsewhere): { token: string | undefined; hostKey: string | undefined } {
+  return aim.kind === "alias" ? { token: aim.record.deviceToken, hostKey: aim.record.hostKey } : { token: aim.token, hostKey: aim.hostKey };
 }
 
 /** How a host is named in a line the person reads: the alias where there is one, the address otherwise. */

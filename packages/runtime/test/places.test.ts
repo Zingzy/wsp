@@ -63,7 +63,7 @@ import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdap
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "../src/seal.js";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
