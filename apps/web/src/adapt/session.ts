@@ -439,8 +439,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     }
     switch (e.kind) {
       case "text": {
-        // Text of another of the harness's messages is another bubble: the reply an agent gave while a background
-        // command ran and the reply it gave when that command woke it are two things it said.
+        // Text of another of the harness's messages is a bubble of its own, the rule messageId carries.
         if (t.openMessageId !== null && e.messageId !== undefined && e.messageId !== t.openMessageId) closeOpenMessage(t);
         const open = t.openMessage !== null ? message(t.openMessage) : undefined;
         if (t.openMessage !== null && open) {
@@ -454,8 +453,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       }
       case "note": {
         // The harness's own line about itself, shown the way the resumed-past-a-cut line is: a notice beside the
-        // work, never a message under the agent's name and never a failure.
-        closeOpenMessage(t);
+        // work, never a message under the agent's name and never a failure. It ends no message of the agent's, as
+        // it ends none in the read and none on the terminal's stream.
         addWork(t, { createdAt: at, label: e.text, tone: "notice", sourceActivityKind: "harness.note" }, at);
         return;
       }

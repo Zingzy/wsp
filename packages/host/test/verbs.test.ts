@@ -1565,6 +1565,24 @@ describe("wsp verbs over the host", () => {
     ]);
   });
 
+  it("a turn whose messages sit either side of a tool call prints no blank line: the call's own lines have parted them already", async () => {
+    await restartHost({
+      claude: sayingAgent(
+        [
+          { kind: "text", text: "Looking.", messageId: "msg_a" },
+          { toolName: "Bash", input: { command: "ls" }, output: "a.txt" },
+          { kind: "text", text: "One file.", messageId: "msg_b" },
+        ],
+        { status: "completed", text: "One file." },
+      ),
+    });
+    await run("new", "alpha");
+    const io = captured();
+    io.muted = text => `~${text}~`;
+    expect(await cli(["run", "alpha", "what is here", "--state", statePath], io, undefined, env)).toBe(0);
+    expect(io.streamed.split("\n")).toEqual(["Looking.", "~$ ls~", "~a.txt~", "One file.", "~completed~", ""]);
+  });
+
   it("a harness's note about itself streams muted above the reply, with no word of failure, and the turn reads completed", async () => {
     const warning = "loading hooks from both /root/.codex/hooks.json and /root/.codex/config.toml; prefer a single representation for this layer";
     await restartHost({ claude: sayingAgent([{ kind: "note", text: warning }, { kind: "text", text: "ready", messageId: "msg_a" }], { status: "completed", text: "ready" }) });

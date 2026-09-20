@@ -91,6 +91,16 @@ describe("deriveSession: a harness's note about itself", () => {
     const notes = model.timeline.filter(row => row.kind === "work" && row.entry.label === warning);
     expect(notes.map(row => (row.kind === "work" ? [row.entry.tone, row.entry.sourceActivityKind] : []))).toEqual([["notice", "harness.note"]]);
   });
+
+  it("ends no message of the agent's: prose a note lands in the middle of goes on in the same bubble, as it does in the read and on the stream", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, at: 1_000, prompt: "say ready" },
+      { type: "session.delta", ...scoped, at: 1_500, kind: "text", text: "Almost ", messageId: "msg_a" },
+      { type: "session.delta", ...scoped, at: 1_700, kind: "note", text: warning },
+      { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "ready.", messageId: "msg_a" },
+    ]);
+    expect(model.messages.map(m => [m.role, m.text])).toEqual([["user", "say ready"], ["assistant", "Almost ready."]]);
+  });
 });
 
 describe("deriveSession: the chat fixture", () => {

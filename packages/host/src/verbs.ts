@@ -1844,22 +1844,26 @@ const WAITING_ON_A_PERSON = `the turn is waiting on a permission; wsp threads sh
 function turnStream(ctx: VerbContext): { text(t: string, messageId?: string): void; line(l: string): void; says(l: string): void; reply(text: string | undefined): string | undefined } {
   let atLineStart = true;
   let streamedProse = false;
-  /** The harness message the prose on the screen is a piece of, so the reply an agent gave while a background
-   * command ran and the reply it gave when that command woke it are two paragraphs rather than one sentence. */
+  /** The harness message the prose on the screen is a piece of, and whether prose is what was written last: another
+   * message opens its own paragraph, the rule SessionDeltaEvent's messageId carries, and it is a paragraph only
+   * where prose would run into prose. A line of the work between them has already parted them. */
   let said: string | undefined;
+  let lastWasProse = false;
   const says = (l: string): void => {
     ctx.out.stream(`${atLineStart ? "" : "\n"}${l}\n`);
     atLineStart = true;
+    lastWasProse = false;
   };
   return {
     text: (t, messageId) => {
       if (t === "") return;
-      if (streamedProse && said !== undefined && messageId !== undefined && messageId !== said) {
+      if (lastWasProse && said !== undefined && messageId !== undefined && messageId !== said) {
         ctx.out.stream(atLineStart ? "\n" : "\n\n");
         atLineStart = true;
       }
       said = messageId ?? said;
       streamedProse = true;
+      lastWasProse = true;
       ctx.out.stream(t);
       atLineStart = t.endsWith("\n");
     },

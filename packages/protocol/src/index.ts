@@ -1328,10 +1328,11 @@ export const SessionDeltaEvent = z.object({
   ...sessionScope,
   kind: DeltaKind,
   text: z.string(),
-  /** The harness's own id for the message this piece of text belongs to. A reader appends text to the message it
-   * has open and opens another where this changes, so a reply the agent gave while a background command ran and the
-   * reply it gave when that command woke it read as two. Absent on a row written before the stamp existed and on
-   * every kind a harness names no message for, which append as they always did. */
+  /** The harness's own id for the message this piece of text belongs to, and the one home of the rule every reader
+   * of text follows: append to the message you have open, open another where this changes. That is what tells the
+   * reply an agent gave while a background command ran from the reply it gave when that command woke it, which the
+   * harness sends as two messages and every reader used to glue into one. Absent on a row written before the stamp
+   * existed and on every kind a harness names no message for, which append as they always did. */
   messageId: z.string().optional(),
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),

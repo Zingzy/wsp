@@ -264,43 +264,33 @@ export interface ScriptedCall {
   failed?: boolean;
 }
 
-/** A harness whose turn is the tool calls it was handed and nothing else, each carrying its input as the JSON the
- * adapters send and its answer behind it, then the done that says what the turn took and cost: what a turn that
- * works for minutes before it answers looks like from the client. */
+/** The calls alone, which is what a turn that works for minutes before it answers looks like from the client. */
 export function toolingAgent(calls: ReadonlyArray<ScriptedCall>, result: TurnResult): HarnessAdapterFactory {
-  return () => ({
-    steers: false,
-    start: o => {
-      const sessionId = o.resume ?? randomUUID();
-      const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
-        for (const [i, call] of calls.entries()) {
-          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify(call.input), toolName: call.toolName, toolUseId: `toolu_${i}` });
-          if (call.output !== undefined) o.onEvent({ type: "turn.delta", sessionId, kind: "tool_result", text: call.output, toolUseId: `toolu_${i}`, isError: call.failed === true });
-        }
-        o.onEvent({ type: "turn.done", sessionId, result });
-        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
-        return result;
-      });
-      return { localId: sessionId, finished, interrupt: async () => {} };
-    },
-  });
+  return sayingAgent(calls, result);
 }
 
-/** One piece of a scripted turn's stream: what the harness wrote, under the kind it wrote it as and the message it
- * belongs to where it named one. */
+/** One piece of a scripted turn's stream that is not a call: what the harness wrote, under the kind it wrote it as
+ * and the message it belongs to where it named one. */
 export type ScriptedSay = { kind: "text" | "note"; text: string; messageId?: string };
 
-/** A harness whose turn is the pieces it was handed and nothing else: what a reply split across two of the
- * harness's own messages, and a note the harness wrote about itself, reach a watcher as. */
-export function sayingAgent(said: ReadonlyArray<ScriptedSay>, result: TurnResult): HarnessAdapterFactory {
+/** A harness whose turn is the pieces it was handed and nothing else, in the order they were handed: the prose of a
+ * reply under the harness's own message id, a note the harness wrote about itself, and the calls between them, each
+ * with its answer behind it. */
+export function sayingAgent(said: ReadonlyArray<ScriptedSay | ScriptedCall>, result: TurnResult): HarnessAdapterFactory {
   return () => ({
     steers: false,
     start: o => {
       const sessionId = o.resume ?? randomUUID();
       const finished = Promise.resolve().then(() => {
         o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
-        for (const piece of said) o.onEvent({ type: "turn.delta", sessionId, kind: piece.kind, text: piece.text, ...(piece.messageId !== undefined ? { messageId: piece.messageId } : {}) });
+        for (const [i, piece] of said.entries()) {
+          if ("kind" in piece) {
+            o.onEvent({ type: "turn.delta", sessionId, kind: piece.kind, text: piece.text, ...(piece.messageId !== undefined ? { messageId: piece.messageId } : {}) });
+            continue;
+          }
+          o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify(piece.input), toolName: piece.toolName, toolUseId: `toolu_${i}` });
+          if (piece.output !== undefined) o.onEvent({ type: "turn.delta", sessionId, kind: "tool_result", text: piece.output, toolUseId: `toolu_${i}`, isError: piece.failed === true });
+        }
         o.onEvent({ type: "turn.done", sessionId, result });
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;

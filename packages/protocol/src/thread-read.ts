@@ -77,9 +77,7 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
           // An empty piece of text opens no row: an adapter that splits a reply hands over the tail of a short one
           // as nothing at all, and a row of no words is not a message anybody sent.
           if (event.text === "") continue;
-          // A piece of another of the harness's messages opens a row of its own: the reply an agent gave while a
-          // background command ran and the reply it gave when that command woke it are two things it said, and one
-          // row carrying both glues them into a sentence nobody wrote.
+          // A piece of another of the harness's messages opens a row of its own, the rule messageId carries.
           if (open?.messageId !== undefined && event.messageId !== undefined && event.messageId !== open.messageId) open = undefined;
           if (open === undefined) open = { row: rows.push(message("agent", event.at, event.text)) - 1, ...(event.messageId !== undefined ? { messageId: event.messageId } : {}) };
           else rows[open.row]!.text += event.text;
