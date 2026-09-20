@@ -1253,7 +1253,10 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
 
 // --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
-export const DeltaKind = z.enum(["text", "thinking", "tool_use", "tool_result"]);
+/** What one piece of a turn's stream is. `note` is the harness's own line about itself, a warning about the
+ * person's configuration among them: not the agent's words, not a call, and never the turn's verdict, so a reader
+ * prints it as an aside and the word failed stays for a call that failed and for a turn that did. */
+export const DeltaKind = z.enum(["text", "thinking", "note", "tool_use", "tool_result"]);
 export type DeltaKind = z.infer<typeof DeltaKind>;
 
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
@@ -1325,6 +1328,12 @@ export const SessionDeltaEvent = z.object({
   ...sessionScope,
   kind: DeltaKind,
   text: z.string(),
+  /** The harness's own id for the message this piece of text belongs to, and the one home of the rule every reader
+   * of text follows: append to the message you have open, open another where this changes. That is what tells the
+   * reply an agent gave while a background command ran from the reply it gave when that command woke it, which the
+   * harness sends as two messages and every reader used to glue into one. Absent on a row written before the stamp
+   * existed and on every kind a harness names no message for, which append as they always did. */
+  messageId: z.string().optional(),
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),
   isError: z.boolean().optional(),

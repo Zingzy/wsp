@@ -52,6 +52,9 @@ export type AdapterEvent =
       sessionId: string;
       kind: DeltaKind;
       text: string;
+      /** Set off the id the harness itself sends with each message it writes, on the kinds it sends one for; left
+       * out where it sends none. What a reader does with it is the rule on SessionDeltaEvent. */
+      messageId?: string;
       toolName?: string;
       toolUseId?: string;
       isError?: boolean;
