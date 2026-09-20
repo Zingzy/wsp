@@ -724,6 +724,10 @@ pub fn rules_up(daemon_port: u16) -> Result<(), Error> {
 }
 
 /// Takes the table and every marked accept away, and turns forwarding back off where this daemon turned it on.
+/// The removal is one batch, so a kernel that refuses it lands none of it; where a teardown racing this one took
+/// the same rules away first, its handles are gone and the batch is refused for that alone, and the goal, wsp's
+/// rules off this box, is reached all the same. So a refusal is read against the ruleset rather than reported as
+/// it comes: it is an error only where something of ours still stands.
 pub fn rules_down() -> Result<(), Error> {
     let mut conn = Conn::open()?;
     let mut batch = Vec::new();
@@ -746,7 +750,11 @@ pub fn rules_down() -> Result<(), Error> {
         }
         batch.push(nft::del_table(nft::NFPROTO_IPV4, TABLE));
     }
-    conn.batch(&batch, "removing the workspace rules")?;
+    if let Err(refused) = conn.batch(&batch, "removing the workspace rules") {
+        if rules_present()? {
+            return Err(refused.into());
+        }
+    }
     for iface in turned_on {
         let file = forwarding_file(&iface);
         match fs::write(&file, "0") {
