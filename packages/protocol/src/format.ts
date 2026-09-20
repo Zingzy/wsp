@@ -2477,6 +2477,18 @@ export function spawnActRefusal(threadId: string, act: SpawnAct): string {
   return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
 }
 
+/** The one sentence a token scoped to a thread is refused with for arriving on a road this host does not serve its
+ * own workspaces' guests on. Which road that is, and why, is on the host's own `ownRoad`. */
+export const SCOPED_TOKEN_ROAD_REFUSAL =
+  "a thread's token opens this host over the road its own workspace's guest is served on, and this request came by another";
+
+/** The one sentence a thread naming the image its fork starts from is refused with: a thread forks the image its
+ * own workspace's project runs, and the manifests that hold every snapshot id are not a thread's to read, so an id
+ * it names is one it read outside the tree it may read. */
+export function spawnGoldenRefusal(threadId: string): string {
+  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread forks the image its own workspace runs; naming an image to fork from is not a thread's to ask for`;
+}
+
 /** The one sentence a fork past the machine cap is refused with, naming the root the machines were counted under. */
 export function spawnCapRefusal(rootThreadId: string, standing: number, cap: number): string {
   return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
@@ -2511,10 +2523,20 @@ export function noParentWorkspaceLine(ref: string): string {
   return `no workspace ${ref} to fork from; a child workspace is made out of one this computer holds`;
 }
 
-/** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
- * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
-export function noWorkspaceRefusal(ref: string): string {
-  return `no workspace ${ref}`;
+/** The one sentence a create naming a parent of another project is refused with: a child is a second checkout of
+ * its parent's project on the branch that parent is on, so a parent holding another project has no branch the
+ * child could start from and nowhere for its work to land back in. */
+export function parentProjectRefusal(parent: string, holds: string, made: string): string {
+  return `${parent} is a workspace of ${holds} and this one is made for ${made}; a child starts on its parent's branch, so both hold one project`;
+}
+
+/** The one sentence a name no workspace this caller may drive carries is refused with. Absence is the only thing it
+ * says, and for a thread it is the whole answer: a workspace outside its tree is refused as missing rather than by
+ * the rule that hides it, since a sentence naming one is how a thread learns what else this host holds. The word
+ * rides it where the caller named one and stays off where the verb found the workspace itself. A person still reads
+ * the rule, since what this host holds is theirs. */
+export function noWorkspaceRefusal(ref?: string): string {
+  return ref === undefined ? "no such workspace" : `no workspace ${ref}`;
 }
 
 /** How much of an id a word has to carry before it names a workspace by its start: enough that a name with spaces

@@ -4653,7 +4653,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
     op: z.literal("workspaces.create"),
-    /** A project image by snapshot id; absent takes the head of the project's computer's own image. */
+    /** A project image by snapshot id; absent takes the head of the project's computer's own image. A create a
+     * thread asked for names none and is refused where it does: it takes the image its own workspace's project
+     * runs, which is the only image a thread reaches. */
     golden: z.string().optional(),
     /** The project this workspace is made for, by id or by name. Its computer is where the workspace lands. */
     project: z.string(),
@@ -4667,8 +4669,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
     /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
-     * branch that workspace is on right now where the remote has that branch. A create a thread asked for is a
-     * child of the thread's own workspace whether or not this names one. */
+     * branch that workspace is on right now where the remote has that branch. A workspace of another project is
+     * refused, since a child starts on its parent's branch. A create a thread asked for is a child of the thread's
+     * own workspace whether or not this names one, and a workspace it names here is not read. */
     parent: z.string().optional(),
     /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
     engine: z.boolean().optional(),
@@ -5016,19 +5019,18 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
  * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
  * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
- * What is deliberately not here: sealing the golden and rolling its snapshots, the project goldens, the person's
- * keys and their init, their preferences, their folders, importing and exporting a folder, every road that hands out
- * or takes away access to this host, the two roads that move a running turn's access mode or answer a permission
- * prompt, which are the person's guard on an agent and not an agent's to lift, and the daemon channel, which carries
- * the panes a person types into while a thread drives its workspace through workspaces.exec and the session ops. */
+ * What is deliberately not here: the image, whose manifest holds every version's snapshot and every sign-in sealed
+ * into it, since a fork takes the image its own workspace's project runs and names none; sealing that image and
+ * rolling its snapshots, the project goldens, the person's keys and their init, their preferences, their folders,
+ * importing and exporting a folder, every road that hands out or takes away access to this host, the two roads that
+ * move a running turn's access mode or answer a permission prompt, which are the person's guard on an agent and not
+ * an agent's to lift, and the daemon channel, which carries the panes a person types into while a thread drives its
+ * workspace through workspaces.exec and the session ops. */
 export const THREAD_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
   "status.list",
   "status.subscribe",
-  // A fork is asked for by snapshot id, and the head of the golden is where wsp new reads it: a thread that may fork
-  // has to be able to say from what. The manifest describes the image its own machine runs, nothing the person holds.
-  "golden.get",
   // Read ahead of every fork for whether this host forks at all and at which sizes, so the refusal for a host that
   // mints nothing comes in one sentence before any stage is streamed; the wsp command asks it under any token.
   "capabilities.get",
