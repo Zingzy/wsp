@@ -7,7 +7,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EXIT_CODES } from "@wsp/protocol";
+import { EXIT_CODES, pairToken, SEAL_UNSERVED } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { advertisedUrl, deviceLines, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
@@ -62,29 +62,43 @@ afterEach(() => {
 /** A home with no hosts folder in it, which is a computer that paired with nobody: named on every call, since a
  * call that named none would read the person's own ~/.wsp and answer out of whatever they have connected. */
 const NO_HOSTS = "/nowhere/wsp-home";
+
+/** The fingerprint the host proves, which wsp host pair prints beside the code and every record carries. */
+const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
 const here = (home = NO_HOSTS): { statePath: string; home: string; env: Record<string, string> } => ({ statePath: "/s/state.json", home, env: {} });
 
 /** A home holding one host under the name box, and the mark that aims every line at it. */
 function homeWithBox(marked: boolean): string {
   const home = mkdtempSync(join(tmpdir(), "wsp-pair-home-"));
   dirs.push(home);
-  const record: HostRecord = { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", pairedAt: "2026-09-11T10:00:00.000Z" };
+  const record: HostRecord = { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z" };
   writeHost(home, "box", record);
   if (marked) setDefaultHost(home, "box");
   return home;
 }
 
 describe("wsp host pair", () => {
-  it("prints the code, when it expires and the address to open, and closes its socket", async () => {
+  it("prints the code with the key the host proves, when it expires and the address to open, and closes its socket", async () => {
     const now = Date.parse("2026-09-11T10:00:00.000Z");
-    const host = fakeHost({ "pair.issue": { code: "7K3MQP2X", expiresAt: now + 600_000 } });
+    const host = fakeHost({ "pair.issue": { code: "7K3MQP2X", expiresAt: now + 600_000, hostKey: HOST_KEY } });
     const log: string[] = [];
     expect(await pairCommand(io(log, []), here(), [], deps(host.client, now))).toBe(0);
     expect(host.asked).toEqual([{ op: "pair.issue" }]);
-    expect(log[0]).toBe("code        7K3MQP2X");
+    // One word to copy: the code the host is holding and the fingerprint the computer taking it pins before it
+    // sends anything of its own, as the line wsp add prints for a computer being joined already carries.
+    expect(log[0]).toBe(`code        ${pairToken("7K3MQP2X", HOST_KEY)}`);
+    expect(log[0]).toBe(`code        7K3M-QP2X.${HOST_KEY}`);
     expect(log[1]).toContain("in 10m");
     expect(log[1]).toContain("2026-09-11T10:10:00.000Z");
     expect(host.closes()).toBe(1);
+  });
+
+  it("prints no code at all where the host proves no key, since nothing could spend one", async () => {
+    const now = Date.parse("2026-09-11T10:00:00.000Z");
+    const host = fakeHost({ "pair.issue": { code: "7K3MQP2X", expiresAt: now + 600_000 } });
+    const log: string[] = [];
+    await expect(pairCommand(io(log, []), here(), [], deps(host.client, now))).rejects.toThrow(SEAL_UNSERVED);
+    expect(log).toEqual([]);
   });
 
   it("refuses a positional argument rather than taking it for something", async () => {

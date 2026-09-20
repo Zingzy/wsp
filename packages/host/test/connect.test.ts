@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EXIT_CODES, PAIR_CODE_REFUSAL } from "@wsp/protocol";
+import { EXIT_CODES, PAIR_CODE_REFUSAL, PAIR_NO_KEY_REFUSAL, pairKeyRefusal, pairToken } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { connectCommand, disconnectCommand, hostsCommand, type ConnectDeps } from "../src/connect.js";
 import { cli, type CliIO } from "../src/cli.js";
@@ -17,6 +17,7 @@ import { defaultHost, dialWindowMs, hostsDir, readHost, writeHost } from "../src
 import { dialer } from "../src/mcp.js";
 import { CLI_VERBS, dialHost, runVerb, type DialOpts, type HostClient } from "../src/verbs.js";
 import { startHost, type HostHandle } from "../src/server.js";
+import { hostKeyHere, placeWiring } from "../src/places.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "../../runtime/test/tcp-proxy.js";
@@ -78,10 +79,13 @@ function fakeWebDir(): string {
   return dir;
 }
 
-function testRuntime(): Runtime {
+/** A runtime with the place wiring every host a person starts has, since the key it proves to a pairing client
+ * is the one the place door holds. The state file is a path in this test's own folder; nothing serves it. */
+function testRuntime(): { runtime: Runtime; statePath: string } {
   const store = memoryStore();
   void store.put("goldens", copyKey("default", "default"), GOLDEN);
-  return createRuntime({ backend: stubBackend(), store, adapters: {} });
+  const statePath = join(tempDir("connect-state"), "state.json");
+  return { runtime: createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath, {}) }), statePath };
 }
 
 /** One request over a raw socket that authed with the host's own token: how a person at the host's terminal mints a
@@ -109,13 +113,24 @@ async function overHostToken(wsPort: number, token: string, op: string): Promise
 }
 
 /** A host of this process, the folder wsp host connect writes into, and a fresh code from that host. */
-async function boxAndHome(): Promise<{ url: string; home: string; code: () => Promise<string>; devices: () => Promise<string[]> }> {
-  handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+async function boxAndHome(): Promise<{ url: string; home: string; hostKey: string; code: () => Promise<string>; codeAlone: () => Promise<string>; devices: () => Promise<string[]> }> {
+  const { runtime, statePath } = testRuntime();
+  handle = await startHost({ runtime, webDir: fakeWebDir(), port: 0, wsPort: 0 });
   const up = handle;
+  const issued = async (): Promise<{ code: string; hostKey: string }> => {
+    const answer = await overHostToken(up.wsPort, up.authToken, "pair.issue");
+    return { code: answer["code"] as string, hostKey: answer["hostKey"] as string };
+  };
   return {
     url: `http://127.0.0.1:${up.port}`,
     home: tempDir("connect-home"),
-    code: async () => (await overHostToken(up.wsPort, up.authToken, "pair.issue"))["code"] as string,
+    hostKey: hostKeyHere(statePath),
+    // What a person copies off wsp host pair: the code and the fingerprint of the key this host proves.
+    code: async () => {
+      const { code, hostKey } = await issued();
+      return pairToken(code, hostKey);
+    },
+    codeAlone: async () => (await issued()).code,
     devices: async () => ((await overHostToken(up.wsPort, up.authToken, "devices.list"))["devices"] as { id: string }[]).map(d => d.id),
   };
 }
@@ -155,7 +170,7 @@ describe("wsp host connect", () => {
 
   it("refuses a code the host is not holding, in the host's own words, and writes nothing", async () => {
     const box = await boxAndHome();
-    await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: "ZZZZZZZZ", name: "box" }, [box.url])).rejects.toThrow(PAIR_CODE_REFUSAL);
+    await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: pairToken("ZZZZZZZZ", box.hostKey), name: "box" }, [box.url])).rejects.toThrow(PAIR_CODE_REFUSAL);
     expect(readHost(box.home, "box")).toBeUndefined();
     expect(defaultHost(box.home)).toBeUndefined();
   });
@@ -212,6 +227,42 @@ describe("wsp host connect", () => {
     // token went nowhere, and no record here to disconnect it with.
     expect(dialled).toBe(false);
     expect(await box.devices()).toEqual([]);
+  });
+
+  it("refuses a code that names no key before it dials anything, and spends nothing", async () => {
+    const box = await boxAndHome();
+    let dialled = false;
+    const watched: ConnectDeps = {
+      dial: (statePath: string, opts: DialOpts) => {
+        dialled = true;
+        return dialHost(statePath, opts);
+      },
+      now: Date.now,
+      deviceName: () => "a test",
+      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
+      window: dialWindowMs,
+    };
+    const code = await box.codeAlone();
+    await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code, name: "box" }, [box.url], watched)).rejects.toThrow(PAIR_NO_KEY_REFUSAL);
+    expect(dialled).toBe(false);
+    expect(readHost(box.home, "box")).toBeUndefined();
+    // The code is still the host's to hand to a line that carries the whole token.
+    expect(await box.devices()).toEqual([]);
+    expect(await connectCommand(io(), { statePath: STATE, home: box.home }, { code: pairToken(code, box.hostKey), name: "box" }, [box.url])).toBe(0);
+    expect(readHost(box.home, "box")!.hostKey).toBe(box.hostKey);
+  });
+
+  it("sends nothing at all to a host that proves another key, and leaves the code unspent", async () => {
+    const box = await boxAndHome();
+    const code = await box.codeAlone();
+    const wrong = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+    await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: pairToken(code, wrong), name: "box" }, [box.url])).rejects.toThrow(pairKeyRefusal(box.url));
+    expect(readHost(box.home, "box")).toBeUndefined();
+    // Nothing of this computer's crossed: no device over there, and the code still buys one for a line that
+    // names the key this host really proves.
+    expect(await box.devices()).toEqual([]);
+    expect(await connectCommand(io(), { statePath: STATE, home: box.home }, { code: pairToken(code, box.hostKey), name: "box" }, [box.url])).toBe(0);
+    expect(await box.devices()).toEqual([readHost(box.home, "box")!.deviceId]);
   });
 
   it("refuses a second connect under a name this computer already holds rather than dropping the token it has", async () => {

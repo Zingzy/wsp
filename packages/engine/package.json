@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@wsp/catalog": "workspace:*",
+    "@wsp/keys": "workspace:*",
     "@wsp/protocol": "workspace:*"
   },
   "devDependencies": {

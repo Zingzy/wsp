@@ -9,7 +9,7 @@
 // reads a key or imports the runtime: the host is the only process that talks
 // to the provider.
 import { platform } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
@@ -18,6 +18,7 @@ import WebSocket from "ws";
 import { z } from "zod";
 import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
+import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, verifyPlaceBytes, SEAL_REFUSAL, type Seal } from "@wsp/keys";
 import {
   AFTER_CUT_LINE,
   COORDINATOR_HANDOFF,
@@ -37,6 +38,11 @@ import {
   NOTIFY_CALLER,
   NOTIFY_ME,
   NOTIFY_WORDS,
+  PLACE_LINK_NONCE_BYTES,
+  SEAL_CLIENT,
+  SealOpenReply,
+  pairKeyRefusal,
+  placeLinkTranscript,
   ProjectExportResult,
   ProjectGolden,
   SealedImage,
@@ -272,8 +278,10 @@ export interface DialOpts extends HostPick {
   deadlineMs?: number;
   /** Resolved already by a caller that had to read it anyway, so the hosts file is read once per line. */
   aim?: HostAim;
-  /** Spends a pairing code as the first frame and holds the device token the host answers with. */
-  redeem?: { code: string; name: string };
+  /** Spends a pairing code as the first frame inside the seal, and holds the device token the host answers with.
+   * The fingerprint is the half of that code the person copied beside it, which the host proves before the code
+   * itself crosses. */
+  redeem?: { code: string; name: string; hostKey: string };
   /** What brings a host up when none serves this state file here. A line that hands none in starts nothing and
    * reads the refusal, which is what a line about to serve a host itself wants. */
   start?: HostStarter;
@@ -287,6 +295,12 @@ export interface DialOpts extends HostPick {
  * refusal ends with the command that fixes it, and the flag is always spelled: which file a bare wsp up would
  * serve is one rule and it lives where the state is picked, not in a second reading here. */
 export const noHostServingLine = (statePath: string): string => `no wsp host is serving ${statePath}; start one with wsp up --state ${statePath}`;
+
+/** The fingerprint of the key the host at this aim is held to, or nothing for a host on this computer, which is
+ * reached over its own loopback with the token off its lock. Read off the record a pairing wrote or off the
+ * launch this turn started with; an aim that carries a token and no key never reaches here, since the aim itself
+ * is refused where it is read. */
+const pinnedKey = (aim: HostAim): string | undefined => (aim.kind === "alias" ? aim.record.hostKey : aim.kind === "url" ? aim.hostKey : undefined);
 
 /** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
  * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
@@ -331,10 +345,22 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
     }),
   );
   let next = 1;
+  /** Set once the host has proved the key this computer pinned: every frame after that reply is sealed under the
+   * key both ends agreed, so the token, the code and everything the line asks for cross a road whose carrier
+   * reads nothing and writes nothing into it. */
+  let seal: Seal | undefined;
   const pending = new Map<number, { settle: (f: Frame) => void; fail: (e: Error) => void }>();
   const listeners = new Set<(f: Frame) => void>();
   ws.on("message", raw => {
-    const frame = JSON.parse(String(raw)) as Frame;
+    let frame: Frame;
+    try {
+      frame = JSON.parse(openFrame(seal, raw)) as Frame;
+    } catch {
+      // A frame that will not open under that key, and one sent in the clear after the seal began, are the same
+      // thing: somebody carrying the bytes writing into the socket. It ends, and every waiting reply fails with it.
+      if (seal !== undefined) ws.close(1002, SEAL_REFUSAL);
+      return;
+    }
     const waiter = typeof frame.id === "number" ? pending.get(frame.id) : undefined;
     if (waiter !== undefined) {
       pending.delete(frame.id as number);
@@ -353,7 +379,8 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
     const id = next++;
     const frame = await new Promise<Frame>((settle, fail) => {
       pending.set(id, { settle, fail });
-      ws.send(JSON.stringify({ id, op, ...params }));
+      const text = JSON.stringify({ id, op, ...params });
+      ws.send(seal === undefined ? text : seal.seal(text));
     });
     if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
     return frame as T;
@@ -366,6 +393,23 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
     timer = setTimeout(() => fail(noAnswerWithin(where, deadlineMs)), deadlineMs);
   });
   let paired: { deviceId: string; deviceToken: string } | undefined;
+  /** The first frame of every dial that holds a key: this computer's nonce and its half of a fresh key agreement,
+   * answered by the host with the key it proves. The fingerprint is read before the signature, since anything
+   * answering at this address signs for itself perfectly well and the only thing that tells it from the host is
+   * which key it is; both checks stand before a token or a code has crossed, and one refusal covers either, so a
+   * stranger learns nothing from which caught it. */
+  const openSeal = async (hostKey: string): Promise<void> => {
+    const mine = freshEphemeral();
+    const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+    const answer = SealOpenReply.safeParse(await request("seal.open", { nonce, ephemeral: mine.publicKey }));
+    if (!answer.success) throw authRefusal(pairKeyRefusal(where));
+    const { hostPublicKey, nonce: hostNonce, signature, ephemeral } = answer.data;
+    if (keyFingerprint(hostPublicKey) !== hostKey) throw authRefusal(pairKeyRefusal(where));
+    if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", SEAL_CLIENT, nonce, hostNonce, { challenger: mine.publicKey, answerer: ephemeral }), signature)) {
+      throw authRefusal(pairKeyRefusal(where));
+    }
+    seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, ephemeral), SEAL_CLIENT), "place");
+  };
   // A refusal whose frame carries no kind is classed by the close code that follows it, so a host of an older version
   // that sends the code alone still reads as auth; a frame with a kind is the source when there is one. A host
   // somewhere else says so with its alias and the line that pairs again, since its token is this computer's to renew.
@@ -374,8 +418,13 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
       throw noAnswerRefusal(where, e instanceof Error ? e.message : String(e));
     })
     .then(async () => {
+      // Before the token or the code: the host proves the key this computer pinned, and everything after that
+      // reply rides inside the seal both ends agreed. A host on this computer is reached over its own loopback,
+      // where there is no road for anybody to stand on, and dials as it always did.
+      const pinned = opts.redeem?.hostKey ?? pinnedKey(aim);
+      if (pinned !== undefined) await openSeal(pinned);
       if (opts.redeem === undefined) return void (await request("auth", { token }));
-      const reply = await request<{ deviceId: string; deviceToken: string }>("pair.redeem", opts.redeem);
+      const reply = await request<{ deviceId: string; deviceToken: string }>("pair.redeem", { code: opts.redeem.code, name: opts.redeem.name });
       paired = { deviceId: reply.deviceId, deviceToken: reply.deviceToken };
     })
     .catch(async (e: unknown) => {

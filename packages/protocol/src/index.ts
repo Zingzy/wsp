@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
-import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
+import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
@@ -1389,14 +1389,19 @@ export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
  * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";
 
-/** The host a turn on a machine drives, off its own environment: the address the launch put there and the token
- * beside it. Nothing unless both are there, since an address with no token opens nothing and a token with no
- * address names no host. The pair goes ahead of every host a computer holds on its own, under only what a line
- * names: it is the identity the launch handed the turn, and the machine's own state file is a path nothing serves. */
-export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): { url: string; token: string } | undefined {
+/** The host a turn on a machine drives, off its own environment: the address the launch put there, the token
+ * beside it and the fingerprint of the key that host proves. Nothing unless the address and the token are there,
+ * since an address with no token opens nothing and a token with no address names no host. The pair goes ahead of
+ * every host a computer holds on its own, under only what a line names: it is the identity the launch handed the
+ * turn, and the machine's own state file is a path nothing serves. The key is read here and refused where the aim
+ * is made, so a launch that named an address and a token and no key is told so rather than silently aiming at the
+ * computer the turn happens to run on. */
+export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): { url: string; token: string; hostKey?: string } | undefined {
   const url = env[HOST_URL_ENV]?.trim();
   const token = env[HOST_TOKEN_ENV]?.trim();
-  return url === undefined || url === "" || token === undefined || token === "" ? undefined : { url, token };
+  const hostKey = env[HOST_KEY_ENV]?.trim();
+  if (url === undefined || url === "" || token === undefined || token === "") return undefined;
+  return { url, token, ...(hostKey === undefined || hostKey === "" ? {} : { hostKey }) };
 }
 
 /** Where a machine's daemon bundle is unpacked, and the wsp command that rides in it: one file, the whole bundled
@@ -4390,6 +4395,26 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
   return new TextEncoder().encode(`wsp place link v2\n${role}\n${placeId}\n${challenge}\n${answer}\n${ephemerals.challenger}\n${ephemerals.answerer}\n`);
 }
 
+/** What stands where a place id stands for a client's seal: a client is no place and holds no record here, so the
+ * word is the same on both ends and rides the transcript and the key derivation exactly as a place id does. */
+export const SEAL_CLIENT = "client";
+
+/** The first frame of a client that holds the fingerprint of this host's key: its nonce and its half of the key
+ * agreement, before the code or the token it came to send. Answered with SealOpenReply, after which every frame
+ * this socket carries either way is sealed under the key both ends agreed. */
+export const SealOpenRequest = z.object({ id: reqId, op: z.literal("seal.open"), nonce: PlaceNonce, ephemeral: PlaceEphemeral });
+export type SealOpenRequest = z.infer<typeof SealOpenRequest>;
+
+/** The host's answer: the key it proves, its nonce, its half of the agreement and its signature over the same
+ * transcript a place challenges it with, the client's word in the place id's slot. The client refuses before it
+ * sends anything of the person's unless the fingerprint is the one it pinned and the signature stands. */
+export const SealOpenReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
+export type SealOpenReply = z.infer<typeof SealOpenReply>;
+
+/** The refusal a client gets from a host that holds no key of its own to prove: a runtime served without the
+ * place wiring, which is a runtime in a test rather than any host a person starts. */
+export const SEAL_UNSERVED = "this host holds no key to prove itself with; the host that serves the app wires one";
+
 /** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
  * written in PAIR_CODE_ALPHABET with the dash the screens group it with, and a fingerprint is base64. */
 export const JOIN_TOKEN_MARK = ".";
@@ -4418,6 +4443,29 @@ export const JOIN_NO_KEY_REFUSAL = "that join line names no key for the host, so
 /** The refusal a join gets when the host at that address proved a key that is not the one the join line named:
  * something answered where the host was expected. Nothing of this computer's went to it. */
 export const joinKeyRefusal = (url: string): string => `the host at ${url} proved a key the join line did not name, so it is not the host that printed that line; nothing was sent to it`;
+
+/** The one word a person copies off wsp host pair, which is the join line's token under the name the pairing road
+ * reads it by: the code and the fingerprint of the key the host will prove, so a client pins that key before it
+ * spends the code. `readJoinToken` reads both roads' tokens, since they are one shape. */
+export const pairToken = joinToken;
+
+/** The refusal a connect gets for a code that named no key: every code wsp host pair prints carries one, so a code
+ * without one was written by hand or cut in half on its way over. Nothing is dialled and no code is spent. */
+export const PAIR_NO_KEY_REFUSAL = "that pairing code names no key for the host, so this computer cannot tell which host it would be pairing with; run wsp host pair on that computer again and copy the whole code it prints";
+
+/** The refusal a connect gets when whatever answered at that address did not prove the key the pairing code named,
+ * whether it proved another one or signed nothing this computer could verify: it is not the host that printed the
+ * code, whichever check caught it, and neither the code nor a token of this computer's went to it. */
+export const pairKeyRefusal = (url: string): string => `the host at ${url} did not prove the key the pairing code named, so it is not the host that printed that code; nothing was sent to it`;
+
+/** The refusal a line gets for aiming at a host it holds no key for: a record written before this wsp pinned keys,
+ * or a turn launched by a host older than this one. `where` names which, since the two are fixed differently. */
+export const hostNoKeyLine = (where: string): string =>
+  `${where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; pair again with the code wsp host pair prints now`;
+
+/** What `hostNoKeyLine` names when the aim came out of the environment a turn was launched with rather than out of
+ * a record a person named. */
+export const LAUNCHED_WITH = "the launch this turn started with";
 
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
@@ -4576,6 +4624,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
   z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
+  /** Agrees the key this socket is sealed under, as its first frame and before the code or the token it came to
+   * send. Answered with a SealOpenReply; it is a door frame read before auth, as a redeem is, and no token names
+   * anybody who may send it. */
+  SealOpenRequest,
   /** What this wsp knows about the account it is signed in to, off this computer's own records. Answers
    * `{ account }`. Only on the person's own road, never on one let in by a ticket. */
   z.object({ id: reqId, op: z.literal("account.get") }),
@@ -5313,5 +5365,5 @@ export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

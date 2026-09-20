@@ -305,6 +305,9 @@ importers:
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog
+      '@wsp/keys':
+        specifier: workspace:*
+        version: link:../keys
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -336,6 +339,9 @@ importers:
       '@wsp/engine':
         specifier: workspace:*
         version: link:../engine
+      '@wsp/keys':
+        specifier: workspace:*
+        version: link:../keys
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -359,6 +365,12 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
 
+  packages/keys:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/protocol:
     dependencies:
       zod:
@@ -379,6 +391,9 @@ importers:
       '@wsp/engine':
         specifier: workspace:*
         version: link:../engine
+      '@wsp/keys':
+        specifier: workspace:*
+        version: link:../keys
       '@wsp/protocol':
         specifier: workspace:*
         version: link:../protocol
