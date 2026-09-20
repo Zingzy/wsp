@@ -13,6 +13,7 @@ export {
   cli,
   devCheckoutState,
   goldenRecipe,
+  keySources,
   loadKeys,
   localWiring,
   localWorkFolder,

@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
-import { describeOrphanOffer, describeOrphans, describeRetention, describeStorage, retentionOffer } from "../src/storage.js";
+import { describeOrphanOffer, describeOrphans, describeRetention, describeStorage, noProviderStorageLine, retentionOffer } from "../src/storage.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
 
@@ -33,6 +33,13 @@ describe("the storage line", () => {
     const s = { count: 4, totalBytes: 40 * GB, ...PRICING, monthlyUsd: 30 * 0.05, kept: { count: 3, bytes: 30 * GB }, orphans: { count: 0, bytes: 0 }, others: { count: 1, bytes: 10 * GB } };
     expect(describeStorage(s)).toContain("3 kept here, 30.0 GB; 1 not this host's, 10.0 GB");
     expect(describeStorage(s)).not.toContain("0 this host's");
+  });
+});
+
+describe("the line a host with no provider prints instead", () => {
+  it("says nothing was listed, why, and where the key it has none of is read", () => {
+    expect(noProviderStorageLine("/tmp/proof/state.json")).toBe("storage: nothing listed; this host is wired to no provider (no key beside /tmp/proof/state.json)");
+    expect(noProviderStorageLine()).toBe("storage: nothing listed; this host is wired to no provider");
   });
 });
 

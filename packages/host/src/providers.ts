@@ -46,6 +46,11 @@ export interface ProviderModule {
 
 /** The variable a person names a provider in, for a host started by a service or a window where no flag can reach. */
 export const PROVIDER_ENV = "WSP_PROVIDER";
+
+/** The row that holds no machine: what a host with no provider key is wired to, which is how a start knows to ask
+ * no provider anything. */
+export const NO_PROVIDER = "none";
+
 /** The Box by ASCII key. */
 export const BOX_KEY_ENV = "BOX_API_KEY";
 /** The Solari key. */
@@ -101,7 +106,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     build: env => new SolariBackend({ apiKey: env[SOLARI_KEY_ENV] ?? "" }),
   },
   {
-    id: "none",
+    id: NO_PROVIDER,
     // No machine behind it, so no place to add and none to show: it is the row that refuses every road in one line.
     envNames: [],
     selects: () => true,
@@ -236,7 +241,8 @@ function keyRowFor(env: ProviderEnv, provider: string | undefined, modules: read
   return row?.keyEnv === undefined ? undefined : { id: row.id, keyEnv: row.keyEnv };
 }
 
-/** What saving a key writes into the wsp home's .env: the variable the row that takes it reads, and nothing else.
+/** What saving a key writes into the .env a host reads its own from: the variable the row that takes it reads, and
+ * nothing else.
  * A key saved for a provider opens it as a place and leaves the provider this computer forks on where it was: a
  * second key is a second place, not a move of every workspace that comes after it. Nothing where no such row reads
  * a key. */
@@ -261,8 +267,10 @@ export function providerEnvWithKey(env: ProviderEnv, key: string, provider?: str
 }
 
 /** The environment a run picks its provider out of: the host's own, the command line's words in front, and every
- * registered key variable taken from the first layer that holds it. With no layers given the environment is the
- * only one there is, which is what a host started by a service reads. */
+ * registered key variable taken from the first layer that holds it. The pick itself rides those same layers, so
+ * the word wsp add wrote beside a state file is what the host serving it starts on; a stand-in's own variables are
+ * not, since a fixture is named by the run that wants it. With no layers given the environment is the only one
+ * there is, which is what a host started by a service reads. */
 export function providerEnvWith(
   flags: { provider?: string },
   env: ProviderEnv = process.env,
@@ -272,8 +280,10 @@ export function providerEnvWith(
     const value = layers.map(l => keyIn(l, name)).find(v => v !== undefined);
     return value !== undefined ? [[name, value] as const] : [];
   });
+  const picked = layers.map(l => keyIn(l, PROVIDER_ENV)).find(v => v !== undefined);
   return {
     ...env,
+    ...(picked !== undefined ? { [PROVIDER_ENV]: picked } : {}),
     ...Object.fromEntries(keys),
     ...(flags.provider !== undefined ? { [PROVIDER_ENV]: flags.provider } : {}),
   };

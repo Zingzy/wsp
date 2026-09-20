@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { goldenRecipe, loadKeys, makeRuntime, readOnce, servesNothing, type Keys, type KeySources, type LoadedKeys, type ProviderEnv } from "@wsp/host";
+import { goldenRecipe, keySources, loadKeys, makeRuntime, readOnce, servesNothing, type Keys, type KeySources, type LoadedKeys, type ProviderEnv } from "@wsp/host";
 import { isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import type { Runtime, Store } from "@wsp/runtime";
 
@@ -14,20 +14,21 @@ export interface SetupOptions {
 const silent = { log: (): void => {}, error: (): void => {} };
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`this window asks nothing: ${q}`));
 
-/** The bin's lookup order (env, ./.env, ~/.wsp/.env) with nothing asked: this window has no terminal, and a missing
- * provider key is not a missing answer here, it is the road on which this computer alone is the workspace. */
-async function findKeys(sources?: KeySources): Promise<LoadedKeys> {
-  return loadKeys({ ...silent, ask: refuse, askSecret: refuse }, sources, { anthropic: false, noSolari: "local" });
+/** The bin's lookup order (the environment, ./.env, the .env beside the state file this window serves) with
+ * nothing asked: this window has no terminal, and a missing provider key is not a missing answer here, it is the
+ * road on which this computer alone is the workspace. */
+async function findKeys(statePath: string, sources?: KeySources): Promise<LoadedKeys> {
+  return loadKeys({ ...silent, ask: refuse, askSecret: refuse }, sources ?? keySources(process.env, statePath), { anthropic: false, noSolari: "local" });
 }
 
 /** The state file read once before anything is made, then the runtime this window serves over: the provider picked
- * out of the environment the keys were read through, so a key in the wsp home's .env wires the same module here as
- * it does at a terminal. The read comes first because the wiring a runtime is built with mints this host's pairing
+ * out of the environment the keys were read through, so a key in the .env beside that state file wires the same
+ * module here as it does at a terminal. The read comes first because the wiring a runtime is built with mints this host's pairing
  * key beside the state file on its first read: an app of an older build opened on a state of a newer shape refuses
  * with nothing minted and nothing written. The store that read answers is handed on, so the file is read once. */
 async function runtimeOf(opts: SetupOptions): Promise<Runtime> {
   const store = await readOnce(opts.statePath);
-  const loaded = await findKeys(opts.sources);
+  const loaded = await findKeys(opts.statePath, opts.sources);
   const build = opts.runtimeFor ?? ((keys, path, env, over) => makeRuntime(keys, path, goldenRecipe(), env, undefined, undefined, undefined, over));
   return build(loaded.keys, opts.statePath, loaded.env, store);
 }

@@ -38,8 +38,10 @@ async function here(rt: Runtime, name: string): Promise<WorkspaceView> {
 
 describe("checkSetup", () => {
   let dir: string;
-  let sources: { env: Record<string, string | undefined>; cwd: string; home: string };
+  let sources: { env: Record<string, string | undefined>; cwd: string; statePath: string };
   const made: { keys: unknown; statePath: string }[] = [];
+  /** The store each runtime was handed: the one the first read answered, so the state file is read once. */
+  const handed: Store[] = [];
   let store: Store;
   /** One store, read through the provider module a computer with a key wires and the one a computer without it
    * wires, since which onboarding is wanted is read off that module. */
@@ -61,8 +63,9 @@ describe("checkSetup", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-desktop-setup-"));
     mkdirSync(join(dir, "cwd"));
-    sources = { env: {}, cwd: join(dir, "cwd"), home: join(dir, "home") };
+    sources = { env: {}, cwd: join(dir, "cwd"), statePath: join(dir, "state.json") };
     made.length = 0;
+    handed.length = 0;
     store = memoryStore();
     const wiring = { store, adapters: {}, local: localWiring(join(dir, "user")), ssh: fakeSsh().wiring, hostId: "box:h1" };
     keyed = createRuntime({ backend: stubBackend(), ...wiring });
@@ -72,8 +75,9 @@ describe("checkSetup", () => {
 
   /** What makeRuntime does with what it is handed: the provider module the environment the keys were read through
    * names, and behind no provider key the one that holds no machine. */
-  const runtimeFor = (keys: Keys, statePath: string, env: ProviderEnv): Runtime => {
+  const runtimeFor = (keys: Keys, statePath: string, env: ProviderEnv, store: Store): Runtime => {
     made.push({ keys, statePath });
+    handed.push(store);
     return (env["SOLARI_API_KEY"] ?? "") === "" ? keyless : keyed;
   };
 
@@ -81,6 +85,8 @@ describe("checkSetup", () => {
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
     // A missing provider key is not a missing answer: the state was read anyway, with no key handed to the runtime.
     expect(made).toEqual([{ keys: {}, statePath: join(dir, "state.json") }]);
+    // And the runtime was handed the store that read answered, so nothing reads the file a second time.
+    expect(await handed[0]!.keys("workspaces")).toEqual([]);
   });
 
   it("opens on a computer with no provider key whose state holds this computer", async () => {
@@ -106,6 +112,13 @@ describe("checkSetup", () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
     await store.put("goldens", "default", { ...GOLDEN, head: 2 });
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
+  });
+
+  it("closes a runtime built past the read when the launch is refused after it", async () => {
+    const closed = vi.spyOn(keyless, "close");
+    vi.spyOn(keyless.golden, "get").mockRejectedValue(new Error("refused past the first read"));
+    await expect(checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).rejects.toThrow("refused past the first read");
+    expect(closed).toHaveBeenCalled();
   });
 
   it("is ready with a key and a golden, handing back the runtime it built", async () => {
@@ -148,6 +161,7 @@ describe("checkSetup", () => {
       state = join(dir, "state", "state.json");
       mkdirSync(join(dir, "state"));
       writeFileSync(state, JSON.stringify({ workspaces: {}, [STATE_SHAPE_KEY]: wrote }));
+      sources.statePath = state;
       // The window's own road, with no runtime handed in: an older app opened on a newer state builds what it
       // would build, and this computer's own folders are the scratch dir's rather than the person's.
       vi.stubEnv("HOME", join(dir, "user"));
@@ -168,13 +182,6 @@ describe("checkSetup", () => {
     it("openThisComputer refuses it the same way, with nothing written beside the state", async () => {
       await expect(openThisComputer({ statePath: state, sources })).rejects.toThrow(stateWrittenByNewerLine(state, wrote));
       expect(readdirSync(join(dir, "state"))).toEqual(["state.json"]);
-    });
-
-    it("a runtime built past the read is closed when the launch is refused after it", async () => {
-      const closed = vi.spyOn(keyless, "close");
-      vi.spyOn(keyless.golden, "get").mockRejectedValue(new Error("refused past the first read"));
-      await expect(checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).rejects.toThrow("refused past the first read");
-      expect(closed).toHaveBeenCalled();
     });
   });
 });
