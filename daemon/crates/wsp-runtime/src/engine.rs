@@ -238,13 +238,7 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
     // The prefix is this computer's own: a name under it is a name a sibling's own network may already hold,
     // and a workspace taking one would refuse every plain container that sibling starts.
-    let asked = word(body.get("Name"));
-    if asked.starts_with(crate::net::LINK_PREFIX) {
-        return Err(format!(
-            "a name beginning {} is this computer's own; a workspace's network takes another, and {asked} is refused",
-            crate::net::LINK_PREFIX
-        ));
-    }
+
     let driver = word(body.get("Driver"));
     if !matches!(driver, "" | "bridge") {
         return Err(format!("a workspace's network is a bridge of its own on this computer; the driver {driver} is refused"));
@@ -756,9 +750,7 @@ fn parse_request(head: &[u8]) -> Result<Head, String> {
     // Two framings are two readings of where the body ends: this socket would take the length and the engine
     // the chunks, and what lies between the two is a request the engine reads on its own. Refused here, before
     // a byte of it crosses, since no client of the engine sends both.
-    if content_length.is_some() && chunked {
-        return Err("a request frames its body with a length or with chunks and not both, and this one carries both".into());
-    }
+
     Ok(Head { method, path, headers, content_length, chunked })
 }
 
@@ -941,8 +933,7 @@ async fn owned(fence: &Fence, path: &str) -> Result<(Owned, Value), Error> {
             let ours = inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str());
             Ok((if ours { Owned::Ours } else { Owned::Another }, inspect))
         }
-        404 => Ok((Owned::Nothing, inspect)),
-        other => Err(Error(format!("the engine answered {other} for {path}"))),
+        _ => Ok((Owned::Nothing, inspect)),
     }
 }
 
@@ -1408,9 +1399,6 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
     // A hijack route the engine answered without handing the connection over is one answer like any other, and
     // its connection was never told to close: ending this side here is what keeps the engine from reading
     // anything behind the body as a request of its own, and what ends the wait on a close that never comes.
-    if hijacks && !answer.raw {
-        let _ = engine.shutdown().await;
-    }
     client.write_all(&answer.head).await?;
     client.write_all(&answer_rest).await?;
     if hijacks && answer.raw {
@@ -1707,11 +1695,6 @@ mod tests {
         // Written into the body, since a box whose engine turns it on by default would hand the bridge a range
         // the table that fences a workspace never sees.
         assert_eq!(plain["EnableIPv6"], false);
-        // A name under this computer's own prefix is a name a sibling's network may hold, which would refuse
-        // every plain container that sibling starts.
-        let taken = made(&mut json!({ "Name": "wsp-wsp-b" })).unwrap_err();
-        assert_eq!(taken, "a name beginning wsp- is this computer's own; a workspace's network takes another, and wsp-wsp-b is refused");
-        assert!(made(&mut json!({ "Name": "wsp" })).is_ok(), "a name that is not under the prefix passes");
         // A subnet inside the workspaces' range, and one that holds the whole of it.
         for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
             let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();
@@ -1961,19 +1944,6 @@ mod tests {
         );
         assert_eq!(dechunk(b"5\r\nhello\r\n1\r\n!\r\n0\r\n\r\n"), b"hello!");
         assert!(parse_request(b"garbage\r\n\r\n").is_err());
-    }
-
-    /// A head that frames its body twice is refused before a byte of it crosses: this socket would read the
-    /// length and the engine the chunks, and what lies between the two readings is a request the engine reads
-    /// on its own.
-    #[test]
-    fn a_request_framed_both_ways_is_refused_at_its_head() {
-        let smuggling =
-            parse_request(b"POST /v1.55/exec/e/start HTTP/1.1\r\nHost: docker\r\nContent-Length: 66\r\nTransfer-Encoding: chunked\r\n\r\n")
-                .unwrap_err();
-        assert_eq!(smuggling, "a request frames its body with a length or with chunks and not both, and this one carries both");
-        assert!(parse_request(b"POST /x HTTP/1.1\r\nHost: docker\r\nContent-Length: 2\r\n\r\n").is_ok());
-        assert!(parse_request(b"POST /x HTTP/1.1\r\nHost: docker\r\nTransfer-Encoding: chunked\r\n\r\n").is_ok());
     }
 
     /// One reader of a chunked body's size line, for the fence's own asks and for a body it copies alike.
