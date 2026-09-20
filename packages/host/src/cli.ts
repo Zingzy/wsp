@@ -29,7 +29,7 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
+import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
@@ -581,24 +581,16 @@ export function localWiring(
 
 /** The machines this computer reaches over ssh: the ssh client here dials them with the person's own key, and one
  * dial both proves a machine answers and reads what its record stands on. A record's id is the whole address, so
- * nothing is kept between dials but the forwards, which are children of this host and go with it.
+ * nothing at all is kept between dials.
  *
  * The daemon on such a machine is put under the login it answered with and binds that machine's own loopback, so
- * nothing there listens where the network can reach it; the road to it is a port on this computer carried over
- * ssh, one child per machine and reused by every dial. */
-export function sshWiring(forwards = new SshForwards()): SshWiring {
-  const backend = new SshBackend();
-  const reachOf = (machine: Machine): SshReach => {
-    const reach = sshReachOf(machine);
-    if (reach === undefined) throw new Error(`${machine.id} is not a machine this host reaches over ssh`);
-    return reach;
-  };
+ * nothing there listens where the network can reach it. This host opens no road to it: a road off a port on this
+ * computer is a port another process here can bind first, and a token is sent to no peer that has not proved it
+ * is the daemon. */
+export function sshWiring(): SshWiring {
   return {
-    backend,
-    forward: (machine, remotePort) => forwards.forward(machine.id, reachOf(machine), remotePort),
+    backend: new SshBackend(),
     removeDaemon: (machine, login) => removeDaemon(machine, sshDaemonPlace(login)),
-    dropForward: machine => forwards.drop(machine.id),
-    close: () => forwards.close(),
   };
 }
 
