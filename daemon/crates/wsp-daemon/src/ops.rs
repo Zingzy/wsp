@@ -851,7 +851,7 @@ mod tests {
         options.root = Some(root.path().to_path_buf());
         options.roots_path = Some(root.path().join("roots"));
         options.manifest_path = Some(root.path().join("manifest.json"));
-        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()), _token: token, root }
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
     fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
@@ -869,7 +869,7 @@ mod tests {
         options.roots_path = Some(root.path().join("roots"));
         options.manifest_path = Some(root.path().join("manifest.json"));
         options.place_file = Some(root.path().join("place.json"));
-        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()), _token: token, root }
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
     fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
@@ -1058,7 +1058,7 @@ mod tests {
         std::fs::write(&at.token_path, "t\n").unwrap();
         let mut options = Options::new(b._token.path());
         options.home = Some(home.path().to_path_buf());
-        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
         let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
         // Each part of wsp's own folder is named for the line it puts in front of a person, and the folder itself
@@ -1075,7 +1075,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let mut options = Options::new(b._token.path());
         options.home = Some(home.path().to_path_buf());
-        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         // Never the sha of what this sends: the exe a landing moves over is this test binary's own, so a part that
         // matched would replace the runner under itself. The landing is proved in place.rs against a temp file.
         let sha = "0".repeat(64);
@@ -1124,7 +1124,7 @@ mod tests {
         let mut options = Options::new(token.path());
         options.place_file = Some(home.path().join("place.json"));
         options.runtime_root = Some(under.to_path_buf());
-        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let (link, _rx) = conn_on(None, Road::Link);
         let said = wsp_runtime::doctor::root_under_a_lower(under).expect("a root under /var read as clear of it");
         for op in ["machine.backend", "machine.checkKey", "machine.create", "machine.list"] {
@@ -1147,7 +1147,7 @@ mod tests {
         let mut options = Options::new(token.path());
         options.place_file = Some(home.path().join("place.json"));
         options.runtime_root = Some(runtime_root.path().to_path_buf());
-        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let (link, _rx) = conn_on(None, Road::Link);
         let listed: Value =
             serde_json::from_str(handle(&link, &ctx, &json!({"id": 1, "op": "machine.list"}).to_string()).await.text()).unwrap();
@@ -1526,7 +1526,7 @@ mod tests {
         options.inbox_dir = Some(b.root.path().join("no-inbox"));
         options.manifest_path = Some(b.root.path().join("m2.json"));
         let without = Bench {
-            ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()),
+            ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()),
             _token: tempfile::NamedTempFile::new().unwrap(),
             root: tempfile::tempdir().unwrap(),
         };

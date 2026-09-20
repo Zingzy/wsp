@@ -150,6 +150,13 @@ impl Layout {
     pub fn engine(&self, id: &str) -> PathBuf {
         self.workspace(id).join("engine")
     }
+    /// Where the fence stages the sources a container of this workspace binds, one entry per source: the fence
+    /// opens the source beneath the rootfs with no link followed and binds it here, and this is the path the
+    /// engine is handed. Beside the engine socket's directory and bound into the workspace nowhere, so nothing
+    /// inside reaches an entry to unlink it and put a link of its own in its place before the container starts.
+    pub fn binds(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("binds")
+    }
     /// youki's own root: `<root>/state/<id>` holds its state.json and notify sockets.
     pub fn state(&self) -> PathBuf {
         self.root.join("state")
@@ -1083,6 +1090,13 @@ pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     mount_bind(source, target, target)
 }
 
+/// A source already opened as a descriptor, bound at a path of this daemon's own: the mount lands on the inode
+/// the descriptor holds, so a path swapped underneath between the open and the mount mounts nothing. The target
+/// is the caller's to make, since a bind wants a directory at both ends or a file at both.
+pub fn bind_opened(source: &impl AsFd, target: &Path) -> Result<(), Error> {
+    mount_bind(Path::new(&format!("/proc/self/fd/{}", source.as_fd().as_raw_fd())), target, target)
+}
+
 /// The two calls of one bind, made in the one order: every bind under a rootfs goes through here, so neither road
 /// can make one and forget the propagation that makes it receive only. The target is the descriptor's own name
 /// under proc where the bind lands inside a workspace, so a failure names the path a person reads rather than it.
@@ -1186,16 +1200,24 @@ pub fn computer_tree_refusal(at: &str, tree: &str) -> String {
 /// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
 /// the path is ever named, let alone unmounted.
 pub fn unmount_under(target: &Path) -> Result<(), Error> {
+    unmount_inside(target)?;
+    unmount(target)
+}
+
+/// The same, for a directory of this daemon's own that is no mount itself and whose entries are: the fence's
+/// staging directory. Asking the kernel to detach a path that was never mounted is its own refusal to read, so
+/// nothing but what the table names is named here.
+pub fn unmount_inside(target: &Path) -> Result<(), Error> {
     let mut under: Vec<PathBuf> = mount_points(&fs::read_to_string(MOUNTINFO).map_err(at(Path::new(MOUNTINFO)))?)
         .into_iter()
-        .filter(|point| point.starts_with(target))
+        .filter(|point| point.starts_with(target) && point != target)
         .collect();
     // Deepest first: a mount cannot be detached while another sits under it.
     under.sort_by_key(|point| std::cmp::Reverse(point.components().count()));
     for point in under {
         unmount(&point)?;
     }
-    unmount(target)
+    Ok(())
 }
 
 /// The filesystem the mount covering this path is of, for the sentence a plain copy is explained in; nothing
@@ -1346,6 +1368,12 @@ mod tests {
         assert_eq!(l.wsp_home("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home"));
         assert_ne!(l.wsp_home("wsp-a"), l.wsp_home("wsp-b"));
         assert_eq!(l.empty_at("wsp-a", "/var/lib/docker"), PathBuf::from("/wsp/run/wsp-a/empty/var/lib/docker"));
+        // The fence's staging directory sits beside the engine socket's and under neither: what is bound into
+        // the workspace is the socket's directory alone, so nothing inside reaches a staged bind.
+        assert_eq!(l.binds("wsp-a"), PathBuf::from("/wsp/run/wsp-a/binds"));
+        assert!(l.binds("wsp-a").starts_with(l.workspace("wsp-a")));
+        assert_ne!(l.binds("wsp-a"), l.engine("wsp-a"));
+        assert!(!l.binds("wsp-a").starts_with(l.engine("wsp-a")) && !l.engine("wsp-a").starts_with(l.binds("wsp-a")));
         // An empty directory per path and no two of them one directory: what a workspace writes at one of them
         // is not what it writes at another.
         let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|(at, _)| l.empty_at("wsp-a", at)).collect();
@@ -1443,6 +1471,14 @@ mod tests {
         let with_engine = config_json(&Config { engine: Some(Path::new("/wsp/run/wsp-a/engine")), ..c });
         let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
         assert_eq!(socket_dir["source"], "/wsp/run/wsp-a/engine");
+        // The socket's directory and nothing beside it: the fence's staging directory is bound in nowhere, so
+        // a workspace reaches no entry the engine is about to mount for it.
+        let staging = Layout::new(Path::new("/wsp")).binds("wsp-a");
+        assert!(
+            with_engine["mounts"].as_array().unwrap().iter().all(|m| !Path::new(m["source"].as_str().unwrap_or("")).starts_with(&staging)),
+            "{:?}",
+            with_engine["mounts"]
+        );
         // The compose project is the workspace's own, and it is the last word in the environment: a workspace
         // with an engine runs compose against the box's engine through the fence, and two workspaces of one
         // project share no network there only because their project names differ.
