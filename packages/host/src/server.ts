@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -305,7 +305,9 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
       return rt.workspaces.create(
         {
           project: project.id,
-          ...(head !== undefined ? { golden: head.snapshotId } : {}),
+          // A thread forks the image its own workspace's project runs and is refused where it names one, so the
+          // head this host holds rides only the person's own create.
+          ...(head !== undefined && scopeOf(caller) === undefined ? { golden: head.snapshotId } : {}),
           name,
           ...(opts.workspaceEnvs !== undefined && head !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },

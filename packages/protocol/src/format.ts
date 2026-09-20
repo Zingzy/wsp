@@ -2477,6 +2477,13 @@ export function spawnActRefusal(threadId: string, act: SpawnAct): string {
   return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
 }
 
+/** The one sentence a thread naming the image its fork starts from is refused with: a thread forks the image its
+ * own workspace's project runs, and the manifests that hold every snapshot id are not a thread's to read, so an id
+ * it names is one it read outside the tree it may read. */
+export function spawnGoldenRefusal(threadId: string): string {
+  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread forks the image its own workspace runs; naming an image to fork from is not a thread's to ask for`;
+}
+
 /** The one sentence a fork past the machine cap is refused with, naming the root the machines were counted under. */
 export function spawnCapRefusal(rootThreadId: string, standing: number, cap: number): string {
   return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
