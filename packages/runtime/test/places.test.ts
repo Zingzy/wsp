@@ -48,6 +48,7 @@ import {
   copyStoppedLine,
   NO_IMAGES_HERE,
   probePath,
+  twoPlacesRefusal,
   type GoldenStageEvent,
   type PlaceProvision,
   type PlaceProvisionRow,
@@ -355,6 +356,36 @@ describe("a computer joining", () => {
     expect(await again.client.closed()).toBe(4401);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(false);
     expect((await runtime!.places!.reportOf(joined.placeId))!.login["HOME"]).toBe("/home/maya");
+  });
+
+  it("keeps the name this computer joined under, whatever a later report calls itself", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), name: "old-macbook" });
+    joined.client.close();
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === false);
+    // A box whose own place file a hostile process edited: it relinks under the name of another computer on this
+    // host, and everything that names that word would follow it.
+    const again = await relink(hostKey, joined.placeId, joined.pair, report("attic-server"));
+    expect(again.proved.ok, String(again.proved["error"])).toBe(true);
+    sockets.push(again.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    expect((await placesOf()).find(p => p.id === joined.placeId)!.name).toBe("old-macbook");
+    // The rest of the report is the newest one all the same: the name is the one field a relink cannot move.
+    expect((await runtime!.places!.reportOf(joined.placeId))!.name).toBe("attic-server");
+    await expect(runtime!.places!.placeFor("attic-server")).rejects.toThrow(/no place named attic-server/);
+    expect(await runtime!.places!.placeFor("old-macbook")).toEqual({ placeId: joined.placeId });
+  });
+
+  it("refuses a word two computers on this host answer to, with both ids, and lands nothing on either", async () => {
+    const { hostKey } = await serving();
+    const first = await join(hostKey, { code: await code(), name: "old-macbook" });
+    sockets.push(first.client.ws);
+    const second = await join(hostKey, { code: await code(), name: "old-macbook" });
+    sockets.push(second.client.ws);
+    // Both joined under the word, which is the person's own doing and not a name one of them took; ids tell them
+    // apart, so every road that resolves the word says so rather than taking whichever joined first.
+    await expect(runtime!.places!.placeFor("old-macbook")).rejects.toThrow(twoPlacesRefusal("old-macbook", [first.placeId, second.placeId]));
+    expect(await runtime!.places!.placeFor(second.placeId)).toEqual({ placeId: second.placeId });
   });
 
   it("turns a linked box down the moment it says its kernel no longer boots the image, and keeps the sentence on the row", async () => {

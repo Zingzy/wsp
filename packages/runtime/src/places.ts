@@ -67,6 +67,7 @@ import {
   type WorkspaceSize,
   PLACE_CODE_REFUSAL,
   PLACE_UNSEALED_JOIN_REFUSAL,
+  twoPlacesRefusal,
   placeBehindLine,
   placeDaemonBehind,
   type PlaceProveRequest,
@@ -1319,7 +1320,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // Where the link dialled in from is the only address this host has for a computer that joined with a code,
       // so it is kept rather than only announced on the event. What the last dial of this computer said goes with
       // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
-      const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
+      // The name is the one this computer joined under and is never taken off a report again: a box whose own
+      // place file a hostile process edited would otherwise answer to another computer's name and take its
+      // creates, its checkout and the keys of the turns that run there.
+      const moved: PlaceRecord = { ...held, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       // What a computer forks with belongs to the daemon that said it: one that dialled back on another version
       // is asked again rather than read off an answer the version before it gave, since a newer daemon can carry
       // a field the older one never did and an older one can have lost it. The read is the attach's own, below.
@@ -1534,8 +1538,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async placeFor(word) {
       const all = await records();
-      const found = all.find(r => namesPlace(r, word));
-      if (found !== undefined) return { placeId: found.id };
+      const found = all.filter(r => namesPlace(r, word));
+      // Two computers by one word is two a person joined under one name: a relink cannot take another's, so this
+      // is theirs to tell apart, and every create and image build that names the word reads the ids rather than
+      // landing on whichever record joined first.
+      if (found.length > 1) throw new Error(twoPlacesRefusal(word, found.map(r => r.id)));
+      if (found[0] !== undefined) return { placeId: found[0].id };
       const here = wiring.here().name;
       const providers = providerIds();
       // The wired provider is where a record with no place word already stands, so naming it is that same road and

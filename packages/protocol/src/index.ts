@@ -4415,6 +4415,13 @@ export const PLACE_CODE_REFUSAL = "that join code is not one this host is waitin
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
  * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
+/** The refusal for a word two computers on this host answer to: ids tell them apart, and the person picks one.
+ * `typed` is the word that was written, since more than one word names a computer and each says its own back. A
+ * relink cannot take another computer's name, so two by one name are two a person joined under one word, and
+ * every road that resolves a word reads this one sentence. */
+export const twoPlacesRefusal = (typed: string, ids: readonly string[]): string =>
+  `${typed}: this host holds ${ids.length} places by that name; name one by its id (${ids.join(", ")}).`;
+
 /** The refusal a join from a computer whose wsp seals no link gets: every frame of a link after the handshake
  * travels inside a key the two ends agree, and a computer that cannot agree one would send its code and its
  * report where the carrier reads them. */

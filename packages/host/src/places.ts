@@ -61,6 +61,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   isLoopback,
   joinAddressOf,
   placeLinkTranscript,
+  twoPlacesRefusal,
   relayUrlOf,
   usageRefusal,
   wsUrlOf,
@@ -269,10 +270,9 @@ export function removeLines(name: string, answer: { swept: readonly string[]; no
   ];
 }
 
-/** The refusal for a name two places share: ids tell them apart, and the person picks one. `typed` is the line the
- * person wrote, since more than one word names a place and each says its own back. */
-export const twoPlacesLine = (typed: string, ids: readonly string[]): string =>
-  `${typed}: this host holds ${ids.length} places by that name; name one by its id (${ids.join(", ")}).`;
+/** The refusal for a name two places share, the protocol's own: the road at the terminal and the road a create
+ * takes read one sentence, since a person who picked an id off one of them types it into the other. */
+export const twoPlacesLine = twoPlacesRefusal;
 
 /** The refusal for a word no place answers to. */
 export const noPlaceLine = (typed: string, names: readonly string[]): string =>
