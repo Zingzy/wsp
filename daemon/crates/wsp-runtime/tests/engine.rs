@@ -937,8 +937,11 @@ async fn a_hijack_route_the_engine_did_not_hand_over_ends_the_engines_connection
         .await
         .expect("the engine's connection was never ended, so the answer never came back");
     let answered = String::from_utf8(answered).unwrap();
-    assert!(answered.starts_with("HTTP/1.1 200 OK\r\n"), "{answered}");
+    assert!(answered.starts_with("HTTP/1.1 200 "), "{answered}");
+    assert!(answered.contains("Connection: close"), "{answered}");
     assert_eq!(w.engine_saw("POST", "/v1.55/exec/execours1/start").unwrap().body, body);
+    // One request on that connection and no other: the engine's side ended with its answer.
+    assert_eq!(w.reached().iter().filter(|r| r.path.starts_with("/v1.55/exec/execours1/start")).count(), 1, "{:?}", w.reached());
 }
 
 /// An inspect the engine answered neither 200 nor 404 to says nothing about whose a name is: the create fails
