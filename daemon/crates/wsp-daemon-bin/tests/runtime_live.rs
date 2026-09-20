@@ -3135,3 +3135,98 @@ async fn a_daemon_of_this_computers_runs_nothing_it_found_under_the_home_the_wor
     assert!(!planted.binary.exists() && !planted.marker.exists());
     assert_eq!(listing(Path::new(PLANTED_DIR)), before, "this case left something under the home");
 }
+
+/// A link the workspace planted in its own upper at the parent of a destination the next boot mounts: the wake is
+/// refused in one sentence naming the path, and the folder the link pointed at on the box holds nothing and
+/// carries no mount. The copy's destination stands for every destination here, since the boot opens each of them
+/// through the one walk.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_link_planted_in_a_workspaces_own_upper_refuses_its_wake_and_lands_nothing_outside() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-planted-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    // The folder the planted link points at: the case's own, under this suite's root and outside every rootfs.
+    let outside = root().join(format!("live-outside-{key}"));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    // A destination under /srv, so its parent is the workspace's own upper and a link there is the workspace's.
+    let at = format!("/srv/planted-{key}/checkout");
+    let id = w
+        .create(spec(json!({
+            "copy": { "from": from.display().to_string(), "at": &at },
+            "idempotencyKey": format!("live-planted-{key}"),
+        })))
+        .await;
+    let (code, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!((code, out.as_str()), (0, "the checkout\n"));
+
+    // Asleep, its mounts down and its upper on the box's disk: the parent of the destination replaced by a link
+    // out of the workspace, which is what a process inside can write there.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    let parent = root().join("run").join(&id).join("upper/srv").join(format!("planted-{key}"));
+    fs::remove_dir_all(&parent).unwrap();
+    std::os::unix::fs::symlink(&outside, &parent).unwrap();
+
+    let refused = w.ask("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(refused["ok"], false, "the wake mounted through a link the workspace planted: {refused}");
+    let said = refused["error"].as_str().unwrap_or_default();
+    assert!(said.contains(&format!("/srv/planted-{key}")), "{said}");
+    assert!(said.contains("replace the link with a folder and wake the workspace"), "{said}");
+    // And nothing of the boot reached where the link pointed: no directory made, no copy, no mount.
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0, "the wake wrote where the link pointed");
+    let table = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(!table.contains(&outside.display().to_string()), "the wake landed a mount where the link pointed");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    let _ = fs::remove_dir_all(&outside);
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
+}
+
+/// A link the box root keeps under the home every workspace here shares, which is a dotfiles checkout on a box
+/// somebody works on: the boot follows it once, the share lands where it leads beneath the rootfs, and the box's
+/// own disk carries nothing of it. The one case here that writes under the box's home; it writes a link of this
+/// checkout's own name and takes it off at its end.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_the_workspace() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let logins = root().join("logins/live-follow");
+    fs::create_dir_all(&logins).unwrap();
+    let source = logins.join("auth.json");
+    fs::write(&source, b"{\"live\":\"a login\"}\n").unwrap();
+    // The box root's own link, at a name of this checkout's own, leading to a path the workspace's own /var holds.
+    let link = PathBuf::from(format!("/root/.wsp-live-link-{key}"));
+    let led = format!("/var/tmp/wsp-landed-{key}");
+    let _ = fs::remove_file(&link);
+    std::os::unix::fs::symlink(&led, &link).unwrap();
+    let id = w
+        .create(spec(json!({
+            "shares": [{ "source": source.display().to_string(), "target": format!("{}/auth.json", link.display()) }],
+            "idempotencyKey": format!("live-follow-{key}"),
+        })))
+        .await;
+
+    // Inside, the login reads at the path the tool looks at and at the path the link leads to, which are one file.
+    let said = "{\"live\":\"a login\"}\n";
+    let (code, out, err) = w.exec(&id, &format!("cat {}/auth.json; cat {led}/auth.json", link.display())).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out, format!("{said}{said}"), "{out}");
+    // And the box carries nothing of it: the follow landed beneath the rootfs, so the path the link leads to is
+    // the workspace's own and the record names no mount point on the computer.
+    assert!(!Path::new(&led).exists(), "the boot made the link's target on the box itself");
+    let record: Value = serde_json::from_slice(&fs::read(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
+    assert_eq!(record["madePoints"].as_array().map(Vec::len).unwrap_or(0), 0, "{record}");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert!(!Path::new(&led).exists(), "the kill left the link's target on the box");
+    fs::remove_file(&link).unwrap();
+    let _ = fs::remove_dir_all(&logins);
+    w.close().await;
+}

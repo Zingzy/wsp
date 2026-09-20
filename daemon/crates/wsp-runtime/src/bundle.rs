@@ -9,11 +9,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use nix::errno::Errno;
+use nix::fcntl::{open, openat, openat2, readlinkat, OFlag, OpenHow, ResolveFlag};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
+use nix::sys::stat::{mkdirat, Mode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use wsp_frames::numbers::GUEST_WSP_HOME;
@@ -44,6 +49,11 @@ impl Layout {
     }
     pub fn rootfs(&self, id: &str) -> PathBuf {
         self.workspace(id).join("rootfs")
+    }
+    /// What every path under that rootfs is opened through: the one road a mount, a create or a write inside a
+    /// workspace takes, so no destination there is ever named by a path the kernel resolves a second time.
+    pub fn inside_of(&self, id: &str) -> Inside {
+        Inside { rootfs: self.rootfs(id), upper: self.upper(id), id: id.to_owned() }
     }
     /// Every overlay's upper under one directory: what the workspace has written since it booted, which is what
     /// a stop keeps and a describe counts.
@@ -425,8 +435,13 @@ pub fn resolv_text(box_file: &str, upstream: &str) -> String {
 /// One overlay: the lower directory read only under the workspace's own upper and work directories, mounted
 /// nodev so no device node under the lower reaches a device from inside.
 pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> Result<(), Error> {
+    mount_overlay_at(lower, upper, work, target, target)
+}
+
+/// The same, landed on a descriptor's own name under proc, with the path a person reads for the failure.
+fn mount_overlay_at(lower: &Path, upper: &Path, work: &Path, target: &Path, named: &Path) -> Result<(), Error> {
     let data = format!("lowerdir={},upperdir={},workdir={}", lower.display(), upper.display(), work.display());
-    mount(Some("overlay"), target, Some("overlay"), MsFlags::MS_NODEV, Some(data.as_str())).map_err(nix_at(target))
+    mount(Some("overlay"), target, Some("overlay"), MsFlags::MS_NODEV, Some(data.as_str())).map_err(nix_at(named))
 }
 
 /// The directories a rootfs carries whatever the box holds: the mount points of the overlays and the binds
@@ -480,9 +495,11 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
             Err(e) => return Err(at(&dir)(e)),
         }
     }
+    let place = layout.inside_of(id);
+    // The top of the rootfs is the daemon's own to make, so a link at one of these names is the workspace's and
+    // refuses the boot: every one of them is a mount point of the boot's or of youki's.
     for name in SKELETON {
-        let dir = rootfs.join(name);
-        fs::create_dir_all(&dir).map_err(at(&dir))?;
+        open_inside(&place, &format!("/{name}"), Want::Dir)?;
     }
     // The rootfs itself, bound to its own path and made to receive only, before one overlay or bind goes under
     // it: the volume this root sits on may be in a shared peer group of its own (a loop volume on a box was
@@ -510,21 +527,20 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
         for made in [&upper, &work] {
             fs::create_dir_all(made).map_err(at(made))?;
         }
-        mount_overlay(Path::new(dir), &upper, &work, &rootfs.join(dir.trim_start_matches('/')))?;
+        let opened = open_inside(&place, dir, Want::Dir)?;
+        mount_overlay_at(Path::new(dir), &upper, &work, &opened.at(), &opened.named(&place))?;
     }
     // The overlays are up, so this lands in the workspace's own upper: a regular resolv.conf where the box has a
     // link into a /run the workspace does not share.
     write_resolv_inside(&rootfs)?;
     // The person's own home on the box, shared by every workspace on it: the agents' sign-ins, their memory and
     // their caches are the computer's and last past any one workspace, last writer wins.
-    bind_into(Path::new(BOX_ROOT), &rootfs.join("root"))?;
+    bind_inside(&place, Path::new(BOX_ROOT), BOX_ROOT)?;
     // And over it, the one folder under that home that is the workspace's own rather than the computer's: the
     // daemon inside writes its token, its inbox and its manifest there by default, and two workspaces on one
     // computer would otherwise take turns rewriting each other's token in a folder they share. It is made at the
     // first boot, kept by a stop as the uppers are, and goes with the workspace.
-    let home = layout.wsp_home(id);
-    fs::create_dir_all(&home).map_err(at(&home))?;
-    bind_over(&home, &rootfs, GUEST_WSP_HOME)?;
+    bind_over(&place, &layout.wsp_home(id), GUEST_WSP_HOME)?;
     // And over every path of the box's own that nothing inside may read, the workspace's own empty file or
     // directory: one per path, so what a workspace writes at one of them is not what it writes at another. Read
     // off the rootfs here rather than listed here, and read last: the person's home and the box's /etc are both
@@ -532,17 +548,16 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     for cover in hardening::covered(&rootfs) {
         let empty = layout.empty_at(id, &cover.at);
         if cover.file {
-            bind_file_over(&empty, &rootfs, &cover.at)?;
+            bind_file_over(&place, &empty, &cover.at)?;
         } else {
-            fs::create_dir_all(&empty).map_err(at(&empty))?;
-            bind_over(&empty, &rootfs, &cover.at)?;
+            bind_over(&place, &empty, &cover.at)?;
         }
     }
     // Last, and after the covers: the Homebrew prefix sits under /home, which a cover has just emptied, so a bind
     // made before it would be the one thing the cover hid. What lands here is the computer's own tools at their own
     // path, and the PATH every process inside starts with names them.
     for root in tool_roots {
-        bind_into(Path::new(root), &inside(&rootfs, root)?)?;
+        bind_inside(&place, Path::new(root), root)?;
     }
     Ok(())
 }
@@ -555,26 +570,224 @@ pub fn tool_roots_present<'a>(roots: &[&'a str]) -> Vec<&'a str> {
     roots.iter().copied().filter(|root| fs::symlink_metadata(root).is_ok_and(|held| held.is_dir())).collect()
 }
 
+/// Which workspace a path is opened inside: the rootfs on the box, the workspace's own uppers, which say whose a
+/// link met on the way is, and the id the refusal names.
+pub struct Inside {
+    rootfs: PathBuf,
+    upper: PathBuf,
+    id: String,
+}
+
+impl Inside {
+    pub fn rootfs(&self) -> &Path {
+        &self.rootfs
+    }
+}
+
+/// What the last part of a path opened inside a workspace is: a directory a bind or an overlay lands on, or a
+/// file a file bind lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Want {
+    Dir,
+    File,
+}
+
+/// A path inside a workspace, opened: the descriptor of the entry itself and the path under the rootfs it landed
+/// at, which is the path asked for unless a link the box root keeps led elsewhere.
+#[derive(Debug)]
+pub struct Opened {
+    fd: OwnedFd,
+    pub landed: String,
+    /// Whether this walk made the entry itself rather than finding it: what says a mount point is the boot's own
+    /// and not something the person had there.
+    pub made: bool,
+}
+
+impl Opened {
+    /// What a mount or an open names this entry by. Through the descriptor and never through the path again: a
+    /// path resolved a second time is a path a workspace can point somewhere else between the two resolutions.
+    pub fn at(&self) -> PathBuf {
+        PathBuf::from(format!("/proc/self/fd/{}", self.fd.as_raw_fd()))
+    }
+    /// The entry's own descriptor, for a call that takes one rather than a path.
+    pub fn fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+    /// Where it sits on the box, for the sentence a failure carries.
+    pub fn named(&self, place: &Inside) -> PathBuf {
+        place.rootfs.join(self.landed.trim_start_matches('/'))
+    }
+}
+
+/// Opens a path inside a workspace beneath its rootfs, making the directories above it and the entry itself where
+/// they are missing, and answers the entry's own descriptor. Every component is walked with `openat2` under
+/// `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, so the kernel resolves no link behind this
+/// walk, and what lands lands on the descriptor rather than on a path resolved a second time.
+///
+/// Where a component is a link, whose link it is decides. Under an overlaid tree the workspace's own upper at the
+/// same relative path says so: present there the link is the workspace's and the boot is refused; absent it is the
+/// box's and is followed once. Under the box's own home every link is read as the box root's, since that home is
+/// shared and the daemon cannot tell one from the other, both being uid 0 in one folder; what closes the road
+/// there is where the follow lands. Anywhere else under the rootfs a link is the workspace's and is refused.
+///
+/// Followed once means the link's target resolved beneath the rootfs, an absolute target under the rootfs's own
+/// path and a relative one against the link's parent, and the walk goes on with no link followed: a second link,
+/// or a target that leaves the rootfs, is refused with the same sentence.
+pub fn open_inside(place: &Inside, at: &str, want: Want) -> Result<Opened, Error> {
+    inside(&place.rootfs, at)?;
+    let root = open_dir(&place.rootfs)?;
+    let mut parts: Vec<String> = at.split('/').filter(|part| !part.is_empty()).map(str::to_owned).collect();
+    let mut walked: Vec<String> = Vec::new();
+    let mut dir = root.try_clone().map_err(|e| Error { path: place.rootfs.clone(), source: e })?;
+    let mut followed = false;
+    let mut made = false;
+    let mut i = 0;
+    while i < parts.len() {
+        let want_here = if i + 1 == parts.len() { want } else { Want::Dir };
+        match step(&dir, &parts[i], want_here) {
+            Ok(Some((fd, fresh))) => {
+                walked.push(parts[i].clone());
+                dir = fd;
+                made = fresh;
+                i += 1;
+            }
+            // A link: whose it is decides, and one the box root keeps is followed by walking its target from the
+            // rootfs again, which is where `RESOLVE_BENEATH` reads a target that leaves the workspace.
+            Ok(None) => {
+                if followed || !the_boxs_own_link(place, &walked, &parts[i]) {
+                    return Err(link_refusal(place, at, &walked, &parts[i]));
+                }
+                followed = true;
+                let target = readlinkat(&dir, parts[i].as_str()).map_err(nix_at(&place.rootfs))?;
+                let led = beneath(&walked, Path::new(&target)).ok_or_else(|| link_refusal(place, at, &walked, &parts[i]))?;
+                parts = led.into_iter().chain(parts[i + 1..].iter().cloned()).collect();
+                walked.clear();
+                dir = root.try_clone().map_err(|e| Error { path: place.rootfs.clone(), source: e })?;
+                i = 0;
+            }
+            Err(e) => return Err(Error { path: place.rootfs.join(walked.join("/")).join(&parts[i]), source: e.into() }),
+        }
+    }
+    Ok(Opened { fd: dir, landed: format!("/{}", walked.join("/")), made })
+}
+
+/// One component walked, made where it is not there: its descriptor and whether this call made it, or nothing
+/// where the component is a link.
+fn step(dir: &OwnedFd, name: &str, want: Want) -> Result<Option<(OwnedFd, bool)>, Errno> {
+    match open_step(dir, name, want) {
+        Ok(fd) => Ok(Some((fd, false))),
+        Err(Errno::ELOOP) => Ok(None),
+        Err(Errno::ENOENT) => {
+            let made = match want {
+                Want::Dir => mkdirat(dir, name, Mode::from_bits_truncate(0o755)),
+                // Mode 0600, since a login is what lands on it; exclusive and following no link, so the entry
+                // this walk goes on to open is the entry this call made.
+                Want::File => openat(
+                    dir,
+                    name,
+                    OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+                    Mode::from_bits_truncate(0o600),
+                )
+                .map(drop),
+            };
+            let fresh = match made {
+                Ok(()) => true,
+                Err(Errno::EEXIST) => false,
+                Err(e) => return Err(e),
+            };
+            match open_step(dir, name, want) {
+                Ok(fd) => Ok(Some((fd, fresh))),
+                Err(Errno::ELOOP) => Ok(None),
+                Err(e) => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn open_step(dir: &OwnedFd, name: &str, want: Want) -> Result<OwnedFd, Errno> {
+    let flags = match want {
+        Want::Dir => OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
+        Want::File => OFlag::O_PATH | OFlag::O_CLOEXEC,
+    };
+    let how = OpenHow::new()
+        .flags(flags)
+        .resolve(ResolveFlag::RESOLVE_BENEATH | ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_NO_MAGICLINKS);
+    openat2(dir, name, how)
+}
+
+fn open_dir(path: &Path) -> Result<OwnedFd, Error> {
+    open(path, OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty()).map_err(nix_at(path))
+}
+
+/// Whether a link met at this path inside is the box's own rather than the workspace's: one under the box's home,
+/// which every workspace here shares, and one in an overlaid tree the workspace's own upper has nothing at.
+fn the_boxs_own_link(place: &Inside, walked: &[String], name: &str) -> bool {
+    let mut rel: Vec<&str> = walked.iter().map(String::as_str).collect();
+    rel.push(name);
+    let path = format!("/{}", rel.join("/"));
+    let under = |tree: &str| path.strip_prefix(tree).is_some_and(|rest| rest.starts_with('/'));
+    if under(BOX_ROOT) {
+        return true;
+    }
+    OVERLAID.iter().any(|tree| under(tree)) && fs::symlink_metadata(place.upper.join(rel.join("/"))).is_err()
+}
+
+/// What a link the workspace planted refuses the boot with, wherever it is met.
+fn link_refusal(place: &Inside, at: &str, walked: &[String], name: &str) -> Error {
+    let mut rel: Vec<&str> = walked.iter().map(String::as_str).collect();
+    rel.push(name);
+    let detail = format!(
+        "{at} inside workspace {} is reached through a link at /{}; replace the link with a folder and wake the workspace",
+        place.id,
+        rel.join("/")
+    );
+    Error { path: place.rootfs.clone(), source: io::Error::new(io::ErrorKind::PermissionDenied, detail) }
+}
+
+/// Where a link's target lands under the rootfs, as the components to walk from it: an absolute target under the
+/// rootfs's own path and a relative one against the link's parent. Nothing where it climbs out of the rootfs.
+fn beneath(parent: &[String], target: &Path) -> Option<Vec<String>> {
+    let mut out: Vec<String> = if target.is_absolute() { Vec::new() } else { parent.to_vec() };
+    for part in target.components() {
+        match part {
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop()?;
+            }
+            Component::Normal(name) => out.push(name.to_string_lossy().into_owned()),
+            Component::Prefix(_) => return None,
+        }
+    }
+    Some(out)
+}
+
+/// One of this computer's own directories bound at a path inside a workspace, landed on the descriptor the walk
+/// above answered. Answers where it landed, which is what the record keeps.
+pub fn bind_inside(place: &Inside, source: &Path, at_path: &str) -> Result<String, Error> {
+    let opened = open_inside(place, at_path, Want::Dir)?;
+    mount_bind(source, &opened.at(), &opened.named(place))?;
+    Ok(opened.landed)
+}
+
 /// One of the workspace's own directories bound over a path inside it. The mount point is under a bind of the
 /// box's own directory or inside an overlay, so the daemon makes it where the box has none: the box's own wsp
 /// folder is there on a computer somebody joined and the two engine folders are made by an engine that may not
 /// be installed at all.
-fn bind_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
-    let target = inside(rootfs, at_path)?;
-    fs::create_dir_all(&target).map_err(at(&target))?;
-    bind_into(source, &target)
+fn bind_over(place: &Inside, source: &Path, at_path: &str) -> Result<(), Error> {
+    fs::create_dir_all(source).map_err(at(source))?;
+    bind_inside(place, source, at_path).map(drop)
 }
 
 /// The same for a path the box keeps a file at: a file bind wants a file at both ends, so the workspace's own
-/// empty one is made here and the one inside is already there, since the cover was read off the rootfs.
-fn bind_file_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
-    let target = inside(rootfs, at_path)?;
+/// empty one is made here and the one inside is made by the walk where the box keeps none.
+fn bind_file_over(place: &Inside, source: &Path, at_path: &str) -> Result<(), Error> {
     if let Some(dir) = source.parent() {
         fs::create_dir_all(dir).map_err(at(dir))?;
     }
     empty_file(source)?;
-    empty_file(&target)?;
-    mount_bind(source, &target)
+    let opened = open_inside(place, at_path, Want::File)?;
+    mount_bind(source, &opened.at(), &opened.named(place))
 }
 
 /// The box's own /root, bound into every workspace at the same path.
@@ -610,22 +823,30 @@ fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
 /// The computer's own wsp, where it has one at all, is a command under the wsp folder every workspace covers, so
 /// a workspace that was not given this word has none.
 ///
-/// Written through the merged view, as the resolv.conf above is, and a link the computer keeps at that path is
-/// removed first: an absolute link under a rootfs is resolved by the kernel against this process's own root, so a
-/// write that followed one would land on the computer's own file instead.
-pub fn write_wsp_shim_inside(rootfs: &Path) -> Result<(), Error> {
-    let path = inside(rootfs, wsp_frames::numbers::GUEST_WSP_PATH)?;
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(at(dir))?;
+/// Written through the descriptor of the folder it sits in, and a link the computer keeps at that name is removed
+/// rather than written through: an absolute link under a rootfs is resolved by the kernel against this process's
+/// own root, so a write that followed one would land on the computer's own file instead.
+pub fn write_wsp_shim_inside(place: &Inside) -> Result<(), Error> {
+    let path = wsp_frames::numbers::GUEST_WSP_PATH;
+    let (folder, name) = path.rsplit_once('/').expect("the shim's path names a folder");
+    let dir = open_inside(place, folder, Want::Dir)?;
+    let shim = wsp_frames::guest_wsp_shim(profile::INIT_PATH);
+    let made = |flags: OFlag| {
+        openat(dir.fd(), name, flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::from_bits_truncate(0o755))
+    };
+    let file = match made(OFlag::O_CREAT | OFlag::O_TRUNC) {
+        // A link at the name: taken off through the same descriptor and the file written in its place.
+        Err(Errno::ELOOP) => {
+            nix::unistd::unlinkat(dir.fd(), name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&dir.named(place)))?;
+            made(OFlag::O_CREAT | OFlag::O_EXCL)
+        }
+        other => other,
     }
-    match fs::symlink_metadata(&path) {
-        Ok(held) if held.file_type().is_symlink() => fs::remove_file(&path).map_err(at(&path))?,
-        Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(at(&path)(e)),
-    }
-    fs::write(&path, wsp_frames::guest_wsp_shim(profile::INIT_PATH)).map_err(at(&path))?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).map_err(at(&path))
+    .map_err(nix_at(&dir.named(place).join(name)))?;
+    let landed = dir.named(place).join(name);
+    let mut file = std::fs::File::from(file);
+    file.write_all(shim.as_bytes()).map_err(at(&landed))?;
+    file.set_permissions(fs::Permissions::from_mode(0o755)).map_err(at(&landed))
 }
 
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
@@ -686,14 +907,15 @@ pub fn unmount(target: &Path) -> Result<(), Error> {
 /// expects, and nothing a workspace mounts reaches the computer.
 pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     fs::create_dir_all(target).map_err(at(target))?;
-    mount_bind(source, target)
+    mount_bind(source, target, target)
 }
 
 /// The two calls of one bind, made in the one order: every bind under a rootfs goes through here, so neither road
-/// can make one and forget the propagation that makes it receive only.
-fn mount_bind(source: &Path, target: &Path) -> Result<(), Error> {
+/// can make one and forget the propagation that makes it receive only. The target is the descriptor's own name
+/// under proc where the bind lands inside a workspace, so a failure names the path a person reads rather than it.
+fn mount_bind(source: &Path, target: &Path, named: &Path) -> Result<(), Error> {
     for (from, at_path, flags) in bind_steps(source, target) {
-        mount(from, at_path, None::<&str>, flags, None::<&str>).map_err(nix_at(at_path))?;
+        mount(from, at_path, None::<&str>, flags, None::<&str>).map_err(nix_at(named))?;
     }
     Ok(())
 }
@@ -716,6 +938,42 @@ pub fn empty_file(path: &Path) -> Result<(), Error> {
         fs::create_dir_all(dir).map_err(at(dir))?;
     }
     fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path).map(|_| ()).map_err(at(path))
+}
+
+/// One mount point a boot made on the computer's own disk, taken off now that the workspace's mounts are down.
+/// Walked from the computer's own root with no link followed and unlinked through the descriptor of the folder it
+/// sits in: these paths run through the home every workspace here shares, where a link somebody kept would
+/// otherwise carry the unlink somewhere else. Only an empty file goes: a sign-in made on the computer since the
+/// boot wrote the person's own login into that file, and it is theirs. Answers the sentence where a link on the
+/// way left the point standing.
+pub fn take_off_point(point: &str) -> Result<Option<String>, Error> {
+    let mut parts: Vec<&str> = point.split('/').filter(|part| !part.is_empty()).collect();
+    let Some(name) = parts.pop() else { return Ok(None) };
+    let stands = |at: &str| Some(format!("{point} is reached through a link at {at} and stays standing"));
+    let mut dir = open_dir(Path::new("/"))?;
+    let mut walked = PathBuf::from("/");
+    for part in parts {
+        walked.push(part);
+        match open_step(&dir, part, Want::Dir) {
+            Ok(fd) => dir = fd,
+            Err(Errno::ENOENT) => return Ok(None),
+            Err(Errno::ELOOP) => return Ok(stands(&walked.to_string_lossy())),
+            Err(e) => return Err(Error { path: walked, source: e.into() }),
+        }
+    }
+    let held = match nix::sys::stat::fstatat(&dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+        Ok(held) => held,
+        Err(Errno::ENOENT) => return Ok(None),
+        Err(e) => return Err(Error { path: walked.join(name), source: e.into() }),
+    };
+    let kind = nix::sys::stat::SFlag::from_bits_truncate(held.st_mode) & nix::sys::stat::SFlag::S_IFMT;
+    if kind == nix::sys::stat::SFlag::S_IFLNK {
+        return Ok(stands(&walked.join(name).to_string_lossy()));
+    }
+    if kind == nix::sys::stat::SFlag::S_IFREG && held.st_size == 0 {
+        nix::unistd::unlinkat(&dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&walked.join(name)))?;
+    }
+    Ok(None)
 }
 
 /// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held
@@ -856,6 +1114,11 @@ pub fn read_record(path: &Path) -> Result<Option<Workspace>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A workspace to open paths inside, on a rootfs made by hand: the uppers beside it, as a layout puts them.
+    fn place_at(root: &Path, id: &str) -> Inside {
+        Inside { rootfs: root.join("rootfs"), upper: root.join("upper"), id: id.to_owned() }
+    }
 
     /// The one reader of a claim's points takes a file that does not parse as no points, so a file an older
     /// daemon tore costs that workspace its claim's names and nothing else. The record's reader refuses such a
@@ -1260,7 +1523,8 @@ mod tests {
         fs::write(&elsewhere, "the computer's own").unwrap();
         std::os::unix::fs::symlink(&elsewhere, &at).unwrap();
 
-        write_wsp_shim_inside(&rootfs).unwrap();
+        let place = place_at(dir.path(), "wsp-shim");
+        write_wsp_shim_inside(&place).unwrap();
         let held = fs::symlink_metadata(&at).unwrap();
         assert!(held.file_type().is_file(), "the workspace's wsp is not a regular file");
         assert_eq!(held.permissions().mode() & 0o777, 0o755);
@@ -1270,13 +1534,124 @@ mod tests {
         // write out of the rootfs.
         assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "the computer's own");
         // Written again at every boot, as the resolv.conf is, over what the last boot left.
-        write_wsp_shim_inside(&rootfs).unwrap();
+        write_wsp_shim_inside(&place).unwrap();
         assert_eq!(fs::read_to_string(&at).unwrap(), wsp_frames::guest_wsp_shim(profile::INIT_PATH));
         // And on a rootfs with no such folder yet, which is a workspace whose upper holds nothing there.
         let bare = dir.path().join("bare");
-        fs::create_dir_all(&bare).unwrap();
-        write_wsp_shim_inside(&bare).unwrap();
-        assert!(bare.join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/')).is_file());
+        fs::create_dir_all(bare.join("rootfs")).unwrap();
+        write_wsp_shim_inside(&place_at(&bare, "wsp-bare")).unwrap();
+        assert!(bare.join("rootfs").join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/')).is_file());
+    }
+
+    /// Every destination under a rootfs is opened beneath it with no link followed: the folders above it made on
+    /// the way, the entry itself made as a directory or a 0600 file, and the descriptor answered is the entry a
+    /// mount lands on rather than a path the kernel resolves a second time. No mount and no root.
+    #[test]
+    fn a_path_inside_is_opened_beneath_the_rootfs_and_the_descriptor_is_the_entry_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let place = place_at(dir.path(), "wsp-open");
+        fs::create_dir_all(&place.rootfs).unwrap();
+
+        let made = open_inside(&place, "/a/b/c", Want::Dir).unwrap();
+        assert_eq!(made.landed, "/a/b/c");
+        assert!(made.made && place.rootfs.join("a/b/c").is_dir());
+        let file = open_inside(&place, "/a/b/c/f", Want::File).unwrap();
+        assert_eq!(fs::symlink_metadata(place.rootfs.join("a/b/c/f")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(fs::read_link(file.at()).unwrap(), fs::canonicalize(place.rootfs.join("a/b/c/f")).unwrap());
+        // A path already there is not made again, which is what tells a mount point this boot made from a file
+        // the person had at that path.
+        assert!(!open_inside(&place, "/a/b/c/f", Want::File).unwrap().made);
+        // The wire's own rule stands behind this one still.
+        let refused = open_inside(&place, "/a/../etc", Want::Dir).unwrap_err().to_string();
+        assert!(refused.contains("not a path inside a workspace"), "{refused}");
+
+        // A link the workspace planted outside every overlaid tree and outside the shared home: refused, naming
+        // the component and what to do about it, and nothing is made where it pointed.
+        std::os::unix::fs::symlink("../..", place.rootfs.join("a/b/link")).unwrap();
+        let refused = open_inside(&place, "/a/b/link/x", Want::Dir).unwrap_err().to_string();
+        assert!(refused.contains("/a/b/link") && refused.contains("wsp-open"), "{refused}");
+        assert!(refused.contains("replace the link with a folder and wake the workspace"), "{refused}");
+        assert!(!dir.path().join("x").exists() && !place.rootfs.join("x").exists());
+    }
+
+    /// Whose a link met on the way is decides what happens to it: one the workspace's own upper carries refuses
+    /// the boot, one the box keeps in an overlay's lower or under the home every workspace shares is followed
+    /// once, and a second link behind it, or a target that leaves the rootfs, refuses with the same sentence.
+    #[test]
+    fn a_link_the_box_keeps_is_followed_once_beneath_the_rootfs_and_the_workspaces_own_refuses_the_boot() {
+        let dir = tempfile::tempdir().unwrap();
+        let place = place_at(dir.path(), "wsp-links");
+        for made in [place.rootfs.join("etc"), place.rootfs.join("root"), place.upper.join("etc")] {
+            fs::create_dir_all(made).unwrap();
+        }
+
+        // In an overlaid tree, with the same path in the workspace's own upper: the workspace wrote it.
+        std::os::unix::fs::symlink("/", place.rootfs.join("etc/x")).unwrap();
+        std::os::unix::fs::symlink("/", place.upper.join("etc/x")).unwrap();
+        let refused = open_inside(&place, "/etc/x/planted", Want::Dir).unwrap_err().to_string();
+        assert!(refused.contains("/etc/x") && refused.contains("replace the link with a folder"), "{refused}");
+
+        // The same link with nothing of the workspace's at that path is the box's own, and is followed once: the
+        // target is resolved beneath the rootfs, so what lands lands inside and never on the box.
+        fs::remove_file(place.upper.join("etc/x")).unwrap();
+        fs::remove_file(place.rootfs.join("etc/x")).unwrap();
+        std::os::unix::fs::symlink("/etc/held", place.rootfs.join("etc/x")).unwrap();
+        let opened = open_inside(&place, "/etc/x/under", Want::Dir).unwrap();
+        assert_eq!(opened.landed, "/etc/held/under");
+        assert!(place.rootfs.join("etc/held/under").is_dir());
+        assert!(!Path::new("/etc/held").exists(), "the walk followed the link onto the box");
+
+        // A second link behind the first, whoever keeps it.
+        std::os::unix::fs::symlink("/etc/again", place.rootfs.join("etc/held/second")).unwrap();
+        let refused = open_inside(&place, "/etc/x/second/deeper", Want::Dir).unwrap_err().to_string();
+        assert!(refused.contains("/etc/held/second"), "{refused}");
+        // And a target that climbs out of the rootfs.
+        std::os::unix::fs::symlink("../../../../..", place.rootfs.join("etc/out")).unwrap();
+        let refused = open_inside(&place, "/etc/out/x", Want::Dir).unwrap_err().to_string();
+        assert!(refused.contains("/etc/out") && refused.contains("replace the link with a folder"), "{refused}");
+
+        // Under the home every workspace here shares the link is the box root's whatever the upper holds, since
+        // the daemon cannot tell one from the other and both are uid 0 in one folder; the follow lands inside.
+        std::os::unix::fs::symlink("/etc/dotfiles", place.rootfs.join("root/.codex")).unwrap();
+        fs::create_dir_all(place.upper.join("root")).unwrap();
+        std::os::unix::fs::symlink("/etc/dotfiles", place.upper.join("root/.codex")).unwrap();
+        let opened = open_inside(&place, "/root/.codex/auth.json", Want::File).unwrap();
+        assert_eq!(opened.landed, "/etc/dotfiles/auth.json");
+        assert!(place.rootfs.join("etc/dotfiles/auth.json").is_file());
+    }
+
+    /// The mount point a boot left on the computer's own disk, taken off through the descriptor of the folder it
+    /// sits in: an empty file goes, a file somebody wrote a login into stays, and a point now reached through a
+    /// link stays with the sentence that says so.
+    #[test]
+    fn the_take_off_unlinks_an_empty_point_and_leaves_one_reached_through_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home/.codex");
+        fs::create_dir_all(&home).unwrap();
+        let point = home.join("auth.json");
+        let named = point.display().to_string();
+        empty_file(&point).unwrap();
+        assert_eq!(take_off_point(&named).unwrap(), None);
+        assert!(!point.exists());
+        // A folder on the way replaced by a link: nothing is unlinked and the sentence names the link.
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let kept = elsewhere.join("auth.json");
+        empty_file(&kept).unwrap();
+        fs::remove_dir_all(&home).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &home).unwrap();
+        let stands = take_off_point(&named).unwrap().unwrap();
+        assert!(stands.contains(&home.display().to_string()) && stands.contains("stays standing"), "{stands}");
+        assert!(kept.is_file(), "the take-off unlinked a file through a link");
+        // A sign-in written into the point since the boot is the person's, as it was before this rule.
+        fs::remove_file(&home).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        fs::write(&point, b"{}").unwrap();
+        assert_eq!(take_off_point(&named).unwrap(), None);
+        assert!(point.is_file());
+        // And a point that is not there is nothing to take off.
+        fs::remove_file(&point).unwrap();
+        assert_eq!(take_off_point(&named).unwrap(), None);
     }
 
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and
