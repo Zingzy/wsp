@@ -318,7 +318,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     agents: [],
     ...(plan.files !== undefined ? { files: { bytes: 0, skipped: skippedFiles } } : {}),
   };
-  const context = await applyMachineContext(machine, { result, path: plan.path });
+  // No shell is opened on a computer somebody owns: its root home is the one every workspace there writes, so a
+  // profile or rc file under it is a file a workspace wrote and a login shell would run it as that computer's root.
+  const context = await applyMachineContext(machine, { result, path: plan.path, shells: "none" });
   stage(`machine context: ${context.summary}`);
   return rows;
 }

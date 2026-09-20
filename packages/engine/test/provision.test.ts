@@ -309,6 +309,20 @@ describe("the run on the computer itself", () => {
     expect(calls.some(c => c.includes("rm -rf /root/.npm") || c.includes("apt-get clean"))).toBe(false);
   });
 
+  it("opens no shell of the computer's own on the context probe, since its root home is the one every workspace there writes", async () => {
+    const { machine, calls } = boxMachine();
+    await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", manager: "npm", bin: "codex" })]), () => {}, ON);
+    const probe = calls.find(c => c.includes("echo WSP_CTX"))!;
+    expect(probe).toBeDefined();
+    // The alias section is what opened one: three login and interactive shells, one per shell the computer may run.
+    expect(probe).not.toContain("-lic");
+    expect(probe).not.toContain("bash -l");
+    expect(probe).toContain('echo "ALIASES unread"');
+    // What no shell costs is the aliases alone: the kernel, the disk and the shell name are read as they were.
+    expect(probe).toContain("uname -r");
+    expect(probe).toContain('echo "SHELL $shell"');
+  });
+
   it("says the floor's own lines as a person reads them, with no stage id of the image build's in front", async () => {
     // A computer with none of the floor on it: every floor row runs, and what the terminal and the log on that
     // computer read is the row and the tally, not the stage the image build files them under.

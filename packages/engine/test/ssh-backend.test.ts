@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -183,14 +184,37 @@ describe("ssh backend", () => {
       return sshBackend(transport).adopt(REACH).then(a => ({ ...a.login }));
     };
     expect(SSH_STORE_VARS).toContain("CLAUDE_CONFIG_DIR");
-    // The read asks a login shell for each store variable the catalog names, in the same call that asks for PATH.
-    expect(SSH_READ_SCRIPT).toContain("bash -lc");
+    // The read asks the machine's own shell for each store variable the catalog names, in the same call as PATH.
+    expect(SSH_READ_SCRIPT).toContain("bash --noprofile --norc -c");
     expect(SSH_READ_SCRIPT).toContain('printf "store:CLAUDE_CONFIG_DIR %s');
     expect(await read("store:CLAUDE_CONFIG_DIR /root/.claude-cfg\n")).toMatchObject({ HOME: "/root", CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
     // A machine that names none leaves the harness on its default, and one that names shell is left there too.
     expect((await read(""))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
     expect((await read("store:CLAUDE_CONFIG_DIR /root/x; id\n"))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
   });
+
+  it("opens no login file of the machine's own, run against a home whose profile would write one", async () => {
+    // A computer somebody owns is worked as its own root by the host, and that root's home is the one every
+    // workspace on it writes, so a profile or an rc file under it is a file a workspace wrote.
+    expect(SSH_READ_SCRIPT).toContain("bash --noprofile --norc -c");
+    expect(SSH_READ_SCRIPT).not.toContain("bash -lc");
+    expect(SSH_READ_SCRIPT).not.toContain("bash -l ");
+    const home = mkdtempSync(join(tmpdir(), "wsp-login-read-"));
+    try {
+      const marker = join(home, "sourced");
+      for (const rc of [".profile", ".bash_profile", ".bashrc"]) writeFileSync(join(home, rc), `echo ${rc} >> ${marker}\n`);
+      const said = spawnSync("bash", ["-c", `export HOME=${home}\n${SSH_READ_SCRIPT}`], { encoding: "utf8" });
+      expect(said.status).toBe(0);
+      const values = readValues(said.stdout);
+      expect(values["home"]).toBe(home);
+      expect(values["user"]).toBe(userInfo().username);
+      expect(values["path"]).toBeTruthy();
+      expect(Number(values["cpu"])).toBeGreaterThan(0);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("every command to one machine rides one master connection, and two machines never share one", () => {
     const args = sshArgs(REACH, "true");

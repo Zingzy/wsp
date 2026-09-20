@@ -362,21 +362,26 @@ export const SSH_DIAL_MS = 15_000;
  * that is not a plain variable name is left out rather than carried there. */
 export const SSH_STORE_VARS: readonly string[] = CATALOG_AGENTS.map(a => a.stateHomeEnv).filter((name): name is string => name !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(name));
 
-/** The one login shell the read opens: the PATH a turn runs under, and the store variable each harness reads, so a
- * machine whose person points their harness at another folder is signed in for a turn the way it is for them. It is
- * exported because a computer somebody joined reads its own login by this same rule, in a shell of its own: a turn
- * there runs the tools their own shell finds, and the shell that happened to type wsp join is not that shell. */
+/** What the read asks the machine's own shell for: the PATH a turn runs under, and the store variable each harness
+ * reads, so a machine whose person points their harness at another folder is signed in for a turn the way it is for
+ * them. It is exported because a computer somebody joined reads its own login by this same rule, in a shell of its
+ * own: a turn there runs the tools their own shell finds, and the shell that happened to type wsp join is not that
+ * shell. */
 export const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
 
-/** What one dial reads off a machine before its record exists: its login environment and the size the row shows.
- * The PATH and the stores come from a login shell, asked for on purpose and once: on the person's own machine the
- * tools a turn runs and the folder their harness reads are where their own shell finds them, not where a golden put
- * them. Linux answers the first branch of each size pair, macOS the second. */
+/** What one dial reads off a machine before its record exists: its environment and the size the row shows. Linux
+ * answers the first branch of each size pair, macOS the second.
+ *
+ * The shell the read runs in opens no file of the machine's own. Every adopt on this road is a computer the host
+ * then works as that computer's root, whose home is the one every workspace there writes, so a profile or an rc
+ * file under it is a file a workspace wrote and a login shell would run it outside every namespace. What that
+ * costs is the PATH: it is the machine's non-login one, which is what the deploy exports and the unit is told,
+ * and the daemon replaces its own at start anyway. */
 export const SSH_READ_SCRIPT = [
   HOME_READ,
   ARCH_READ,
   'printf "user %s\\n" "$(id -un)"',
-  `bash -lc ${shellQuote(LOGIN_READ)} 2>/dev/null`,
+  `env -u BASH_ENV bash --noprofile --norc -c ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
   'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
 ].join("\n");
