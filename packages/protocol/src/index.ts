@@ -4258,6 +4258,9 @@ export const PlaceNonce = base64(PLACE_LINK_NONCE_BYTES);
 export const PlacePublicKey = base64(44);
 /** An ed25519 signature, base64: 64 bytes. */
 export const PlaceSignature = base64(64);
+/** An X25519 public key as its raw 32 bytes, base64: what each end of a link sends to agree the key every frame
+ * after the handshake is sealed under. Fresh per attempt and never held past the socket. */
+export const PlaceEphemeral = base64(32);
 
 /** The engine a project's own containers would run on: Docker first, then podman, else none. The one rule both
  * the host's own-machine report and the node agent's read off their own PATH check. */
@@ -4315,18 +4318,18 @@ export const PlaceReport = z.object({
 });
 export type PlaceReport = z.infer<typeof PlaceReport>;
 
-/** The first frame of a joining place: spends a join code (the pairing code road) for a place record that holds
- * this key. Answered with PlaceJoinReply; the socket then continues with place.prove as an auth would. */
+/** The first frame of a joining place: the key it will prove and the two public values that agree the seal.
+ * Nothing of the person's rides it, since nothing has proved who is on the other end yet: the code it spends and
+ * the report it carries go in the prove, inside the seal. Answered with PlaceJoinReply; the socket then continues
+ * with place.prove as an auth would. */
 export const PlaceJoinRequest = z.object({
   id: reqId,
   op: z.literal("place.join"),
-  code: z.string().max(64),
   publicKey: PlacePublicKey,
   nonce: PlaceNonce,
-  report: PlaceReport,
-  /** The joining computer also wants a device token for its own window. One code buys both, since the person's
-   * intent was one act; absent on a join typed in a terminal, which wants no window. */
-  client: z.object({ name: z.string().min(1).max(200) }).optional(),
+  /** Absent from a computer running a wsp older than the seal, which the host refuses in its own sentence rather
+   * than reading a frame it cannot answer. */
+  ephemeral: PlaceEphemeral.optional(),
 });
 export type PlaceJoinRequest = z.infer<typeof PlaceJoinRequest>;
 export const PlaceJoinReply = z.object({
@@ -4334,29 +4337,46 @@ export const PlaceJoinReply = z.object({
   hostPublicKey: PlacePublicKey,
   nonce: PlaceNonce,
   signature: PlaceSignature,
+  ephemeral: PlaceEphemeral,
   /** What the primary computer calls itself, which is what the joined computer shows a person from then on. */
   hostName: z.string().min(1).max(200),
-  /** Handed back only to a join that asked for one: the token this computer's own window holds. */
-  device: z.object({ deviceId: z.string(), deviceToken: z.string().min(1) }).optional(),
 });
 export type PlaceJoinReply = z.infer<typeof PlaceJoinReply>;
 
+/** The token a join's own window was given, on the reply to its prove: the one thing of the person's a join
+ * takes back, and it rides inside the seal now that the reply to frame one no longer carries it. */
+export const PlaceJoinDevice = z.object({ deviceId: z.string(), deviceToken: z.string().min(1) });
+export type PlaceJoinDevice = z.infer<typeof PlaceJoinDevice>;
+
 /** The first frame of a place that already joined: names itself and challenges the host. */
-export const PlaceAuthRequest = z.object({ id: reqId, op: z.literal("place.auth"), placeId: z.string().max(64), nonce: PlaceNonce });
+export const PlaceAuthRequest = z.object({ id: reqId, op: z.literal("place.auth"), placeId: z.string().max(64), nonce: PlaceNonce, ephemeral: PlaceEphemeral.optional() });
 export type PlaceAuthRequest = z.infer<typeof PlaceAuthRequest>;
-export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature });
+export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
 export type PlaceAuthReply = z.infer<typeof PlaceAuthReply>;
 
-/** The second frame: the place's answer to the host's nonce, and its report as it stands now. After this the socket
- * is the place link and carries daemon frames only. */
-export const PlaceProveRequest = z.object({ id: reqId, op: z.literal("place.prove"), signature: PlaceSignature, report: PlaceReport });
+/** The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
+ * now. A join's prove carries the code it spends and the window it wants too, which is where they cross now that
+ * the host has proved itself and nothing of the person's may travel before it. After this the socket is the place
+ * link and carries daemon frames only. */
+export const PlaceProveRequest = z.object({
+  id: reqId,
+  op: z.literal("place.prove"),
+  signature: PlaceSignature,
+  report: PlaceReport,
+  /** A join's own: the code this computer spends, and the window it also wants a token for. Absent on a relink,
+   * which spends nothing, and on a join typed in a terminal, which wants no window. */
+  code: z.string().max(64).optional(),
+  client: z.object({ name: z.string().min(1).max(200) }).optional(),
+});
 export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
 
-/** What both sides sign, built by one function so they cannot drift: the role of the signer, the place id and the
- * two nonces, the challenged party's nonce first. The host signs the transcript the place challenged it with and
- * the place signs the host's, so neither side's signature can be replayed back at it as the other's. */
-export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string): Uint8Array {
-  return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
+/** What both sides sign, built by one function so they cannot drift: the role of the signer, the place id, the two
+ * nonces and the two ephemerals, the challenged party's first in each pair. The host signs the transcript the
+ * place challenged it with and the place signs the host's, so neither side's signature can be replayed back at it
+ * as the other's; the ephemerals are inside it, so the key the two ends agree is one both signatures cover and a
+ * carrier that swapped either of them has signed nothing. */
+export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string, ephemerals: { challenger: string; answerer: string }): Uint8Array {
+  return new TextEncoder().encode(`wsp place link v2\n${role}\n${placeId}\n${challenge}\n${answer}\n${ephemerals.challenger}\n${ephemerals.answerer}\n`);
 }
 
 /** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
@@ -4395,6 +4415,11 @@ export const PLACE_CODE_REFUSAL = "that join code is not one this host is waitin
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
  * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
+/** The refusal a join from a computer whose wsp seals no link gets: every frame of a link after the handshake
+ * travels inside a key the two ends agree, and a computer that cannot agree one would send its code and its
+ * report where the carrier reads them. */
+export const PLACE_UNSEALED_JOIN_REFUSAL = "that computer's wsp is older than this host and seals no link; update wsp there and join again";
+
 export const PLACE_KEY_REFUSAL = "that place's key does not match the one this host learned at join; wsp remove it here and join it again";
 
 /** The refusal a place that names an id this host holds none of gets: removed here, or a state file that is not

@@ -37,6 +37,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   readJoinToken,
   placeEngineLine,
   PLACE_LINK_NONCE_BYTES,
+  PlaceJoinDevice,
   PlaceJoinReply,
   PlaceStageEvent,
   PlaceView,
@@ -66,7 +67,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
 import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { PlaceLoginRefusedError, newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { PlaceLoginRefusedError, SEAL_REFUSAL, freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -1311,9 +1312,13 @@ async function handshake(
 ): Promise<{ placeId: string; hostPublicKey: string; hostName: string; privateKeyPem: string; report: PlaceReport; device?: { deviceId: string; deviceToken: string } }> {
   const pair = newPlaceKeyPair();
   const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+  // One key agreement per join, thrown away with the socket: from the prove on every frame rides inside it, so
+  // the code this computer spends and the report it sends are read by the host and by nobody carrying the bytes.
+  const mine = freshEphemeral();
   const report = { ...placeReport({ name, home }), dialed: url };
   const ws = dial(url);
-  let answered: { placeId: string; hostPublicKey: string; hostName: string; device?: { deviceId: string; deviceToken: string } } | undefined;
+  let seal: Seal | undefined;
+  let answered: { placeId: string; hostPublicKey: string; hostName: string } | undefined;
   try {
     return await new Promise((done, fail) => {
       const deadline = setTimeout(() => fail(new JoinRefused("address", `the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
@@ -1323,11 +1328,14 @@ async function handshake(
       };
       ws.on("error", (e: Error) => end(new JoinRefused("address", `${url} could not be reached: ${e.message}`)));
       ws.once("close", () => end(new JoinRefused("address", `${url} closed the socket before this computer had joined`)));
-      ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "place.join", code, publicKey: pair.publicKey, nonce, report, ...(client ? { client: { name } } : {}) })));
+      // Frame one carries public values only: the key this computer will prove, its nonce and its half of the
+      // agreement. Nothing of the person's crosses before the host has proved the key the join line named.
+      ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "place.join", publicKey: pair.publicKey, nonce, ephemeral: mine.publicKey })));
       ws.on("message", raw => {
         let frame: Record<string, unknown>;
         try {
-          frame = JSON.parse(String(raw)) as Record<string, unknown>;
+          if (seal !== undefined && !(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
+          frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
         } catch {
           end(new JoinRefused("address", `${url} sent something that is not a frame`));
           return;
@@ -1346,7 +1354,7 @@ async function handshake(
             end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
             return;
           }
-          const { placeId, hostPublicKey, nonce: hostNonce, signature, hostName, device } = reply.data;
+          const { placeId, hostPublicKey, nonce: hostNonce, signature, ephemeral, hostName } = reply.data;
           // Nothing of this computer's is written or sent past here: not its report, not its own signature. The key
           // is read before the signature it came with, since a stranger answering at this address signs for itself
           // perfectly well and the only thing that tells it from the host is which key it is.
@@ -1354,25 +1362,34 @@ async function handshake(
             end(new Error(joinKeyRefusal(url)));
             return;
           }
-          if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", placeId, nonce, hostNonce), signature)) {
+          if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", placeId, nonce, hostNonce, { challenger: mine.publicKey, answerer: ephemeral }), signature)) {
             end(new Error(hostKeyRefusal(url)));
             return;
           }
-          answered = { placeId, hostPublicKey, hostName, ...(device === undefined ? {} : { device }) };
+          answered = { placeId, hostPublicKey, hostName };
           if (frame["notice"] !== undefined) io.error(String(frame["notice"]));
+          // The key both signatures cover, since the transcript named both ephemerals: the prove and everything
+          // after it ride inside it, and a carrier that swapped either of them has signed nothing.
+          const sealed = makeSeal(sealKeys(sharedSecret(mine.privateKey, ephemeral), placeId), "place");
           ws.send(
-            JSON.stringify({
-              id: 2,
-              op: "place.prove",
-              signature: signPlaceBytes(pair.privateKeyPem, placeLinkTranscript("place", placeId, hostNonce, nonce)),
-              report,
-            }),
+            sealed.seal(
+              JSON.stringify({
+                id: 2,
+                op: "place.prove",
+                signature: signPlaceBytes(pair.privateKeyPem, placeLinkTranscript("place", placeId, hostNonce, nonce, { challenger: ephemeral, answerer: mine.publicKey })),
+                report,
+                code,
+                ...(client ? { client: { name } } : {}),
+              }),
+            ),
           );
+          seal = sealed;
           return;
         }
         if (frame["id"] === 2 && answered !== undefined) {
           clearTimeout(deadline);
-          done({ ...answered, privateKeyPem: pair.privateKeyPem, report });
+          const device = PlaceJoinDevice.safeParse(frame["device"]);
+          done({ ...answered, ...(device.success ? { device: device.data } : {}), privateKeyPem: pair.privateKeyPem, report });
         }
       });
     });

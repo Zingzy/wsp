@@ -116,6 +116,12 @@ pub fn link_out_of_order(url: &str) -> String {
     format!("{url} answered out of order; nothing was sent to it and the next address is tried")
 }
 
+/// What a host that answered the handshake with no key agreement of its own is passed over with: it runs a wsp
+/// older than this one, and a link neither end can seal is one this computer does not hold.
+pub fn link_host_unsealed(url: &str) -> String {
+    format!("the host at {url} agreed no key for this link; it runs an older wsp")
+}
+
 pub fn link_linked(url: &str) -> String {
     format!("linked to the host at {url}")
 }

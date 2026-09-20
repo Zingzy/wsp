@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::sync::{Mutex, MutexGuard};
-use wsp_frames::RequestId;
+use wsp_frames::{numbers, probe_path, RequestId};
 use wsp_runtime::net::{self, Network, Route};
 use wsp_runtime::nft;
 use wsp_runtime::ops::Ops;
@@ -2990,14 +2990,79 @@ async fn a_diff_inside_past_the_cap_reads_cut() {
     w.close().await;
 }
 
-/// The name the planted-binary case looks for, which nothing on a box answers.
-const PROBE_AGENT: &str = "wsp-live-probe-agent";
+/// The one directory the case writes on the box: the first entry of the tools PATH under the home every
+/// workspace here shares, which is the directory the finding is about. Nothing of the box's own `/usr` is
+/// touched, since the tool the case reads back is one every Linux box already has there.
+const PLANTED_DIR: &str = "/root/.local/bin";
+/// The tool the case shadows: on the probe list it is the box's own under /usr, and what it prints cannot be
+/// mistaken for the planted copy's word.
+const SHADOWED: &str = "uname";
+const ITS_ANSWER: &str = "Linux";
+/// What the planted copy prints when it runs, which the box's own never prints.
+const PLANTED_ANSWER: &str = "planted";
 
-/// A script at `at` that writes `marker` and prints `version`, executable.
-fn plant(at: &Path, marker: &Path, version: &str) {
-    fs::create_dir_all(at.parent().unwrap()).unwrap();
-    fs::write(at, format!("#!/bin/sh\ntouch {}\necho {version}\n", marker.display())).unwrap();
-    fs::set_permissions(at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+/// The copy the case plants under the home, and the marker that copy writes when it runs. The marker is written
+/// by the planted script itself and by nothing else, so a marker standing means this daemon ran that file. Both
+/// come off the box when this value is dropped, which is every way the case can end, a panic among them.
+struct Planted {
+    binary: PathBuf,
+    marker: PathBuf,
+    /// Whether the case made the directory itself, so a box that had none is left with none.
+    made_dir: bool,
+}
+
+impl Planted {
+    fn new() -> Planted {
+        let dir = PathBuf::from(PLANTED_DIR);
+        let made_dir = !dir.exists();
+        fs::create_dir_all(&dir).unwrap();
+        let planted = Planted { binary: dir.join(SHADOWED), marker: PathBuf::from("/root/wsp-live-planted-ran"), made_dir };
+        // A file already standing under that name is the box's own, whoever put it there: this case shadows a
+        // tool and sweeps what it shadowed, and it will not delete a file it did not write.
+        assert!(!planted.binary.exists(), "{} already stands; remove it and run again", planted.binary.display());
+        let _ = fs::remove_file(&planted.marker);
+        // Every value the script prints is quoted: a script whose own line will not parse writes its marker and
+        // prints nothing, which is a case that reads as the rule failing when it was the case that broke.
+        fs::write(&planted.binary, format!("#!/bin/sh\ntouch '{}'\nprintf '%s\\n' '{PLANTED_ANSWER}'\n", planted.marker.display()))
+            .unwrap();
+        fs::set_permissions(&planted.binary, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        planted
+    }
+
+    /// Whether the planted copy has run: it writes this file and nothing else does.
+    fn ran(&self) -> bool {
+        self.marker.exists()
+    }
+
+    fn sweep(&self) {
+        let _ = fs::remove_file(&self.binary);
+        let _ = fs::remove_file(&self.marker);
+    }
+}
+
+impl Drop for Planted {
+    fn drop(&mut self) {
+        self.sweep();
+        if self.made_dir {
+            let _ = fs::remove_dir(PLANTED_DIR);
+        }
+    }
+}
+
+/// What stands in a directory now, by name, sorted: read before the case plants and after it sweeps.
+fn listing(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> =
+        fs::read_dir(dir).map(|read| read.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// The stdout of one exec on the link, line by line, with what it said on the way for a case that fails.
+async fn exec_lines(client: &mut FrameClient, cmd: &str) -> (Vec<String>, String) {
+    let said = client.ok("exec", json!({ "cmd": cmd })).await;
+    let out = said["stdout"].as_str().unwrap_or_default().to_owned();
+    let lines = out.lines().map(str::to_owned).collect();
+    (lines, said.to_string())
 }
 
 #[tokio::test]
@@ -3006,38 +3071,35 @@ async fn a_daemon_of_this_computers_runs_nothing_it_found_under_the_home_the_wor
     assert!(root_here(), "{LIVE_REASON}");
     let _turn = ONE_AT_A_TIME.lock().await;
     let home = PathBuf::from("/root");
-    let planted = home.join(".local/bin").join(PROBE_AGENT);
-    let outside = PathBuf::from("/usr/local/bin").join(PROBE_AGENT);
-    let planted_ran = home.join("wsp-live-probe-planted-ran");
-    let outside_ran = home.join("wsp-live-probe-outside-ran");
-    let before: Vec<String> = fs::read_dir(home.join(".local/bin"))
-        .map(|dir| dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-        .unwrap_or_default();
-    for path in [&planted, &outside, &planted_ran, &outside_ran] {
-        let _ = fs::remove_file(path);
-    }
-    plant(&planted, &planted_ran, "9.9.9 (planted)");
-    plant(&outside, &outside_ran, "1.0.0 (the box's own)");
+    let before = listing(Path::new(PLANTED_DIR));
+    let planted = Planted::new();
+    let planted_at = planted.binary.to_string_lossy().into_owned();
 
     let d = frames_daemon_at(home.clone()).await;
     let mut client = FrameClient::connect(d.addr).await;
-    // The list this daemon resolves every command through, set before a child of it could exist: the box's own
-    // system directories, with every directory under the home it shares with its workspaces left out. The version
-    // probe walks this same list, so a binary planted under that home has no road to a run as root out here.
-    let said = client.ok("exec", json!({ "cmd": r#"printf '%s\n' "$PATH"; command -v wsp-live-probe-agent; wsp-live-probe-agent"# })).await;
-    let out = said["stdout"].as_str().unwrap_or_default().to_owned();
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.first().copied(), Some(wsp_frames::probe_path(&home).as_str()), "{out}");
-    assert_eq!(lines.get(1).copied(), Some(outside.to_string_lossy().as_ref()), "{out}");
-    assert_eq!(lines.get(2).copied(), Some("1.0.0 (the box's own)"), "{out}");
-    assert!(outside_ran.exists(), "the copy outside the home did not run");
-    assert!(!planted_ran.exists(), "the binary planted under the home was run as root outside every workspace");
+    // What this daemon resolves a command through, set before a child of it could exist: the box's own system
+    // directories, with every directory under the home it shares with its workspaces left out. Every road out of
+    // this daemon runs on it, the exec below, the git and gh reads, each pty and the version probe.
+    let asked = format!("printf '%s\\n' \"$PATH\"; command -v {SHADOWED}; {SHADOWED}");
+    let (lines, said) = exec_lines(&mut client, &asked).await;
+    assert_eq!(lines.first().map(String::as_str), Some(probe_path(&home).as_str()), "{said}");
+    // The box's own copy under /usr, which every Linux box has, and never the one planted under the home.
+    let found = lines.get(1).cloned().unwrap_or_default();
+    assert_ne!(found, planted_at, "the daemon resolved the command through the home its workspaces write: {said}");
+    assert!(found.starts_with("/usr/") || found.starts_with("/bin/"), "{found}: {said}");
+    assert_eq!(lines.get(2).map(String::as_str), Some(ITS_ANSWER), "{said}");
+    assert!(!planted.ran(), "the binary planted under the home was run as root outside every workspace");
 
-    for path in [&planted, &outside, &planted_ran, &outside_ran] {
-        let _ = fs::remove_file(path);
-    }
-    let after: Vec<String> = fs::read_dir(home.join(".local/bin"))
-        .map(|dir| dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-        .unwrap_or_default();
-    assert_eq!(after, before, "this case left something under the home");
+    // The case's own red, driven on this box: the list this daemon ran on before the rule, the home's own
+    // directory first. The same read there answers the planted copy and runs it, so the green above is the rule
+    // holding and not a planted copy nothing would have found either way.
+    let on_the_old = format!("export PATH={}\ncommand -v {SHADOWED}\n{SHADOWED}", numbers::TOOLS_PATH);
+    let (old, said) = exec_lines(&mut client, &on_the_old).await;
+    assert_eq!(old.first().map(String::as_str), Some(planted_at.as_str()), "{said}");
+    assert_eq!(old.get(1).map(String::as_str), Some(PLANTED_ANSWER), "{said}");
+    assert!(planted.ran(), "the case could not drive the road it is here to close: {said}");
+
+    planted.sweep();
+    assert!(!planted.binary.exists() && !planted.marker.exists());
+    assert_eq!(listing(Path::new(PLANTED_DIR)), before, "this case left something under the home");
 }

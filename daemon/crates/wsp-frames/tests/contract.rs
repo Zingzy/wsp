@@ -291,6 +291,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("authUnreadable", words::link_unreadable_auth_reply("{url}", "{error}"));
     m.insert("hostRefused", words::link_refused("{url}", "{refusal}"));
     m.insert("linkOutOfOrder", words::link_out_of_order("{url}"));
+    m.insert("linkHostUnsealed", words::link_host_unsealed("{url}"));
     m
 }
 

@@ -36,5 +36,6 @@
   "notAFrame": "{url} sent something that is not a frame",
   "authUnreadable": "{url} answered place.auth with something this computer cannot read: {error}",
   "hostRefused": "{url}: {refusal}",
-  "linkOutOfOrder": "{url} answered out of order; nothing was sent to it and the next address is tried"
+  "linkOutOfOrder": "{url} answered out of order; nothing was sent to it and the next address is tried",
+  "linkHostUnsealed": "the host at {url} agreed no key for this link; it runs an older wsp"
 }

@@ -25,6 +25,9 @@ mod proc_local;
 mod pty;
 mod readings;
 mod relay;
+/// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
+/// stand on the host's side of it, which in the product is node's own.
+pub mod seal;
 mod sys;
 mod sys_local;
 mod tunnel;

@@ -6,6 +6,7 @@
 
 import { DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
+import { SEAL_REFUSAL, type Seal } from "./seal.js";
 
 export interface ReachOptions {
   /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. One of this and socket. */
@@ -20,6 +21,10 @@ export interface ReachOptions {
   /** Fires on every transition; reauth-needed and dead are terminal. */
   onStatus?: (s: DaemonLinkStatus) => void;
   heartbeatMs?: number;
+  /** The seal a place link agreed in its handshake: every frame this reach sends goes out inside it and every
+   * frame it reads is opened with it, so whoever carries the bytes reads nothing and writes nothing. Absent on
+   * every road that is not a place link, which is dialled with a token over the provider's own route. */
+  seal?: Seal;
   /** The wait before each re-dial; the link rule's unless a test pins one. A dial that keeps failing is made again
    * for as long as this link is held, since only the daemon's own word ends anything running behind it. */
   backoffMs?: (attempt: number) => number;
@@ -94,7 +99,8 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      sock.send(JSON.stringify({ id, op, ...params }));
+      const text = JSON.stringify({ id, op, ...params });
+      sock.send(opts.seal === undefined ? text : opts.seal.seal(text));
     });
   }
 
@@ -131,8 +137,12 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
   function handleMessage(raw: unknown): void {
     let msg: Record<string, unknown>;
     try {
-      msg = JSON.parse(String(raw)) as Record<string, unknown>;
+      // A frame that does not open under the key both ends agreed is a carrier writing into the link: the socket
+      // is cut and the link redials, rather than a frame nobody proved being read as the computer's own.
+      if (opts.seal !== undefined && !(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
+      msg = JSON.parse(opts.seal === undefined ? String(raw) : opts.seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
     } catch {
+      if (opts.seal !== undefined) ws?.close(1002, SEAL_REFUSAL);
       return;
     }
     const id = msg["id"];

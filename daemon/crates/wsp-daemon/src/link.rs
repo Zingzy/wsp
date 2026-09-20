@@ -19,13 +19,14 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_frames::{
-    is_http_url, numbers, place_link_transcript, words, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce,
-    PlaceProveRequest, RequestId,
+    is_http_url, numbers, place_link_transcript, words, Base64Bytes, LinkEphemerals, LinkRole, PlaceAuthReply, PlaceAuthRequest,
+    PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, RequestId,
 };
 
 use crate::door::{self, Ended};
 use crate::ops::{Conn, Road};
 use crate::place::{self, AgentBin, AgentVersions, ReportInput};
+use crate::seal::{self, Seal};
 use crate::{Ctx, Outbound};
 
 /// How long each address gets to answer the connect and each frame of the handshake.
@@ -101,7 +102,7 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// is not one it knows, an answer this attempt could not go on with, or nothing at all. Only a host that proved
 /// itself can refuse: an `ok: false` from anyone else is a frame anybody who answers at the address can send.
 enum Outcome {
-    Linked(Box<Socket>),
+    Linked(Box<Socket>, Box<Seal>),
     Refused,
     Answered,
     Silent,
@@ -169,9 +170,9 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
                     answers += 1;
                     refusals += 1;
                 }
-                Outcome::Linked(ws) => {
+                Outcome::Linked(ws, seal) => {
                     let linked_at = Instant::now();
-                    match link.hold(*ws, url).await {
+                    match link.hold(*ws, url, *seal).await {
                         Ended::Leave | Ended::Restart => return,
                         Ended::Quiet => link.log(&words::link_quiet(url, seconds(link.quiet.as_millis() as u64))),
                         Ended::Peer => {}
@@ -236,20 +237,44 @@ impl Link {
             }
         };
         let nonce = fresh_nonce();
-        let auth = PlaceAuthRequest::new(RequestId::from(1), file.place_id.clone(), nonce.clone());
+        // One key agreement per attempt, thrown away with the socket: a key that leaks later opens nothing that
+        // was said on a link before it.
+        let Some((private, public)) = seal::fresh_ephemeral() else {
+            self.log(&words::link_could_not_dial(url, "this computer has no randomness for a key agreement"));
+            return Outcome::Silent;
+        };
+        let mut private = Some(private);
+        let ephemeral: PlaceEphemeral = Base64Bytes::from_bytes(&public);
+        let auth = PlaceAuthRequest::new(RequestId::from(1), file.place_id.clone(), nonce.clone(), ephemeral.clone());
         if ws.send(Message::text(crate::frame_text(&auth))).await.is_err() {
             self.log(&words::link_no_answer_to_dial(url));
             return Outcome::Silent;
         }
         let mut step = Step::SentAuth;
+        let mut held: Option<Seal> = None;
         loop {
             let frame = match timeout_at(deadline, ws.next()).await {
                 Err(_) => {
                     self.log(&words::link_no_answer_in(url, seconds(self.connect.as_millis() as u64)));
                     return self.cut(ws, Outcome::Silent).await;
                 }
-                Ok(Some(Ok(Message::Text(t)))) => t.to_string(),
-                Ok(Some(Ok(Message::Binary(b)))) => String::from_utf8_lossy(&b).into_owned(),
+                // Once the prove has gone out sealed, the host's own reply comes back the same way, and a frame
+                // in the clear after it is a carrier writing into the handshake.
+                Ok(Some(Ok(Message::Text(t)))) if held.is_none() => t.to_string(),
+                Ok(Some(Ok(Message::Binary(b)))) => match held.as_mut() {
+                    Some(seal) => match seal.unseal(&b) {
+                        Some(text) => text,
+                        None => {
+                            self.log(&words::link_not_a_frame(url));
+                            return self.cut(ws, Outcome::Answered).await;
+                        }
+                    },
+                    None => String::from_utf8_lossy(&b).into_owned(),
+                },
+                Ok(Some(Ok(Message::Text(_)))) => {
+                    self.log(&words::link_not_a_frame(url));
+                    return self.cut(ws, Outcome::Answered).await;
+                }
                 Ok(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => continue,
                 Ok(_) => {
                     self.log(&words::link_no_answer_to_dial(url));
@@ -276,6 +301,12 @@ impl Link {
                     return self.cut(ws, Outcome::Refused).await;
                 }
                 (Step::SentAuth, true, Some(1)) => {
+                    // A host that sends no key of its own to agree with runs a wsp older than this one, and a
+                    // link neither end can seal is one this computer does not hold.
+                    if value.get("ephemeral").is_none() {
+                        self.log(&words::link_host_unsealed(url));
+                        return self.cut(ws, Outcome::Answered).await;
+                    }
                     let reply = match serde_json::from_value::<PlaceAuthReply>(value.clone()) {
                         Ok(reply) => reply,
                         Err(e) => {
@@ -283,7 +314,9 @@ impl Link {
                             return self.cut(ws, Outcome::Answered).await;
                         }
                     };
-                    let host_bytes = place_link_transcript(LinkRole::Host, &file.place_id, nonce.as_str(), reply.nonce.as_str());
+                    let ephemerals = LinkEphemerals { challenger: ephemeral.as_str(), answerer: reply.ephemeral.as_str() };
+                    let host_bytes =
+                        place_link_transcript(LinkRole::Host, &file.place_id, nonce.as_str(), reply.nonce.as_str(), ephemerals);
                     let proved = reply.host_public_key.as_str() == file.host_public_key
                         && place::verify_place_bytes(&reply.host_public_key, &host_bytes, &reply.signature);
                     if !proved {
@@ -292,21 +325,40 @@ impl Link {
                         self.log(&words::host_key_refusal(url));
                         return self.cut(ws, Outcome::Answered).await;
                     }
+                    // The key both signatures cover, since the transcript named both ephemerals: a carrier that
+                    // swapped either of them signed nothing, and from the prove on it reads and writes nothing.
+                    let agreed = private.take().and_then(|private| seal::agree(private, &reply.ephemeral.to_bytes()));
+                    let Some(secret) = agreed else {
+                        self.log(&words::link_host_unsealed(url));
+                        return self.cut(ws, Outcome::Answered).await;
+                    };
+                    let mut seal = Seal::place(&seal::seal_keys(&secret, &file.place_id));
                     let versions = self.agent_versions().await;
-                    let prove = match self.prove(file, url, reply.nonce.as_str(), nonce.as_str(), &versions) {
+                    let prove = match self.prove(
+                        file,
+                        url,
+                        reply.nonce.as_str(),
+                        nonce.as_str(),
+                        LinkEphemerals { challenger: reply.ephemeral.as_str(), answerer: ephemeral.as_str() },
+                        &versions,
+                    ) {
                         Ok(prove) => prove,
                         Err(why) => {
                             self.log(&words::link_refused(url, &why));
                             return self.cut(ws, Outcome::Answered).await;
                         }
                     };
-                    if ws.send(Message::text(crate::frame_text(&prove))).await.is_err() {
+                    if ws.send(Message::Binary(seal.seal(&crate::frame_text(&prove)).into())).await.is_err() {
                         self.log(&words::link_no_answer_to_dial(url));
                         return Outcome::Silent;
                     }
+                    held = Some(seal);
                     step = Step::HostProved;
                 }
-                (Step::HostProved, true, Some(2)) => return Outcome::Linked(Box::new(ws)),
+                (Step::HostProved, true, Some(2)) => {
+                    let Some(seal) = held else { return self.cut(ws, Outcome::Answered).await };
+                    return Outcome::Linked(Box::new(ws), Box::new(seal));
+                }
                 _ => {
                     self.log(&words::link_out_of_order(url));
                     return self.cut(ws, Outcome::Answered).await;
@@ -340,6 +392,7 @@ impl Link {
         url: &str,
         host_nonce: &str,
         my_nonce: &str,
+        ephemerals: LinkEphemerals<'_>,
         agent_versions: &BTreeMap<String, String>,
     ) -> Result<PlaceProveRequest, String> {
         let pem = std::fs::read_to_string(Path::new(&file.key_path)).map_err(|e| format!("{}: {e}", file.key_path))?;
@@ -354,7 +407,8 @@ impl Link {
             unit_path: self.ctx.options.unit_path.as_deref(),
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
         });
-        let signature = place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce))?;
+        let signature =
+            place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce, ephemerals))?;
         Ok(PlaceProveRequest::new(RequestId::from(2), signature, report))
     }
 
@@ -371,11 +425,11 @@ impl Link {
 
     /// The socket is this place's link from here: the daemon serves it as it serves an inbound one, the link's own
     /// ops ride it, and a link that carries no frame at all is cut so the redial can find a host that is there.
-    async fn hold(&self, ws: Socket, url: &str) -> Ended {
+    async fn hold(&self, ws: Socket, url: &str, seal: Seal) -> Ended {
         self.log(&words::link_linked(url));
         let (tx, rx) = mpsc::unbounded_channel();
         let conn = Arc::new(Conn::new(self.ctx.next_key(), None, Outbound(tx), Road::Link));
-        door::serve_authed(ws, &self.ctx, conn, rx, Some(self.quiet)).await
+        door::serve_authed(ws, &self.ctx, conn, rx, Some(self.quiet), Some(seal)).await
     }
 }
 

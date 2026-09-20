@@ -540,7 +540,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    use wsp_frames::{place_link_transcript, LinkRole};
+    use wsp_frames::{place_link_transcript, LinkEphemerals, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];
@@ -555,11 +555,15 @@ mod tests {
     fn a_signature_verifies_under_its_own_key_and_no_other_over_no_other_bytes() {
         let (pem, public) = pair();
         let (_, other) = pair();
-        let bytes = place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=");
+        let pair_of = LinkEphemerals { challenger: "CCC=", answerer: "DDD=" };
+        let bytes = place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=", pair_of);
         let sig = sign_place_bytes(&pem, &bytes).unwrap();
         assert!(verify_place_bytes(&public, &bytes, &sig));
         assert!(!verify_place_bytes(&other, &bytes, &sig));
-        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB="), &sig));
+        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB=", pair_of), &sig));
+        // The ephemerals are inside the bytes, so a carrier that swapped one has a signature over nothing.
+        let swapped = LinkEphemerals { challenger: "CCC=", answerer: "EEE=" };
+        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=", swapped), &sig));
         assert!(sign_place_bytes("not a key", &bytes).is_err());
     }
 
@@ -569,8 +573,21 @@ mod tests {
         let fixture: serde_json::Value = serde_json::from_str(&text).unwrap();
         let s = |k: &str| fixture[k].as_str().unwrap().to_owned();
         let b64 = |k: &str| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s(k)).unwrap();
-        let host_bytes = place_link_transcript(LinkRole::Host, &s("placeId"), &s("placeNonce"), &s("hostNonce"));
-        let place_bytes = place_link_transcript(LinkRole::Place, &s("placeId"), &s("hostNonce"), &s("placeNonce"));
+        let (place_ephemeral, host_ephemeral) = (s("placeEphemeral"), s("hostEphemeral"));
+        let host_bytes = place_link_transcript(
+            LinkRole::Host,
+            &s("placeId"),
+            &s("placeNonce"),
+            &s("hostNonce"),
+            LinkEphemerals { challenger: &place_ephemeral, answerer: &host_ephemeral },
+        );
+        let place_bytes = place_link_transcript(
+            LinkRole::Place,
+            &s("placeId"),
+            &s("hostNonce"),
+            &s("placeNonce"),
+            LinkEphemerals { challenger: &host_ephemeral, answerer: &place_ephemeral },
+        );
         assert_eq!(host_bytes, b64("hostTranscript"));
         assert_eq!(place_bytes, b64("placeTranscript"));
         let public = Base64Bytes::parse(&s("publicKey")).unwrap();

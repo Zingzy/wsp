@@ -9,6 +9,7 @@
     "@types/node": "^26.4.0",
     "@types/ws": "^8.18.1",
     "@wsp/protocol": "workspace:*",
+    "@wsp/runtime": "workspace:*",
     "ws": "^8.21.3"
   },
   "license": "AGPL-3.0-only"
