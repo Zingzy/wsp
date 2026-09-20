@@ -27,6 +27,8 @@ libc = "0.2"
 nix = { version = "0.31", default-features = false, features = ["poll", "process", "signal", "term"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# pidfd_open, which nix 0.31 wraps no module for: the descriptor the runtime watches a workspace's init on.
+libc = "0.2"
 libcontainer = { version = "0.7.0", default-features = false, features = ["v2", "libseccomp"] }
 libcgroups = { version = "0.7.0", default-features = false, features = ["v2"] }
 nix = { version = "0.31", default-features = false, features = ["fs", "ioctl", "mount", "poll", "process", "sched", "signal", "term", "user"] }

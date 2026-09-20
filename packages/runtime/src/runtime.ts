@@ -6164,6 +6164,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             line: ++deltas,
             kind: event.kind,
             text: event.text,
+            ...(event.messageId !== undefined ? { messageId: event.messageId } : {}),
             ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
             ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
             ...(event.isError !== undefined ? { isError: event.isError } : {}),

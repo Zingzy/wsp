@@ -15,6 +15,7 @@ import {
   PLACES_TICKET_REFUSAL,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
+  placeRefusalTranscript,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
   placeBehindLine,
@@ -474,11 +475,20 @@ describe("a place dialling back in", () => {
     expect(ok).toBe(true);
   });
 
-  it("refuses an id this host holds no place by", async () => {
-    await serving();
+  it("refuses an id this host holds no place by, with its own key over the sentence it refused with", async () => {
+    const { hostKey } = await serving();
     const c = await WsClient.connect(srv!.port);
-    const answer = await c.request("place.auth", { placeId: "p_deadbeefdeadbeef", nonce: nonce() });
+    const mine = nonce();
+    const answer = await c.request("place.auth", { placeId: "p_deadbeefdeadbeef", nonce: mine });
     expect(answer).toMatchObject({ ok: false, error: PLACE_UNKNOWN_REFUSAL, kind: "auth" });
+    // The word is this host's own and the computer that dialled can prove it: the key it pinned at join over the
+    // place it named, the nonce it challenged with and the sentence. That is what earns it the long wait.
+    expect(answer["hostPublicKey"]).toBe(hostKey.publicKey);
+    const { verify } = await import("node:crypto");
+    const stands = (bytes: Uint8Array): boolean =>
+      verify(null, bytes, { key: Buffer.from(hostKey.publicKey, "base64"), format: "der", type: "spki" }, Buffer.from(String(answer["signature"]), "base64"));
+    expect(stands(placeRefusalTranscript("p_deadbeefdeadbeef", mine, PLACE_UNKNOWN_REFUSAL))).toBe(true);
+    expect(stands(placeRefusalTranscript("p_deadbeefdeadbeef", nonce(), PLACE_UNKNOWN_REFUSAL))).toBe(false);
     expect(await c.closed()).toBe(4401);
   });
 

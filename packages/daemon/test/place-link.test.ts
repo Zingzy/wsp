@@ -106,14 +106,24 @@ describe("the link a place dials", () => {
     expect(d.log()).not.toContain(linkedLine(host.url));
   });
 
-  it("stops dialling for minutes when the host says it holds no such place", async () => {
-    const host = await fakePlaceHost({ refuse: PLACE_UNKNOWN_REFUSAL });
-    const place = placeFile([host.url], placePair().publicKey, placePair().privateKeyPem);
-    const d = await placeDaemon(place, { linkRefusedRetryMs: 600_000 });
+  it("stops dialling for minutes when the host proves its key and says it holds no such place", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key, refuse: PLACE_UNKNOWN_REFUSAL, signRefusal: true });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    // A backoff of milliseconds, so a refusal this computer could not prove would show a second dial at once.
+    const d = await placeDaemon(place, { linkRefusedRetryMs: 600_000, linkBackoffMs: 20 });
     await untilLogged(d, line => line.includes("holds no place by that id"));
-    // Refused is a wait of minutes, not the backoff of seconds: no second dial lands in the time a redial would take.
     await settled(300);
     expect(host.dials()).toBe(1);
+  });
+
+  it("keeps dialling when the refusal carries no signature the key it pinned at join made", async () => {
+    const host = await fakePlaceHost({ refuse: PLACE_UNKNOWN_REFUSAL });
+    const place = placeFile([host.url], placePair().publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkRefusedRetryMs: 600_000, linkBackoffMs: 20 });
+    await untilLogged(d, line => line.includes("holds no place by that id"));
+    // Anybody who answers at the address can send that frame, so it costs this computer the backoff and nothing more.
+    await vi.waitFor(() => expect(host.dials()).toBeGreaterThan(2), { timeout: 5_000, interval: 10 });
   });
 
   it("says so and waits when this computer holds no place file at all", async () => {
