@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { openFrame, type Seal } from "../src/seal.js";
+import { openFrame, type Seal } from "@wsp/keys";
 
 export interface WireMsg {
   id?: string | number | null;
