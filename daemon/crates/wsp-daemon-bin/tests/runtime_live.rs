@@ -2901,6 +2901,38 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
     w.close().await;
 }
 
+/// A workspace whose init ends on its own ends the way a stop ends it: the daemon that took the workspaces over
+/// hears the same word, so the door inside goes, its socket file goes with it, and the workspace reads as a nap
+/// the wake boots from.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspace_whose_init_is_killed_loses_its_door_and_reads_as_a_nap() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The daemon is started after the workspace, as one that restarted under a running workspace is: it names
+    // every workspace already running as it takes them over, binds the door inside each and watches each init.
+    let _d = frames_daemon().await;
+    let at = root().join("run").join(&id).join("wsp-home").join("daemon.sock");
+    assert!(at.exists(), "no door inside a running workspace");
+
+    let record: Value = serde_json::from_slice(&fs::read(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
+    let pid = record["init"]["pid"].as_i64().unwrap() as i32;
+    // SAFETY: kill takes two plain integers and touches no memory of ours.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0, "the init of {id} could not be killed");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while at.exists() {
+        assert!(Instant::now() < deadline, "the socket stands on a workspace whose init is gone");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(tokio::net::UnixStream::connect(&at).await.is_err());
+    assert_eq!(w.state(&id).await, "paused");
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(w.state(&id).await, "running");
+    w.close().await;
+}
+
 /// How long this computer's daemon has seen that workspace do nothing, off the reading it answers for one
 /// workspace: the clock is the daemon's own, so it is read through the socket the frames ride and not through
 /// another opening of the same root.

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,6 +29,7 @@ use libcontainer::workload::{Executor, ExecutorError, ExecutorValidationError};
 use nix::sys::signal::{kill, killpg, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::Pid;
+use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use wsp_frames::numbers;
@@ -623,6 +625,26 @@ pub fn identity_of(pid: i32) -> io::Result<Init> {
 /// Whether the process the record names is still that process.
 pub fn alive(init: &Init) -> bool {
     identity_of(init.pid).is_ok_and(|now| now == *init)
+}
+
+/// A descriptor that reads ready the moment the process a record names ends, so a workspace whose init died on
+/// its own is heard rather than read on the next listing. `pidfd_open` wants Linux 5.3, which every computer the
+/// map takes as a box runs; an older kernel or a pid already gone answers the error and nothing is watched.
+pub fn death_of(init: &Init) -> io::Result<AsyncFd<OwnedFd>> {
+    // SAFETY: pidfd_open takes two plain integers and answers a descriptor or -1.
+    let opened = unsafe { libc::syscall(libc::SYS_pidfd_open, init.pid, 0) };
+    if opened < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the kernel answered this descriptor just now and nothing else holds it.
+    let fd = unsafe { OwnedFd::from_raw_fd(opened as RawFd) };
+    // The identity again, under the descriptor: a pid the kernel had already handed on would be watched in the
+    // init's place, and the watch would fire on a stranger's exit. A pid that reads as the init here read as the
+    // init at the open too, since the kernel never gives one process's number back to it.
+    if !alive(init) {
+        return Err(io::Error::from(io::ErrorKind::NotFound));
+    }
+    AsyncFd::new(fd)
 }
 
 /// How long the process a record names has been running. Both figures count from the same boot, so the box's own
