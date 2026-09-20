@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One state file, one host: the lock names the process serving it and the
 // ports it bound, so a second host refuses and other local tools find it.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf } from "@wsp/protocol";
+import { ownFolder } from "@wsp/own-file";
 
 export interface HostLock {
   pid: number;
@@ -183,7 +184,9 @@ export function refuseIfServed(lockPath: string, statePath: string): void {
 export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
-  mkdirSync(dirname(lockPath), { recursive: true });
+  // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken.
+  ownFolder(dirname(statePath));
+  ownFolder(dirname(lockPath));
   rmSync(lockPath, { force: true });
   try {
     writeFileSync(lockPath, JSON.stringify(lock), { flag: "wx" });

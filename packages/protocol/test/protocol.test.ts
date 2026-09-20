@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   creationAwaits,
+  vaultMemberRefusal,
+  vaultUnlistedRefusal,
   WORKSPACE_GLYPHS,
   lookWord,
   Recipe,
@@ -1289,6 +1291,39 @@ describe("goldenImage", () => {
     expect(wire.GoldenVersion.parse(v).templateId).toBeUndefined();
     expect(wire.GoldenVersion.parse({ ...v, templateId: "tpl_a" }).templateId).toBe("tpl_a");
     expect(wire.GoldenStage.options).toContain("promoting");
+  });
+});
+
+describe("the sentences a vault archive is refused with", () => {
+  it("the member refusal names the member, the reason and what that refusal did in the room it is read in", () => {
+    const why = "it lands at /etc/cron.d/x, which is not one of the paths the seal asked for or under one";
+    for (const road of ["seal", "import"] as const) {
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("etc/cron.d/x");
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("not one of the paths the seal asked for");
+    }
+    // Nothing was ever going to be imported at the seal, and no copy is what the import stopped.
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).toContain("the seal is refused and no version is recorded");
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).not.toContain("imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).toContain("nothing of it was imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).not.toContain("the seal is refused");
+  });
+
+  it("the unlisted refusal names the image and its version and says to cut the next one", () => {
+    const line = vaultUnlistedRefusal("default", 1);
+    expect(line).toContain("default v1");
+    expect(line).toContain("cut the next version");
+  });
+
+  it("neither sentence carries a path of the computer the record sits on", () => {
+    for (const line of [vaultMemberRefusal("seal", "root/.codex/auth.json", "it points at /etc"), vaultMemberRefusal("import", "root/.codex/auth.json", "it points at /etc"), vaultUnlistedRefusal("default", 2)]) {
+      expect(line).not.toMatch(/\/Users\/|\/home\/|\.wsp|state\.json/);
+    }
+  });
+
+  it("a sealed vault reads with the paths it held, and one sealed before the list was kept reads without", () => {
+    const vault = { sha256: "a".repeat(64), bytes: 10, paths: 2, takenAt: "2026-09-01T00:00:00Z" };
+    expect(wire.SealedVault.parse(vault).held).toBeUndefined();
+    expect(wire.SealedVault.parse({ ...vault, held: ["/root/.codex/auth.json"] }).held).toEqual(["/root/.codex/auth.json"]);
   });
 });
 

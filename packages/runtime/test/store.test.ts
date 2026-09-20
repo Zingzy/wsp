@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { writeOwn } from "@wsp/own-file";
 import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
@@ -199,5 +200,47 @@ describe("the shape a state file was written in", () => {
     const store = memoryStore();
     await store.put("workspaces", "a", { id: "a" });
     expect(await store.shape()).toBeUndefined();
+  });
+});
+
+describe("what the owner's state folder stands at", () => {
+  const modeOf = (path: string): number => statSync(path).mode & 0o777;
+
+  it("the state file, the blobs and the folders over them are this user's alone, whatever the umask", async () => {
+    const home = mkdtempSync(join(dir, "own-"));
+    const path = join(home, "state.json");
+    const store = jsonFileStore(path, WRITER);
+    await store.put("workspaces", "a", { id: "a" });
+    await store.putBlob("image-vaults", "default@v1", Buffer.from("sign-ins"));
+    expect(modeOf(home)).toBe(0o700);
+    expect(modeOf(path)).toBe(0o600);
+    expect(modeOf(join(home, "blobs"))).toBe(0o700);
+    expect(modeOf(join(home, "blobs", "image-vaults"))).toBe(0o700);
+    expect(modeOf(join(home, "blobs", "image-vaults", "default@v1"))).toBe(0o600);
+  });
+
+  it("a folder and a file an older build left wider are repaired at the next write", async () => {
+    const home = mkdtempSync(join(dir, "wide-"));
+    const path = join(home, "state.json");
+    mkdirSync(join(home, "blobs", "image-vaults"), { recursive: true });
+    for (const wide of [home, join(home, "blobs"), join(home, "blobs", "image-vaults")]) chmodSync(wide, 0o755);
+    writeFileSync(path, "{}", { mode: 0o644 });
+    chmodSync(path, 0o644);
+    const store = jsonFileStore(path, WRITER);
+    await store.put("workspaces", "a", { id: "a" });
+    await store.putBlob("image-vaults", "default@v1", Buffer.from("sign-ins"));
+    expect([modeOf(home), modeOf(join(home, "blobs")), modeOf(join(home, "blobs", "image-vaults"))]).toEqual([0o700, 0o700, 0o700]);
+    expect(modeOf(path)).toBe(0o600);
+    expect(await store.get("workspaces", "a")).toEqual({ id: "a" });
+  });
+
+  it("nothing above the folder the writer was handed is touched", () => {
+    const over = mkdtempSync(join(dir, "over-"));
+    chmodSync(over, 0o755);
+    const home = join(over, "wsp");
+    writeOwn(home, "state.json", "{}");
+    expect(modeOf(over)).toBe(0o755);
+    expect(modeOf(home)).toBe(0o700);
+    expect(modeOf(join(home, "state.json"))).toBe(0o600);
   });
 });

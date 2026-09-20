@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
@@ -91,6 +91,16 @@ describe("serve takes host.lock next to the state file", () => {
     await h.close();
     handles.splice(0);
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("the state folder is the owner's when the host takes its lock, and one an older build left wider is repaired", async () => {
+    mkdirSync(join(home, "state"), { recursive: true });
+    chmodSync(join(home, "state"), 0o755);
+    const h = await start();
+    expect(statSync(join(home, "state")).mode & 0o777).toBe(0o700);
+    expect(existsSync(lockPath)).toBe(true);
+    await h.close();
+    handles.splice(0);
   });
 
   it("refuses a second host on the same state file, naming the running pid and ports", async () => {

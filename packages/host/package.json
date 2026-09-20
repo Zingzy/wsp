@@ -18,6 +18,7 @@
     "@wsp/collect": "workspace:*",
     "@wsp/engine": "workspace:*",
     "@wsp/keys": "workspace:*",
+    "@wsp/own-file": "workspace:*",
     "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",

@@ -59,6 +59,15 @@ describe("host identity", () => {
     expect([after.size, after.mtimeMs]).toEqual([before.size, before.mtimeMs]);
   });
 
+  it("the id and the folder it sits in are this user's alone, whatever the umask", () => {
+    const parent = mkdtempSync(join(tmpdir(), "wsp-host-id-mode-"));
+    dirs.push(parent);
+    const dir = join(parent, "wsp");
+    hostIdentity(dir);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(join(dir, "host-id")).mode & 0o777).toBe(0o600);
+  });
+
   it("the suite's default dir is the temp XDG_CONFIG_HOME, so no test reaches the developer's real config dir", () => {
     const xdg = process.env["XDG_CONFIG_HOME"];
     expect(xdg).toBeDefined();

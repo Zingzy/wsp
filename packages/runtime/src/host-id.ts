@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
+import { writeOwn } from "@wsp/own-file";
 
 /** Where this install keeps what must never travel with a WSP_HOME: the OS-local config dir. XDG_CONFIG_HOME wins on
  * every platform when set, which is also how the test suite keeps its runs out of the developer's real dir. */
@@ -23,8 +24,7 @@ export function hostIdentity(dir = localConfigDir()): string {
     let id = existsSync(path) ? readFileSync(path, "utf8").trim() : "";
     if (id === "") {
       id = randomBytes(4).toString("hex");
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(path, `${id}\n`);
+      writeOwn(dir, "host-id", `${id}\n`);
     }
     return `${hostname()}:${id}`;
   } catch (e) {

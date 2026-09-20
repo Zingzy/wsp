@@ -6,9 +6,10 @@
 // relay learns where the box answers and nothing else: no pairing code and no
 // device token is ever sent here, and a client still pairs with the host
 // itself.
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { writeOwn } from "@wsp/own-file";
 import { fmtDuration, relayUrlOf, runForTheList, unknownWordLine, usageRefusal, type AccountView } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
@@ -84,12 +85,9 @@ function readJsonFile<T>(path: string, holds: (v: unknown) => v is T): T | undef
   }
 }
 
-/** The token in these files opens the relay, so they are written for this user alone rather than at the umask's word. */
+/** The token in these files opens the relay, so they go through the one writer of the owner's files. */
 function writeJsonFile(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  // A file that was already there keeps the mode it had, so the mode is set rather than assumed.
-  chmodSync(path, 0o600);
+  writeOwn(dirname(path), basename(path), `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function readRelayRecord(statePath: string): RelayRecord | undefined {
