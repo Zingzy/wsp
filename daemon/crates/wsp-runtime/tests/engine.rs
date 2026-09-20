@@ -31,21 +31,25 @@ impl Seen {
 
 type Record = Arc<Mutex<Vec<Seen>>>;
 
-/// The request as the engine reads it: the head, then the body by whichever framing the head named. A chunked
-/// body is read to its terminator and answered without its framing, so a case reads what a client sent.
-async fn read_request(stream: &mut UnixStream) -> Seen {
-    let mut held = Vec::new();
+/// The request as the engine reads it: the head, then the body by whichever framing the head named, and
+/// whatever came in behind that body left in `held` for the request after it, as a keep-alive engine leaves it.
+/// Where a head names both framings the chunks win and the length is dropped, which is what Go's own server
+/// does and so what the box engine does; that reading is the whole of the smuggling this fence refuses.
+/// `None` where the connection ended with nothing held.
+async fn read_request(stream: &mut UnixStream, held: &mut Vec<u8>) -> Option<Seen> {
     let mut buf = [0u8; 4096];
     let split = loop {
         if let Some(at) = held.windows(4).position(|w| w == b"\r\n\r\n") {
             break at + 4;
         }
-        let n = stream.read(&mut buf).await.unwrap();
-        assert!(n > 0, "the request ended before its head did");
+        let n = stream.read(&mut buf).await.ok()?;
+        if n == 0 {
+            return None;
+        }
         held.extend_from_slice(&buf[..n]);
     };
     let head = String::from_utf8(held[..split].to_vec()).unwrap();
-    let mut rest = held[split..].to_vec();
+    held.drain(..split);
     let mut lines = head.split("\r\n");
     let mut first = lines.next().unwrap().split(' ');
     let method = first.next().unwrap().to_owned();
@@ -53,21 +57,29 @@ async fn read_request(stream: &mut UnixStream) -> Seen {
     let headers: Vec<(String, String)> =
         lines.filter(|l| !l.is_empty()).filter_map(|l| l.split_once(": ").map(|(k, v)| (k.to_ascii_lowercase(), v.to_owned()))).collect();
     let chunked = headers.iter().any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
-    let wanted: usize = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
-    while rest.len() < wanted {
-        let n = stream.read(&mut buf).await.unwrap();
-        assert!(n > 0);
-        rest.extend_from_slice(&buf[..n]);
-    }
-    if chunked {
-        while !rest.windows(5).any(|w| w == b"0\r\n\r\n") {
+    let body = if chunked {
+        let through = loop {
+            match held.windows(5).position(|w| w == b"0\r\n\r\n") {
+                Some(at) => break at + 5,
+                None => {
+                    let n = stream.read(&mut buf).await.unwrap();
+                    assert!(n > 0, "the chunked body ended before its terminator");
+                    held.extend_from_slice(&buf[..n]);
+                }
+            }
+        };
+        let framed: Vec<u8> = held.drain(..through).collect();
+        dechunk(&framed)
+    } else {
+        let wanted: usize = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
+        while held.len() < wanted {
             let n = stream.read(&mut buf).await.unwrap();
-            assert!(n > 0, "the chunked body ended before its terminator");
-            rest.extend_from_slice(&buf[..n]);
+            assert!(n > 0);
+            held.extend_from_slice(&buf[..n]);
         }
-        rest = dechunk(&rest);
-    }
-    Seen { method, path, headers, body: String::from_utf8_lossy(&rest).into_owned() }
+        held.drain(..wanted).collect()
+    };
+    Some(Seen { method, path, headers, body: String::from_utf8_lossy(&body).into_owned() })
 }
 
 /// A chunked body without its framing, as the engine would read it.
@@ -192,32 +204,34 @@ fn fake_engine(dir: &Path) -> (PathBuf, Record) {
             let (mut stream, _) = listener.accept().await.unwrap();
             let record = Arc::clone(&record);
             tokio::spawn(async move {
-                let request = read_request(&mut stream).await;
-                record.lock().unwrap().push(request.clone());
-                match answered(&request) {
-                    Answered::HandsOver(head) => {
-                        stream.write_all(head).await.unwrap();
-                        let mut buf = [0u8; 1024];
-                        while let Ok(n) = stream.read(&mut buf).await {
-                            if n == 0 {
-                                break;
+                let mut held = Vec::new();
+                // One request after another on the one connection, as a keep-alive engine serves them: what a
+                // client left behind a body is the next request here, which is what the fence must never let
+                // reach this far.
+                while let Some(request) = read_request(&mut stream, &mut held).await {
+                    record.lock().unwrap().push(request.clone());
+                    match answered(&request) {
+                        Answered::HandsOver(head) => {
+                            stream.write_all(head).await.unwrap();
+                            let mut buf = [0u8; 1024];
+                            while let Ok(n) = stream.read(&mut buf).await {
+                                if n == 0 {
+                                    break;
+                                }
+                                let echoed = format!("echo:{}", String::from_utf8_lossy(&buf[..n]));
+                                stream.write_all(echoed.as_bytes()).await.unwrap();
                             }
-                            let echoed = format!("echo:{}", String::from_utf8_lossy(&buf[..n]));
-                            stream.write_all(echoed.as_bytes()).await.unwrap();
+                            return;
+                        }
+                        Answered::KeepsAlive(head) => stream.write_all(&head).await.unwrap(),
+                        Answered::Closes(head) => {
+                            stream.write_all(&head).await.unwrap();
+                            let _ = stream.shutdown().await;
+                            return;
                         }
                     }
-                    Answered::KeepsAlive(head) => {
-                        stream.write_all(&head).await.unwrap();
-                        // Read on as a keep-alive engine does, and close where the other side ends its own.
-                        let mut buf = [0u8; 1024];
-                        while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {}
-                        let _ = stream.shutdown().await;
-                    }
-                    Answered::Closes(head) => {
-                        stream.write_all(&head).await.unwrap();
-                        let _ = stream.shutdown().await;
-                    }
                 }
+                let _ = stream.shutdown().await;
             });
         }
     });
@@ -899,6 +913,8 @@ async fn a_request_framed_both_ways_is_refused_before_a_byte_crosses() {
     let answered = String::from_utf8(w.raw(request.as_bytes()).await).unwrap();
     assert!(answered.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{answered}");
     assert!(answered.contains("with a length or with chunks and not both"), "{answered}");
+    // Neither the request nor the one riding behind it: this fake engine reads the chunks and drops the length,
+    // as the box engine does, so the bytes past the terminator would be its next request.
     assert!(w.engine_saw("POST", "/v1.55/exec/execours1/start").is_none(), "{:?}", w.reached());
     assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
     assert!(w.reached().is_empty(), "{:?}", w.reached());
@@ -910,6 +926,7 @@ async fn a_request_framed_both_ways_is_refused_before_a_byte_crosses() {
 #[tokio::test]
 async fn a_hijack_route_the_engine_did_not_hand_over_ends_the_engines_connection() {
     let w = world();
+    // Detached: the engine answers and keeps its connection, handing nothing over.
     let body = r#"{"Detach":true,"Tty":false}"#;
     let request = format!(
         "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
