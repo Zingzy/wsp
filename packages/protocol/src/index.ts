@@ -4669,8 +4669,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
     /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
-     * branch that workspace is on right now where the remote has that branch. A create a thread asked for is a
-     * child of the thread's own workspace whether or not this names one. */
+     * branch that workspace is on right now where the remote has that branch. A workspace of another project is
+     * refused, since a child starts on its parent's branch. A create a thread asked for is a child of the thread's
+     * own workspace whether or not this names one, and a workspace it names here is not read. */
     parent: z.string().optional(),
     /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
     engine: z.boolean().optional(),

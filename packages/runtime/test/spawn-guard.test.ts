@@ -22,6 +22,7 @@ import { HERE_PLACE_ID,
   spawnGoldenRefusal,
   spawnDepthRefusal,
   noWorkspaceRefusal,
+  parentProjectRefusal,
   spawnProjectRefusal,
   spawnReachRefusal,
   threadWord,
@@ -177,6 +178,42 @@ describe("agents spawning agents", () => {
     await createOn(rt, { name: "ours" }, asThread(scope));
     expect(backend.machines.at(-1)!.spec.fromSnapshot).toBe("snap_image-v1");
     held.end(0);
+    await rt.close();
+  });
+
+  it("a thread's fork is a child of its own workspace whatever parent it names, and no other machine is read", async () => {
+    const held = heldAdapter();
+    const backend = stubBackend();
+    // Each machine says which branch its checkout is on, so a read of the wrong one shows up in the child's base.
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: `${m.id}-branch\norigin/${m.id}-branch\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const project = await projectOn(rt);
+    const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const theirs = await createOn(rt, { project: project.id, golden: "snap_g", name: "theirs" });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const foreign = backend.machines.find(m => m.id === theirs.machineId)!;
+    const readsBefore = foreign.execLog.filter(cmd => cmd.includes("rev-parse")).length;
+    const child = await createOn(rt, { project: project.id, name: "ours", parent: theirs.id }, asThread(scope));
+    expect(child.parentWorkspaceId).toBe(ws.id);
+    // The branch the child starts on is its own workspace's, and the workspace it named was never asked.
+    expect(backend.machines.find(m => m.id === ws.machineId)!.execLog.some(cmd => cmd.includes("rev-parse"))).toBe(true);
+    expect(foreign.execLog.filter(cmd => cmd.includes("rev-parse")).length).toBe(readsBefore);
+    expect(backend.machines.at(-1)!.execLog.find(cmd => cmd.includes("git clone"))).toContain(`--branch ${ws.machineId}-branch`);
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a person's create takes a parent of the project it is made for and refuses one of another", async () => {
+    const rt = runtimeWith({ claude: heldAdapter().factory });
+    const mine = await projectOn(rt);
+    const other = await projectOn(rt);
+    const parent = await createOn(rt, { project: mine.id, golden: "snap_g", name: "parent" });
+    const elsewhere = await createOn(rt, { project: other.id, golden: "snap_g", name: "elsewhere" });
+    await expect(rt.workspaces.create({ project: mine.id, golden: "snap_g", name: "child", parent: elsewhere.id })).rejects.toThrow(parentProjectRefusal("elsewhere", other.name, mine.name));
+    const child = await rt.workspaces.create({ project: mine.id, golden: "snap_g", name: "child", parent: parent.id });
+    expect(child.parentWorkspaceId).toBe(parent.id);
     await rt.close();
   });
 

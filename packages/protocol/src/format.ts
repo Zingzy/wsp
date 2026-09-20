@@ -2518,6 +2518,13 @@ export function noParentWorkspaceLine(ref: string): string {
   return `no workspace ${ref} to fork from; a child workspace is made out of one this computer holds`;
 }
 
+/** The one sentence a create naming a parent of another project is refused with: a child is a second checkout of
+ * its parent's project on the branch that parent is on, so a parent holding another project has no branch the
+ * child could start from and nowhere for its work to land back in. */
+export function parentProjectRefusal(parent: string, holds: string, made: string): string {
+  return `${parent} is a workspace of ${holds} and this one is made for ${made}; a child starts on its parent's branch, so both hold one project`;
+}
+
 /** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
  * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
 export function noWorkspaceRefusal(ref: string): string {
