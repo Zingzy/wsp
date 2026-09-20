@@ -265,6 +265,23 @@ describe("wsp host connect", () => {
     expect(await box.devices()).toEqual([readHost(box.home, "box")!.deviceId]);
   });
 
+  it("says a host that answered the seal with a refusal did not prove its key, rather than that a token was taken away", async () => {
+    // A runtime with no place door proves no key and refuses the first frame. No token and no code of this
+    // computer's crossed, so the line says which host did not prove itself rather than reading the refusal as a
+    // device this host revoked, which is what the alias road says for a refused token.
+    const store = memoryStore();
+    void store.put("goldens", copyKey("default", "default"), GOLDEN);
+    const bare = await startHost({ runtime: createRuntime({ backend: stubBackend(), store, adapters: {} }), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    try {
+      const url = `http://127.0.0.1:${bare.port}`;
+      const home = tempDir("connect-unsealed");
+      writeHost(home, "box", { url, deviceId: "d_1", deviceToken: "tok-1", hostKey: "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A", pairedAt: "2026-09-20T00:00:00.000Z" });
+      await expect(dialHost(STATE, { host: "box", home, env: {} })).rejects.toThrow(pairKeyRefusal(url));
+    } finally {
+      await bare.close();
+    }
+  });
+
   it("refuses a second connect under a name this computer already holds rather than dropping the token it has", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);

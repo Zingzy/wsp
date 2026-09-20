@@ -435,13 +435,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             // sends next inside the seal is what names it. The gate opens for that frame.
             deciding = false;
             send({ id: msg.id, ok: true, nonce: opened.nonce, hostPublicKey: opened.hostPublicKey, signature: opened.signature, ephemeral: opened.ephemeral });
-            // The reply is the last frame of this socket that travels in the clear.
             seal = opened.seal;
             return;
           }
           if (msg.op === "place.join" || msg.op === "place.auth") {
             // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
-            // frame must sign; a key or a report this host cannot work with refuses in the door's own words.
+            // frame must sign; a key or a report this host cannot work with refuses in the door's own words. One
+            // key per socket holds here too: a link's own agreement would replace the one a client already has.
+            if (seal !== undefined) return refuse(UNAUTHORIZED);
             let opened: { reply: Record<string, unknown>; expect: Uint8Array; seal: Seal; notice?: string } | undefined;
             try {
               opened = msg.op === "place.join" ? await places().join(msg, from, now()) : await places().auth(msg, now());

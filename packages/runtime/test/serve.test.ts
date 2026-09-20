@@ -120,6 +120,24 @@ describe("the key a native client pins before it sends anything", () => {
     authed.close();
   });
 
+  it("refuses a place's own handshake on a socket that already agreed a key, so one key stands per socket", async () => {
+    const { hostKey, runtime } = served();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret", devices: runtime.devices });
+    const c = await WsClient.connect(srv.port);
+    await openSeal(c, hostKey);
+    // A link's own agreement would replace the one this socket already counts its frames under, and a place has
+    // no need of a socket a client opened: the frame is refused and the socket ends.
+    const refused = await c.request("place.auth", { placeId: "p_1", nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(refused.ok).toBe(false);
+    expect(await c.closed()).toBe(4401);
+
+    const second = await WsClient.connect(srv.port);
+    await openSeal(second, hostKey);
+    const join = await second.request("place.join", { publicKey: newPlaceKeyPair().publicKey, nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+    expect(join.ok).toBe(false);
+    expect(await second.closed()).toBe(4401);
+  });
+
   it("says in one sentence that a runtime holding no key of its own cannot prove itself, and closes the socket", async () => {
     srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port);

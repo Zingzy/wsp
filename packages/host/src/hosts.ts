@@ -318,11 +318,18 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
  * this computer's own loopback is what a line aimed at the host here is, and dials as one: there is no road
  * between two ports of one computer for anybody to stand on. */
 function keyed(aim: AimElsewhere, where: string): AimElsewhere {
-  const held = aim.kind === "alias" ? { token: aim.record.deviceToken, hostKey: aim.record.hostKey } : { token: aim.token, hostKey: aim.hostKey };
+  const held = aimHolds(aim);
   if (held.token === undefined || held.hostKey !== undefined) return aim;
   const at = servedHostname(aimAddress(aim));
   if (at !== undefined && isLoopback(at)) return aim;
   throw authRefusal(hostNoKeyLine(where));
+}
+
+/** What an aim at a host elsewhere holds for it: the token it would present, and the fingerprint of the key it
+ * holds that host to. One reading, so the rule above that refuses an aim with no key and the dial that pins the
+ * key before it sends the token cannot disagree about what a record or a launch carried. */
+export function aimHolds(aim: AimElsewhere): { token: string | undefined; hostKey: string | undefined } {
+  return aim.kind === "alias" ? { token: aim.record.deviceToken, hostKey: aim.record.hostKey } : { token: aim.token, hostKey: aim.hostKey };
 }
 
 /** How a host is named in a line the person reads: the alias where there is one, the address otherwise. */
