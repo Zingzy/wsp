@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { APT_INDEX, BASE_FLOOR, CURL_NET, ROAD_STEPS, UV_INSTALL, installAfter } from "@wsp/catalog";
 import { PRELUDE } from "../src/dotfiles-presets.js";
-import { ALREADY_ON_MACHINE, BASE_VERSIONS_CMD, baseInstalls, carriedByImage, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
+import { ALREADY_ON_MACHINE, baseInstalls, baseVersionsCmd, carriedByImage, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
 import { TOOLS_PATH } from "../src/golden-import.js";
 import { FREE_KB_CMD, guardedRoad, reasonOf, roadLimitS } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -29,7 +29,7 @@ function guest(answer: (script: string) => ExecResult | undefined, free: () => s
     exec: async (cmd: string) => {
       cmds.push(cmd);
       if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${free()}\n`, stderr: "" };
-      if (cmd === BASE_VERSIONS_CMD && reads++ === 0) return { exitCode: 0, stdout: onImage, stderr: "" };
+      if (cmd === baseVersionsCmd(TOOLS_PATH) && reads++ === 0) return { exitCode: 0, stdout: onImage, stderr: "" };
       return answer(cmd) ?? ok;
     },
     run: async (script: string) => {
@@ -147,6 +147,8 @@ describe("a download that fails", () => {
 });
 
 describe("the versions read", () => {
+  const BASE_VERSIONS_CMD = baseVersionsCmd(TOOLS_PATH);
+
   it("asks each floor command for its version on the tools PATH, unzip with zip, and nothing of the node that left it", () => {
     const first = String.raw`grep -m1 -E '[0-9]+\.[0-9]+'`;
     expect(BASE_VERSIONS_CMD).toMatch(/^export PATH=\/root\/\.local\/bin:/);
@@ -156,7 +158,7 @@ describe("the versions read", () => {
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION rg: $(rg --version 2>/dev/null | ${first})"`);
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION unzip: $(unzip -v 2>/dev/null | ${first})"`);
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION git: $(git --version 2>/dev/null | ${first})"`);
-    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(16);
+    expect(BASE_VERSIONS_CMD.split("\n").filter((l: string) => l.startsWith("echo \"VERSION"))).toHaveLength(16);
   });
 
   it("keeps the first line of a read that carries a version, so zip reads carried and the floor has no apt index to run", () => {

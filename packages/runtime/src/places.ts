@@ -179,7 +179,9 @@ export interface PlaceWiring {
  * which is that computer itself over the link its daemon holds. The host wires it because the recipe and the
  * reading of this computer are the host's, as the installer and the daemon binary are. */
 export interface PlaceProvisioner {
-  plan(): Promise<ProvisionPlan | { noRecipe: string }>;
+  /** `on` is the computer the plan is for: its home is what every path of the job hangs off and what the PATH the
+   * job's scripts export is read from, since a directory under it is one the workspaces there write. */
+  plan(on: { home: string }): Promise<ProvisionPlan | { noRecipe: string }>;
   run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
 }
 
@@ -973,7 +975,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     // inside it would both have passed the check above and installed over each other on that box.
     provisioning.add(placeId);
     try {
-      const planned = await provisioner.plan();
+      const planned = await provisioner.plan({ home });
       if ("noRecipe" in planned) {
         provisioning.delete(placeId);
         return { said: placeNoRecipeLine(record.name, planned.noRecipe) };

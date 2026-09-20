@@ -41,7 +41,7 @@ pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,
     PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
-pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, PlaceDaemonPaths, PlaceProvisionPaths};
+pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
     GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry,

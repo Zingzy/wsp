@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, words, BackendFacts, CopyReport, DaemonAuthRequest,
+    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
     MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
     MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
@@ -389,6 +389,21 @@ fn the_leaves_own_list_matches_the_committed_fixture() {
     let theirs: Vec<String> = committed_value("place-paths.json");
     let ours: Vec<String> = place_owned_paths(Path::new(FIXTURE_HOME)).iter().map(|p| p.to_string_lossy().into_owned()).collect();
     assert_eq!(ours, theirs, "place-paths.json and place_owned_paths name the same paths in the same order");
+}
+
+/// The home the probe path's fixture is rendered for, as the protocol's own test renders it: root's, since every
+/// directory the tools PATH names under a home is under that one.
+const PROBE_HOME: &str = "/root";
+
+#[test]
+fn the_probe_path_matches_the_committed_fixture_byte_for_byte() {
+    let path = fixtures().join("probe-path.txt");
+    let theirs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(
+        format!("{}\n", probe_path(Path::new(PROBE_HOME))),
+        theirs,
+        "probe-path.txt and probe_path are one list: what this daemon resolves a command through and what the recipe job exports"
+    );
 }
 
 #[test]

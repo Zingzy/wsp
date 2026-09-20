@@ -12,7 +12,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -65,7 +65,7 @@ import {
   verifyNoneLeft,
   type DaemonSocket,
 } from "../src/doctor.js";
-import { agentName, catalogEntry, VAULT_VARIABLES } from "@wsp/catalog";
+import { agentName, catalogEntry, GUEST_HOME, VAULT_VARIABLES } from "@wsp/catalog";
 import { daemonFixLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
 import { captured, createOn, projectOn } from "./verbs-fixture.js";
@@ -685,7 +685,7 @@ describe("the doctor's computer road", () => {
   }
 
   /** The one step of a plan these cases read inside: a command the workspace answers for, or does not. */
-  const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
+  const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
   const answering = () => ({ exitCode: 0, stdout: "wsp-present 0 /usr/local/bin/agent-browser\n", stderr: "" });
 
   it("proves the computer in order: it answers, the vault, the agents there, a workspace of a project whose checkout stands, the tools inside and the delete", async () => {
@@ -839,7 +839,7 @@ describe("which road wsp doctor takes", () => {
   it("with no word takes the local road here and no other: a computer somebody joined is proved by the host holding its link", async () => {
     const host = fakeHost([computer({ id: HERE_PLACE_ID, name: "this computer", kind: "computer", takesForks: false }), computer(), { id: "solari", kind: "provider", name: "solari", default: false }]);
     const io = captured();
-    expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] }) })).toBe(0);
+    expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] }) })).toBe(0);
     expect(io.lines.some(l => l.includes(`proving a thread on ${THIS_COMPUTER}`))).toBe(true);
     // Nothing of the computer road runs in this process: its link is held by the host that computer dials.
     expect(io.lines.some(l => l.includes("a computer you added"))).toBe(false);

@@ -138,6 +138,8 @@ impl Flags {
             auth_deadline_ms: self.auth_deadline_ms,
             guest_unwatched_ms: self.guest_unwatched_ms,
             place_file: self.place_file,
+            // Read off the process by the bind, before the probe list takes its place; no flag names it.
+            unit_path: None,
             home: self.home,
             wsp_argv: self.wsp_argv,
             agents: self.agents,

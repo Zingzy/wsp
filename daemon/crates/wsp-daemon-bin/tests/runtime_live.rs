@@ -2298,6 +2298,12 @@ struct FramesDaemon {
 const FRAMES_TOKEN: &str = "runtime-live-token";
 
 async fn frames_daemon() -> FramesDaemon {
+    frames_daemon_at(root().join("frames-home")).await
+}
+
+/// The same under a home the caller names, for the one case that asks what a daemon whose home is the box's own
+/// resolves a command through.
+async fn frames_daemon_at(home: PathBuf) -> FramesDaemon {
     let mut token = tempfile::NamedTempFile::new().unwrap();
     std::io::Write::write_all(&mut token, format!("{FRAMES_TOKEN}\n").as_bytes()).unwrap();
     let mut options = wsp_daemon::Options::new(token.path());
@@ -2310,8 +2316,8 @@ async fn frames_daemon() -> FramesDaemon {
     // and what the product's own daemon on a box is started with. The file itself need not be there: a daemon
     // whose file is missing logs that it has no host to dial and dials nothing, and the workspaces it runs are
     // still its own to answer for.
-    options.home = Some(root().join("frames-home"));
-    options.place_file = Some(root().join("frames-home").join("place.json"));
+    options.place_file = Some(home.join("place.json"));
+    options.home = Some(home);
     // The helper every create and exec inside a workspace runs: the daemon binary this suite drives the ops
     // through. A daemon opened inside this process would otherwise run this test executable as its helper, and a
     // test binary answers an exec line by refusing its first flag.
@@ -2982,4 +2988,56 @@ async fn a_diff_inside_past_the_cap_reads_cut() {
     let cut = client.ok("git.diff", json!({ "cwd": repo, "scope": "staged", "machineId": &id })).await;
     assert_eq!(cut["truncated"], json!(true), "a diff past every cap read whole");
     w.close().await;
+}
+
+/// The name the planted-binary case looks for, which nothing on a box answers.
+const PROBE_AGENT: &str = "wsp-live-probe-agent";
+
+/// A script at `at` that writes `marker` and prints `version`, executable.
+fn plant(at: &Path, marker: &Path, version: &str) {
+    fs::create_dir_all(at.parent().unwrap()).unwrap();
+    fs::write(at, format!("#!/bin/sh\ntouch {}\necho {version}\n", marker.display())).unwrap();
+    fs::set_permissions(at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_daemon_of_this_computers_runs_nothing_it_found_under_the_home_the_workspaces_here_share() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let _turn = ONE_AT_A_TIME.lock().await;
+    let home = PathBuf::from("/root");
+    let planted = home.join(".local/bin").join(PROBE_AGENT);
+    let outside = PathBuf::from("/usr/local/bin").join(PROBE_AGENT);
+    let planted_ran = home.join("wsp-live-probe-planted-ran");
+    let outside_ran = home.join("wsp-live-probe-outside-ran");
+    let before: Vec<String> = fs::read_dir(home.join(".local/bin"))
+        .map(|dir| dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    for path in [&planted, &outside, &planted_ran, &outside_ran] {
+        let _ = fs::remove_file(path);
+    }
+    plant(&planted, &planted_ran, "9.9.9 (planted)");
+    plant(&outside, &outside_ran, "1.0.0 (the box's own)");
+
+    let d = frames_daemon_at(home.clone()).await;
+    let mut client = FrameClient::connect(d.addr).await;
+    // The list this daemon resolves every command through, set before a child of it could exist: the box's own
+    // system directories, with every directory under the home it shares with its workspaces left out. The version
+    // probe walks this same list, so a binary planted under that home has no road to a run as root out here.
+    let said = client.ok("exec", json!({ "cmd": r#"printf '%s\n' "$PATH"; command -v wsp-live-probe-agent; wsp-live-probe-agent"# })).await;
+    let out = said["stdout"].as_str().unwrap_or_default().to_owned();
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.first().copied(), Some(wsp_frames::probe_path(&home).as_str()), "{out}");
+    assert_eq!(lines.get(1).copied(), Some(outside.to_string_lossy().as_ref()), "{out}");
+    assert_eq!(lines.get(2).copied(), Some("1.0.0 (the box's own)"), "{out}");
+    assert!(outside_ran.exists(), "the copy outside the home did not run");
+    assert!(!planted_ran.exists(), "the binary planted under the home was run as root outside every workspace");
+
+    for path in [&planted, &outside, &planted_ran, &outside_ran] {
+        let _ = fs::remove_file(path);
+    }
+    let after: Vec<String> = fs::read_dir(home.join(".local/bin"))
+        .map(|dir| dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    assert_eq!(after, before, "this case left something under the home");
 }

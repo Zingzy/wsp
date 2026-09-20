@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
 import { catalogEntry } from "@wsp/catalog";
-import { MCP_ID_PREFIX, type Recipe } from "@wsp/protocol";
+import { MCP_ID_PREFIX, probePath, type Recipe } from "@wsp/protocol";
 import { AGENT_NODE_STEP, type ProvisionPlan } from "@wsp/engine";
 import { placeProvisioner } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
@@ -36,7 +36,7 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     });
 
   const planned = async (): Promise<ProvisionPlan> => {
-    const answer = await planner().plan();
+    const answer = await planner().plan({ home });
     if ("noRecipe" in answer) throw new Error(`no recipe: ${answer.noRecipe}`);
     return answer;
   };
@@ -54,8 +54,18 @@ describe("the recipe this host holds, planned for a computer you own", () => {
 
   const write = (recipe: Recipe): void => writeFileSync(smallRecipePath(statePath), `${JSON.stringify(recipe, null, 2)}\n`);
 
+  it("sets the plan's PATH to the probe list of the computer it is for, so no step resolves a command through a directory the workspaces there write", async () => {
+    write(SMALL);
+    const plan = await planner().plan({ home: "/root" });
+    if ("noRecipe" in plan) throw new Error(`no recipe: ${plan.noRecipe}`);
+    expect(plan.path).toBe(probePath("/root"));
+    const exported = plan.steps.flatMap(s => s.cmd.split("\n").filter(l => l.startsWith("export PATH=")));
+    expect(exported.length).toBeGreaterThan(0);
+    expect(exported.filter(l => l.includes("/root/.local/bin"))).toEqual([]);
+  });
+
   it("says where a recipe would be written when this computer holds none, and reads nothing else", async () => {
-    const answer = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => { throw new Error("this computer was read for a recipe that is not there"); }, brew: async () => new Map() }).plan();
+    const answer = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => { throw new Error("this computer was read for a recipe that is not there"); }, brew: async () => new Map() }).plan({ home });
     expect(answer).toEqual({ noRecipe: smallRecipePath(statePath) });
   });
 
@@ -119,7 +129,7 @@ describe("the recipe this host holds, planned for a computer you own", () => {
       ...FIXTURE,
       entries: [...FIXTURE.entries, { rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/github`, label: "github", group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const }],
     };
-    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => withServer, brew: async () => new Map() }).plan();
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => withServer, brew: async () => new Map() }).plan({ home });
     if ("noRecipe" in plan) throw new Error("no recipe");
     expect(plan.mcp?.agents.map(a => [a.id, a.scopes.flatMap(sc => sc.keep)])).toEqual([["claude", ["github"]]]);
     // The config the server is defined in travels with the agent's own row, which is what the edit there reads.

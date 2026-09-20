@@ -47,6 +47,7 @@ import {
   workFolderIn,
   copyStoppedLine,
   NO_IMAGES_HERE,
+  probePath,
   type GoldenStageEvent,
   type PlaceProvision,
   type PlaceProvisionRow,
@@ -2965,6 +2966,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
   const RECIPE_AT = "2026-09-17T10:00:00.000Z";
   const PLAN: ProvisionPlan = {
     recipeAt: RECIPE_AT,
+    path: probePath("/root"),
     steps: [
       { id: "agents/node", label: "Node 22.23.2", manager: "script", cmd: "node-step" },
       { id: "agents/codex", label: "Codex", manager: "npm", cmd: "codex-step", after: "agents/node" },

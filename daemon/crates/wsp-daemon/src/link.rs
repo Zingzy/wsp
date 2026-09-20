@@ -321,7 +321,9 @@ impl Link {
     async fn agent_versions(&self) -> BTreeMap<String, String> {
         let held = Arc::clone(&self.versions);
         let agents = self.agents.clone();
-        let path = place::agents_path();
+        // What this daemon's own children run on, which a place sets to the probe list at start: a binary a
+        // workspace planted under the home this daemon shares with them is on no line of it.
+        let path = place::run_path();
         tokio::task::spawn_blocking(move || {
             let mut versions = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             versions.refresh(&agents, &path, place::VERSION_DEADLINE);
@@ -349,6 +351,7 @@ impl Link {
             agent_versions,
             daemon_port: self.daemon_port,
             dialed: url,
+            unit_path: self.ctx.options.unit_path.as_deref(),
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
         });
         let signature = place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce))?;

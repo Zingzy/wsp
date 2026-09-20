@@ -78,6 +78,10 @@ pub struct Options {
     /// How long a guest session stands with nobody watching it before it ends to its guest.
     pub guest_unwatched_ms: Option<u64>,
     pub place_file: Option<PathBuf>,
+    /// The PATH this daemon's unit handed it, read once at start before the probe list took its place. A place
+    /// daemon runs nothing on it; the report carries it as what the person's login shell gives, and the presence
+    /// read looks along it, since reading that a tool stands somewhere runs nothing.
+    pub unit_path: Option<String>,
     pub home: Option<PathBuf>,
     pub wsp_argv: Vec<String>,
     pub agents: Vec<String>,
@@ -121,6 +125,7 @@ impl Options {
             auth_deadline_ms: None,
             guest_unwatched_ms: None,
             place_file: None,
+            unit_path: None,
             home: None,
             wsp_argv: Vec::new(),
             agents: Vec::new(),
@@ -412,7 +417,16 @@ impl Daemon {
     }
 
     /// The same, with the log going where the caller says.
-    pub async fn bind_with(options: Options, log: Log) -> io::Result<Daemon> {
+    pub async fn bind_with(mut options: Options, log: Log) -> io::Result<Daemon> {
+        // Before the listener, before any task and before a single child of this process could exist: a daemon on
+        // a computer that runs workspaces resolves every command it runs through the probe list and no other, since
+        // the home it shares with its workspaces is written from inside them. Every child inherits it from here:
+        // the exec handler's bash, the git and gh reads, each pty, the leave's sh, and every script the recipe job
+        // sends. The unit's own PATH is kept for the report and the presence read, which run nothing.
+        if options.place_file.is_some() {
+            options.unit_path = Some(std::env::var("PATH").unwrap_or_default());
+            std::env::set_var("PATH", wsp_frames::probe_path(&place::place_home(options.home.as_deref())));
+        }
         if auth::current_token(&options.token_path).is_none() {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { EXEC_DEADLINE_EXIT, MCP_ID_PREFIX, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths, provisionLandedLine, provisionListReadLine, provisionPackedLine, provisionShippedLine } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpFormat } from "@wsp/catalog";
 import {
   LEDGER_MARK,
@@ -359,7 +359,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // it merged into it.
     const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("github")) });
     expect(first.rows.at(-1)!.outcome).toBe("installed");
-    const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {} });
+    const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {}, path: TOOLS_PATH });
     expect(servers.map(r => [r.id, r.outcome])).toEqual([
       [`${MCP_ID_PREFIX}claude/github`, "installed"],
       [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
@@ -386,7 +386,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
 
     // With nothing of this computer's beside it, the server in the agent's own file is read and not written: it is
     // there as the recipe asks, and its row says so rather than saying whose the file is.
-    const again = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: new Map(), tools: [], stage: () => {} });
+    const again = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: new Map(), tools: [], stage: () => {}, path: TOOLS_PATH });
     expect(again.map(r => [r.id, r.outcome])).toEqual([
       [`${MCP_ID_PREFIX}claude/github`, "present"],
       [`${MCP_ID_PREFIX}claude/gsc`, "skipped"],
@@ -404,7 +404,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     const lands: ProvisionLanding[] = [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/CLAUDE.md" }, { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true }];
     const both = tarOf([file(".claude-cfg/CLAUDE.md", "his standing rules\n"), file(".claude-cfg/.claude.json", `${JSON.stringify({ mcpServers: { github: { command: "npx" } } }, null, 2)}\n`)]);
     const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(both) });
-    await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {} });
+    await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: first.owned, tools: [], stage: () => {}, path: TOOLS_PATH });
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     const listed = readFileSync(at.landed, "utf8");
     expect(listed).toContain(`${MCP_ID_PREFIX}claude/github`);
@@ -412,7 +412,7 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     // A round that lands the person's files but never gets this computer's copy of the agent's own file there:
     // it reads that file and writes nothing in it, so it knows nothing about either name and says nothing.
     const again = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tarOf([file(".claude-cfg/CLAUDE.md", "his standing rules\n")])) });
-    const rows = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: again.owned, tools: [], stage: () => {} });
+    const rows = await provisionMcp(machine, mcpPlanOn(root), { home: root, landed: again.owned, tools: [], stage: () => {}, path: TOOLS_PATH });
     expect(rows.map(r => r.outcome)).toEqual(["present", "skipped"]);
     await closeAgentFiles(machine, root, oncePathsOf(lands));
     expect(readFileSync(at.landed, "utf8")).toBe(listed);
