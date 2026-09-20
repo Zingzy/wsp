@@ -1743,6 +1743,23 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     let staged = root().join("run").join(&id).join("binds");
     let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
     assert!(mounts.contains(staged.to_str().unwrap()), "no staged bind under {}", staged.display());
+    // A stop and a wake leave every entry of the life before standing and still mounted: the engine's record
+    // of a container made then names the entry that life gave it, and its next start resolves that entry.
+    let entries: Vec<String> =
+        fs::read_dir(&staged).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert!(!entries.is_empty(), "nothing staged under {}", staged.display());
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let after: Vec<String> =
+        fs::read_dir(&staged).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    for entry in &entries {
+        assert!(after.contains(entry), "the wake took the staged entry {entry}: {after:?}");
+    }
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(mounts.contains(staged.to_str().unwrap()), "the wake left no staged bind under {}", staged.display());
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo start 2>&1")).await;
+    show("docker compose start after a wake, from inside", code, &out, &err);
+    assert_eq!(code, 0, "{out}");
     // The page is asked for once the service listens, not once `up -d` has returned. Measured on a box: nginx
     // answers 1.2 to 2.0 s after its container starts, and until it does the engine's published port on the
     // box's loopback accepts the connection and closes it with no byte, which reads exactly like a forward that

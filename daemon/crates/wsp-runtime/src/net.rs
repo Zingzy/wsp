@@ -466,8 +466,12 @@ fn guarded_interface(comment: &str) -> Option<&str> {
 /// wildcard address on a fork and which a workspace holds no token for, and the engine's two, which a box that
 /// exposes either exposes to every workspace on it. A daemon that bound no port names none.
 pub fn gateway_drops(daemon_port: u16) -> Vec<u16> {
-    let mut ports: Vec<u16> = std::iter::once(daemon_port).filter(|port| *port != 0).chain(ENGINE_PORTS).collect();
-    ports.dedup();
+    let mut ports: Vec<u16> = std::iter::once(daemon_port).filter(|port| *port != 0).collect();
+    for port in ENGINE_PORTS {
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
     ports
 }
 
@@ -1353,6 +1357,7 @@ mod tests {
         assert_eq!(gateway_drops(7070), vec![7070, 2375, 2376]);
         assert_eq!(gateway_drops(0), vec![2375, 2376]);
         assert_eq!(gateway_drops(2375), vec![2375, 2376], "the engine's own port named twice is one rule");
+        assert_eq!(gateway_drops(2376), vec![2376, 2375], "and the same wherever it sits in the list");
         assert_eq!(guarded_interface("wsp workspaces: forwarding turned on for eth0"), Some("eth0"));
         assert_eq!(guarded_interface(RULE_COMMENT), None);
         assert_eq!(forwarding_file("wsp-3"), "/proc/sys/net/ipv4/conf/wsp-3/forwarding");

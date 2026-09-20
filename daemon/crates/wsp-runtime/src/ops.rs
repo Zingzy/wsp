@@ -354,8 +354,11 @@ impl Ops {
             bind_roots(&self.layout, record),
             binds,
             socket,
-            Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
-            Arc::new(Bridged { net: Arc::clone(&self.net) }),
+            engine::Hooks {
+                ports: Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
+                bridges: Arc::new(Bridged { net: Arc::clone(&self.net) }),
+            },
+            life_of(&record.init),
         );
         let task = tokio::spawn(engine::serve(listener, Arc::new(fence)));
         if let Some(old) = self.engines.lock().await.insert(id.to_owned(), task) {
@@ -374,14 +377,14 @@ impl Ops {
         }
     }
 
-    /// The accept loop ended, the socket file gone and every bind this fence staged for the engine detached and
-    /// taken away; the socket's directory stays with the bundle.
+    /// The accept loop ended and the socket file gone; the socket's directory stays with the bundle, and so do
+    /// the staged binds, since the containers that mount them outlive a stop and their next start resolves the
+    /// entry each was given. The remove is what takes them.
     async fn stop_engine(&self, id: &str) {
         if let Some(task) = self.engines.lock().await.remove(id) {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
-        let _ = clear_binds(&self.layout.binds(id));
     }
 
     /// The daemon takes the workspaces over from here: every boot and every stop after this is told as it
@@ -1166,6 +1169,9 @@ impl Ops {
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
         bundle::unmount_under(&self.layout.rootfs(id))?;
+        // Every bind every life of this workspace staged for the engine, detached and gone with the containers
+        // that mounted them.
+        clear_binds(&self.layout.binds(id))?;
         take_off_points(&self.layout, id, &points_of(&self.layout, id)?)?;
         // After the unmount, and the way it was made: a snapshot is a subvolume the kernel takes away, a copied
         // tree is a tree. The copy is the workspace's own, so it goes with it.
@@ -1410,6 +1416,18 @@ fn bind_roots(layout: &Layout, record: &Workspace) -> Vec<(String, PathBuf)> {
     let mut roots: Vec<(String, PathBuf)> = record.copy.iter().map(|made| (made.at.clone(), layout.copy_of(&record.id))).collect();
     roots.extend(record.binds.iter().map(|bind| (bind.target.clone(), PathBuf::from(&bind.source))));
     roots
+}
+
+/// What tells one life of a workspace from the next, which is the first half of every staging entry's name that
+/// life makes: the init's own boot id, start and pid, which together are what tell its process from any other
+/// the kernel hands the same number to.
+fn life_of(init: &Init) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in init.boot_id.bytes().chain(init.started.to_string().bytes()).chain(init.pid.to_string().bytes()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Every bind the fence staged detached and the directory holding them gone.
@@ -1736,6 +1754,27 @@ mod tests {
         // One core of every period, and a third of the box's four gigabytes.
         assert_eq!(spec["linux"]["resources"]["cpu"], serde_json::json!({ "quota": 100_000, "period": 100_000 }));
         assert_eq!(spec["linux"]["resources"]["memory"], serde_json::json!({ "limit": 1365u64 * 1024 * 1024 }));
+    }
+
+    /// A container the engine still holds from an earlier life names the staging entry that life gave it, so a
+    /// stop leaves every entry standing and the remove is what takes them; and two lives of one workspace never
+    /// name one entry.
+    #[tokio::test]
+    async fn the_staged_binds_outlive_a_stop_and_go_at_the_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
+        let binds = ops.layout.binds("wsp-a");
+        fs::create_dir_all(binds.join("earlier-0")).unwrap();
+        ops.stop_engine("wsp-a").await;
+        assert!(binds.join("earlier-0").is_dir(), "a stop took the entry a container made in an earlier life mounts");
+        clear_binds(&binds).unwrap();
+        assert!(!binds.exists(), "the remove left the staging directory standing");
+        // One life, one name; and a name of its own at every boot, since the entries of two lives sit side by side.
+        let life = |pid, started, boot: &str| life_of(&Init { pid, started, boot_id: boot.to_owned() });
+        assert_eq!(life(7, 1200, "b"), life(7, 1200, "b"));
+        assert_ne!(life(7, 1200, "b"), life(7, 1201, "b"));
+        assert_ne!(life(7, 1200, "b"), life(8, 1200, "b"));
+        assert_ne!(life(7, 1200, "b"), life(7, 1200, "c"));
     }
 
     /// The workspace a refusal names, and the one every exec carries the compose project of.

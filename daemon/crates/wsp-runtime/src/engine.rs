@@ -236,6 +236,15 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 /// fence names, since the rules that keep a workspace off the box's metadata and off its neighbours match on that
 /// name. Answers the bridge name the engine is being told to make.
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
+    // The prefix is this computer's own: a name under it is a name a sibling's own network may already hold,
+    // and a workspace taking one would refuse every plain container that sibling starts.
+    let asked = word(body.get("Name"));
+    if asked.starts_with(crate::net::LINK_PREFIX) {
+        return Err(format!(
+            "a name beginning {} is this computer's own; a workspace's network takes another, and {asked} is refused",
+            crate::net::LINK_PREFIX
+        ));
+    }
     let driver = word(body.get("Driver"));
     if !matches!(driver, "" | "bridge") {
         return Err(format!("a workspace's network is a bridge of its own on this computer; the driver {driver} is refused"));
@@ -243,6 +252,9 @@ pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String,
     if body.get("EnableIPv6").and_then(Value::as_bool) == Some(true) {
         return Err("a workspace's network carries IPv4 alone; EnableIPv6 is refused".into());
     }
+    // Written and not merely left out: a box whose engine turns IPv6 on by default would give the bridge a
+    // range the table that fences a workspace never sees.
+    body["EnableIPv6"] = Value::Bool(false);
     for config in body.pointer("/IPAM/Config").and_then(Value::as_array).into_iter().flatten() {
         let subnet = word(config.get("Subnet"));
         if subnet.is_empty() {
@@ -260,8 +272,14 @@ pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String,
             None => return Err(format!("a workspace's network names its subnet as an address and a prefix, and {subnet} is not one")),
         }
     }
-    let name = word(body.get("Name")).to_owned();
-    let bridge = bridge_name(workspace, &name);
+    name_the_bridge(body, workspace)
+}
+
+/// The link the engine is told to make this network on, written into its options: under the prefix every rule of
+/// the workspace table matches, so a container on it meets the same drops the workspace does. The one road to a
+/// bridge name, read by a create a workspace sent and by the workspace's own default network alike.
+fn name_the_bridge(body: &mut Value, workspace: &str) -> Result<String, String> {
+    let bridge = bridge_name(workspace, word(body.get("Name")));
     let options =
         body.as_object_mut().ok_or_else(|| "a create carries a JSON object".to_owned())?.entry("Options").or_insert_with(|| json!({}));
     if options.is_null() {
@@ -562,7 +580,7 @@ pub struct Staged {
 /// staged at `binds/<at>`, an entry under a directory nothing inside the workspace reaches. What the engine is
 /// handed is that entry: the engine resolves a bind source again at every container start, so a path this fence
 /// only read would be a path the workspace swapped in between.
-pub fn map_bind(rootfs: &Path, roots: &[(String, PathBuf)], binds: &Path, at: usize, source: &str) -> Result<Staged, String> {
+pub fn map_bind(rootfs: &Path, roots: &[(String, PathBuf)], binds: &Path, at: &str, source: &str) -> Result<Staged, String> {
     if roots.is_empty() {
         return Err(format!("this workspace has no project folder yet, so a container can bind nothing of it; {source} is refused"));
     }
@@ -588,24 +606,23 @@ pub fn map_bind(rootfs: &Path, roots: &[(String, PathBuf)], binds: &Path, at: us
 
 /// The entry one bind source is staged at, made through a descriptor of the staging directory: a directory for
 /// a directory and an empty file for anything else, since a bind wants the same kind at both ends.
-fn stage(binds: &Path, at: usize, source: &std::os::fd::OwnedFd) -> Result<PathBuf, String> {
+fn stage(binds: &Path, at: &str, source: &std::os::fd::OwnedFd) -> Result<PathBuf, String> {
     let held = nix::sys::stat::fstat(source).map_err(|e| format!("the bind source could not be read: {e}"))?;
     let directory = nix::sys::stat::SFlag::from_bits_truncate(held.st_mode).contains(nix::sys::stat::SFlag::S_IFDIR);
     let dir = fs::File::open(binds).map_err(|e| format!("{}: {e}", binds.display()))?;
-    let name = at.to_string();
     let made = if directory {
-        nix::sys::stat::mkdirat(&dir, name.as_str(), nix::sys::stat::Mode::from_bits_truncate(0o700))
+        nix::sys::stat::mkdirat(&dir, at, nix::sys::stat::Mode::from_bits_truncate(0o700))
     } else {
         nix::fcntl::openat(
             &dir,
-            name.as_str(),
+            at,
             nix::fcntl::OFlag::O_CREAT | nix::fcntl::OFlag::O_EXCL | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_WRONLY,
             nix::sys::stat::Mode::from_bits_truncate(0o600),
         )
         .map(|_| ())
     };
-    made.map_err(|e| format!("{}/{name}: {e}", binds.display()))?;
-    Ok(binds.join(name))
+    made.map_err(|e| format!("{}/{at}: {e}", binds.display()))?;
+    Ok(binds.join(at))
 }
 
 /// The ports a container's create asked for, joined to the box ports the engine bound: (inside, box) pairs.
@@ -633,6 +650,13 @@ pub trait Ports: Send + Sync {
     fn published(&self, workspace: &str, inside: u16, box_port: u16);
 }
 
+/// What the daemon does on the box for one workspace's fence: the two are separate concerns and the fence is
+/// handed both at its start.
+pub struct Hooks {
+    pub ports: Arc<dyn Ports>,
+    pub bridges: Arc<dyn Bridges>,
+}
+
 /// What the daemon does on the box for a network the fence lets the engine make.
 pub trait Bridges: Send + Sync {
     /// Whether the box holds a link by that name now; where it does, the rule letting two containers of this
@@ -653,10 +677,13 @@ pub struct Fence {
     /// Where those sources are staged for the engine.
     pub binds: PathBuf,
     pub engine: PathBuf,
-    pub ports: Arc<dyn Ports>,
-    pub bridges: Arc<dyn Bridges>,
-    /// The next staging entry's name. One entry per bind source per create, since the alternative is reusing an
-    /// inode a workspace may have replaced since.
+    pub hooks: Hooks,
+    /// What tells this life of the workspace from the ones before it, and the first half of every staging
+    /// entry's name: a container made in an earlier life still names the entry it was given, and the entries
+    /// of two lives sit side by side under one directory rather than one overwriting the other.
+    life: String,
+    /// The second half. One entry per bind source per create, since the alternative is reusing an inode a
+    /// workspace may have replaced since.
     staged: std::sync::atomic::AtomicUsize,
 }
 
@@ -667,15 +694,15 @@ impl Fence {
         roots: Vec<(String, PathBuf)>,
         binds: PathBuf,
         engine: PathBuf,
-        ports: Arc<dyn Ports>,
-        bridges: Arc<dyn Bridges>,
+        hooks: Hooks,
+        life: String,
     ) -> Fence {
-        Fence { workspace, rootfs, roots, binds, engine, ports, bridges, staged: std::sync::atomic::AtomicUsize::new(0) }
+        Fence { workspace, rootfs, roots, binds, engine, hooks, life, staged: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn map_bind(&self, source: &str) -> Result<PathBuf, String> {
-        let at = self.staged.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let staged = map_bind(&self.rootfs, &self.roots, &self.binds, at, source)?;
+        let at = format!("{}-{}", self.life, self.staged.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let staged = map_bind(&self.rootfs, &self.roots, &self.binds, &at, source)?;
         crate::bundle::bind_opened(&staged.source, &staged.at).map_err(|e| format!("{source} could not be staged for the engine: {e}"))?;
         Ok(staged.at)
     }
@@ -726,6 +753,12 @@ fn parse_request(head: &[u8]) -> Result<Head, String> {
     let find = |name: &str| headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_owned());
     let content_length = find("content-length").and_then(|v| v.parse().ok());
     let chunked = find("transfer-encoding").is_some_and(|v| v.to_ascii_lowercase().contains("chunked"));
+    // Two framings are two readings of where the body ends: this socket would take the length and the engine
+    // the chunks, and what lies between the two is a request the engine reads on its own. Refused here, before
+    // a byte of it crosses, since no client of the engine sends both.
+    if content_length.is_some() && chunked {
+        return Err("a request frames its body with a length or with chunks and not both, and this one carries both".into());
+    }
     Ok(Head { method, path, headers, content_length, chunked })
 }
 
@@ -796,13 +829,20 @@ fn response_head(head: &[u8]) -> Result<Answer, String> {
     Ok(Answer { status, raw, head: out.into_bytes() })
 }
 
+/// The size a chunked body's size line names, its extension after a semicolon dropped; none where the line is no
+/// size at all. One reader, since the fence reads a chunked body of the engine's own and copies one of a
+/// client's, and a size read two ways is a body framed two ways.
+fn chunk_size(line: &[u8]) -> Option<usize> {
+    let text = String::from_utf8_lossy(line);
+    usize::from_str_radix(text.split(';').next().unwrap_or("").trim(), 16).ok()
+}
+
 fn dechunk(body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut at = 0;
     while at < body.len() {
         let Some(line_end) = body[at..].windows(2).position(|w| w == b"\r\n") else { break };
-        let size_text = String::from_utf8_lossy(&body[at..at + line_end]);
-        let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+        let size = chunk_size(&body[at..at + line_end]).unwrap_or(0);
         at += line_end + 2;
         if size == 0 {
             break;
@@ -893,11 +933,17 @@ enum Owned {
 /// which is what tells one workspace's from another's.
 async fn owned(fence: &Fence, path: &str) -> Result<(Owned, Value), Error> {
     let (status, inspect) = ask(&fence.engine, "GET", path, None).await?;
-    if status != 200 {
-        return Ok((Owned::Nothing, inspect));
+    // Nothing means the fence may make one under that name, so nothing is the engine's own word for it and no
+    // other: an engine that answered anything else was not asked, and a create that read it as nothing would
+    // make a volume on a name a sibling already holds and attach the sibling's.
+    match status {
+        200 => {
+            let ours = inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str());
+            Ok((if ours { Owned::Ours } else { Owned::Another }, inspect))
+        }
+        404 => Ok((Owned::Nothing, inspect)),
+        other => Err(Error(format!("the engine answered {other} for {path}"))),
     }
-    let ours = inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str());
-    Ok((if ours { Owned::Ours } else { Owned::Another }, inspect))
 }
 
 async fn owned_network(fence: &Fence, id: &str) -> Result<(Owned, Value), Error> {
@@ -911,7 +957,7 @@ async fn held_volume(fence: &Fence, name: &str) -> Result<Owned, Error> {
 /// The bridge the engine was told to make, proven to be on the box and carrying its rule. Where it is not, the
 /// network goes again rather than standing outside every rule that keeps a workspace off the box.
 async fn bridge_stands(fence: &Fence, answer: &Value, bridge: &str) -> Result<(), String> {
-    if fence.bridges.made(&fence.workspace, bridge) {
+    if fence.hooks.bridges.made(&fence.workspace, bridge) {
         return Ok(());
     }
     if let Some(id) = answer.get("Id").and_then(Value::as_str) {
@@ -922,8 +968,8 @@ async fn bridge_stands(fence: &Fence, answer: &Value, bridge: &str) -> Result<()
 
 /// The workspace's own default network, made the first time a container of it asks for no network of its own.
 async fn make_default_network(fence: &Fence, name: &str) -> Result<(), Error> {
-    let mut body = json!({ "Name": name });
-    let bridge = fence_network_create(&mut body, &fence.workspace).map_err(Error)?;
+    let mut body = json!({ "Name": name, "EnableIPv6": false });
+    let bridge = name_the_bridge(&mut body, &fence.workspace).map_err(Error)?;
     label_create(&mut body, &fence.workspace).map_err(Error)?;
     let (status, answer) = ask(&fence.engine, "POST", "/networks/create", Some(&body)).await?;
     if status != 201 {
@@ -1014,13 +1060,13 @@ impl<'a, S: AsyncRead + Unpin> Held<'a, S> {
         Ok(())
     }
 
-    /// The next line with its own newline, written on to the engine and answered.
-    async fn copy_line<W: AsyncWrite + Unpin>(&mut self, engine: &mut W) -> Result<Vec<u8>, String> {
+    /// The next line with its own newline. Read and answered, never written on: a line the caller refuses is a
+    /// line the engine must not have seen.
+    async fn line(&mut self) -> Result<Vec<u8>, String> {
         loop {
             if let Some(end) = self.rest().windows(2).position(|w| w == b"\r\n") {
                 let line = self.bytes[self.at..self.at + end + 2].to_vec();
                 self.at += end + 2;
-                engine.write_all(&line).await.map_err(|e| e.to_string())?;
                 return Ok(line);
             }
             if self.rest().len() > HEAD_MAX {
@@ -1050,17 +1096,25 @@ async fn copy_body<S: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         return Ok(());
     }
     loop {
-        let line = held.copy_line(engine).await?;
-        let text = String::from_utf8_lossy(&line);
-        let word = text.split(';').next().unwrap_or("").trim();
-        let size = usize::from_str_radix(word, 16).map_err(|_| format!("a chunk size this socket cannot read: {word}"))?;
+        // Read, then written: a size line this socket cannot read ends the request here rather than at the
+        // engine, which would have the bytes behind it already.
+        let line = held.line().await?;
+        let Some(size) = chunk_size(&line) else {
+            return Err(format!("a chunk size this socket cannot read: {}", String::from_utf8_lossy(&line).trim()));
+        };
+        engine.write_all(&line).await.map_err(|e| e.to_string())?;
         if size == 0 {
             break;
         }
         held.copy(engine, size + 2).await?;
     }
-    while held.copy_line(engine).await? != b"\r\n" {}
-    Ok(())
+    loop {
+        let line = held.line().await?;
+        engine.write_all(&line).await.map_err(|e| e.to_string())?;
+        if line == b"\r\n" {
+            return Ok(());
+        }
+    }
 }
 
 async fn read_body<S: AsyncRead + Unpin>(stream: &mut S, head: &Head, mut rest: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -1261,7 +1315,7 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                 return match ask(&fence.engine, "DELETE", &head.path, None).await {
                     Ok((204, _)) => {
                         if !bridge.is_empty() {
-                            fence.bridges.gone(&fence.workspace, &bridge);
+                            fence.hooks.bridges.gone(&fence.workspace, &bridge);
                         }
                         Verdict::Answer(format!("HTTP/1.1 204 {}\r\nConnection: close\r\n\r\n", reason(204)).into_bytes())
                     }
@@ -1351,6 +1405,12 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
             return Ok(());
         }
     };
+    // A hijack route the engine answered without handing the connection over is one answer like any other, and
+    // its connection was never told to close: ending this side here is what keeps the engine from reading
+    // anything behind the body as a request of its own, and what ends the wait on a close that never comes.
+    if hijacks && !answer.raw {
+        let _ = engine.shutdown().await;
+    }
     client.write_all(&answer.head).await?;
     client.write_all(&answer_rest).await?;
     if hijacks && answer.raw {
@@ -1362,7 +1422,7 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
     if let (Some(id), 204) = (started, answer.status) {
         if let Ok(Some(inspect)) = owned_container(&fence, &id).await {
             for (inside, box_port) in published_ports(&inspect) {
-                fence.ports.published(&fence.workspace, inside, box_port);
+                fence.hooks.ports.published(&fence.workspace, inside, box_port);
             }
         }
     }
@@ -1646,6 +1706,14 @@ mod tests {
             made(&mut json!({ "Name": "n", "EnableIPv6": true })).unwrap_err(),
             "a workspace's network carries IPv4 alone; EnableIPv6 is refused"
         );
+        // Written into the body, since a box whose engine turns it on by default would hand the bridge a range
+        // the table that fences a workspace never sees.
+        assert_eq!(plain["EnableIPv6"], false);
+        // A name under this computer's own prefix is a name a sibling's network may hold, which would refuse
+        // every plain container that sibling starts.
+        let taken = made(&mut json!({ "Name": "wsp-wsp-b" })).unwrap_err();
+        assert_eq!(taken, "a name beginning wsp- is this computer's own; a workspace's network takes another, and wsp-wsp-b is refused");
+        assert!(made(&mut json!({ "Name": "wsp" })).is_ok(), "a name that is not under the prefix passes");
         // A subnet inside the workspaces' range, and one that holds the whole of it.
         for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
             let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();
@@ -1705,46 +1773,51 @@ mod tests {
         std::os::unix::fs::symlink("/", rootfs.join("wsp/projects/demo/escape")).unwrap();
         std::os::unix::fs::symlink("elsewhere", on_box.join("link")).unwrap();
         let roots = vec![("/wsp/projects/demo".to_owned(), on_box.clone())];
-        let map = |at: usize, source: &str| map_bind(&rootfs, &roots, &binds, at, source);
+        let map = |at: &str, source: &str| map_bind(&rootfs, &roots, &binds, at, source);
 
-        let staged = map(0, "/wsp/projects/demo/html").unwrap();
-        assert_eq!(staged.at, binds.join("0"), "the engine is handed the staging entry");
+        let staged = map("life-0", "/wsp/projects/demo/html").unwrap();
+        assert_eq!(staged.at, binds.join("life-0"), "the engine is handed the staging entry");
         assert!(staged.at.is_dir() && !staged.at.starts_with(&on_box), "{}", staged.at.display());
-        assert_eq!(map(1, "/wsp/projects/demo").unwrap().at, binds.join("1"), "the project folder itself is a source");
+        assert_eq!(map("life-1", "/wsp/projects/demo").unwrap().at, binds.join("life-1"), "the project folder itself is a source");
+        // A life of its own in the name: the entries of the life before are still there and still mounted, so
+        // a container the engine holds from then starts on the source it was given.
+        assert_eq!(map("next-0", "/wsp/projects/demo/html").unwrap().at, binds.join("next-0"));
+        assert!(binds.join("life-0").is_dir(), "an earlier life's entry went");
         // A link met on the rootfs side, and one met on the box side behind a path the rootfs side holds whole.
         for through in ["/wsp/projects/demo/escape", "/wsp/projects/demo/link/x"] {
-            let refused = map(2, through).unwrap_err();
+            let refused = map("x", through).unwrap_err();
             assert_eq!(
                 refused,
                 format!("{through} is reached through a link inside the workspace, and a container binds nothing through a link")
             );
         }
-        let outside = map(2, "/").unwrap_err();
+        let outside = map("x", "/").unwrap_err();
         assert_eq!(outside, "a bind mount's source must sit under a project folder of this workspace (/wsp/projects/demo), and / does not");
-        assert!(map(2, "/etc").unwrap_err().contains("and /etc does not"));
-        assert!(map(2, "/root/other").unwrap_err().contains("and /root/other does not"));
+        assert!(map("x", "/etc").unwrap_err().contains("and /etc does not"));
+        assert!(map("x", "/root/other").unwrap_err().contains("and /root/other does not"));
         // A name that merely begins with the folder's own is not under it.
-        assert!(map(2, "/wsp/projects/demoted").unwrap_err().contains("and /wsp/projects/demoted does not"));
-        assert!(map(2, "/wsp/projects/demo/missing").unwrap_err().contains("is not there in the workspace"));
-        assert!(map(2, "relative").unwrap_err().contains("absolute path"));
-        assert!(map(2, "/wsp/projects/demo/../../etc").unwrap_err().contains("absolute path"));
+        assert!(map("x", "/wsp/projects/demoted").unwrap_err().contains("and /wsp/projects/demoted does not"));
+        assert!(map("x", "/wsp/projects/demo/missing").unwrap_err().contains("is not there in the workspace"));
+        assert!(map("x", "relative").unwrap_err().contains("absolute path"));
+        assert!(map("x", "/wsp/projects/demo/../../etc").unwrap_err().contains("absolute path"));
         // The roots file the workspace owns says nothing here, however it is written.
         fs::write(rootfs.join("root/.wsp/roots"), "/\n/etc\n").unwrap();
-        assert!(map(2, "/etc").unwrap_err().contains("and /etc does not"));
+        assert!(map("x", "/etc").unwrap_err().contains("and /etc does not"));
         // A workspace the record gives no folder binds nothing at all.
-        let none = map_bind(&rootfs, &[], &binds, 2, "/wsp/projects/demo/html").unwrap_err();
+        let none = map_bind(&rootfs, &[], &binds, "x", "/wsp/projects/demo/html").unwrap_err();
         assert!(none.contains("no project folder yet"), "{none}");
 
         let next = std::sync::atomic::AtomicUsize::new(3);
-        let mapped = |source: &str| map(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed), source).map(|staged| staged.at);
+        let entry = || format!("life-{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let mapped = |source: &str| map(&entry(), source).map(|staged| staged.at);
         let mut body = json!({ "Image": "alpine", "HostConfig": { "Binds": ["/:/host"] } });
         assert_eq!(fence_create(&mut body, "w", &mapped).unwrap_err(), outside);
         let mut mount = json!({ "Image": "alpine", "HostConfig": { "Mounts": [{ "Type": "bind", "Source": "/etc", "Target": "/x" }] }});
         assert!(fence_create(&mut mount, "w", &mapped).unwrap_err().contains("and /etc does not"));
         let mut fine = json!({ "Image": "alpine", "HostConfig": { "Binds": ["/wsp/projects/demo/html:/usr/share/nginx/html:ro"] } });
-        let entry = next.load(std::sync::atomic::Ordering::Relaxed);
+        let at = format!("life-{}", next.load(std::sync::atomic::Ordering::Relaxed));
         fence_create(&mut fine, "w", &mapped).unwrap();
-        assert_eq!(fine["HostConfig"]["Binds"][0], format!("{}:/usr/share/nginx/html:ro", binds.join(entry.to_string()).display()));
+        assert_eq!(fine["HostConfig"]["Binds"][0], format!("{}:/usr/share/nginx/html:ro", binds.join(at).display()));
     }
 
     #[test]
@@ -1892,6 +1965,31 @@ mod tests {
         assert!(parse_request(b"garbage\r\n\r\n").is_err());
     }
 
+    /// A head that frames its body twice is refused before a byte of it crosses: this socket would read the
+    /// length and the engine the chunks, and what lies between the two readings is a request the engine reads
+    /// on its own.
+    #[test]
+    fn a_request_framed_both_ways_is_refused_at_its_head() {
+        let smuggling =
+            parse_request(b"POST /v1.55/exec/e/start HTTP/1.1\r\nHost: docker\r\nContent-Length: 66\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .unwrap_err();
+        assert_eq!(smuggling, "a request frames its body with a length or with chunks and not both, and this one carries both");
+        assert!(parse_request(b"POST /x HTTP/1.1\r\nHost: docker\r\nContent-Length: 2\r\n\r\n").is_ok());
+        assert!(parse_request(b"POST /x HTTP/1.1\r\nHost: docker\r\nTransfer-Encoding: chunked\r\n\r\n").is_ok());
+    }
+
+    /// One reader of a chunked body's size line, for the fence's own asks and for a body it copies alike.
+    #[test]
+    fn a_chunk_size_line_reads_one_way() {
+        assert_eq!(chunk_size(b"1f4"), Some(500));
+        assert_eq!(chunk_size(b"5\r\n"), Some(5));
+        assert_eq!(chunk_size(b"a;name=value\r\n"), Some(10));
+        assert_eq!(chunk_size(b"0\r\n"), Some(0));
+        assert_eq!(chunk_size(b"GET /containers/json HTTP/1.1\r\n"), None);
+        assert_eq!(chunk_size(b"\r\n"), None);
+        assert_eq!(dechunk(b"5\r\nhello\r\n0\r\n\r\n"), b"hello");
+    }
+
     /// The two routes the engine may hand a connection over on, and the reading that an upgrade asked for on any
     /// other one is dropped from the head before it goes.
     #[test]
@@ -1948,11 +2046,13 @@ mod tests {
         let mut engine = Vec::new();
         copy_body(&mut client, &mut engine, &head, b"GET /containers/json HTTP/1.1\r\n\r\n".to_vec()).await.unwrap();
         assert!(engine.is_empty());
-        // A size line that is not a size ends the request rather than being passed on.
+        // A size line that is not a size ends the request rather than being passed on, and the engine has not
+        // seen the line: it is read before it is written.
         let head = framed("PUT", "Transfer-Encoding: chunked\r\n");
         let (mut client, _idle) = tokio::io::duplex(64);
         let mut engine = Vec::new();
         let refused = copy_body(&mut client, &mut engine, &head, b"nonsense\r\n".to_vec()).await.unwrap_err();
         assert!(refused.contains("a chunk size this socket cannot read"), "{refused}");
+        assert!(engine.is_empty(), "the line reached the engine before it was read: {engine:?}");
     }
 }

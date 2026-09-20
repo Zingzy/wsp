@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use wsp_runtime::engine::{self, Bridges, Fence, Ports, LABEL, PORTS_LABEL};
+use wsp_runtime::engine::{self, Bridges, Fence, Hooks, Ports, LABEL, PORTS_LABEL};
 
 const WORKSPACE: &str = "wsp-a";
 
@@ -129,6 +129,11 @@ fn answer(method: &str, path: &str) -> Vec<u8> {
         },
         ["networks", "create"] if method == "POST" => json_response(201, &json!({ "Id": "netours-made", "Warning": "" })),
         ["networks", _] if method == "DELETE" => b"HTTP/1.1 204 No Content\r\n\r\n".to_vec(),
+        // An inspect the engine did not answer: a status that is neither 200 nor 404 says nothing about whose
+        // the name is, and a fence that read it as nothing would make one over it.
+        ["volumes", name] if method == "GET" && name.starts_with("volbroken") => {
+            json_response(500, &json!({ "message": "the engine is unwell" }))
+        }
         ["networks", id] if method == "GET" => match owner(id.trim_start_matches("net")) {
             Some(w) => json_response(
                 200,
@@ -149,19 +154,30 @@ fn answer(method: &str, path: &str) -> Vec<u8> {
     }
 }
 
-/// Whether the request is one the engine hands the connection over on: a client that asked to upgrade gets a
-/// 101, and an exec start that asked for nothing gets the 200 raw stream the engine answers instead.
-fn hands_over(seen: &Seen) -> Option<&'static [u8]> {
+/// What the fake engine does with one request.
+enum Answered {
+    /// The connection is handed over: a 101 to a client that asked to upgrade, and the raw stream under a 200
+    /// the engine answers an exec start that asked for nothing.
+    HandsOver(&'static [u8]),
+    /// One answer, and the connection left open as a keep-alive engine leaves it: what a detached exec start
+    /// gets, and the shape a fence that never ends its side would wait on for ever.
+    KeepsAlive(Vec<u8>),
+    /// One answer and the connection closed.
+    Closes(Vec<u8>),
+}
+
+fn answered(seen: &Seen) -> Answered {
     if seen.header("upgrade") == Some("tcp") {
-        return Some(
+        return Answered::HandsOver(
             b"HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n",
         );
     }
     let bare = seen.path.split('?').next().unwrap();
     let segments: Vec<&str> = bare.trim_start_matches("/v1.55").split('/').filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
-        ["exec", _, "start"] => Some(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.multiplexed-stream\r\n\r\n"),
-        _ => None,
+        ["exec", _, "start"] if seen.body.contains("\"Detach\":true") => Answered::KeepsAlive(json_response(200, &json!({ "ok": true }))),
+        ["exec", _, "start"] => Answered::HandsOver(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.multiplexed-stream\r\n\r\n"),
+        _ => Answered::Closes(answer(&seen.method, &seen.path)),
     }
 }
 
@@ -178,20 +194,30 @@ fn fake_engine(dir: &Path) -> (PathBuf, Record) {
             tokio::spawn(async move {
                 let request = read_request(&mut stream).await;
                 record.lock().unwrap().push(request.clone());
-                if let Some(head) = hands_over(&request) {
-                    stream.write_all(head).await.unwrap();
-                    let mut buf = [0u8; 1024];
-                    while let Ok(n) = stream.read(&mut buf).await {
-                        if n == 0 {
-                            break;
+                match answered(&request) {
+                    Answered::HandsOver(head) => {
+                        stream.write_all(head).await.unwrap();
+                        let mut buf = [0u8; 1024];
+                        while let Ok(n) = stream.read(&mut buf).await {
+                            if n == 0 {
+                                break;
+                            }
+                            let echoed = format!("echo:{}", String::from_utf8_lossy(&buf[..n]));
+                            stream.write_all(echoed.as_bytes()).await.unwrap();
                         }
-                        let echoed = format!("echo:{}", String::from_utf8_lossy(&buf[..n]));
-                        stream.write_all(echoed.as_bytes()).await.unwrap();
                     }
-                    return;
+                    Answered::KeepsAlive(head) => {
+                        stream.write_all(&head).await.unwrap();
+                        // Read on as a keep-alive engine does, and close where the other side ends its own.
+                        let mut buf = [0u8; 1024];
+                        while stream.read(&mut buf).await.is_ok_and(|n| n > 0) {}
+                        let _ = stream.shutdown().await;
+                    }
+                    Answered::Closes(head) => {
+                        stream.write_all(&head).await.unwrap();
+                        let _ = stream.shutdown().await;
+                    }
                 }
-                stream.write_all(&answer(&request.method, &request.path)).await.unwrap();
-                let _ = stream.shutdown().await;
             });
         }
     });
@@ -251,8 +277,8 @@ fn world() -> World {
         vec![("/root/demo".to_owned(), on_box)],
         binds,
         engine,
-        Arc::clone(&joined) as Arc<dyn Ports>,
-        Arc::clone(&bridged) as Arc<dyn Bridges>,
+        Hooks { ports: Arc::clone(&joined) as Arc<dyn Ports>, bridges: Arc::clone(&bridged) as Arc<dyn Bridges> },
+        "life".into(),
     );
     tokio::spawn(engine::serve(listener, Arc::new(fence)));
     World { socket: dir.path().join("ws").join(engine::SOCKET_NAME), seen, joined, bridged, _dir: dir }
@@ -856,4 +882,67 @@ async fn a_container_on_no_named_network_joins_the_workspaces_own() {
     assert_eq!(status, 200);
     let sent = w.reached().into_iter().rfind(|r| r.path.starts_with("/v1.55/containers/create")).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&sent.body).unwrap()["HostConfig"]["NetworkMode"], "none");
+}
+
+/// The smuggling shape the cold review named: a request framed by a length and by chunks at once is read one
+/// way here and the other way by the engine, and what lies between the two readings is a request the engine
+/// answers on its own. Refused at the head, so neither the request nor what rides behind it crosses.
+#[tokio::test]
+async fn a_request_framed_both_ways_is_refused_before_a_byte_crosses() {
+    let w = world();
+    let smuggled = "GET /v1.55/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n";
+    let body = format!("0\r\n\r\n{smuggled}");
+    let request = format!(
+        "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: {}\r\nTransfer-Encoding: chunked\r\n\r\n{body}",
+        body.len()
+    );
+    let answered = String::from_utf8(w.raw(request.as_bytes()).await).unwrap();
+    assert!(answered.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{answered}");
+    assert!(answered.contains("with a length or with chunks and not both"), "{answered}");
+    assert!(w.engine_saw("POST", "/v1.55/exec/execours1/start").is_none(), "{:?}", w.reached());
+    assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
+    assert!(w.reached().is_empty(), "{:?}", w.reached());
+}
+
+/// A hijack route the engine answered without handing the connection over, which is what a detached exec start
+/// gets: the answer is one answer, this side of the engine's connection ends with it, and nothing waits on a
+/// close the engine was never told to make.
+#[tokio::test]
+async fn a_hijack_route_the_engine_did_not_hand_over_ends_the_engines_connection() {
+    let w = world();
+    let body = r#"{"Detach":true,"Tty":false}"#;
+    let request = format!(
+        "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let answered = tokio::time::timeout(std::time::Duration::from_secs(10), w.raw(request.as_bytes()))
+        .await
+        .expect("the engine's connection was never ended, so the answer never came back");
+    let answered = String::from_utf8(answered).unwrap();
+    assert!(answered.starts_with("HTTP/1.1 200 OK\r\n"), "{answered}");
+    assert_eq!(w.engine_saw("POST", "/v1.55/exec/execours1/start").unwrap().body, body);
+}
+
+/// An inspect the engine answered neither 200 nor 404 to says nothing about whose a name is: the create fails
+/// rather than reading it as a name nothing holds and making one over it.
+#[tokio::test]
+async fn a_volume_the_engine_would_not_answer_for_fails_the_create() {
+    let w = world();
+    let body = json!({ "Image": "alpine", "HostConfig": { "Binds": ["volbroken1:/var/lib/data"] } });
+    let (status, _, answered) = w.call("POST", "/v1.55/containers/create", Some(&body)).await;
+    assert_eq!(status, 502, "{}", World::message(&answered));
+    assert!(World::message(&answered).contains("the engine answered 500"), "{}", World::message(&answered));
+    assert!(w.engine_saw("POST", "/volumes/create").is_none(), "a volume was made over a name the engine would not answer for");
+    assert!(w.engine_saw("POST", "/v1.55/containers/create").is_none(), "{:?}", w.reached());
+}
+
+/// A network named under this computer's own prefix is a name a sibling's network may already hold, and taking
+/// it would refuse every plain container that sibling starts.
+#[tokio::test]
+async fn a_network_named_under_this_computers_prefix_is_refused() {
+    let w = world();
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-wsp-other" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&answered));
+    assert!(World::message(&answered).contains("is this computer's own"), "{}", World::message(&answered));
+    assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
 }
