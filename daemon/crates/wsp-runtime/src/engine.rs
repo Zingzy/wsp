@@ -105,8 +105,10 @@ pub enum Route {
     Create,
     /// A listing, filtered to the workspace's label: containers, networks, volumes, events.
     List,
-    /// A network or volume create: labelled.
-    Labelled,
+    /// A network create: fenced and labelled.
+    NetworkCreate,
+    /// A volume create: fenced and labelled.
+    VolumeCreate,
     /// A route naming one container, which must be the workspace's; `verb` is what follows the id.
     Container {
         id: String,
@@ -166,10 +168,10 @@ pub fn route(method: &str, path: &str) -> Route {
         (Some("containers"), Some(id), verb) => Route::Container { id: id.to_owned(), verb: verb.map(str::to_owned) },
         (Some("exec"), Some(id), verb) => Route::Exec { id: id.to_owned(), verb: verb.map(str::to_owned) },
         (Some("networks"), None, _) => Route::List,
-        (Some("networks"), Some("create"), None) if method == "POST" => Route::Labelled,
+        (Some("networks"), Some("create"), None) if method == "POST" => Route::NetworkCreate,
         (Some("networks"), Some(id), verb) => Route::Network { id: id.to_owned(), verb: verb.map(str::to_owned) },
         (Some("volumes"), None, _) => Route::List,
-        (Some("volumes"), Some("create"), None) if method == "POST" => Route::Labelled,
+        (Some("volumes"), Some("create"), None) if method == "POST" => Route::VolumeCreate,
         (Some("volumes"), Some(name), None) => Route::Volume { name: name.to_owned() },
         _ => Route::Refused(not_served(bare)),
     }
@@ -276,10 +278,20 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
     let mut mounts = Vec::new();
     for mount in host.get("Mounts").and_then(Value::as_array).into_iter().flatten() {
         let mut mount = mount.clone();
-        if mount.get("Type").and_then(Value::as_str) == Some("bind") {
-            let source = word(mount.get("Source")).to_owned();
-            let mapped = map_bind(&source)?;
-            mount["Source"] = Value::String(mapped.display().to_string());
+        match word(mount.get("Type")) {
+            "bind" => {
+                let source = word(mount.get("Source")).to_owned();
+                let mapped = map_bind(&source)?;
+                mount["Source"] = Value::String(mapped.display().to_string());
+            }
+            "volume" => {
+                let config = mount.pointer("/VolumeOptions/DriverConfig");
+                plain_volume(word(config.and_then(|c| c.get("Name"))), config.and_then(|c| c.get("Options")))?;
+            }
+            "tmpfs" => {}
+            other => {
+                return Err(format!("a workspace's container mounts a bind, a volume or a tmpfs; a mount of kind {other:?} is refused"))
+            }
         }
         mounts.push(mount);
     }
@@ -333,6 +345,22 @@ fn ports_of_word(word: &str) -> BTreeMap<String, u16> {
             Some((port.to_owned(), asked.parse().ok()?))
         })
         .collect()
+}
+
+/// A volume a workspace makes is the engine's own plain local volume: another driver, or a driver option, names
+/// a path or a server of the box's, and the rootful engine mounts it for the workspace wherever it points. Read
+/// off a volume create and off the driver config a container create may carry inline, which are the two roads to
+/// the same mount.
+fn plain_volume(driver: &str, options: Option<&Value>) -> Result<(), String> {
+    let keys: Vec<&str> = options.and_then(Value::as_object).map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+    let asked = if !keys.is_empty() {
+        format!("driver options ({})", keys.join(", "))
+    } else if matches!(driver, "" | "local") {
+        return Ok(());
+    } else {
+        format!("the driver {driver}")
+    };
+    Err(format!("a workspace's volume is a plain local volume, and this one asks for {asked}"))
 }
 
 /// The fence over an exec create: a privileged exec is root on the box as a privileged container is.
@@ -854,12 +882,17 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
             let text = body.to_string().into_bytes();
             Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
         }
-        Route::Labelled => {
+        kind @ (Route::NetworkCreate | Route::VolumeCreate) => {
             let body = match read_body(stream, head, rest).await.and_then(|b| json_body(&b)) {
                 Ok(body) => body,
                 Err(e) => return Verdict::Answer(json_message(400, &e)),
             };
             let mut body = body;
+            if kind == Route::VolumeCreate {
+                if let Err(sentence) = plain_volume(word(body.get("Driver")), body.get("DriverOpts")) {
+                    return refused(sentence);
+                }
+            }
             if let Err(e) = label_create(&mut body, &fence.workspace) {
                 return Verdict::Answer(json_message(400, &e));
             }
@@ -1125,8 +1158,8 @@ mod tests {
         assert_eq!(route("GET", "/v1.55/networks"), Route::List);
         assert_eq!(route("GET", "/v1.55/volumes"), Route::List);
         assert_eq!(route("GET", "/v1.55/events?since=1"), Route::List);
-        assert_eq!(route("POST", "/v1.55/networks/create"), Route::Labelled);
-        assert_eq!(route("POST", "/v1.55/volumes/create"), Route::Labelled);
+        assert_eq!(route("POST", "/v1.55/networks/create"), Route::NetworkCreate);
+        assert_eq!(route("POST", "/v1.55/volumes/create"), Route::VolumeCreate);
         assert_eq!(route("POST", "/v1.55/containers/abc/start"), Route::Container { id: "abc".into(), verb: Some("start".into()) });
         assert_eq!(route("DELETE", "/v1.55/containers/abc?force=1"), Route::Container { id: "abc".into(), verb: None });
         assert_eq!(route("GET", "/v1.55/containers/abc/logs?follow=1"), Route::Container { id: "abc".into(), verb: Some("logs".into()) });
@@ -1293,6 +1326,47 @@ mod tests {
         let mut volume = json!({ "Name": "data", "Labels": null });
         label_create(&mut volume, "wsp-a").unwrap();
         assert_eq!(volume["Labels"][LABEL], "wsp-a");
+    }
+
+    /// A volume the fence lets a workspace make reaches nothing of the box's: a local volume with a device and a
+    /// bind option is how the box's own /etc is mounted into a container, and an inline driver config on a
+    /// container create is the same road by another door.
+    #[test]
+    fn a_volume_carrying_a_driver_or_driver_options_is_refused() {
+        let refused = plain_volume("local", Some(&json!({ "type": "none", "device": "/etc", "o": "bind" }))).unwrap_err();
+        assert_eq!(refused, "a workspace's volume is a plain local volume, and this one asks for driver options (device, o, type)");
+        assert_eq!(
+            plain_volume("nfs", None).unwrap_err(),
+            "a workspace's volume is a plain local volume, and this one asks for the driver nfs"
+        );
+        assert!(plain_volume("", None).is_ok() && plain_volume("local", None).is_ok());
+        assert!(plain_volume("local", Some(&json!({}))).is_ok(), "an empty options object asks for nothing");
+        let inline = json!({
+            "Image": "alpine",
+            "HostConfig": { "Mounts": [{
+                "Type": "volume",
+                "Source": "data",
+                "Target": "/data",
+                "VolumeOptions": { "DriverConfig": { "Name": "local", "Options": { "device": "/etc", "o": "bind", "type": "none" } } }
+            }] }
+        });
+        let mut inline = inline;
+        assert_eq!(fence_create(&mut inline, "w", &no_binds).unwrap_err(), refused);
+        let mut npipe = json!({ "Image": "alpine", "HostConfig": { "Mounts": [{ "Type": "npipe", "Target": "/x" }] } });
+        assert_eq!(
+            fence_create(&mut npipe, "w", &no_binds).unwrap_err(),
+            "a workspace's container mounts a bind, a volume or a tmpfs; a mount of kind \"npipe\" is refused"
+        );
+        let mut missing = json!({ "Image": "alpine", "HostConfig": { "Mounts": [{ "Target": "/x" }] } });
+        assert!(fence_create(&mut missing, "w", &no_binds).unwrap_err().contains("a mount of kind \"\" is refused"));
+        let mut fine = json!({
+            "Image": "alpine",
+            "HostConfig": { "Mounts": [
+                { "Type": "tmpfs", "Target": "/scratch" },
+                { "Type": "volume", "Source": "data", "Target": "/data" }
+            ] }
+        });
+        assert!(fence_create(&mut fine, "w", &no_binds).is_ok());
     }
 
     #[test]

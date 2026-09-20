@@ -692,3 +692,25 @@ async fn a_followed_log_is_copied_back_and_nothing_behind_the_head_goes_to_the_e
     assert_eq!(logs.body, "");
     assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
 }
+
+/// The volume create the box's own /etc is mounted through: refused before the engine hears of it, and the
+/// plain create beside it still reaching the engine labelled.
+#[tokio::test]
+async fn a_volume_create_naming_a_driver_option_is_refused_and_never_reaches_the_engine() {
+    let w = world();
+    let evil = json!({ "Name": "evil", "Driver": "local", "DriverOpts": { "type": "none", "device": "/etc", "o": "bind" } });
+    let (status, _, body) = w.call("POST", "/v1.55/volumes/create", Some(&evil)).await;
+    assert_eq!(
+        (status, World::message(&body).as_str()),
+        (403, "a workspace's volume is a plain local volume, and this one asks for driver options (device, o, type)")
+    );
+    let (status, _, body) = w.call("POST", "/v1.55/volumes/create", Some(&json!({ "Name": "elsewhere", "Driver": "nfs" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&body));
+    assert!(w.engine_saw("POST", "/v1.55/volumes/create").is_none(), "{:?}", w.reached());
+    let (status, _, _) = w.call("POST", "/v1.55/volumes/create", Some(&json!({ "Name": "data" }))).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&w.engine_saw("POST", "/v1.55/volumes/create").unwrap().body).unwrap()["Labels"][LABEL],
+        WORKSPACE
+    );
+}
