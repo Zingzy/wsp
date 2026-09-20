@@ -6481,9 +6481,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         o.notify === undefined
           ? undefined
           : [...new Set(o.notify.map(target => (target === NOTIFY_ME && o.turnToken !== undefined ? threadOfToken(o.turnToken) : target)))];
+      // The tree a thread may tell: the root on the scope its own token carries, which is where every other reach
+      // reads it from, so a caller whose rows this host no longer holds cannot read itself as its own root. A
+      // thread of another tree reads as no thread at all, so a guest cannot tell a foreign thread from none. The
+      // one crossing this keeps is the shim's own `--notify me`, the lead of the same tree.
+      const callersRoot = scopeOf(origin)?.rootThreadId;
       for (const target of asked ?? []) {
         if (target === NOTIFY_ME) continue;
-        if (latestOn(target) === undefined) throw new Error(`no thread ${target} to notify`);
+        if (latestOn(target) === undefined || (callersRoot !== undefined && rootOf(target) !== callersRoot)) throw new Error(`no thread ${target} to notify`);
         if (target === threadId) throw new Error("a thread cannot notify itself");
         // Each end would start the next turn on the other thread with no one sending anything, so the chain is
         // walked whole; it is a lead and its builders, so it is short.
