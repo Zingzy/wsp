@@ -23,9 +23,8 @@ async function findKeys(statePath: string, sources?: KeySources): Promise<Loaded
 
 /** The state file read once before anything is made, then the runtime this window serves over: the provider picked
  * out of the environment the keys were read through, so a key in the .env beside that state file wires the same
- * module here as it does at a terminal. The read comes first because the wiring a runtime is built with mints this host's pairing
- * key beside the state file on its first read: an app of an older build opened on a state of a newer shape refuses
- * with nothing minted and nothing written. The store that read answers is handed on, so the file is read once. */
+ * module here as it does at a terminal. The read comes first for the reason readOnce carries, so an app of an older
+ * build opened on a state of a newer shape refuses with nothing minted, and the store it answers is handed on. */
 async function runtimeOf(opts: SetupOptions): Promise<Runtime> {
   const store = await readOnce(opts.statePath);
   const loaded = await findKeys(opts.statePath, opts.sources);

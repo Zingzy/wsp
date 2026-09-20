@@ -1218,9 +1218,11 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
 
 /** The state file read once, before anything else on this host reads it: a file written in a shape this build does
  * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
- * their own work, where one of them warns with the whole error and its stack behind a line of its own. Read here and
- * the refusal is this start's, thrown once and printed once, and the store is handed on so the file is not read
- * twice over. One reading, taken by wsp up and by the app's first launch before either makes a runtime. */
+ * their own work, where one of them warns with the whole error and its stack behind a line of its own. It comes
+ * before the wiring a runtime is built with, which mints this host's pairing key beside the state file on its own
+ * first read: a start refused here leaves the home as it found it. Read here, the refusal is this start's, thrown
+ * once and printed once, and the store is handed on so the file is not read twice over. One reading, taken by wsp
+ * up and by the app's first launch before either makes a runtime. */
 export async function readOnce(statePath: string): Promise<Store> {
   const store = jsonFileStore(statePath, stateWriterHere());
   await store.keys("workspaces");
@@ -1240,8 +1242,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
-  // Read before the wiring, which mints this host's pairing key beside the state file on its first read: a start
-  // that refuses a state file of a shape it does not read leaves the home as it found it.
+  // Read first, for the reason readOnce carries.
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
@@ -1467,9 +1468,11 @@ export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: Servic
   }
   await adoptLoginPath(line => io.log(line));
   // The layers this unit's host will read: the shell installing it, its folder, and the .env beside the state file
-  // the unit is being written to serve.
+  // the unit is being written to serve. The row is picked out of all three, as that host will pick it at its own
+  // start: read off the shell alone, this preflight would weigh a key for a provider the host it installs is not
+  // wired to, and let the one it is wired to go with the shell.
   const sources: KeySources = { ...deps.keys, statePath: opts.statePath };
-  const shellOnly = keyOnlyInThisShell(sources, providerEnvWith(opts, sources.env));
+  const shellOnly = keyOnlyInThisShell(sources, providerEnvWith(opts, sources.env, keyLayers(sources)));
   if (shellOnly !== undefined) {
     io.error(shellOnly);
     return 1;

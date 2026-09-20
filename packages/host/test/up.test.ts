@@ -7,6 +7,7 @@ import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, DEFAULT_PORT, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
 import { BOX_API_URL } from "@wsp/engine";
+import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
@@ -542,8 +543,11 @@ describe("wsp up", () => {
       mkdirSync(folder, { recursive: true });
       writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
       if (beside !== undefined) writeFileSync(join(folder, ".env"), beside);
-      // No key in this shell either: the home's file is the only one that holds one.
+      // Nothing of a provider in this shell either: the files are the only places a key or a pick is, so a shell
+      // that exported one cannot decide a case here.
       vi.stubEnv("SOLARI_API_KEY", undefined);
+      vi.stubEnv(BOX_KEY_ENV, undefined);
+      vi.stubEnv(PROVIDER_ENV, undefined);
       const dialled: string[] = [];
       vi.stubGlobal("fetch", (input: unknown) => {
         dialled.push(String(input));

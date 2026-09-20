@@ -29,6 +29,7 @@ import {
   type ServiceRunner,
 } from "../src/service.js";
 import { setDefaultHost, stateIgnoredLine, writeHost } from "../src/hosts.js";
+import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -549,6 +550,23 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(keyOnlyInThisShell({ env: { SOLARI_API_KEY: KEY }, cwd: home, statePath })).toBeDefined();
     keyInFile();
     expect(keyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
+  });
+
+  it("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
+    // The reading this is from: the pick written beside the state file said box, the box key was exported in the
+    // installing shell alone, and the preflight read the row off the shell, saw no provider and let the unit
+    // through. The host it started wired box, its key gone with the shell, and forked with an empty one.
+    const folder = join(home, "elsewhere");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
+    writeFileSync(join(folder, ".env"), `${PROVIDER_ENV}=box\n`);
+    vi.stubEnv(BOX_KEY_ENV, "box_fake_shell_key");
+    const fake = svc();
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO([], errors), { ...opts, statePath: join(folder, "state.json") }, fake.deps)).toBe(1);
+    expect(errors[0]).toContain(`${BOX_KEY_ENV} is only in this shell's environment`);
+    expect(errors[0]).toContain(`put it in ${join(folder, ".env")} first`);
+    expect(fake.ran).toEqual([]);
   });
 
   it("names the .env beside the state file the unit will serve, not the wsp home's", async () => {

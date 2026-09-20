@@ -15,7 +15,8 @@ import { createRuntime, localExecStream, memoryStore, type LocalWiring, type Run
 import { afterEach, describe, expect, it } from "vitest";
 import { ALSO_LOCAL_QUESTION } from "../src/init-first.js";
 import { hostPlatform } from "../src/verbs.js";
-import { runLocalInit, type LocalInitOptions } from "../src/init-local.js";
+import { noKeyLines, runLocalInit, type LocalInitOptions } from "../src/init-local.js";
+import { KEY_LAYER_WORDS } from "../src/env-keys.js";
 import type { InitIO } from "../src/init.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
@@ -137,6 +138,10 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
 }
 
 describe("wsp init with no provider key", () => {
+  it("names the file a key goes in with the one spelling every other line about those files uses", () => {
+    expect(noKeyLines("wsp up").join("\n")).toContain(KEY_LAYER_WORDS);
+  });
+
   it("says there is no provider before it does anything, makes this computer the workspace, and opens the app on it", async () => {
     const f = fake({ tty: true });
     const run = runLocalInit(f.opts, f.io);
