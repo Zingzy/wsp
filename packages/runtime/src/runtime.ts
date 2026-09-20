@@ -5753,6 +5753,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return found;
   };
+  /** Which threads a thread's own token reaches: the thread its turn runs on and the threads under that one,
+   * whatever workspace they share, so two trees on one workspace neither read nor drive each other and anything
+   * crossing between them goes through the person. A caller that is no thread reaches every thread this host
+   * holds; a row with no thread of its own is under nobody and is hidden from every thread. This sits beside the
+   * workspace rule rather than inside it: a workspace a thread may drive still holds threads it may not. */
+  const drivesThread = (threadId: string | undefined, caller: Caller | undefined): boolean => {
+    const scope = scopeOf(caller);
+    if (scope === undefined) return true;
+    if (threadId === undefined) return false;
+    return threadId === scope.threadId || treeUnder(scope.threadId).includes(threadId);
+  };
   /** What a thread is called, by the one rule every listing reads it by: its own rows folded, so a thread named in
    * another thread's row reads there exactly as it reads in the sidebar. */
   const threadTitle = (threadId: string): string => {
@@ -6428,6 +6439,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
       // two is what a thread's own token is capped on. Read before the machine is asked for anything.
       const opens = rowsOn(threadId).length === 0;
+      // A send goes into a thread the caller drives, read on the thread it lands in rather than on how it was
+      // named, so a harness session id given as resume reaches no more than the thread id would.
+      if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${threadId} on this workspace`);
       spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
@@ -6691,7 +6705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A listing that names a workspace refuses like any other verb naming one; a listing of them all leaves out
       // the rows the caller may not drive, as workspaces.list does.
       if (workspaceId !== undefined) refuseNamed(workspaceId, origin);
-      const all = [...sessions.values()].filter(s => drivesId(s.view.workspaceId, origin));
+      const all = [...sessions.values()].filter(s => drivesId(s.view.workspaceId, origin) && drivesThread(s.view.threadId, origin));
       const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
       const rows = held.map(s => s.view);
       // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that
@@ -6715,7 +6729,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async history(workspaceId, origin) {
       await entryOf(workspaceId, origin);
-      return (transcripts.get(workspaceId) ?? []).map(e => ({ ...e }));
+      return (transcripts.get(workspaceId) ?? []).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
     },
 
     async interrupt(sessionId, origin) {
@@ -6723,6 +6737,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       await entryOf(s.view.workspaceId, origin);
+      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
       // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
       // itself may already be over, which is an answer and not a reason to leave its builders running.
@@ -6740,6 +6755,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       const entry = await entryOf(s.view.workspaceId, origin);
+      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
@@ -6791,6 +6807,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!s) return { outcome: "not-found" };
       const harnessSessionId = s.view.claudeSessionId;
       const entry = await entryOf(s.view.workspaceId, origin);
+      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const write = adapterFor(entry, s.view.harness).adapter.renameSession;

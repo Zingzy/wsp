@@ -915,6 +915,61 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("a thread's own token drives its thread and the tree under it, and reads nothing else on the workspace they share", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 3 } });
+    // Three trees on one workspace: the person's own thread, the lead whose token every line below runs on, and a
+    // second lead the person opened beside it, which is the shape a box with two jobs on one machine has.
+    const mine = await rt.sessions.start(ws.id, { prompt: "the person's own" });
+    const mineThread = mine.view().threadId!;
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const other = await rt.sessions.start(ws.id, { prompt: "second lead" });
+    const otherThread = other.view().threadId!;
+    const child = await rt.sessions.start(ws.id, { prompt: "child" }, asThread(scope));
+    const childThread = child.view().threadId!;
+    const grand = await rt.sessions.start(ws.id, { prompt: "grandchild" }, asThread({ kind: "thread", threadId: childThread, workspaceId: ws.id, rootThreadId: rootThread }));
+    const grandThread = grand.view().threadId!;
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+
+    const tree = [rootThread, childThread, grandThread].sort();
+    expect((await rt.sessions.list(ws.id, asThread(scope))).map(v => v.threadId).sort()).toEqual(tree);
+    expect((await rt.sessions.list(undefined, asThread(scope))).map(v => v.threadId).sort()).toEqual(tree);
+    // The person reads every row, as they always did.
+    expect((await rt.sessions.list(ws.id)).map(v => v.threadId).sort()).toEqual([mineThread, otherThread, ...tree].sort());
+    // The transcript is read the same way: a thread is handed its own tree's rows and no other tree's.
+    expect([...new Set((await rt.sessions.history(ws.id, asThread(scope))).map(e => e.threadId))].sort()).toEqual(tree);
+    expect([...new Set((await rt.sessions.history(ws.id)).map(e => e.threadId))].sort()).toEqual([mineThread, otherThread, ...tree].sort());
+
+    // Another tree's row is absent on every verb, which is what a thread reads for a session that is not there.
+    for (const foreign of [mine, other]) {
+      expect(await rt.sessions.interrupt(foreign.id, asThread(scope))).toEqual({ outcome: "not-found" });
+      expect(await rt.sessions.steer(foreign.id, { prompt: "do this instead" }, asThread(scope))).toEqual({ outcome: "not-found" });
+      expect(await rt.sessions.rename(foreign.id, "mine now", asThread(scope))).toEqual({ outcome: "not-found" });
+    }
+    // A send into either is refused whether it names the thread or names the harness session that thread resumes.
+    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: mineThread }, asThread(scope))).rejects.toThrow(`no thread ${mineThread} on this workspace`);
+    await expect(rt.sessions.start(ws.id, { prompt: "hi", resume: other.view().claudeSessionId }, asThread(scope))).rejects.toThrow(`no thread ${otherThread} on this workspace`);
+    expect((await rt.sessions.list(ws.id)).filter(v => v.threadId === mineThread || v.threadId === otherThread).every(v => v.status !== "running")).toBe(true);
+
+    // Its own tree it drives, by thread id and by the session id a resume carries alike.
+    const carry = await rt.sessions.start(ws.id, { prompt: "carry on", thread: childThread }, asThread(scope));
+    expect(carry.view().threadId).toBe(childThread);
+    expect(await rt.sessions.steer(carry.id, { prompt: "and this" }, asThread(scope))).toEqual({ outcome: "unsupported" });
+    expect(await rt.sessions.rename(carry.id, "builder", asThread(scope))).toEqual({ outcome: "unsupported" });
+    expect((await rt.sessions.interrupt(carry.id, asThread(scope))).outcome).toBe("accepted");
+    const back = await rt.sessions.start(ws.id, { prompt: "and you", resume: grand.view().claudeSessionId }, asThread(scope));
+    expect(back.view().threadId).toBe(grandThread);
+    expect((await rt.sessions.interrupt(back.id, asThread(scope))).outcome).toBe("accepted");
+    // The person keeps every verb on every thread, the two the lead cannot see among them.
+    expect(await rt.sessions.rename(mine.id, "mine")).toEqual({ outcome: "unsupported" });
+    expect((await rt.sessions.start(ws.id, { prompt: "on you go", thread: otherThread })).view().threadId).toBe(otherThread);
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
   it("a thread's notify target is a thread of its own tree, and one outside it reads as no thread at all", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });

@@ -103,8 +103,14 @@ describe("the wsp skill", () => {
     expect(section).toContain("`wsp threads` (the `threads` tool) is where you find that id");
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
+    // Which threads that road reaches: the ones this caller started and the ones under those, and the person for
+    // anything else. A reader who takes the old promise still sends into a thread the host refuses.
+    expect(section).toContain("one you started or one under it");
+    expect(section).not.toContain("whoever opened it");
+    expect(section).toContain("goes to the person");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
     expect(INSTRUCTIONS).toContain("how one thread talks to another");
+    expect(INSTRUCTIONS).toContain("A thread reaches the threads it started and the threads under those, and nothing else");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
