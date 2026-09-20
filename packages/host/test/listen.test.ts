@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, API_UNAUTHORIZED, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -78,20 +78,63 @@ async function bootOf(port: number, headers: Record<string, string> = {}): Promi
 /** What the connector puts on every request it forwards, as a request that came in through the tunnel carries it. */
 const THROUGH_CONNECTOR = { "cf-connecting-ip": "203.0.113.7", "cf-ray": "8e0f4a1b2c3d4e5f-BOM" };
 
-/** The same reading down a raw socket, which is the only way to put a header on the wire in the capitals it was
- * written in. */
-async function rawBootOf(port: number, headers: Record<string, string>): Promise<BootPayload> {
-  const html = await new Promise<string>((done, fail) => {
-    const req = request({ host: "127.0.0.1", port, path: "/", headers }, res => {
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", chunk => (body += chunk));
-      res.once("end", () => done(body));
-    });
+/** A request down a raw socket, the only road that puts a header on the wire in the capitals it was written in and
+ * the only one that names a Host of its own, which fetch keeps for itself. */
+async function raw(port: number, opts: { method?: string; path?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; body: string }> {
+  const body = opts.body;
+  return new Promise((done, fail) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: opts.method ?? "GET",
+        path: opts.path ?? "/",
+        headers: { ...(body !== undefined ? { "content-type": "application/json", "content-length": Buffer.byteLength(body) } : {}), ...opts.headers },
+      },
+      res => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", chunk => (text += chunk));
+        res.once("end", () => done({ status: res.statusCode ?? 0, body: text }));
+      },
+    );
     req.once("error", fail);
+    if (body !== undefined) req.write(body);
     req.end();
   });
-  return JSON.parse(/<script>window\.__WSP__ = ([\s\S]*?);<\/script>/.exec(html)![1]!) as BootPayload;
+}
+
+/** The same reading down that socket. */
+async function rawBootOf(port: number, headers: Record<string, string>): Promise<BootPayload> {
+  const { body } = await raw(port, { headers });
+  return JSON.parse(/<script>window\.__WSP__ = ([\s\S]*?);<\/script>/.exec(body)![1]!) as BootPayload;
+}
+
+/** What a page's upgrade gets when this host refuses it: the socket never opens, so no frame of it is ever read. */
+async function upgradeRefused(url: string, origin: string): Promise<string> {
+  const ws = new WebSocket(url, { headers: { Origin: origin } });
+  return new Promise<string>((done, fail) => {
+    ws.once("error", (e: Error) => done(e.message));
+    ws.once("open", () => {
+      ws.close();
+      fail(new Error(`${url} opened for a page at ${origin}`));
+    });
+  });
+}
+
+/** And what it gets when the host takes it: an open socket the host token authenticates, as the app's own page has. */
+async function upgradeTaken(url: string, origin: string, token: string): Promise<boolean> {
+  const ws = new WebSocket(url, { headers: { Origin: origin } });
+  await new Promise<void>((done, fail) => {
+    ws.once("open", () => done());
+    ws.once("error", fail);
+  });
+  const reply = await new Promise<Record<string, unknown>>(done => {
+    ws.once("message", frame => done(JSON.parse(String(frame)) as Record<string, unknown>));
+    ws.send(JSON.stringify({ id: 1, op: "auth", token }));
+  });
+  ws.close();
+  return reply["ok"] === true;
 }
 
 /** Redeems a code the way a browser does: the first frame of a socket nothing authed, over the app's own port. */
@@ -157,6 +200,63 @@ describe("a host on this computer alone", () => {
       expect(reply["ok"], url).toBe(true);
       ws.close();
     }
+  });
+});
+
+describe("a page at a name this host does not answer at", () => {
+  it("reads no token out of the page and nothing off the JSON routes, though it reached the loopback port", async () => {
+    const { handle: h } = await up();
+    const foreignHost = { Host: `evil.example:${h.port}` };
+    const boot = await rawBootOf(h.port, foreignHost);
+    expect(boot.token).toBeUndefined();
+    expect(boot.paired).toBe(false);
+
+    const listed = await raw(h.port, { path: "/api/workspaces", headers: foreignHost });
+    expect(listed.status).toBe(401);
+    expect(JSON.parse(listed.body) as { error: string }).toEqual({ error: API_UNAUTHORIZED });
+  });
+
+  it("reads every loopback name as this computer, whatever port it names, and no other name as one", async () => {
+    const { handle: h } = await up();
+    for (const host of [`127.0.0.1:${h.port}`, `localhost:${h.port}`, `[::1]:${h.port}`, "127.0.0.1:54321"]) {
+      const boot = await rawBootOf(h.port, { Host: host });
+      expect(boot.token, host).toBe(h.authToken);
+      expect(boot.paired, host).toBe(true);
+    }
+    for (const host of [`evil.example:${h.port}`, "wsp.example", `[2001:db8::5]:${h.port}`]) {
+      const boot = await rawBootOf(h.port, { Host: host });
+      expect(boot.token, host).toBeUndefined();
+      expect(boot.paired, host).toBe(false);
+    }
+  });
+
+  it("refuses its upgrade before a frame of it is read, on the app's port and on the runtime's own", async () => {
+    const { handle: h } = await up();
+    const foreign = `http://evil.example:${h.port}`;
+    expect(await upgradeRefused(`ws://127.0.0.1:${h.port}${WS_PATH}`, foreign)).toContain("403");
+    expect(await upgradeRefused(`ws://127.0.0.1:${h.wsPort}`, foreign)).toMatch(/Unexpected server response/);
+
+    // The app's own page dials both ports from the one name it was served at, and both open as they always did.
+    const own = `http://127.0.0.1:${h.port}`;
+    expect(await upgradeTaken(`ws://127.0.0.1:${h.port}${WS_PATH}`, own, h.authToken)).toBe(true);
+    expect(await upgradeTaken(`ws://127.0.0.1:${h.wsPort}`, own, h.authToken)).toBe(true);
+  });
+
+  it("refuses its write with one sentence and creates nothing, where the app's own page and a tool still create", async () => {
+    const { handle: h, runtime } = await up();
+    await projectOn(runtime);
+    const body = JSON.stringify({ name: "never" });
+    const refused = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { Origin: "http://evil.example" }, body });
+    expect(refused.status).toBe(403);
+    expect(JSON.parse(refused.body) as { error: string }).toEqual({ error: crossOriginRefusal("http://evil.example", `127.0.0.1:${h.port}`) });
+    expect(await runtime.workspaces.list()).toEqual([]);
+
+    // The page at the name this host answers at, and the command line, which sends no Origin at all.
+    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { Origin: `http://127.0.0.1:${h.port}` }, body: JSON.stringify({ name: "from the page" }) });
+    expect(made.status).toBe(200);
+    const typed = await raw(h.port, { method: "POST", path: "/api/workspaces", body: JSON.stringify({ name: "from a tool" }) });
+    expect(typed.status).toBe(200);
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["from the page", "from a tool"]);
   });
 });
 
@@ -295,14 +395,15 @@ describe("the lock the host writes", () => {
 describe("a host on loopback that a relay carries traffic to", () => {
   /** A linked box serving its own loopback port, with the relay itself off: what decides here is what a request
    * carries, not whether the tunnel is up. */
-  async function linkedBox(tag: string): Promise<{ h: HostHandle; lines: string[] }> {
+  async function linkedBox(tag: string): Promise<{ h: HostHandle; lines: string[]; runtime: Runtime }> {
     const dir = mkdtempSync(join(tmpdir(), `wsp-listen-${tag}-`));
     dirs.push(dir);
     const statePath = join(dir, "state.json");
     writeRelayRecord(statePath, { relayUrl: "http://127.0.0.1:1", hostId: "h1", token: "relay-token", name: "box", linkedAt: new Date().toISOString() });
     const lines: string[] = [];
-    handle = await serve(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime() });
-    return { h: handle, lines };
+    const runtime = testRuntime();
+    handle = await serve(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime });
+    return { h: handle, lines, runtime };
   }
 
   it("serves its own computer's app the token in the page, exactly as it did before it was linked", async () => {
@@ -335,6 +436,21 @@ describe("a host on loopback that a relay carries traffic to", () => {
     expect(redeemed.deviceToken).toMatch(/\S/);
     const authed = await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { ...THROUGH_CONNECTOR, authorization: `Bearer ${redeemed.deviceToken!}` } });
     expect(authed.status).toBe(200);
+  });
+
+  it("takes a page at the relay's own name, which is the name that host was reached at, and no other", async () => {
+    const { h, runtime } = await linkedBox("relay-origin");
+    await projectOn(runtime);
+    const code = await pairCode(h.wsPort, h.authToken);
+    const { deviceToken } = await redeem(h.port, code);
+    const relayed = { ...THROUGH_CONNECTOR, Host: "h1.boxes.example", authorization: `Bearer ${deviceToken!}` };
+
+    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { ...relayed, Origin: "https://h1.boxes.example" }, body: JSON.stringify({ name: "over the relay" }) });
+    expect(made.status).toBe(200);
+
+    const refused = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { ...relayed, Origin: "https://evil.example" }, body: JSON.stringify({ name: "never" }) });
+    expect(refused.status).toBe(403);
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["over the relay"]);
   });
 
   it("says at start which requests pair and which open as before", async () => {
