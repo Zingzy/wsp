@@ -134,7 +134,7 @@ pub fn make_on(roads: &[&dyn CopyRoad], ask: &CopyAsk) -> Result<CopyReport, Str
             continue;
         }
         return match settle(road, to, &branch, &base, ask) {
-            Ok((sha, fetched, excluded)) => Ok(CopyReport {
+            Ok((sha, fetched, left)) => Ok(CopyReport {
                 road: road.name(),
                 path: ask.to.clone(),
                 base: sha,
@@ -144,7 +144,8 @@ pub fn make_on(roads: &[&dyn CopyRoad], ask: &CopyAsk) -> Result<CopyReport, Str
                 },
                 fetched,
                 carried: road.carried(),
-                excluded,
+                excluded: left.gone,
+                skipped: left.skipped,
                 bytes: walked.bytes,
                 ms: started.elapsed().as_millis() as u64,
                 fell_back: passed.first().cloned(),
@@ -161,17 +162,17 @@ pub fn make_on(roads: &[&dyn CopyRoad], ask: &CopyAsk) -> Result<CopyReport, Str
 /// The rules on a copy that has just been made: the path-bound directories out so they rebuild here, and then
 /// whatever the road says its copy still needs. The fetch runs in the copy's own git directory, so a copy starts
 /// level with the remote rather than behind the person's last pull.
-fn settle(road: &dyn CopyRoad, to: &Path, branch: &str, base: &str, ask: &CopyAsk) -> Result<(String, bool, Vec<String>), String> {
-    let excluded = rules::exclude(to, &ask.exclude)?;
+fn settle(road: &dyn CopyRoad, to: &Path, branch: &str, base: &str, ask: &CopyAsk) -> Result<(String, bool, rules::Excluded), String> {
+    let left = rules::exclude(to, &ask.exclude)?;
     if road.settling() == Settling::Made {
-        return Ok((base.to_owned(), false, excluded));
+        return Ok((base.to_owned(), false, left));
     }
     // A base the caller named is the base; the fetch only moves a copy that was going to take the folder's own
     // default branch.
     let fetched = if ask.base.is_none() { rules::fetch(to, branch) } else { None };
     let sha = fetched.clone().unwrap_or_else(|| base.to_owned());
     rules::reset_to(to, branch, &sha)?;
-    Ok((sha, fetched.is_some(), excluded))
+    Ok((sha, fetched.is_some(), left))
 }
 
 /// The roads this copy may take, in order: the one the caller named alone, or every road there is. A named road
@@ -378,6 +379,7 @@ mod tests {
         assert!(!report.fetched, "no remote, so no fetch landed");
         assert_eq!(report.carried, Carried::DepsAndConfig);
         assert_eq!(report.excluded, vec![".next".to_owned(), "node_modules/.cache".to_owned()]);
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
         assert_eq!(report.fell_back, None);
         assert!(report.bytes > 0);
         assert_eq!(std::fs::read_to_string(to.join("node_modules/dep.js")).unwrap(), "dep\n");
@@ -390,6 +392,31 @@ mod tests {
         assert!(from.join("scratch.txt").exists() && from.join(".next/server").exists());
         remove(&from, &to, report.road).unwrap();
         assert!(!to.exists());
+    }
+
+    /// A checkout carrying a link where a folder is meant to be: the copy stands, nothing beside the checkout is
+    /// removed, and the report names the row the exclusion left standing and why.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_copy_whose_excluded_row_runs_through_a_link_stands_and_the_report_says_which_row_was_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("work");
+        repo(&from);
+        let beside = dir.path().join("beside");
+        std::fs::create_dir_all(beside.join(".cache")).unwrap();
+        std::fs::write(beside.join(".cache/held"), b"outside the copy\n").unwrap();
+        std::os::unix::fs::symlink(&beside, from.join("node_modules")).unwrap();
+        std::fs::create_dir_all(from.join(".next/server")).unwrap();
+
+        let to = dir.path().join("work-other");
+        let report = make(&ask(&from, &to)).unwrap();
+        assert_eq!(report.excluded, vec![".next".to_owned()]);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert!(report.skipped[0].starts_with("node_modules/.cache: node_modules is a link"), "{:?}", report.skipped);
+        // The copy stands, and the folder the link pointed at is as it was.
+        assert!(to.join("README.md").exists());
+        assert!(beside.join(".cache/held").is_file(), "the copy removed a folder beside the checkout");
+        remove(&from, &to, report.road).unwrap();
     }
 
     #[cfg(target_os = "macos")]

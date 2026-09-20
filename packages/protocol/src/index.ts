@@ -591,6 +591,9 @@ export const CopyReport = z.object({
   fetched: z.boolean(),
   carried: Carried,
   excluded: z.array(z.string()),
+  /** The rows the exclusion left standing and why: a path it could not walk without following a link, so nothing
+   * under it was removed. Absent where every row it was given went. */
+  skipped: z.array(z.string()).optional(),
   bytes: z.number().int().nonnegative(),
   ms: z.number().int().nonnegative(),
   fellBack: z.string().optional(),
