@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
+import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { keyFingerprint } from "@wsp/engine";
 import { stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -24,7 +26,11 @@ afterEach(async () => {
   second = undefined;
 });
 
-const rt = (store: Store = memoryStore()) => createRuntime({ backend: stubBackend(), store, adapters: {} });
+/** The place wiring every host a person starts has: the code a pairing mints carries the fingerprint of the key
+ * this door proves, and the computer taking that code holds the host to it. */
+const hostKey = newPlaceKeyPair();
+const rt = (store: Store = memoryStore()) =>
+  createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { hostKey, provider: () => undefined, here: () => ({ name: "this-mac" }), hostName: () => "this-mac" } });
 
 async function serving(opts: { now?: () => number; store?: Store } = {}): Promise<{ store: Store }> {
   const store = opts.store ?? memoryStore();
@@ -39,6 +45,9 @@ async function codeFrom(): Promise<string> {
   const issued = await c.request("pair.issue");
   c.close();
   expect(issued.ok, String(issued["error"])).toBe(true);
+  // The fingerprint travels beside the code: the computer that types it holds this host to that key before the
+  // code or a token of its own crosses.
+  expect(issued["hostKey"]).toBe(keyFingerprint(hostKey.publicKey));
   return issued["code"] as string;
 }
 

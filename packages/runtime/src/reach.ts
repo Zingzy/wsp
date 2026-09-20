@@ -6,7 +6,7 @@
 
 import { DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
-import { openFrame, SEAL_REFUSAL, type Seal } from "./seal.js";
+import { openFrame, SEAL_REFUSAL, type Seal } from "@wsp/keys";
 
 export interface ReachOptions {
   /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. One of this and socket. */

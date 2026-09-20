@@ -10,7 +10,7 @@ export * from "./daemon-channel.js";
 export * from "./daemon-token.js";
 export * from "./devices.js";
 export * from "./places.js";
-export * from "./seal.js";
+export * from "@wsp/keys";
 export * from "./tunnel.js";
 export * from "./place-forward.js";
 export * from "./harness-catalog.js";

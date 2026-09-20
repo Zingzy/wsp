@@ -20,6 +20,11 @@ export const HOST_URL_ENV = "WSP_HOST_URL";
  * taken away when the turn's process exits. It never reaches a config file or an argument, only the environment. */
 export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";
 
+/** The fingerprint of the key that host proves, beside the two above: the turn pins it before it sends the token,
+ * so a relay that carries the bytes or names another host at that address gets nothing. A launch that carries the
+ * address and the token without it is refused rather than dialled, since nothing there says which host it is. */
+export const HOST_KEY_ENV = "WSP_HOST_KEY";
+
 /** The person's own home directory, for a host whose HOME is not theirs: a harness that serves a fixture state out
  * of a throwaway home still runs its turns on this computer, and macOS keys an agent's sign-in to the home the
  * person logs in to. A turn under any other home answers "Not logged in" whatever the store variables say: the
