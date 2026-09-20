@@ -1401,10 +1401,12 @@ const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
  * is the rows behind it. A command answering from outside its own road's directories is a note and not a failure;
  * a row that did not answer fails the step, and where the computer's own record read that row present the line
  * that reads the computer again is said with it. */
-export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
+export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps" | "prefix">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
   const asked = plan.steps.filter(step => presenceTests(step).length > 0);
   if (asked.length === 0) return "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside";
-  const present = await presentSteps(machine as Machine, asked);
+  // On the tools PATH, which is what a workspace boots with, and under the same managers' knobs the job ran: a
+  // row's version read is its manager's own command and answers about the folder that manager was told to use.
+  const present = await presentSteps(machine as Machine, asked, TOOLS_PATH, plan.prefix);
   const notes = asked.flatMap(step => {
     const note = presentElsewhere(step, present.get(step.id));
     return note === undefined ? [] : [note];
