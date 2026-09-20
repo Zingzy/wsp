@@ -40,8 +40,9 @@ const message = (who: ThreadVoice, at: number | undefined, text: string): Thread
  * from the result, the same rule the app's timeline follows. */
 export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: string): ThreadMessage[] {
   const rows: ThreadMessage[] = [];
-  /** The agent row text deltas append to, by index; nothing when the last row is not one of the agent's. */
-  let open: number | undefined;
+  /** The agent row text deltas append to and the harness message it is a piece of; nothing when the last row is
+   * not one of the agent's. */
+  let open: { row: number; messageId?: string } | undefined;
   /** The running turn's tool rows by the id of their call, since a call's JSON may arrive in pieces and the line is
    * drawn from the whole of it. */
   const calls = new Map<string, { row: number; name: string; input: string }>();
@@ -76,8 +77,12 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
           // An empty piece of text opens no row: an adapter that splits a reply hands over the tail of a short one
           // as nothing at all, and a row of no words is not a message anybody sent.
           if (event.text === "") continue;
-          if (open === undefined) open = rows.push(message("agent", event.at, event.text)) - 1;
-          else rows[open]!.text += event.text;
+          // A piece of another of the harness's messages opens a row of its own: the reply an agent gave while a
+          // background command ran and the reply it gave when that command woke it are two things it said, and one
+          // row carrying both glues them into a sentence nobody wrote.
+          if (open?.messageId !== undefined && event.messageId !== undefined && event.messageId !== open.messageId) open = undefined;
+          if (open === undefined) open = { row: rows.push(message("agent", event.at, event.text)) - 1, ...(event.messageId !== undefined ? { messageId: event.messageId } : {}) };
+          else rows[open.row]!.text += event.text;
           sawText = true;
         } else if (event.kind === "tool_result") {
           // The call's own row turns to the past here and nowhere else: what the transcript holds a result for is

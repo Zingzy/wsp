@@ -26,7 +26,7 @@ import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
-import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
+import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
 runsFromItsOwnFolder();
@@ -1541,6 +1541,28 @@ describe("wsp verbs over the host", () => {
     expect(await cli(["run", "alpha", "look around", "--state", statePath], forked, undefined, env)).toBe(0);
     expect(forked.streamed).toContain("completed · Worked for 1m 12s · $0.19\n");
     expect(forked.streamed).not.toContain(LIST_PRICE_WORD);
+  });
+
+  it("a turn's two replies stream as two paragraphs: what the agent said while its background command ran, then what it said when that command woke it", async () => {
+    await restartHost({
+      claude: sayingAgent(
+        [
+          { kind: "text", text: "Waiting for the 90-second hold to complete.", messageId: "msg_a" },
+          { kind: "text", text: "Done. The hold completed with exit code 0.", messageId: "msg_b" },
+        ],
+        { status: "completed", text: "Done. The hold completed with exit code 0." },
+      ),
+    });
+    await run("new", "alpha");
+    const { code, io } = await run("run", "alpha", "hold for 90 seconds");
+    expect(code).toBe(0);
+    expect(io.streamed.split("\n")).toEqual([
+      "Waiting for the 90-second hold to complete.",
+      "",
+      "Done. The hold completed with exit code 0.",
+      "completed",
+      "",
+    ]);
   });
 
   it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {

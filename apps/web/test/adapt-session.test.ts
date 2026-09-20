@@ -58,6 +58,24 @@ describe("deriveSession: a message steered into the running turn", () => {
   });
 });
 
+describe("deriveSession: a turn whose agent wrote twice", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_h" };
+  const events: SessionEvent[] = [
+    { type: "session.start", ...scoped, at: 1_000, prompt: "hold for 90 seconds" },
+    { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "Waiting for the hold to complete.", messageId: "msg_a" },
+    { type: "session.delta", ...scoped, at: 92_000, kind: "text", text: "Done. ", messageId: "msg_b" },
+    { type: "session.delta", ...scoped, at: 92_500, kind: "text", text: "It ended with exit code 0.", messageId: "msg_b" },
+  ];
+
+  it("is two bubbles, the one it wrote while its background command ran and the one it wrote when that command woke it", () => {
+    expect(deriveSession(events).messages.map(m => [m.role, m.text])).toEqual([
+      ["user", "hold for 90 seconds"],
+      ["assistant", "Waiting for the hold to complete."],
+      ["assistant", "Done. It ended with exit code 0."],
+    ]);
+  });
+});
+
 describe("deriveSession: the chat fixture", () => {
   const model = deriveSession(CHAT_STREAM);
 

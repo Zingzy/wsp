@@ -53,6 +53,8 @@ interface TurnBuild {
   ordinal: number;
   /** Index into `timeline` of the assistant message still accepting text, if the tail is one. */
   openMessage: number | null;
+  /** The harness message that one is a piece of, where the harness named it; text of another opens its own bubble. */
+  openMessageId: string | null;
   sawText: boolean;
   tools: Map<string, ToolCall>;
   /** Each of a subagent's open calls as the harness has reported it so far, by that line's own key: a call whose
@@ -152,6 +154,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const m = message(t.openMessage);
     if (m && m.streaming) replace(t.openMessage, messageEntry({ ...m, streaming: false }));
     t.openMessage = null;
+    t.openMessageId = null;
   };
   const addWork = (t: TurnBuild, entry: Omit<WorkLogEntry, "id" | "turnId">, at: string): number => {
     t.ordinal += 1;
@@ -235,7 +238,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       completedAt: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
@@ -433,11 +436,15 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     }
     switch (e.kind) {
       case "text": {
+        // Text of another of the harness's messages is another bubble: the reply an agent gave while a background
+        // command ran and the reply it gave when that command woke it are two things it said.
+        if (t.openMessageId !== null && e.messageId !== undefined && e.messageId !== t.openMessageId) closeOpenMessage(t);
         const open = t.openMessage !== null ? message(t.openMessage) : undefined;
         if (t.openMessage !== null && open) {
           replace(t.openMessage, messageEntry({ ...open, text: open.text + e.text, updatedAt: at || open.updatedAt }));
         } else {
           t.openMessage = addMessage(t, "assistant", e.text, at, true);
+          t.openMessageId = e.messageId ?? null;
         }
         t.sawText = true;
         return;

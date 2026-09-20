@@ -287,6 +287,29 @@ export function toolingAgent(calls: ReadonlyArray<ScriptedCall>, result: TurnRes
   });
 }
 
+/** One piece of a scripted turn's stream: what the harness wrote, under the kind it wrote it as and the message it
+ * belongs to where it named one. */
+export type ScriptedSay = { kind: "text"; text: string; messageId?: string };
+
+/** A harness whose turn is the pieces it was handed and nothing else: what a reply split across two of the
+ * harness's own messages reaches a watcher as. */
+export function sayingAgent(said: ReadonlyArray<ScriptedSay>, result: TurnResult): HarnessAdapterFactory {
+  return () => ({
+    steers: false,
+    start: o => {
+      const sessionId = o.resume ?? randomUUID();
+      const finished = Promise.resolve().then(() => {
+        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        for (const piece of said) o.onEvent({ type: "turn.delta", sessionId, kind: piece.kind, text: piece.text, ...(piece.messageId !== undefined ? { messageId: piece.messageId } : {}) });
+        o.onEvent({ type: "turn.done", sessionId, result });
+        o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return result;
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+}
+
 /** A harness whose turn never ends: the session starts and nothing more arrives. */
 export function stuckAgent(): HarnessAdapterFactory {
   return () => ({

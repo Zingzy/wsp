@@ -1841,16 +1841,24 @@ const WAITING_ON_A_PERSON = `the turn is waiting on a permission; wsp threads sh
  * redrawn, since the stream may be a file. The reply is one turn's text written once: `reply` hands the stdout
  * print the finished text only where the stream has not already put it in front of the same person, and closes
  * whatever the stream stopped mid-line on first, so the print under it never lands on the work's last line. */
-function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void; says(l: string): void; reply(text: string | undefined): string | undefined } {
+function turnStream(ctx: VerbContext): { text(t: string, messageId?: string): void; line(l: string): void; says(l: string): void; reply(text: string | undefined): string | undefined } {
   let atLineStart = true;
   let streamedProse = false;
+  /** The harness message the prose on the screen is a piece of, so the reply an agent gave while a background
+   * command ran and the reply it gave when that command woke it are two paragraphs rather than one sentence. */
+  let said: string | undefined;
   const says = (l: string): void => {
     ctx.out.stream(`${atLineStart ? "" : "\n"}${l}\n`);
     atLineStart = true;
   };
   return {
-    text: t => {
+    text: (t, messageId) => {
       if (t === "") return;
+      if (streamedProse && said !== undefined && messageId !== undefined && messageId !== said) {
+        ctx.out.stream(atLineStart ? "\n" : "\n\n");
+        atLineStart = true;
+      }
+      said = messageId ?? said;
       streamedProse = true;
       ctx.out.stream(t);
       atLineStart = t.endsWith("\n");
@@ -2053,7 +2061,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
         // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
         if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
-        if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
+        if (e.type === "session.delta" && e.kind === "text") stream.text(e.text, e.messageId);
         if (e.type === "session.delta" && e.kind === "tool_use") {
           stream.line(toolActivityLine(e.toolName, e.text));
           if (e.toolUseId !== undefined) {

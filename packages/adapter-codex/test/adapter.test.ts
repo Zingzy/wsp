@@ -162,6 +162,15 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     expect(session.localId).not.toBe(THREAD_ID);
   });
 
+  it("carries the CLI's own id for the message each reply came out of, so two replies of one turn read as two", async () => {
+    const exec = scriptedExec(fixtureLines("exec-turn"));
+    const { events, onEvent } = collect();
+    await adapterOver(exec).start({ prompt: "list the repo", onEvent }).finished;
+
+    const deltas = events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
+    expect(deltas.filter(d => d.kind === "text").map(d => d.messageId)).toEqual(["item_7"]);
+  });
+
   it("a turn.failed is a failed result carrying the CLI's own reason, and the stream's error lines are not deltas", async () => {
     const exec = scriptedExec([`{"type":"thread.started","thread_id":"${THREAD_ID}"}`, '{"type":"turn.started"}', '{"type":"error","message":"Reconnecting... 2/5 (stream disconnected)"}', '{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}'], { exitCode: 1 });
     const { events, onEvent } = collect();
