@@ -173,6 +173,10 @@ export function installHomes(prefix?: string): InstallHomes {
  * caller names none, and what a folder a row carries is read against. */
 const OWN_HOMES = installHomes();
 
+/** The homes a job on a computer somebody owns runs on, since one prefix is wsp's: read by the modules' roots, so
+ * the folders a road writes are named once here and once there. */
+const PREFIX_HOMES = installHomes(TOOL_PREFIX);
+
 /** A manager's own command folder and the folder every command in it is linked into, for a manager whose commands
  * the job's homes put where no PATH of the job looks. */
 interface LinkedCommands {
@@ -183,12 +187,14 @@ interface LinkedCommands {
 /** That pair for one manager's home, or nothing where the manager puts its commands where it is told. */
 const linkedOf = (home: InstallHome): LinkedCommands | undefined => (home.links === undefined ? undefined : { links: home.links, bin: home.bin });
 
-/** The pair for the manager whose own command folder this is, for a job whose prefix moves that folder under
- * itself. Nothing for a folder no manager keeps, which is a row's own and stands, and nothing for a job with no
- * prefix. */
+/** The pair for the manager that keeps its commands in this folder and links them out of it under this job's
+ * homes, which is cargo's own folder and pnpm's. Nothing for any other folder a row names, which is the row's own
+ * and stands, and nothing at all for a job with no prefix, where no manager links. `/root/.local/bin` is the
+ * folder uv and pipx are told to link into rather than one either of them keeps, and it is what the harness
+ * installer's row names too, so it answers here only if one of those two is ever given a folder of its own. */
 function movedHome(dir: string, homes: InstallHomes): LinkedCommands | undefined {
   for (const name of INSTALL_HOMES) {
-    if (OWN_HOMES[name].bin === dir) return linkedOf(homes[name]);
+    if (homes[name].links !== undefined && OWN_HOMES[name].bin === dir) return linkedOf(homes[name]);
   }
   return undefined;
 }
@@ -331,7 +337,7 @@ const npm: RoadModule<Road<"npm">> = {
 /** pnpm and bun keep npm's global shape under their own verbs; bun lists its globals as a tree and keeps no root command. */
 const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
-  roots: [OWN_HOMES[road].home, installHomes(TOOL_PREFIX)[road].home],
+  roots: [OWN_HOMES[road].home, PREFIX_HOMES[road].home],
   bins: (_r, homes = OWN_HOMES) => binsOf(homes[road]),
   env: homes => homes[road].env,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
@@ -348,7 +354,7 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
   words: `with ${road}`,
   // Both install a tool into an environment of its own and link its command beside it: under the machine's home
   // by default, and under the prefix with the command in /usr/local/bin where the job names one.
-  roots: [OWN_HOMES[road].home, installHomes(TOOL_PREFIX)[road].home],
+  roots: [OWN_HOMES[road].home, PREFIX_HOMES[road].home],
   bins: (_r, homes = OWN_HOMES) => binsOf(homes[road]),
   env: homes => homes[road].env,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
@@ -361,7 +367,7 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
 
 const cargo: RoadModule<Road<"cargo">> = {
   words: "with cargo",
-  roots: [CARGO_HOME, installHomes(TOOL_PREFIX).cargo.home],
+  roots: [OWN_HOMES.cargo.home, PREFIX_HOMES.cargo.home],
   bins: (_r, homes = OWN_HOMES) => binsOf(homes.cargo),
   env: homes => homes.cargo.env,
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
@@ -396,7 +402,7 @@ export function goBinary(module: string): string {
 
 const go: RoadModule<Road<"go">> = {
   words: "with go install",
-  roots: [OWN_HOMES.go.home, installHomes(TOOL_PREFIX).go.home],
+  roots: [OWN_HOMES.go.home, PREFIX_HOMES.go.home],
   bins: (_r, homes = OWN_HOMES) => binsOf(homes.go),
   env: homes => homes.go.env,
   fromRow: r => {
