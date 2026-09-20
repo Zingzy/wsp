@@ -155,6 +155,9 @@ pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
 /// binary the host just sent.
 pub(crate) enum Outgoing {
     Text(String),
+    /// A guest frame and the bytes it holds against its workspace: the count goes back once the frame is written,
+    /// and with the frame if the channel it waits on is dropped, so what the cap counts is what is really waiting.
+    Guest(String, guest::GuestBytes),
     Leave(String),
     Restart(String),
     /// The token this socket authed with is no longer the file's: it is closed 4401 with one sentence and nothing
@@ -166,7 +169,7 @@ impl Outgoing {
     #[cfg(test)]
     pub(crate) fn text(&self) -> &str {
         match self {
-            Outgoing::Text(t) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
+            Outgoing::Text(t) | Outgoing::Guest(t, _) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
             Outgoing::Rotated => wsp_frames::words::AUTH_TOKEN_ROTATED,
         }
     }

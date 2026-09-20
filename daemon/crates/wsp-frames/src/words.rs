@@ -43,6 +43,9 @@ pub const NO_IMAGES_HERE: &str = "this computer keeps no images: a workspace her
 pub const GUEST_NOT_WATCHER: &str = "only the socket that sent guest.watch may answer or close a guest session";
 /// Why a session with nobody reading it is ended: the host has been away past the queue's cap.
 pub const GUEST_QUEUE_FULL: &str = "the host has not read this session for too long";
+/// Why a guest message is refused where its workspace already has the cap's worth of bytes waiting to be read:
+/// the frame is turned away and the session stands, so a sender whose host is reading slowly goes on.
+pub const GUEST_IN_FLIGHT_FULL: &str = "too many guest bytes are waiting to be read here; send this one again";
 /// Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
 /// agent that ran the line can run it again against a host that is there.
 pub const GUEST_UNWATCHED: &str = "the host stopped watching; run it again";

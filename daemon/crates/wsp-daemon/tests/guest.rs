@@ -387,3 +387,51 @@ async fn every_session_of_one_daemon_carries_the_same_life_and_another_bind_carr
     assert_eq!((one["session"].as_str(), session.as_str()), (Some("g0"), "g0"));
     assert_ne!(life_of(&third), life_of(&one));
 }
+
+/// One message of a flood, big enough that a handful fill the cap and small enough to ride one frame.
+fn fat() -> Value {
+    Value::from("x".repeat(1024 * 1024))
+}
+
+/// The road the byte cap closes: a process inside a machine opens sessions on socket after socket and streams
+/// into each faster than the host reads, and nothing but this cap bounds what the daemon holds for it. The cap
+/// counts across every session and every socket, since one session's frame count bounds one session alone.
+#[tokio::test]
+async fn guest_bytes_past_the_cap_are_refused_and_the_sessions_stand() {
+    let d = start().await;
+    // Nobody is watching, so every frame waits where a flood would grow the daemon.
+    let mut guests = Vec::new();
+    for _ in 0..4 {
+        let mut guest = Client::connect(d.addr).await;
+        opened(&mut guest, "cli").await;
+        guests.push(guest);
+    }
+
+    let mut sent = 0usize;
+    let refused = 'flood: loop {
+        for guest in &mut guests {
+            let reply = guest.request("guest.send", json!({ "message": fat() })).await;
+            if reply["ok"] == json!(false) {
+                break 'flood reply;
+            }
+            sent += 1;
+            assert!(sent < numbers::GUEST_QUEUE_CAP_FRAMES, "the bytes cap refused nothing before the frame cap did");
+        }
+    };
+    assert_eq!(
+        (refused["ok"].clone(), refused["code"].clone(), refused["error"].clone()),
+        (json!(false), json!("bad-request"), json!(words::GUEST_IN_FLIGHT_FULL))
+    );
+    assert!(sent * fat().to_string().len() <= numbers::GUEST_IN_FLIGHT_CAP_BYTES, "the daemon held more than the cap");
+
+    // The sessions stood through the refusal: a watcher arrives, everything waiting reaches it, and the bytes it
+    // carried away are the room the next message goes in.
+    let mut host = Client::connect(d.addr).await;
+    host.request("guest.watch", json!({})).await;
+    for _ in 0..guests.len() + sent {
+        assert!(matches!(host.next_event().await["type"].as_str(), Some("guest.opened" | "guest.message")));
+    }
+    let again = guests[0].request("guest.send", json!({ "message": "after" })).await;
+    assert_eq!(again["ok"], json!(true), "{again}");
+    assert_eq!(host.next_event().await["message"], json!("after"));
+}

@@ -289,6 +289,15 @@ where
                                 break Ended::Peer;
                             }
                         }
+                        // A guest frame gives its workspace's bytes back once it is out of this socket: until then
+                        // it is waiting here, and what waits is what the cap counts.
+                        Some(Outgoing::Guest(t, held)) => {
+                            let wrote = emit(&mut ws, &mut seal, t).await;
+                            drop(held);
+                            if !wrote {
+                                break Ended::Peer;
+                            }
+                        }
                         // The reply goes out whole before the daemon stops: the host reads what was swept, or where
                         // the binary it sent landed.
                         Some(Outgoing::Leave(t)) => {

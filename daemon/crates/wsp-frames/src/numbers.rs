@@ -91,6 +91,12 @@ pub const GUEST_MESSAGE_CAP_BYTES: usize = 4 * 1024 * 1024;
 /// frame it opened with rides a field of its own and is named to every watcher that arrives. Past the cap the
 /// session is closed to the guest.
 pub const GUEST_QUEUE_CAP_FRAMES: usize = 256;
+/// Guest bytes one workspace may have waiting at once, queued in its sessions and written onto the watcher's
+/// channel but not carried out of the socket yet. One count per workspace on a computer that runs them, and one
+/// for the daemon itself inside a machine, where a session names no workspace and every session shares it. Four
+/// of one message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is
+/// refused and its session stands.
+pub const GUEST_IN_FLIGHT_CAP_BYTES: usize = 4 * GUEST_MESSAGE_CAP_BYTES;
 /// How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions this
 /// machine holds, so a host that restarted picks them back up; past this span nobody is coming, and the session
 /// ends to its guest rather than leaving the process inside the machine waiting for the life of the workspace.
