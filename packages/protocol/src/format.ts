@@ -2582,6 +2582,42 @@ export function hostKeyKeptNote(hostKey: string, file?: string): string {
   return file === undefined || file.endsWith(KNOWN_HOSTS.slice(1)) ? hostKey : `${hostKey} in ${file}`;
 }
 
+/** Whether the key a dial read is the one the person pinned. A person passes either the whole known_hosts word
+ * (`ssh-ed25519 SHA256:...`) or the fingerprint on its own, which is what ssh-keygen prints beside the size and the
+ * comment, so both sides are read down to the fingerprint where they carry one. */
+export function hostKeyMatches(pinned: string, read: string): boolean {
+  const mark = (word: string): string => word.trim().split(/\s+/).find(w => w.startsWith("SHA256:")) ?? word.trim();
+  return mark(pinned) !== "" && mark(pinned) === mark(read);
+}
+
+/** What a computer this computer's ssh client has never met is asked before the first dial: the key it answered a
+ * scan with, for the person to check against the computer in front of them. What the first dial writes is the
+ * identity every later dial of that computer trusts, so it is confirmed before anything is sent there. */
+export function hostKeyAsk(address: string, hostKey: string): string {
+  return `${address} answers with the key ${hostKey}; trust it and continue?`;
+}
+
+/** What the add is refused with for such a computer where nobody confirmed that key: the key whole, so it can be
+ * read against the computer itself, and the line that pins it. Said before anything is dialled. */
+export function hostKeyUnconfirmedRefusal(address: string, hostKey: string): string {
+  return `${address} has never been reached from this computer and answers with the key ${hostKey}; check it against the computer itself, then run wsp add ${address} --host-key '${hostKey}'`;
+}
+
+/** The same refusal where the key could not be asked for at all: a jump host or a proxy command in the person's own
+ * ssh config, which a scan cannot follow, or a computer that answered no scan. The key is theirs to read on the
+ * computer and pass here. */
+export function hostKeyUnscannableRefusal(address: string, stoppedBy?: string): string {
+  const why = stoppedBy === undefined ? "answered no key to a scan" : `is reached through ${stoppedBy} in your ssh config, which a key scan cannot follow`;
+  return `${address} has never been reached from this computer and ${why}; read its host key on the computer itself and run wsp add ${address} --host-key '<type> <fingerprint>'`;
+}
+
+/** What an install is refused with when the computer that answered the first dial holds a key other than the one
+ * the person pinned: what it answered with, the file ssh wrote that into on its way in, and the line that takes it
+ * out again. Nothing of wsp's has left this computer at that point. */
+export function hostKeyMismatchRefusal(o: { address: string; pinned: string; wrote?: string; target: string; file: string }): string {
+  return `${o.address} answered with ${o.wrote ?? "a key this computer could not read"}, not the ${o.pinned} you pinned; ssh wrote it into ${o.file}, and ssh-keygen -R ${o.target} -f ${o.file} takes it out`;
+}
+
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
  * against the machine's own before they trust the road. Printed once, when the workspace is recorded. */
 export function sshHostKeyNotice(hostKey: string): string {

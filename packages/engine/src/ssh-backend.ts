@@ -281,6 +281,24 @@ async function offeredHostKeys(values: Record<string, string>, run: SshLocalRun)
   return read.exitCode === 0 ? read.stdout : "";
 }
 
+/** What a machine itself answers with on its ssh port, with nothing authenticated and nothing installed: one scan
+ * of the address the client would dial, read as a known_hosts entry is read, and what in the person's own ssh
+ * config stopped the scan where one did. This is what a person is shown before the first dial of a computer this
+ * one has never met, to check against the computer in front of them; it stands on no trust of its own and is never
+ * what a dial is checked against, which stays the client's job.
+ *
+ * A jump or a command of the person's stops it: the scan dials the resolved name itself and can take neither, so
+ * whatever answered on this network would be shown as that machine's key. */
+export async function offeredHostKey(reach: SshReach, run: SshLocalRun = localRun): Promise<{ key?: string; stoppedBy?: string }> {
+  const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
+  if (config.exitCode !== 0) return {};
+  const values = readValues(config.stdout);
+  const stoppedBy = (values["proxyjump"] ?? "") !== "" ? "ProxyJump" : (values["proxycommand"] ?? "") !== "" ? "ProxyCommand" : undefined;
+  if (stoppedBy !== undefined) return { stoppedBy };
+  const key = hostKeyFound(await offeredHostKeys(values, run), values["hostkeyalgorithms"] ?? "");
+  return key === undefined ? {} : { key };
+}
+
 /** The key this machine is known by, as one string whoever asks. `ssh -G` answers where the client looks and what
  * it prefers there with the person's own config applied, and `ssh-keygen -F` reads the entry out, hashed or not.
  * That much is read on this computer with nothing dialled, which is the road that survives a warm master: the
@@ -568,6 +586,8 @@ export interface SshBackendOptions {
   hostKey?: SshHostKeyReader;
   /** Which file on this computer that entry was written into; the client's own answer unless a test hands its own. */
   knownHosts?: (reach: SshReach) => Promise<string | undefined>;
+  /** What the machine itself answers a scan with; the read above unless a test hands its own. */
+  offeredKey?: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -604,11 +624,13 @@ export class SshBackend implements MachineBackend {
   private readonly transport: SshTransport;
   private readonly hostKey: SshHostKeyReader;
   private readonly knownHosts: (reach: SshReach) => Promise<string | undefined>;
+  private readonly offered: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
     this.hostKey = opts.hostKey ?? knownHostKey;
     this.knownHosts = opts.knownHosts ?? knownHostsWritten;
+    this.offered = opts.offeredKey ?? offeredHostKey;
   }
 
   async create(): Promise<Machine> {
@@ -652,5 +674,11 @@ export class SshBackend implements MachineBackend {
    * one. Nothing where the client answers nothing, which leaves that screen its default to name. */
   async knownHostsFile(reach: SshReach): Promise<string | undefined> {
     return this.knownHosts(reach);
+  }
+
+  /** What the machine itself answers with, asked of the machine and not of this computer's own files: the one read
+   * a road has before the first dial of a computer nobody here has met. */
+  async offeredKeyFor(reach: SshReach): Promise<{ key?: string; stoppedBy?: string }> {
+    return this.offered(reach);
   }
 }

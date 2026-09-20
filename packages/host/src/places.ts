@@ -56,7 +56,13 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   placeNoChipLine,
   MACHINE_PUT_PART_BYTES,
   workFolderIn,
+  hostKeyAsk,
   hostKeyKeptNote,
+  hostKeyMatches,
+  hostKeyMismatchRefusal,
+  hostKeyUnconfirmedRefusal,
+  hostKeyUnscannableRefusal,
+  KNOWN_HOSTS,
   hostKeyRefusal,
   isLoopback,
   joinAddressOf,
@@ -67,7 +73,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { SshBackend, SSH_DEFAULT_PORT, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
@@ -339,6 +345,9 @@ export interface AddFlags {
   name?: string;
   sshPort?: number;
   keyPath?: string;
+  /** The host key of a computer this computer has never dialled, as the person read it off that computer. Without
+   * it the add asks about the key the computer answers a scan with, and refuses off a terminal. */
+  hostKey?: string;
   /** The one word for a computer already in this wsp: put the daemon this host deploys on it. Every other flag on
    * this verb is about a computer that is not in yet, so it goes beside none of them. */
   update?: boolean;
@@ -371,9 +380,12 @@ export function addFlags(
   base?: string,
   signIn?: string,
   seed: { yes?: boolean; keep?: string[]; cut?: string[]; noMemory?: boolean; noCommits?: boolean; remember?: boolean } = {},
+  hostKey?: string,
 ): AddFlags {
   const asked = sshAsked(name, port, keyPath);
+  const pinned = hostKey?.trim();
   return {
+    ...(pinned !== undefined && pinned !== "" ? { hostKey: pinned } : {}),
     ...(seed.yes === true ? { yes: true } : {}),
     ...(seed.keep !== undefined ? { keep: seed.keep } : {}),
     ...(seed.cut !== undefined ? { cut: seed.cut } : {}),
@@ -416,6 +428,16 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
     if (hostUrls.length === 0) throw new Error(ADD_LOOPBACK_REFUSAL);
     stage("connect", "running");
     const backend = deps.backend ?? new SshBackend();
+    // A computer this computer's ssh client has never met is dialled only once somebody has seen its key: the dial
+    // writes whatever answers into this computer's known_hosts and every later dial of that computer trusts it, so
+    // a stranger who controls the route or the name during this one would be recorded as the person's own box. The
+    // key rides the request where the person confirmed or pinned it; where it does not and the client holds none of
+    // its own, the refusal carries the key the computer answers a scan with and the line that pins it. Read before
+    // anything is dialled, so the app's sheet and an older client meet the same wall the command line does.
+    if (req.hostKey === undefined && (await backend.keyFor(reach).catch(() => undefined)) === undefined) {
+      const offered = await backend.offeredKeyFor(reach).catch((): { key?: string; stoppedBy?: string } => ({}));
+      throw new Error(offered.key === undefined ? hostKeyUnscannableRefusal(req.address, offered.stoppedBy) : hostKeyUnconfirmedRefusal(req.address, offered.key));
+    }
     // The dial writes the box's key into this computer's own known_hosts on its way in, whether or not the login
     // that follows it stands, so the step is ticked off what the client holds afterwards and not off the login's
     // outcome: this is the one thing the add does to the computer the person is sitting at, and since the refusal
@@ -434,6 +456,14 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
       throw e;
     }
     const { machine, login, arch, hostKey } = adopted;
+    // What answered is held against what the person pinned before anything else is asked of it. The read that has
+    // already run sent nothing of the person's beyond the ssh identity every dial offers and printed the machine's
+    // own facts; accept-new wrote its key here on the way in, so the refusal names that key, the file it went into
+    // and the line that takes it out again. Nothing of wsp's has left this computer yet.
+    if (req.hostKey !== undefined && !hostKeyMatches(req.hostKey, hostKey ?? "")) {
+      const file = (await backend.knownHostsFile(reach).catch(() => undefined)) ?? KNOWN_HOSTS;
+      throw new Error(hostKeyMismatchRefusal({ address: req.address, pinned: req.hostKey, ...(hostKey !== undefined ? { wrote: hostKey } : {}), target: reach.port === SSH_DEFAULT_PORT ? reach.host : `[${reach.host}]:${reach.port}`, file }));
+    }
     // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
     // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
     // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
@@ -684,6 +714,11 @@ interface PlaceDeps {
   placeLink(client: HostClient, placeId: string): Promise<PlaceLink>;
   /** Runs the tool's own sign-in on that computer; a test hands its own rather than a pty on a real box. */
   signIn(o: BoxSignIn): Promise<BoxSignedIn>;
+  /** The key this computer's ssh client already holds for a computer, read with nothing dialled: a computer it
+   * holds one for is one it has met, and the add proceeds as it always did. */
+  heldHostKey(reach: SshReach): Promise<string | undefined>;
+  /** The key a computer answers a scan with, and what in the person's own ssh config stopped the scan. */
+  offeredHostKey(reach: SshReach): Promise<{ key?: string; stoppedBy?: string }>;
 }
 
 const systemDeps: PlaceDeps = {
@@ -696,6 +731,8 @@ const systemDeps: PlaceDeps = {
   open: systemOpener(platform()),
   placeLink,
   signIn: signInOnBox,
+  heldHostKey: reach => knownHostKey(reach),
+  offeredHostKey: reach => offeredHostKey(reach),
 };
 
 /** What the two host-side words work on: the state file the host on this computer serves, and where this run would
@@ -739,7 +776,7 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   const aim = aimHere("add", opts);
   if (flags.signIn !== undefined) {
     if (word === undefined) throw usageRefusal("wsp add --sign-in names the computer to sign the agent in on.", ADD_USAGE);
-    if (flags.update === true || flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined) {
+    if (flags.update === true || flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined) {
       io.error(SIGN_IN_FLAGS_REFUSAL);
       return 1;
     }
@@ -747,13 +784,13 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   }
   if (flags.update === true) {
     if (word === undefined) throw usageRefusal("wsp add --update takes the place to move onto this wsp's daemon.", ADD_USAGE);
-    if (flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined) {
+    if (flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined) {
       io.error(UPDATE_FLAGS_REFUSAL);
       return 1;
     }
     return updatePlace(io, opts, aim, word, deps);
   }
-  const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined;
+  const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined;
   // What one word names is read once, in the protocol: a computer of the person's own over ssh, a repo a computer
   // clones, or a folder this computer holds. A provider's own word is neither and is read first.
   const kind = word === undefined || addableProviders().includes(word) ? undefined : sourceKindOf(word);
@@ -1004,6 +1041,8 @@ function choiceFrom(plan: SeedPlan, flags: AddFlags): SeedChoice {
  * work is the host's, over the socket this line opens, so what the app does and what this prints are one road; the
  * steps come back as events and each is printed as it lands. */
 async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: string, flags: AddFlags, deps: PlaceDeps): Promise<number> {
+  const confirmed = await confirmedHostKey(io, address, flags, deps);
+  if (confirmed === undefined) return 1;
   const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   // Minted here rather than read off the reply: the steps come back while the install runs and the reply lands
   // only once it is over, so a line printed as it happens has to know which stream is this one's.
@@ -1025,6 +1064,7 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
         ...(flags.name !== undefined ? { name: flags.name } : {}),
         ...(flags.sshPort !== undefined ? { sshPort: flags.sshPort } : {}),
         ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
+        ...confirmed,
       });
       for (const line of addedLines(added.place, added.hostKey)) io.log(line);
       if (added.said !== undefined) io.log(added.said);
@@ -1041,6 +1081,28 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
   } finally {
     client.close();
   }
+}
+
+/** What this add sends about the computer's key, decided before anything is dialled: the one the person pinned on
+ * the line, else nothing at all where this computer's ssh client already holds a key for that computer, since it
+ * has met it. A computer it has never met is scanned and the key it answers with is put to the person; off a
+ * terminal, and on a no, the add refuses with that key and the line that pins it, and nothing is sent. Nothing
+ * back at all where the add is not to go on. */
+async function confirmedHostKey(io: CliIO, address: string, flags: AddFlags, deps: PlaceDeps): Promise<{ hostKey?: string } | undefined> {
+  if (flags.hostKey !== undefined) return { hostKey: flags.hostKey };
+  const reach = parseSshAddress(address, {
+    ...(flags.sshPort !== undefined ? { port: flags.sshPort } : {}),
+    ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
+  });
+  if ((await deps.heldHostKey(reach).catch(() => undefined)) !== undefined) return {};
+  const offered = await deps.offeredHostKey(reach).catch((): { key?: string; stoppedBy?: string } => ({}));
+  if (offered.key === undefined) {
+    io.error(hostKeyUnscannableRefusal(address, offered.stoppedBy));
+    return undefined;
+  }
+  if (io.isTTY === true && (await io.ask(hostKeyAsk(address, offered.key))) === "yes") return { hostKey: offered.key };
+  io.error(hostKeyUnconfirmedRefusal(address, offered.key));
+  return undefined;
 }
 
 /** One step of an install as a terminal prints it: the step's own words, a tick where it is done and what the

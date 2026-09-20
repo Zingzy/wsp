@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ARCH_READ, OS_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -536,6 +536,27 @@ describe("the key a machine over ssh is known by", () => {
     // The machine was asked and said nothing: the record goes without an identity rather than with a guess.
     expect(await knownHostKey(REACH, run(CA_FOUND, ""))).toBeUndefined();
     expect(scans).toHaveLength(1);
+  });
+
+  it("the key a machine itself answers with is one read of its ssh port, and nothing where the person's config stops the scan", async () => {
+    const asked: { file: string; args: readonly string[] }[] = [];
+    const run = (proxy: string): SshLocalRun => async (file, args) => {
+      asked.push({ file, args });
+      if (file === "ssh") return { exitCode: 0, stdout: `${CONFIG}\n${proxy}`, stderr: "" };
+      return file === "ssh-keyscan" ? { exitCode: 0, stdout: OFFERED, stderr: "# 10.0.0.5:2222 SSH-2.0-OpenSSH_9.6\n" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // The machine is asked at the host and port the client resolved for the dial, and the key that comes back is
+    // the one of the types this client prefers, so what a person is shown is what a dial would negotiate.
+    expect(await offeredHostKey(REACH, run(""))).toEqual({ key: OFFERED_KEY });
+    expect(asked.at(-1)).toEqual({ file: "ssh-keyscan", args: ["-T", "5", "-p", "2222", "10.0.0.5"] });
+    // Nothing is dialled where the client would reach the machine through a jump or a command of the person's: the
+    // scan dials the resolved name itself, and whatever answered there is not that machine. The refusal names the
+    // config line that stopped it, so the person knows what to read the key off instead.
+    expect(await offeredHostKey(REACH, run("proxyjump bastion.example.com"))).toEqual({ stoppedBy: "ProxyJump" });
+    expect(await offeredHostKey(REACH, run("proxycommand nc %h %p"))).toEqual({ stoppedBy: "ProxyCommand" });
+    expect(asked.filter(a => a.file === "ssh-keyscan")).toHaveLength(1);
+    // A machine that answers no scan leaves the person with neither a key nor a reason of the config's.
+    expect(await offeredHostKey(REACH, async file => (file === "ssh" ? { exitCode: 0, stdout: CONFIG, stderr: "" } : { exitCode: 1, stdout: "", stderr: "" }))).toEqual({});
   });
 
   it("a machine the client reaches through a jump or a command of the person's is asked nothing, since this road cannot take either", async () => {
