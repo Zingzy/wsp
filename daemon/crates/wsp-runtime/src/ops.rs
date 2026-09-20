@@ -1448,6 +1448,7 @@ fn life_of(init: &Init) -> String {
 /// is where it is. Nothing is detached and nothing removed here, since a container the engine still holds mounts
 /// the entry its own life was given and its next start resolves that entry again.
 fn ready_binds(binds: &Path) -> Result<(), OpError> {
+    clear_binds(binds)?;
     fs::create_dir_all(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))
 }
 
