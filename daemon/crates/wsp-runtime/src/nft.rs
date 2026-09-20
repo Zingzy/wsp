@@ -78,6 +78,9 @@ const NFTA_BITWISE_MASK: u16 = 4;
 const NFTA_BITWISE_XOR: u16 = 5;
 const NFTA_CT_DREG: u16 = 1;
 const NFTA_CT_KEY: u16 = 2;
+const NFTA_MATCH_NAME: u16 = 1;
+const NFTA_MATCH_REV: u16 = 2;
+const NFTA_MATCH_INFO: u16 = 3;
 const NFTA_REJECT_TYPE: u16 = 1;
 const NFTA_REJECT_ICMP_CODE: u16 = 2;
 const NFT_REJECT_ICMPX_UNREACH: u32 = 2;
@@ -93,9 +96,23 @@ const NFT_META_NFPROTO: u32 = 15;
 const NFT_CMP_EQ: u32 = 0;
 const NFT_CMP_NEQ: u32 = 1;
 const NFT_PAYLOAD_NETWORK_HEADER: u32 = 1;
+const NFT_PAYLOAD_TRANSPORT_HEADER: u32 = 2;
+const NFT_META_L4PROTO: u32 = 16;
+const IPPROTO_TCP: u8 = 6;
 const NFT_CT_STATE: u32 = 0;
 /// The conntrack state bits as the kernel keeps them in the register: established is bit 1, related bit 2.
 const CT_ESTABLISHED_OR_RELATED: u32 = 0b110;
+/// The same two states as the conntrack match of the iptables extensions keeps them, in its own field.
+const XT_CONNTRACK_STATE_ESTABLISHED_OR_RELATED: u16 = 0b110;
+/// That match reads the state field at all.
+const XT_CONNTRACK_STATE: u16 = 1;
+/// The revision of `xt_conntrack`'s info struct iptables writes, and the size of that struct with its padding.
+const XT_CONNTRACK_REVISION: u32 = 3;
+const XT_CONNTRACK_INFO: usize = 164;
+/// Where the fields this rule sets sit in that struct: eight address and mask unions, two expiry counts, the
+/// protocol and four ports come first.
+const XT_CONNTRACK_MATCH_FLAGS: usize = 146;
+const XT_CONNTRACK_STATE_MASK: usize = 150;
 /// The comment type in nft's rule userdata, which is how nft shows a rule's comment back.
 const UDATA_RULE_COMMENT: u8 = 0;
 
@@ -278,6 +295,37 @@ pub fn reject() -> Expr {
 /// `meta nfproto ipv4`, which an inet chain wants before it reads an IPv4 header.
 pub fn nfproto_ipv4() -> [Expr; 2] {
     [meta(NFT_META_NFPROTO), cmp(NFT_CMP_EQ, &[NFPROTO_IPV4])]
+}
+
+/// `meta l4proto tcp`, which a port compare wants before it reads a transport header.
+pub fn l4proto_tcp() -> [Expr; 2] {
+    [meta(NFT_META_L4PROTO), cmp(NFT_CMP_EQ, &[IPPROTO_TCP])]
+}
+
+/// `tcp dport <port>`: the two bytes at the transport header's second offset, which is where both TCP and UDP
+/// keep the destination port.
+pub fn tcp_dport_is(port: u16) -> [Expr; 2] {
+    let load = expr("payload", |o| {
+        nla_be32(o, NFTA_PAYLOAD_DREG, NFT_REG_1);
+        nla_be32(o, NFTA_PAYLOAD_BASE, NFT_PAYLOAD_TRANSPORT_HEADER);
+        nla_be32(o, NFTA_PAYLOAD_OFFSET, 2);
+        nla_be32(o, NFTA_PAYLOAD_LEN, 2);
+    });
+    [load, cmp(NFT_CMP_EQ, &port.to_be_bytes())]
+}
+
+/// `ct state established,related` written as the conntrack match of the iptables extensions, which is the form
+/// iptables-nft itself writes: the kernel takes it in a native chain through its compat module, and a chain
+/// holding one still renders under `iptables -L`, which a chain holding the native expression below does not.
+pub fn xt_ct_established_or_related() -> Expr {
+    let mut info = vec![0u8; XT_CONNTRACK_INFO];
+    info[XT_CONNTRACK_MATCH_FLAGS..XT_CONNTRACK_MATCH_FLAGS + 2].copy_from_slice(&XT_CONNTRACK_STATE.to_ne_bytes());
+    info[XT_CONNTRACK_STATE_MASK..XT_CONNTRACK_STATE_MASK + 2].copy_from_slice(&XT_CONNTRACK_STATE_ESTABLISHED_OR_RELATED.to_ne_bytes());
+    expr("match", move |o| {
+        nla_str(o, NFTA_MATCH_NAME, "conntrack");
+        nla_be32(o, NFTA_MATCH_REV, XT_CONNTRACK_REVISION);
+        nla(o, NFTA_MATCH_INFO, &info);
+    })
 }
 
 /// `ct state established,related`.
@@ -843,6 +891,33 @@ mod tests {
             ))
         );
         assert_eq!(shape_of(&new_table(NFPROTO_IPV4, "wsp")), None);
+    }
+
+    /// The two expressions a port drop is made of, and the conntrack match written the way iptables writes it.
+    #[test]
+    fn a_port_compare_reads_the_transport_header_and_the_conntrack_match_is_iptables_own() {
+        let [proto, is_tcp] = l4proto_tcp();
+        assert_eq!((proto.name, is_tcp.name), ("meta", "cmp"));
+        assert_eq!(be32(attrs(&proto.data)[0].1), Some(NFT_META_L4PROTO));
+        assert_eq!(attrs(attrs(&is_tcp.data)[2].1)[0].1, [IPPROTO_TCP]);
+        let [load, is_port] = tcp_dport_is(7070);
+        assert_eq!((load.name, is_port.name), ("payload", "cmp"));
+        let fields = attrs(&load.data);
+        assert_eq!(be32(fields[1].1), Some(NFT_PAYLOAD_TRANSPORT_HEADER));
+        assert_eq!((be32(fields[2].1), be32(fields[3].1)), (Some(2), Some(2)));
+        assert_eq!(attrs(attrs(&is_port.data)[2].1)[0].1, 7070u16.to_be_bytes());
+        let xt = xt_ct_established_or_related();
+        assert_eq!(xt.name, "match");
+        let fields = attrs(&xt.data);
+        assert_eq!(text(fields[0].1), "conntrack");
+        assert_eq!(be32(fields[1].1), Some(XT_CONNTRACK_REVISION));
+        let info = fields[2].1;
+        assert_eq!(info.len(), XT_CONNTRACK_INFO);
+        assert_eq!(info[XT_CONNTRACK_MATCH_FLAGS..XT_CONNTRACK_MATCH_FLAGS + 2], XT_CONNTRACK_STATE.to_ne_bytes());
+        assert_eq!(info[XT_CONNTRACK_STATE_MASK..XT_CONNTRACK_STATE_MASK + 2], XT_CONNTRACK_STATE_ESTABLISHED_OR_RELATED.to_ne_bytes());
+        assert!(info.iter().enumerate().all(|(at, byte)| *byte == 0
+            || (XT_CONNTRACK_MATCH_FLAGS..XT_CONNTRACK_MATCH_FLAGS + 2).contains(&at)
+            || (XT_CONNTRACK_STATE_MASK..XT_CONNTRACK_STATE_MASK + 2).contains(&at)));
     }
 
     #[test]

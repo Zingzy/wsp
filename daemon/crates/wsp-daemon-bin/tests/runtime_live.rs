@@ -99,7 +99,7 @@ impl World {
     /// of them named after this checkout.
     async fn open() -> World {
         let turn = ONE_AT_A_TIME.lock().await;
-        let ops = Ops::open(&root(), bin()).unwrap();
+        let ops = Ops::open(&root(), bin(), numbers::DEFAULT_PORT).unwrap();
         let world = World { ops, made: Vec::new(), _turn: turn };
         world.ops.restore().await.unwrap();
         let rows = world.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner() } })).await;
@@ -111,7 +111,7 @@ impl World {
 
     /// The same root opened again, as a daemon that restarted opens it: nothing killed, the forwards restored.
     async fn reopen(&mut self) {
-        let fresh = Ops::open(&root(), bin()).unwrap();
+        let fresh = Ops::open(&root(), bin(), numbers::DEFAULT_PORT).unwrap();
         drop(std::mem::replace(&mut self.ops, fresh));
         // The old listeners' tasks end at the next turn of this runtime; a daemon that died holds no port.
         tokio::task::yield_now().await;
@@ -957,7 +957,7 @@ async fn a_pid_the_kernel_reused_after_the_init_died_is_not_the_workspace() {
     assert!(exec["error"].as_str().unwrap().contains("is stopped"), "{exec}");
     // A fresh open of the same root finds the workspace stopped by the same reading, takes its mount and youki's
     // state, and says which.
-    let again = Ops::open(&root(), PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon"))).unwrap();
+    let again = Ops::open(&root(), PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon")), numbers::DEFAULT_PORT).unwrap();
     assert!(again.stopped_at_open().contains(&id), "{:?}", again.stopped_at_open());
     assert!(!root().join("state").join(&id).exists());
     drop(again);
@@ -3257,4 +3257,43 @@ fn nft_ruleset() -> (i32, String, String) {
         ),
         Err(e) => panic!("this box has no nft to read its ruleset with: {e}"),
     }
+}
+
+/// The box at host.wsp.internal stays the reach the threat model names, less the ports its own daemon and its own
+/// engine serve: a service the box binds on every address answers a workspace on a high port and on neither of
+/// those. A refusing input chain of the box's own gets the return path and nothing wider.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let network = w.network(&id);
+    // A high port on every address, which is the designed reach and stays one.
+    let open = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+    let open_port = open.local_addr().unwrap().port();
+    let heard = std::thread::spawn(move || accept_line(&open));
+    let (code, _, err) = w.exec(&id, &format!("exec 3<>/dev/tcp/host.wsp.internal/{open_port} && echo hi from $(hostname) >&3")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "the gateway stopped answering a port nothing closes");
+    assert_eq!(heard.join().unwrap().unwrap(), format!("hi from {id}"));
+    // The ports this daemon and the box's engine serve, bound on every address as a service of the box's would
+    // be: both closed at the gateway, whatever the box's own firewall says. The listener accepts nothing, since
+    // the kernel completes the handshake by itself and a connect that returns is the packet having got through.
+    for port in net::gateway_drops(numbers::DEFAULT_PORT) {
+        let Ok(listener) = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)) else {
+            eprintln!("this box already holds port {port}; that one is not read here");
+            continue;
+        };
+        let (code, out, err) = w.exec(&id, &format!("timeout 3 bash -c 'exec 3<>/dev/tcp/host.wsp.internal/{port}'")).await;
+        show(&format!("host.wsp.internal:{port} from inside"), code, &out, &err);
+        assert_ne!(code, 0, "the gateway answered port {port}");
+        drop(listener);
+    }
+    // The rules the box carries for this, read as a person reads them.
+    let (_, ruleset, _) = nft_ruleset();
+    for port in net::gateway_drops(numbers::DEFAULT_PORT) {
+        assert!(ruleset.contains(&format!("gateway port {port}")), "no drop for {port}:\n{ruleset}");
+    }
+    assert!(ruleset.contains(&network.link), "the workspace's own link is in no rule:\n{ruleset}");
+    w.close().await;
 }

@@ -255,7 +255,9 @@ pub(crate) struct WorkspaceDoor {
 impl Ctx {
     /// Reads the manifest file once; a manifest that is there but cannot be read refuses the start, as it does for
     /// the node daemon.
-    pub(crate) fn new(options: Options, log: Log) -> io::Result<Ctx> {
+    /// The port is the runtime's, and no workspace runs where there is no runtime.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    pub(crate) fn new(options: Options, log: Log, daemon_port: u16) -> io::Result<Ctx> {
         let root = resolved_root(options.root.as_deref());
         let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
         let proc_root = options.proc_root.clone().unwrap_or_else(|| PathBuf::from("/proc"));
@@ -267,7 +269,7 @@ impl Ctx {
         let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
-        let (runtime, runtime_refusal) = open_runtime(&options, &log);
+        let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);
         Ok(Ctx {
             options,
             root,
@@ -472,7 +474,10 @@ impl Daemon {
             Some(path) => Some(relay::listen_open_socket(path)?),
             None => None,
         };
-        let ctx = Arc::new(Ctx::new(options, log)?);
+        // The port the listener above actually bound, which is the one a workspace must not reach at its
+        // gateway: the option may name zero and let the kernel pick.
+        let daemon_port = listener.local_addr()?.port();
+        let ctx = Arc::new(Ctx::new(options, log, daemon_port)?);
         #[cfg(target_os = "linux")]
         if let Some(runtime) = &ctx.runtime {
             if let Err(e) = runtime.restore().await {
@@ -523,7 +528,7 @@ impl Daemon {
 /// is the person's own choice and the reason every create under it would fail, so the reading travels to the
 /// ops, since somebody asking what this computer can do reads the host's answer and not this log.
 #[cfg(target_os = "linux")]
-fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::Ops>>, Option<String>) {
+fn open_runtime(options: &Options, log: &Log, daemon_port: u16) -> (Option<Arc<wsp_runtime::ops::Ops>>, Option<String>) {
     if options.place_file.is_none() {
         return (None, None);
     }
@@ -541,7 +546,7 @@ fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::O
             return (None, None);
         }
     };
-    match wsp_runtime::ops::Ops::open(&root, exe) {
+    match wsp_runtime::ops::Ops::open(&root, exe, daemon_port) {
         Ok(ops) => {
             for id in ops.stopped_at_open() {
                 log(&format!("workspace {id} found stopped at start: its init is gone"));

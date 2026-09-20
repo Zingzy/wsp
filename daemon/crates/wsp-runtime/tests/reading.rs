@@ -47,7 +47,7 @@ async fn metrics(ops: &Ops, id: &str) -> Value {
 #[tokio::test]
 async fn a_reading_carries_the_sizes_and_the_paths_always_and_the_live_figures_only_where_they_can_be_read() {
     let dir = tempfile::tempdir().unwrap();
-    let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+    let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
     let layout = Layout::new(dir.path());
     // A workspace whose init is not the process its record names: stopped, with its saved layer still there.
     recorded(&layout, "wsp-stopped", Init { pid: 1, started: 1, boot_id: "not-this-boot".to_owned() });

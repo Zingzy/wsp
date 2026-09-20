@@ -272,9 +272,10 @@ impl Ops {
     /// Opens the root, sweeps the creates that never finished, reads the box, marks every workspace whose init is
     /// gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
     /// directories and youki's state behind, and youki reads any process on the old pid as the container), and
-    /// sweeps the network of every workspace that is not running. `exe` is this binary. The forwards of the
-    /// workspaces still running come back with `restore`, which wants the runtime the listeners live on.
-    pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, OpError> {
+    /// sweeps the network of every workspace that is not running. `exe` is this binary and `daemon_port` the port
+    /// this computer's own daemon bound, which no workspace reaches at its gateway. The forwards of the workspaces
+    /// still running come back with `restore`, which wants the runtime the listeners live on.
+    pub fn open(root: &Path, exe: PathBuf, daemon_port: u16) -> Result<Ops, OpError> {
         // Where the root was put, before a directory is made under it: every workspace here reads the computer's
         // own system directories through an overlay whose upper sits under this root, so a root inside one of
         // them gives every workspace its own upper, and its neighbours', to read inside the tree it overlays.
@@ -304,7 +305,8 @@ impl Ops {
         let runtime = Runtime::new(root, exe);
         let stopped = mark_stopped(&layout)?;
         let running = running_ids(&layout)?;
-        let (net, net_swept) = Net::open(Layout::new(root), &running).map_err(|e| OpError::plain(format!("{}: {e}", root.display())))?;
+        let (net, net_swept) =
+            Net::open(Layout::new(root), &running, daemon_port).map_err(|e| OpError::plain(format!("{}: {e}", root.display())))?;
         Ok(Ops {
             layout,
             runtime,
@@ -1786,7 +1788,7 @@ mod tests {
     #[tokio::test]
     async fn taking_the_workspaces_over_names_every_one_of_them_that_is_running() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
         let layout = Layout::new(dir.path());
         let running = runtime::identity_of(std::process::id() as i32).unwrap();
         for (id, init) in [("wsp-awake", running), ("wsp-asleep", Init { pid: i32::MAX, started: 0, boot_id: String::new() })] {
@@ -1833,7 +1835,7 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_whose_init_dies_on_its_own_is_stopped_the_way_a_stop_stops_it() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
         let layout = Layout::new(dir.path());
         let mut init = a_process_that_waits();
         let record = record_on(&layout, "wsp-dies", init.id() as i32);
@@ -1853,7 +1855,7 @@ mod tests {
     #[tokio::test]
     async fn a_stop_under_way_is_not_stopped_a_second_time_by_its_own_watch() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
         let layout = Layout::new(dir.path());
         let mut init = a_process_that_waits();
         let record = record_on(&layout, "wsp-stops", init.id() as i32);
@@ -1874,7 +1876,7 @@ mod tests {
         // No shell, no supervisor script, nothing to look for: the boot is the one process execs reach it through.
         assert_eq!(boot_cmd(), vec!["sleep".to_owned(), "infinity".to_owned()]);
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(dir.path());
         let running = runtime::identity_of(std::process::id() as i32).unwrap();
         for (id, init) in [("wsp-awake", running), ("wsp-asleep", Init { pid: i32::MAX, started: 0, boot_id: String::new() })] {
@@ -1944,7 +1946,7 @@ mod tests {
     #[test]
     fn a_create_with_no_room_on_the_box_is_refused_and_a_box_with_room_is_not() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(dir.path());
         // Two workspaces of ours, awake because their records name this process as their init.
         let mine = runtime::identity_of(std::process::id() as i32).unwrap();
@@ -1985,7 +1987,7 @@ mod tests {
     #[tokio::test]
     async fn a_retry_under_a_key_the_box_already_holds_a_workspace_for_is_answered_and_not_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(dir.path());
         let key = "landing-a";
         let id = format!("wsp-{}", workspace_word(key));
@@ -2014,7 +2016,7 @@ mod tests {
     #[tokio::test]
     async fn a_destination_under_the_computers_own_trees_is_refused_at_the_create_and_at_the_boot() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(dir.path());
         let checkout = layout.projects().join("a-checkout");
         fs::create_dir_all(&checkout).unwrap();
@@ -2112,7 +2114,7 @@ mod tests {
     #[test]
     fn the_backend_facts_are_the_plans() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let facts = ops.backend_facts();
         assert_eq!(facts.offer, "runtime");
         assert_eq!(facts.capabilities.pause_mode, Some(PauseMode::Disk));
@@ -2148,7 +2150,7 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_workspace_is_missing_on_every_op_that_names_one_and_a_bad_frame_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         for op in [
             "machine.get",
             "machine.exec",
@@ -2216,7 +2218,7 @@ mod tests {
     #[test]
     fn the_capacity_names_no_image() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let capacity = ops.capacity().unwrap();
         assert!(capacity.images.is_empty(), "{:?}", capacity.images);
         assert_eq!(capacity.machines, MachineCounts { running: 0, paused: 0 });
@@ -2231,7 +2233,7 @@ mod tests {
     #[tokio::test]
     async fn a_create_that_names_an_image_is_refused_in_one_sentence_and_claims_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         for named in [
             serde_json::json!({ "kind": "sandbox", "template": "ubuntu:24.04" }),
             serde_json::json!({ "kind": "sandbox", "fromSnapshot": "sha256:aa" }),
@@ -2307,7 +2309,7 @@ mod tests {
         left_on_disk(root, "wsp-one");
         left_on_disk(root, "wsp-two");
 
-        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        let again = Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap();
         // The records are there and the listing names both, with the size each was created at.
         let listed = again.list(None).unwrap();
         assert_eq!(listed.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["wsp-one", "wsp-two"]);
@@ -2345,7 +2347,7 @@ mod tests {
     #[test]
     fn a_login_shared_into_a_workspace_is_a_file_under_this_daemons_logins_directory_and_nowhere_else() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let logins = ops.layout.logins();
         // The open made it, and only this login reads what lands under it: the sign-in writes the person's own
         // login there before any workspace asks for it.
@@ -2386,7 +2388,7 @@ mod tests {
     #[test]
     fn a_folder_bound_into_a_workspace_is_a_directory_under_this_daemons_root_and_nowhere_else() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let projects = ops.layout.projects();
         // The open made the projects directory, and only this login reads what lands under it: a project's
         // checkout and its agent's memory are the person's.
@@ -2445,7 +2447,7 @@ mod tests {
     #[test]
     fn a_shared_mount_point_stands_while_another_workspace_holds_it_and_goes_with_the_last() {
         let dir = tempfile::tempdir().unwrap();
-        drop(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
         let layout = Layout::new(dir.path());
         // The point as a boot leaves it on the computer's own disk: empty, with the login bound over it inside.
         let point = dir.path().join("home/.codex/auth.json");
@@ -2487,7 +2489,7 @@ mod tests {
     fn two_boots_sharing_one_login_at_the_same_moment_both_own_its_point_and_the_last_takes_it_off() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("wsp");
-        let ops = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(&root);
         // The first boot as it stands in the middle of its create: the claim's own file names the point it has
         // just made on the computer's home, and there is no record of that workspace anywhere yet. The path is
@@ -2521,7 +2523,7 @@ mod tests {
     #[test]
     fn a_login_written_on_the_computer_since_the_boot_stays_when_the_workspace_goes() {
         let dir = tempfile::tempdir().unwrap();
-        drop(Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
         let layout = Layout::new(dir.path());
         let point = dir.path().join("home/.codex/auth.json");
         fs::create_dir_all(point.parent().unwrap()).unwrap();
@@ -2609,7 +2611,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("wsp");
         let layout = Layout::new(&root);
-        drop(Ops::open(&root, PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap());
         // The empty file the boot left on the computer's own home for the login to be bound over.
         let point = dir.path().join("home/.codex/auth.json");
         fs::create_dir_all(point.parent().unwrap()).unwrap();
@@ -2618,7 +2620,7 @@ mod tests {
         fs::create_dir_all(layout.workspace("wsp-halfway")).unwrap();
         bundle::write_json(&layout.points("wsp-halfway"), &vec![point.display().to_string()]).unwrap();
 
-        let again = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let again = Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap();
         assert!(!point.exists(), "the open left the mount point of a create that never finished on the computer's home");
         // The folder stays, as it does for a workspace that went the whole way: it is the agent's own.
         assert!(point.parent().unwrap().is_dir());
@@ -2639,7 +2641,7 @@ mod tests {
         assert!(nix::unistd::geteuid().is_root(), "{}", crate::LIVE_REASON);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("wsp");
-        let ops = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap();
         let layout = Layout::new(&root);
         let point = dir.path().join("home/.codex/auth.json");
         fs::create_dir_all(point.parent().unwrap()).unwrap();
@@ -2658,7 +2660,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let layout = Layout::new(root);
-        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap());
         // What a daemon that died in the middle of a create leaves: the claim it took first, and the copy it
         // was writing under the name a copy is made under.
         let half = layout.copy_being_made("wsp-half");
@@ -2678,7 +2680,7 @@ mod tests {
         // A probe file a daemon died beside is a file rather than a copy, and the open may not trip on it.
         fs::write(layout.copies().join(".clone-probe-4242-0"), b"w").unwrap();
 
-        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        let again = Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap();
         let swept = again.unfinished_at_open();
         assert_eq!(swept.copies.iter().filter(|name| name.contains("wsp-half")).count(), 1, "{swept:?}");
         assert!(swept.copies.contains(&"wsp-done".to_owned()) && swept.copies.contains(&".clone-probe-4242-0".to_owned()), "{swept:?}");
@@ -2702,9 +2704,9 @@ mod tests {
         assert_eq!(fs::read(layout.copy_of("wsp-done").join("index.js")).unwrap(), b"module.exports = 1\n");
         // And an open of a root nothing died under says nothing; the copy just made has no record yet, so it
         // is swept in its turn, which is what a create that died right there left.
-        let third = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        let third = Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap();
         assert_eq!(third.unfinished_at_open().copies, vec!["wsp-done".to_owned()]);
-        let fourth = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        let fourth = Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap();
         assert!(fourth.unfinished_at_open().is_empty());
     }
 
@@ -2718,7 +2720,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let layout = Layout::new(root);
-        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap());
         // A copy of a checkout, and the claim of the create that was binding it in when the daemon died.
         let copy = layout.copy_of("wsp-mounted");
         fs::create_dir_all(&copy).unwrap();
@@ -2728,7 +2730,7 @@ mod tests {
         let mounted = || fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&rootfs.display().to_string());
         assert!(mounted());
 
-        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        let again = Ops::open(root, PathBuf::from("/bin/true"), 0).unwrap();
         assert!(!mounted(), "the open left the bind of a claim it removed");
         assert!(!layout.workspace("wsp-mounted").exists());
         assert!(!copy.exists(), "the copy of a create that never finished stayed");
@@ -2741,7 +2743,7 @@ mod tests {
     #[tokio::test]
     async fn a_copy_that_fails_partway_leaves_no_copy_and_nothing_half_made() {
         let dir = tempfile::tempdir().unwrap();
-        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap();
         let from = dir.path().join("checkout");
         fs::create_dir_all(from.join("src")).unwrap();
         fs::write(from.join("src/index.js"), b"module.exports = 1\n").unwrap();
@@ -2763,7 +2765,7 @@ mod tests {
     #[test]
     fn a_root_under_a_directory_every_workspace_overlays_is_refused_by_the_open_and_nothing_is_made() {
         let under = Path::new("/var/lib/wsp-under-a-lower");
-        let refused = match Ops::open(under, PathBuf::from("/bin/true")) {
+        let refused = match Ops::open(under, PathBuf::from("/bin/true"), 0) {
             Ok(_) => panic!("a root under /var opened"),
             Err(e) => e.message,
         };
@@ -2771,10 +2773,10 @@ mod tests {
         assert!(refused.contains("/var/lib/wsp-under-a-lower") && refused.contains("/var"), "{refused}");
         assert!(!under.exists(), "the open made a folder under a root it refused");
         // And the same root a directory deeper, since the reading is of the whole path.
-        assert!(Ops::open(Path::new("/etc/wsp/one"), PathBuf::from("/bin/true")).is_err());
+        assert!(Ops::open(Path::new("/etc/wsp/one"), PathBuf::from("/bin/true"), 0).is_err());
         // A root clear of all five opens as ever.
         let dir = tempfile::tempdir().unwrap();
-        assert!(Ops::open(dir.path(), PathBuf::from("/bin/true")).is_ok());
+        assert!(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).is_ok());
     }
 
     /// An older daemon that died inside the write of a claim's points file left a torn one behind: the open
@@ -2785,11 +2787,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("wsp");
         let layout = Layout::new(&root);
-        drop(Ops::open(&root, PathBuf::from("/bin/true")).unwrap());
+        drop(Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap());
         fs::create_dir_all(layout.workspace("wsp-torn")).unwrap();
         fs::write(layout.points("wsp-torn"), "[\"/root/.codex/auth.json\"").unwrap();
 
-        let again = Ops::open(&root, PathBuf::from("/bin/true")).unwrap();
+        let again = Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap();
         assert_eq!(again.unfinished_at_open().claims, vec!["wsp-torn".to_owned()]);
         assert!(!layout.workspace("wsp-torn").exists());
     }
@@ -2800,7 +2802,7 @@ mod tests {
         let broken = dir.path().join("run").join("wsp-broken");
         fs::create_dir_all(&broken).unwrap();
         fs::write(broken.join("workspace.json"), "{ not json").unwrap();
-        let refused = match Ops::open(dir.path(), PathBuf::from("/bin/true")) {
+        let refused = match Ops::open(dir.path(), PathBuf::from("/bin/true"), 0) {
             Ok(_) => panic!("a record that does not read opened"),
             Err(e) => e.to_string(),
         };
