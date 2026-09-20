@@ -2560,9 +2560,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
+  /** The rule as the caller reads it. A person is told which rule hid the workspace, since what this host holds is
+   * theirs; a thread is told absence and nothing more, since a sentence naming a workspace or a project outside its
+   * tree is how a thread learns what else stands here. No word rides the thread's: every verb that reaches this
+   * found the workspace itself rather than being handed it. */
   const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined): void => {
     const line = refusalFor(record, caller);
-    if (line !== undefined) throw new Error(line);
+    if (line === undefined) return;
+    throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
   };
   const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
   /** Every workspace this host holds, as any door serves them: one a create has not finished is not there yet. */
@@ -4622,7 +4627,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
-    if (!entry || entry.creating) throw new Error(`no such workspace: ${id}`);
+    // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
+    // apart is how a thread walks what else stands here.
+    if (!entry || entry.creating) {
+      if (scopeOf(origin) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
+      throw new Error(`no such workspace: ${id}`);
+    }
     refuseRelayed(entry.record, origin);
     return entry;
   };
@@ -5055,7 +5065,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async resolve(ref, origin) {
       await ready();
-      const rows = held();
+      const scope = scopeOf(origin);
+      // A thread is answered off the reading its own listing is built from rather than off everything this host
+      // holds, so a word naming a workspace outside its tree is absent here exactly as it is there and every miss
+      // is one sentence: an id, a start of one and a name all read the same, and nothing is enumerated.
+      const rows = scope === undefined ? held() : listedFor(origin);
       // The whole of an id, then the whole of a name, as a thread's own reference does: a name names one workspace at
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
@@ -5065,6 +5079,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
       const entry = exact ?? started[0];
       if (entry === undefined) {
+        if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
         const place = (await placeDoor?.find(ref)) ?? [];

@@ -24,6 +24,8 @@ import { HERE_PLACE_ID,
   spawnDepthRefusal,
   bareNoSuchProjectLine,
   noSuchProjectLine,
+  ID_PREFIX_MIN,
+  nameTakenRefusal,
   noWorkspaceRefusal,
   parentProjectRefusal,
   spawnProjectRefusal,
@@ -230,12 +232,19 @@ describe("agents spawning agents", () => {
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    const line = spawnProjectRefusal(rootThread, mine.name, other.name);
-    // A project word the thread's own workspace does not hold is absent to it, so the create never reaches the rule.
+    // A project word the thread's own workspace does not hold is absent to it, and so is every workspace of one:
+    // both read as missing rather than naming the project or the workspace the thread may not have.
     await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(bareNoSuchProjectLine(other.id));
-    await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(line);
-    await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(line);
-    await expect(rt.workspaces.bringBack({ workspaceId: theirs.id }, asThread(scope))).rejects.toThrow(line);
+    for (const reach of [
+      () => rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope)),
+      () => rt.workspaces.get(theirs.id, asThread(scope)),
+      () => rt.workspaces.bringBack({ workspaceId: theirs.id }, asThread(scope)),
+    ]) {
+      await expect(reach()).rejects.toThrow(noWorkspaceRefusal());
+      await expect(reach()).rejects.not.toThrow(other.name);
+    }
+    // The person still reads which rule hid it, since what this host holds is theirs.
+    expect(await rt.workspaces.originRefusal(theirs.id, asThread(scope))).toBe(spawnProjectRefusal(rootThread, mine.name, other.name));
     // Its own workspace is still its own, and the listing shows that one and no other project's.
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name)).toEqual(["lead"]);
     held.end(0);
@@ -360,16 +369,27 @@ describe("agents spawning agents", () => {
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mine.id, rootThreadId: "t_root" };
     const forked = await createOn(rt, { name: "ours" }, asThread(scope));
     expect((await rt.workspaces.get(forked.id, asThread(scope))).name).toBe("ours");
-    await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
-    await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
+    // A workspace outside the tree reads as missing and nothing else: its name, its id and the ids a start of one
+    // matches are what a thread would otherwise walk this host with.
+    await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(noWorkspaceRefusal());
+    await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(noWorkspaceRefusal());
+    await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.not.toThrow("theirs");
     // The listing leaves out what it may not drive rather than naming it, and the name is refused by the same rule:
     // one reading behind the list and behind every verb that takes a workspace, so neither can deny what the other shows.
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name).sort()).toEqual(["mine", "ours"]);
     expect((await rt.status.list(undefined, asThread(scope))).map(s => s.name).sort()).toEqual(["mine", "ours"]);
     expect((await rt.workspaces.resolve("mine", asThread(scope))).id).toBe(mine.id);
-    await expect(rt.workspaces.resolve("theirs", asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
-    await expect(rt.workspaces.resolve(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
-    await expect(rt.workspaces.resolve("nobody", asThread(scope))).rejects.toThrow(noWorkspaceRefusal("nobody"));
+    for (const word of ["theirs", theirs.id, theirs.id.slice(0, 6), "nobody"]) {
+      await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(noWorkspaceRefusal(word));
+    }
+    // Every id of this host starts ws_, so the start a thread would walk the whole host with answers off its own
+    // listing: one workspace there, never the two a bare prefix would name.
+    expect((await rt.workspaces.resolve(forked.id.slice(0, ID_PREFIX_MIN), asThread(scope))).id).toBe(forked.id);
+    // A name a workspace outside the tree holds is still taken, which is the thread's own word answered back.
+    await expect(createOn(rt, { name: "theirs" }, asThread(scope))).rejects.toThrow(nameTakenRefusal("theirs"));
+    // The very word the thread reads as absent is a workspace to the person, which is what makes it a rule and not
+    // a missing record.
+    expect((await rt.workspaces.resolve("theirs")).id).toBe(theirs.id);
     await rt.close();
   });
 

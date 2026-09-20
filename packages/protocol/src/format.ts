@@ -2532,10 +2532,13 @@ export function parentProjectRefusal(parent: string, holds: string, made: string
   return `${parent} is a workspace of ${holds} and this one is made for ${made}; a child starts on its parent's branch, so both hold one project`;
 }
 
-/** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
- * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
-export function noWorkspaceRefusal(ref: string): string {
-  return `no workspace ${ref}`;
+/** The one sentence a name no workspace this caller may drive carries is refused with. Absence is the only thing it
+ * says, and for a thread it is the whole answer: a workspace outside its tree is refused as missing rather than by
+ * the rule that hides it, since a sentence naming one is how a thread learns what else this host holds. The word
+ * rides it where the caller named one and stays off where the verb found the workspace itself. A person still reads
+ * the rule, since what this host holds is theirs. */
+export function noWorkspaceRefusal(ref?: string): string {
+  return ref === undefined ? "no such workspace" : `no workspace ${ref}`;
 }
 
 /** How much of an id a word has to carry before it names a workspace by its start: enough that a name with spaces
