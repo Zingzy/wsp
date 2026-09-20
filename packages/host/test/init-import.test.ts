@@ -6,11 +6,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
-import { NODE_RELEASES, planFiles, type StagedFile } from "@wsp/engine";
+import { NODE_RELEASES, planFiles, type PlannedFile, type StagedFile } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
@@ -470,6 +470,29 @@ describe("packPlan", () => {
     expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}');
   });
 
+  it("a hook is judged by the file it points at: a link to a script under home travels as its bytes, one to a private key comes out and is listed as left behind", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude", "hooks"), { recursive: true });
+    mkdirSync(join(home, "bin"));
+    writeFileSync(join(home, ".claude", "hooks", "fine"), "#!/bin/sh\necho fine\n", { mode: 0o755 });
+    writeFileSync(join(home, "bin", "notify.sh"), "#!/bin/sh\necho notify\n", { mode: 0o755 });
+    symlinkSync(join(home, "bin", "notify.sh"), join(home, ".claude", "hooks", "linked"));
+    symlinkSync(join(home, ".ssh", "id_ed25519"), join(home, ".claude", "hooks", "keyed"));
+    const settings = { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "~/.claude/hooks/fine" }, { type: "command", command: "~/.claude/hooks/linked" }, { type: "command", command: "~/.claude/hooks/keyed --quiet" }] }] } };
+    writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+    const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude/settings.json"] })], { home, stat: statOf, platform: "darwin", rewrites: [[".claude/", ".claude-cfg/"]] });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const dir = extract(packed.tar);
+    expect(readFileSync(join(dir, ".claude-cfg", "hooks", "fine"), "utf8")).toBe("#!/bin/sh\necho fine\n");
+    expect(readFileSync(join(dir, ".claude-cfg", "hooks", "linked"), "utf8")).toBe("#!/bin/sh\necho notify\n");
+    expect(lstatSync(join(dir, ".claude-cfg", "hooks", "linked")).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(dir, ".claude-cfg", "hooks", "keyed"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8"))).toEqual({
+      hooks: { SessionStart: [{ hooks: [{ type: "command", command: "/root/.claude-cfg/hooks/fine" }, { type: "command", command: "/root/.claude-cfg/hooks/linked" }] }] },
+    });
+    expect(packed.leftBehind).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/.claude/hooks/keyed" }]);
+  });
+
   it("a copied Codex config loses a notify whose program is a Mac binary, listed as left behind, and keeps every other key as written", async () => {
     const home = laptop();
     mkdirSync(join(home, ".codex", "computer-use"), { recursive: true });
@@ -624,6 +647,36 @@ describe("packPlan: excludes and consent rows", () => {
     const entry = listTar(packed.tar).find(e => e.path === ".config/gsc/creds.json");
     expect(entry?.mode).toMatch(/^-rw-------/);
     expect(packed.skipped).toEqual([]);
+  });
+});
+
+describe("packPlan: the never list under a ticked path", () => {
+  it("leaves a .env under a ticked folder home and names it, judges a link by its target, and carries both on a row the person answered copy", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".config", "tool"), { recursive: true });
+    writeFileSync(join(home, ".config", "tool", "config.toml"), "a = 1\n");
+    writeFileSync(join(home, ".config", "tool", ".env"), "TOKEN=sk-ant-x\n");
+    mkdirSync(join(home, ".config", "tool", ".env.d"));
+    writeFileSync(join(home, ".config", "tool", ".env.d", "one.toml"), "b = 2\n");
+    writeFileSync(join(home, ".netrc"), "machine example.com password sk-ant-x\n");
+    symlinkSync(join(home, ".netrc"), join(home, ".config", "tool", "creds"));
+    const tool: ManifestEntry = row({ rung: "shell", id: "shell/tool", paths: ["~/.config/tool"] });
+    const packed = await packPlan(planFiles([tool], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    const paths = listTar(packed.tar).map(e => e.path);
+    expect(paths).toContain(".config/tool/config.toml");
+    // The name rule is about files: a directory named .env.d is config, and it travels.
+    expect(paths).toContain(".config/tool/.env.d/one.toml");
+    expect(paths.filter(p => /tool\/\.env$|creds/.test(p))).toEqual([]);
+    expect([...packed.skipped].sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { id: "shell/tool", path: "~/.config/tool/.env", note: ".env files are never copied; set the values on the machine" },
+      { id: "shell/tool", path: "~/.config/tool/creds", note: "a link to ~/.netrc: .netrc is never copied; sign in on the machine" },
+    ]);
+    // The same folder on a credential row the person answered copy carries both, as its own path would.
+    const consented = await packPlan(planFiles([row({ ...tool, id: "everything/tool", consent: true, choice: "copy" })], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
+    const dir = extract(consented.tar);
+    expect(readFileSync(join(dir, ".config", "tool", ".env"), "utf8")).toBe("TOKEN=sk-ant-x\n");
+    expect(readFileSync(join(dir, ".config", "tool", "creds"), "utf8")).toBe("machine example.com password sk-ant-x\n");
+    expect(consented.skipped).toEqual([]);
   });
 });
 
@@ -866,6 +919,20 @@ describe("keychainReader", () => {
   });
 });
 
+/** A planned file as planFiles hands it to the digest: the row's rung and its copy answer travel with the path,
+ * since what is under it is judged by the row's own rule. */
+const plannedAt = (source: string, home: string, over: Partial<PlannedFile> = {}): PlannedFile => ({
+  id: "everything/demo",
+  rung: "everything",
+  source,
+  dest: relative(home, source),
+  mode: 0o755,
+  dir: true,
+  excludes: [],
+  volatile: false,
+  ...over,
+});
+
 describe("digestOf", () => {
   it("reads the names, modes and bytes under a path, leaves excludes out, and never reads stat times", async () => {
     const home = laptop();
@@ -874,31 +941,31 @@ describe("digestOf", () => {
     writeFileSync(join(demo, "settings.json"), "{}\n");
     writeFileSync(join(demo, "cache", "blob"), "1");
     const excludes = [join(demo, "cache")];
-    const d0 = digestOf(demo, excludes, home);
+    const d0 = digestOf(plannedAt(demo, home, { excludes }), home);
     expect(d0).toMatch(/^[0-9a-f]{64}$/);
     writeFileSync(join(demo, "cache", "blob"), "22");
     writeFileSync(join(demo, "settings.json"), "{}\n");
     const later = new Date(Date.now() + 60_000);
     utimesSync(join(demo, "settings.json"), later, later);
     utimesSync(demo, later, later);
-    expect(digestOf(demo, excludes, home)).toBe(d0);
-    expect(digestOf(demo, [], home)).not.toBe(d0);
+    expect(digestOf(plannedAt(demo, home, { excludes }), home)).toBe(d0);
+    expect(digestOf(plannedAt(demo, home), home)).not.toBe(d0);
     // Same length, one byte different: only the bytes read can tell these apart.
     writeFileSync(join(demo, "settings.json"), "{]\n");
-    const d1 = digestOf(demo, excludes, home);
+    const d1 = digestOf(plannedAt(demo, home, { excludes }), home);
     expect(d1).not.toBe(d0);
     chmodSync(join(demo, "settings.json"), 0o600);
-    const d2 = digestOf(demo, excludes, home);
+    const d2 = digestOf(plannedAt(demo, home, { excludes }), home);
     expect(d2).not.toBe(d1);
     writeFileSync(join(demo, "extra"), "");
-    const d3 = digestOf(demo, excludes, home);
+    const d3 = digestOf(plannedAt(demo, home, { excludes }), home);
     expect(d3).not.toBe(d2);
     // A file that cannot be read digests by its error and is left for the pack to fail on.
     await withRefused(join(demo, "settings.json"), () => {
-      expect(digestOf(demo, excludes, home)).toMatch(/^[0-9a-f]{64}$/);
-      expect(digestOf(demo, excludes, home)).not.toBe(d3);
+      expect(digestOf(plannedAt(demo, home, { excludes }), home)).toMatch(/^[0-9a-f]{64}$/);
+      expect(digestOf(plannedAt(demo, home, { excludes }), home)).not.toBe(d3);
     });
-    expect(digestOf(demo, excludes, home)).toBe(d3);
+    expect(digestOf(plannedAt(demo, home, { excludes }), home)).toBe(d3);
   });
 
   it("a link to the planned directory or one of its parents digests as the pack refuses it: the siblings behind it never enter", () => {
@@ -908,11 +975,11 @@ describe("digestOf", () => {
     writeFileSync(join(demo, "settings.json"), "{}\n");
     symlinkSync(join(home, ".config"), join(demo, "up"));
     symlinkSync(demo, join(demo, "self"));
-    const d0 = digestOf(demo, [], home);
+    const d0 = digestOf(plannedAt(demo, home), home);
     writeFileSync(join(home, ".config", "sibling.txt"), "new\n");
-    expect(digestOf(demo, [], home)).toBe(d0);
+    expect(digestOf(plannedAt(demo, home), home)).toBe(d0);
     writeFileSync(join(demo, "settings.json"), "{]\n");
-    expect(digestOf(demo, [], home)).not.toBe(d0);
+    expect(digestOf(plannedAt(demo, home), home)).not.toBe(d0);
   });
 
   it("link targets enter the digest relative to home, so the same layout under another home digests the same", () => {
@@ -929,7 +996,7 @@ describe("digestOf", () => {
     const a = laptop();
     const b = laptop();
     expect(a).not.toBe(b);
-    expect(digestOf(layout(a), [], a)).toBe(digestOf(layout(b), [], b));
+    expect(digestOf(plannedAt(layout(a), a), a)).toBe(digestOf(plannedAt(layout(b), b), b));
   });
 
   it("follows a link into home and reads its target's bytes; a link outside home, to a private key or back into a walked directory digests by where it points", () => {
@@ -941,14 +1008,34 @@ describe("digestOf", () => {
     symlinkSync("/etc/hosts", join(demo, "outside"));
     symlinkSync(join(home, ".ssh", "id_ed25519"), join(demo, "key"));
     symlinkSync(demo, join(demo, "loop"));
-    const d0 = digestOf(demo, [], home);
+    const d0 = digestOf(plannedAt(demo, home), home);
     expect(d0).toMatch(/^[0-9a-f]{64}$/);
     writeFileSync(join(home, ".shared"), "changed\n");
-    const d1 = digestOf(demo, [], home);
+    const d1 = digestOf(plannedAt(demo, home), home);
     expect(d1).not.toBe(d0);
     writeFileSync(join(home, ".ssh", "id_ed25519"), "OTHER PRIVATE", { mode: 0o600 });
-    expect(digestOf(demo, [], home)).toBe(d1);
-    expect(digestOf(join(demo, "inside"), [], home)).toBe(digestOf(join(home, ".shared"), [], home));
+    expect(digestOf(plannedAt(demo, home), home)).toBe(d1);
+    expect(digestOf(plannedAt(join(demo, "inside"), home), home)).toBe(digestOf(plannedAt(join(home, ".shared"), home), home));
+  });
+
+  it("a file the row never copies digests by that rule and not by its bytes, so the pack and the hash agree", () => {
+    const home = laptop();
+    const demo = join(home, ".config", "demo");
+    mkdirSync(demo, { recursive: true });
+    writeFileSync(join(demo, "settings.json"), "{}\n");
+    writeFileSync(join(demo, ".env"), "TOKEN=one\n");
+    writeFileSync(join(home, ".netrc"), "machine example.com\n");
+    symlinkSync(join(home, ".netrc"), join(demo, "creds"));
+    const d0 = digestOf(plannedAt(demo, home), home);
+    writeFileSync(join(demo, ".env"), "TOKEN=two, and longer\n");
+    writeFileSync(join(home, ".netrc"), "machine example.com password sk-ant-x\n");
+    expect(digestOf(plannedAt(demo, home), home)).toBe(d0);
+    // On a row answered copy the pack carries both, so their bytes are this golden's.
+    const consent = { consent: true };
+    const c0 = digestOf(plannedAt(demo, home, consent), home);
+    expect(c0).not.toBe(d0);
+    writeFileSync(join(demo, ".env"), "TOKEN=three\n");
+    expect(digestOf(plannedAt(demo, home, consent), home)).not.toBe(c0);
   });
 });
 

@@ -57,6 +57,10 @@ export type PathInfo =
 
 export interface PlannedFile {
   id: string;
+  /** The row's rung and its copy answer, so the pack and the digest judge every file under this path, every link
+   * target and every hook by the rule the row's own path was judged by. */
+  rung: string;
+  consent?: boolean;
   /** Absolute path on this computer. */
   source: string;
   /** Path under the guest's home. */
@@ -291,7 +295,7 @@ export function refusedPath(rel: string, dir: boolean | undefined): string | und
 /** Why a row's path never travels, or nothing. Environment files and .netrc hold values, not config: they
  * copy only as a login row's own file or on a credential row the person answered copy. The name rule is
  * about files; a directory called .env is a Python environment more often than a secret. */
-export function neverCopied(e: RecipeEntry, rel: string, dir: boolean | undefined): string | undefined {
+export function neverCopied(e: Pick<RecipeEntry, "id" | "rung" | "consent">, rel: string, dir: boolean | undefined): string | undefined {
   if (e.id.startsWith("identity/ssh-key")) return "private key, never copied";
   if (e.id === "identity/gpg") return "GPG keys are never copied";
   const base = rel.slice(rel.lastIndexOf("/") + 1);
@@ -559,7 +563,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
-      const planned: PlannedFile = { id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) };
+      const planned: PlannedFile = { id: e.id, rung: e.rung, ...(e.consent === true ? { consent: true } : {}), source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) };
       if (opts.keep !== undefined && !opts.keep(planned)) continue;
       plan.files.push(planned);
       brought++;

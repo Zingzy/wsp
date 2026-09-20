@@ -29,7 +29,7 @@ export const RUNG_TITLE: Record<Rung, string> = {
  * same answer about what is on disk (`isDir`: true, false, or undefined when the path is not there). */
 export function refusedNote(e: ManifestEntry, isDir: (rel: string) => boolean | undefined): string | undefined {
   if (e.rung === "tools" || e.paths.length === 0 || !e.paths.every(p => p.startsWith("~/"))) return undefined;
-  const notes = e.paths.map(p => neverCopied({ ...e, bring: true, choice: "copy" }, p.slice(2), isDir(p.slice(2))));
+  const notes = e.paths.map(p => neverCopied(e, p.slice(2), isDir(p.slice(2))));
   return notes.every(n => n !== undefined) ? notes[0] : undefined;
 }
 

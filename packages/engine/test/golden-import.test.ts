@@ -141,10 +141,10 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "identity", id: "identity/ssh-config", paths: ["~/.ssh/config"], bytes: 2267 }),
     ]);
     expect(p.files).toEqual([
-      { id: "identity/git-user", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, excludes: [], volatile: false },
-      { id: "shell/starship", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, excludes: [], volatile: false },
-      { id: "shell/oh-my-zsh", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, excludes: [], volatile: false },
-      { id: "identity/ssh-config", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, excludes: [], volatile: false },
+      { id: "identity/git-user", rung: "identity", source: `${HOME}/.gitconfig`, dest: ".gitconfig", mode: 0o644, dir: false, excludes: [], volatile: false },
+      { id: "shell/starship", rung: "shell", source: `${HOME}/.config/starship.toml`, dest: ".config/starship.toml", mode: 0o644, dir: false, excludes: [], volatile: false },
+      { id: "shell/oh-my-zsh", rung: "shell", source: `${HOME}/.oh-my-zsh/custom`, dest: ".oh-my-zsh/custom", mode: 0o755, dir: true, excludes: [], volatile: false },
+      { id: "identity/ssh-config", rung: "identity", source: `${HOME}/.ssh/config`, dest: ".ssh/config", mode: 0o600, dir: false, excludes: [], volatile: false },
     ]);
     expect(p.bytes).toBe(225 + 2258 + 1_031_384 + 2267);
     expect(p.rungs).toEqual({ identity: 2, shell: 2 });
@@ -211,7 +211,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
       row({ rung: "shell", id: "shell/gone", paths: ["~/.gone-linked"] }),
     ]);
     // The target's bytes ship at the link's path: dest is the link, source is the link (packing follows it).
-    expect(p.files).toEqual([{ id: "shell/zshrc", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, excludes: [], volatile: false }]);
+    expect(p.files).toEqual([{ id: "shell/zshrc", rung: "shell", source: `${HOME}/.zshrc-linked`, dest: ".zshrc-linked", mode: 0o644, dir: false, excludes: [], volatile: false }]);
     expect(p.skipped).toEqual([
       { id: "shell/hosts", path: "~/.hosts-linked", note: "a link to /etc/hosts, outside your home directory" },
       { id: "shell/key", path: "~/.key-linked", note: "a link to ~/.ssh/id_ed25519: private key, never copied" },
@@ -570,6 +570,20 @@ describe("planFiles: files never copied by name", () => {
     ]);
     expect(neverCopied(row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"] }), ".netrc", false)).toBe(".netrc is never copied; sign in on the machine");
     expect(neverCopied(row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"], consent: true, choice: "copy" }), ".netrc", false)).toBeUndefined();
+  });
+
+  it("a planned file carries its row's rung and copy answer, so the pack judges every file under it by the row's rule", () => {
+    const p = plan([
+      row({ rung: "everything", id: "everything/.config/demo", paths: ["~/.config/demo"] }),
+      row({ rung: "everything", id: "everything/.netrc", paths: ["~/.netrc"], consent: true, choice: "copy" }),
+    ]);
+    expect(p.files.map(f => [f.dest, f.rung, f.consent])).toEqual([
+      [".config/demo", "everything", undefined],
+      [".netrc", "everything", true],
+    ]);
+    // The rule reads a row by those three fields alone, which is what a planned file carries.
+    expect(neverCopied({ id: "everything/x", rung: "everything" }, ".config/demo/.env", false)).toBe(".env files are never copied; set the values on the machine");
+    expect(neverCopied({ id: "everything/x", rung: "everything", consent: true }, ".config/demo/.env", false)).toBeUndefined();
   });
 
   it("the name rule is about files: a directory named .env (a Python environment) copies, and a missing .env is only missing", () => {
