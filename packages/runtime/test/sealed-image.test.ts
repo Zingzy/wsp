@@ -4,8 +4,8 @@
 // at a second place does and refuses.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { NoProviderBackend, imageHash } from "@wsp/engine";
-import { NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
+import { NoProviderBackend, imageHash, tarOf } from "@wsp/engine";
+import { NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, vaultUnlistedRefusal, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -47,9 +47,9 @@ describe("the image record a seal writes", () => {
     const { store, rt } = started();
     const b = await rt.golden.prepare();
     const { version } = await rt.golden.seal(b.id);
-    const image = (await store.get("images", "default")) as { hash: string; recipeHash: string; recipe: Recipe; vault: { sha256: string; paths: number } };
+    const image = (await store.get("images", "default")) as { hash: string; recipeHash: string; recipe: Recipe; vault: { sha256: string; paths: number; held?: string[] } };
     expect(image).toMatchObject({ name: "default", version: 1, recipeHash: "h1", recipe: SMALL, sealedFrom: "h1" });
-    expect(image.vault).toMatchObject({ sha256: EMPTY_TGZ_SHA, paths: 1 });
+    expect(image.vault).toMatchObject({ sha256: EMPTY_TGZ_SHA, paths: 1, held: ["/etc/profile.d/wsp-secrets.sh"] });
     expect(image.hash).toBe(imageHash("h1", EMPTY_TGZ_SHA, []));
     expect(version.imageHash).toBe(image.hash);
     expect(await store.getBlob("image-vaults", "default@v1")).toBeDefined();
@@ -299,6 +299,52 @@ describe("building the image at a second place", () => {
     const view = await rt.image.get();
     expect(view.copies.map(c => c.place)).toEqual(["box"]);
     expect(other.machines.length).toBe(0);
+    await rt.close();
+  });
+
+  /** A record on the store as a seal left it, with the archive its builder handed back: what a second place reads
+   * before it boots anything. */
+  async function recorded(store: Store, o: { held?: string[]; tar: Buffer }): Promise<void> {
+    const vault = {
+      sha256: createHash("sha256").update(o.tar).digest("hex"),
+      bytes: o.tar.length,
+      paths: 1,
+      ...(o.held !== undefined ? { held: o.held } : {}),
+      takenAt: "2026-09-01T00:00:00.000Z",
+    };
+    await store.put("images", "default", { name: "default", version: 1, hash: "a".repeat(64), recipeHash: "h1", recipe: SMALL, pins: [], logins: [], sealedAt: "2026-09-01T00:00:00.000Z", sealedFrom: "h1", vault, place: "box" });
+    await store.putBlob("image-vaults", "default@v1", o.tar);
+  }
+
+  it("a copy reads the archive against the paths the seal asked for, and one carrying a foreign member boots no builder", async () => {
+    const { other, places } = twoPlaces();
+    const store = memoryStore();
+    await recorded(store, { held: ["/root/.codex/auth.json"], tar: tarOf([{ path: "etc/cron.d/x", mode: 0o644, content: "* * * * * root sh" }]) });
+    const { rt, composed } = started({ store, places });
+    await expect(rt.image.build({ place: "solari" })).rejects.toMatchObject({ kind: "conflict", message: expect.stringContaining("etc/cron.d/x") });
+    expect(other.machines.length).toBe(0);
+    expect(other.puts).toHaveLength(0);
+    expect(composed.count).toBe(0);
+    await rt.close();
+  });
+
+  it("a record whose vault kept no path list is refused in its own sentence, never the one for a blob this computer lost", async () => {
+    const { other, places } = twoPlaces();
+    const store = memoryStore();
+    await recorded(store, { tar: tarOf([{ path: "root/.codex/auth.json", mode: 0o600, content: "{}" }]) });
+    const { rt } = started({ store, places });
+    await expect(rt.image.build({ place: "solari" })).rejects.toMatchObject({ kind: "conflict", message: vaultUnlistedRefusal("default", 1) });
+    expect(other.machines.length).toBe(0);
+    await rt.close();
+  });
+
+  it("an archive whose every member is under the asked paths builds the copy", async () => {
+    const { other, places } = twoPlaces();
+    const store = memoryStore();
+    await recorded(store, { held: ["/root/.codex/auth.json"], tar: tarOf([{ path: "root/.codex/auth.json", mode: 0o600, content: "{}" }]) });
+    const { rt } = started({ store, places });
+    expect(await rt.image.build({ place: "solari" })).toMatchObject({ built: true, copy: { place: "solari" } });
+    expect(other.machines.length).toBeGreaterThan(0);
     await rt.close();
   });
 

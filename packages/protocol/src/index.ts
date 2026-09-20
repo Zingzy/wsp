@@ -2329,6 +2329,9 @@ export const SealedVault = z.object({
   bytes: z.number().int().nonnegative(),
   /** How many guest paths the archive names; zero means the seal had nothing to hold and the copy will ask for sign-ins again. */
   paths: z.number().int().nonnegative(),
+  /** The guest paths the seal archived, absolute, which every member of the archive is judged against before a copy
+   * imports it. Absent on a record sealed before the list was kept, and such a record builds no copy. */
+  held: z.array(z.string()).optional(),
   takenAt: z.string(),
 });
 export type SealedVault = z.infer<typeof SealedVault>;
@@ -3578,6 +3581,17 @@ export const isJoinedComputer = (place: { id: string; kind: string }): boolean =
  * and that builder's disk copied, and a computer somebody joined does neither. */
 export const placeBuildsNoImageLine = (place: string): string =>
   `${place} takes no copy of your image: a copy is built by forking a machine there and copying its disk, and ${place} does neither`;
+
+/** What a vault archive is refused with, at the seal that takes it and at the copy that imports it alike: where the
+ * reading stopped and why. The archive is refused whole, since a builder that wrote one member nobody asked for
+ * wrote every other member too. */
+export const vaultMemberRefusal = (member: string, why: string): string =>
+  `the image's sign-in archive is refused at ${member}: ${why}; nothing of it was imported`;
+
+/** What a copy is refused with for a record whose vault kept no path list: sealed before the record held which
+ * paths its sign-ins live at, so no other place can tell a member the seal asked for from one it did not. */
+export const vaultUnlistedRefusal = (name: string, version: number): string =>
+  `${name} v${version} was sealed before its record kept which paths its sign-ins live at, so no other place can check its archive against them; cut the next version`;
 
 export const DaemonErrorCode = z.enum([
   "unsupported",

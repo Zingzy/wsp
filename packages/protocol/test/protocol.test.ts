@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   creationAwaits,
+  vaultMemberRefusal,
+  vaultUnlistedRefusal,
   WORKSPACE_GLYPHS,
   lookWord,
   Recipe,
@@ -1291,6 +1293,33 @@ describe("goldenImage", () => {
     expect(wire.GoldenVersion.parse(v).templateId).toBeUndefined();
     expect(wire.GoldenVersion.parse({ ...v, templateId: "tpl_a" }).templateId).toBe("tpl_a");
     expect(wire.GoldenStage.options).toContain("promoting");
+  });
+});
+
+describe("the sentences a vault archive is refused with", () => {
+  it("the member refusal names the member and the reason and says nothing landed", () => {
+    const line = vaultMemberRefusal("etc/cron.d/x", "it lands at /etc/cron.d/x, which is not one of the paths the seal asked for or under one");
+    expect(line).toContain("etc/cron.d/x");
+    expect(line).toContain("not one of the paths the seal asked for");
+    expect(line).toContain("nothing of it was imported");
+  });
+
+  it("the unlisted refusal names the image and its version and says to cut the next one", () => {
+    const line = vaultUnlistedRefusal("default", 1);
+    expect(line).toContain("default v1");
+    expect(line).toContain("cut the next version");
+  });
+
+  it("neither sentence carries a path of the computer the record sits on", () => {
+    for (const line of [vaultMemberRefusal("root/.codex/auth.json", "it points at /etc"), vaultUnlistedRefusal("default", 2)]) {
+      expect(line).not.toMatch(/\/Users\/|\/home\/|\.wsp|state\.json/);
+    }
+  });
+
+  it("a sealed vault reads with the paths it held, and one sealed before the list was kept reads without", () => {
+    const vault = { sha256: "a".repeat(64), bytes: 10, paths: 2, takenAt: "2026-09-01T00:00:00Z" };
+    expect(wire.SealedVault.parse(vault).held).toBeUndefined();
+    expect(wire.SealedVault.parse({ ...vault, held: ["/root/.codex/auth.json"] }).held).toEqual(["/root/.codex/auth.json"]);
   });
 });
 
