@@ -99,7 +99,7 @@ impl World {
     /// of them named after this checkout.
     async fn open() -> World {
         let turn = ONE_AT_A_TIME.lock().await;
-        let ops = Ops::open(&root(), bin()).unwrap();
+        let ops = Ops::open(&root(), bin(), numbers::DEFAULT_PORT).unwrap();
         let world = World { ops, made: Vec::new(), _turn: turn };
         world.ops.restore().await.unwrap();
         let rows = world.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner() } })).await;
@@ -111,7 +111,7 @@ impl World {
 
     /// The same root opened again, as a daemon that restarted opens it: nothing killed, the forwards restored.
     async fn reopen(&mut self) {
-        let fresh = Ops::open(&root(), bin()).unwrap();
+        let fresh = Ops::open(&root(), bin(), numbers::DEFAULT_PORT).unwrap();
         drop(std::mem::replace(&mut self.ops, fresh));
         // The old listeners' tasks end at the next turn of this runtime; a daemon that died holds no port.
         tokio::task::yield_now().await;
@@ -957,7 +957,7 @@ async fn a_pid_the_kernel_reused_after_the_init_died_is_not_the_workspace() {
     assert!(exec["error"].as_str().unwrap().contains("is stopped"), "{exec}");
     // A fresh open of the same root finds the workspace stopped by the same reading, takes its mount and youki's
     // state, and says which.
-    let again = Ops::open(&root(), PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon"))).unwrap();
+    let again = Ops::open(&root(), PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon")), numbers::DEFAULT_PORT).unwrap();
     assert!(again.stopped_at_open().contains(&id), "{:?}", again.stopped_at_open());
     assert!(!root().join("state").join(&id).exists());
     drop(again);
@@ -1667,28 +1667,55 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
         eprintln!("== the box pulled the image first:\n{said}");
     }
     let outside_id = container_id(&started).unwrap_or_else(|| panic!("no container id on stdout: {started:?}"));
-    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-665-engine-{key}") }))).await;
-    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
-    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
-    let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
-    show("the socket inside the workspace made with --engine", code, &out, &err);
-    assert_eq!(code, 0);
+    // The project the compose stack is run from: a checkout on the box, copied into the workspace by the create.
+    // What a container of this workspace may bind is that copy and nothing else, off the record the create wrote,
+    // so nothing the workspace writes inside decides it.
+    let from = root().join("projects").join(format!("live-compose-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    fs::create_dir_all(from.join("html")).unwrap();
+    fs::write(from.join("html/index.html"), b"hello-from-workspace\n").unwrap();
     // Both services wear this suite's own label, so a person sweeping the box after a run that died finds them
     // by one filter: a compose stack's containers are named after its project and not after this suite.
     let compose_file = format!(
         "services:\n  db:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_PASSWORD: wsp\n    labels:\n      {LIVE_LABEL}: \"1\"\n  web:\n    image: nginx:alpine\n    ports:\n      - \"18080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    labels:\n      {LIVE_LABEL}: \"1\"\n    depends_on: [db]\n"
     );
+    fs::write(from.join("compose.yaml"), compose_file.as_bytes()).unwrap();
+    let project = "/live-compose";
+    let id = w
+        .create(spec(json!({
+            "engine": true,
+            "copy": { "from": from.display().to_string(), "at": project },
+            "idempotencyKey": format!("live-engine-{key}")
+        })))
+        .await;
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
+    let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
+    show("the socket inside the workspace made with --engine", code, &out, &err);
+    assert_eq!(code, 0);
+    // The staging directory the fence binds a source into is beside the socket's on the box and inside nowhere.
+    assert!(!out.contains("binds"), "the staging directory shows inside the workspace: {out}");
+    // The file the allowlist used to live in, written by the workspace to say it may bind the whole box.
     let (code, _, err) = w
         .exec(
             &id,
-            &format!(
-                "mkdir -p /var/tmp/demo/html /root/.wsp && echo hello-from-workspace > /var/tmp/demo/html/index.html && printf '%s' '{compose_file}' > /var/tmp/demo/compose.yaml && echo /var/tmp/demo > /root/.wsp/roots && docker version --format 'client {{{{.Client.Version}}}} server {{{{.Server.Version}}}}'"
-            ),
+            "mkdir -p /root/.wsp && echo / > /root/.wsp/roots && docker version --format 'client {{.Client.Version}} server {{.Server.Version}}'",
         )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (code, out, err) = w.exec(&id, "docker run --rm -v /etc:/x alpine ls /x 2>&1").await;
+    show("docker run -v /etc:/x after writing / into the roots file, from inside", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains(&format!("({project}), and /etc does not")), "{out}");
+    // A link the workspace plants under its own project, which the engine would resolve at the container's start.
+    let (code, _, err) = w.exec(&id, &format!("ln -sfn /etc {project}/html2")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (code, out, err) = w.exec(&id, &format!("docker run --rm -v {project}/html2:/x alpine ls /x 2>&1")).await;
+    show("docker run -v <project>/html2:/x where html2 is a link, from inside", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains("is reached through a link inside the workspace"), "{out}");
     let started = Instant::now();
-    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo up -d 2>&1").await;
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo up -d 2>&1")).await;
     show("docker compose up -d, from inside", code, &out, &err);
     // The pull has happened, so the ids this case brought are the ids it removes at its end.
     images.pulled();
@@ -1708,9 +1735,31 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     show("docker run -v /:/host, from inside", code, &out, &err);
     assert_ne!(code, 0);
     assert!(
-        out.contains("a bind mount's source must sit under a project folder of this workspace (/var/tmp/demo), and / does not"),
+        out.contains(&format!("a bind mount's source must sit under a project folder of this workspace ({project}), and / does not")),
         "{out}"
     );
+    // The bind the stack's own service asked for: staged under the workspace's own run folder on the box, which
+    // is where the engine read it from, and nothing of the copy's own path handed over.
+    let staged = root().join("run").join(&id).join("binds");
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(mounts.contains(staged.to_str().unwrap()), "no staged bind under {}", staged.display());
+    // A stop and a wake leave every entry of the life before standing and still mounted: the engine's record
+    // of a container made then names the entry that life gave it, and its next start resolves that entry.
+    let entries: Vec<String> =
+        fs::read_dir(&staged).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert!(!entries.is_empty(), "nothing staged under {}", staged.display());
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let after: Vec<String> =
+        fs::read_dir(&staged).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    for entry in &entries {
+        assert!(after.contains(entry), "the wake took the staged entry {entry}: {after:?}");
+    }
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(mounts.contains(staged.to_str().unwrap()), "the wake left no staged bind under {}", staged.display());
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo start 2>&1")).await;
+    show("docker compose start after a wake, from inside", code, &out, &err);
+    assert_eq!(code, 0, "{out}");
     // The page is asked for once the service listens, not once `up -d` has returned. Measured on a box: nginx
     // answers 1.2 to 2.0 s after its container starts, and until it does the engine's published port on the
     // box's loopback accepts the connection and closes it with no byte, which reads exactly like a forward that
@@ -1758,11 +1807,11 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     eprintln!("== cost: docker ps through the fence {fenced} ms, straight at the engine {straight} ms (mean of 20, from the box)");
     let status = fs::read_to_string("/proc/self/status").unwrap();
     eprintln!("== this process VmRSS with the proxy and forwards up: {}", status.lines().find(|l| l.starts_with("VmRSS")).unwrap_or(""));
-    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo down -v 2>&1").await;
+    let (code, out, err) = w.exec(&id, &format!("cd {project} && docker compose -p wspdemo down -v 2>&1")).await;
     show("docker compose down -v, from inside", code, &out, &err);
     assert_eq!(code, 0);
     // A workspace made without the engine: no socket, and the client says so.
-    let plain = w.create(spec(json!({ "idempotencyKey": format!("live-665-noengine-{key}") }))).await;
+    let plain = w.create(spec(json!({ "idempotencyKey": format!("live-noengine-{key}") }))).await;
     put_file(&w, &plain, &docker, "/usr/local/bin/docker").await;
     let (code, out, err) = w.exec(&plain, "ls -la /var/run/docker.sock /run/wsp 2>&1; docker ps 2>&1").await;
     show("a workspace made without --engine: the socket and docker ps", code, &out, &err);
@@ -1776,6 +1825,9 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     eprintln!("== after the kill, on the box: containers [{}] networks [{}]", left.trim(), networks.trim());
     assert_eq!((left.trim(), networks.trim()), ("", ""), "the killed workspace left containers on the engine");
     assert!(!socket.exists(), "the socket stays after the kill");
+    let mounts = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(!mounts.contains(staged.to_str().unwrap()), "a staged bind stays mounted after the kill");
+    assert!(!staged.exists(), "the staging directory stays after the kill");
     let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
     assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
 }
@@ -1817,12 +1869,7 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
     // The label every container this suite makes on the box wears, so a person sweeping the box after a run that
     // died can find them by one filter rather than by name.
     let stack = format!("services:\n  quiet:\n    image: alpine\n    command: sleep 600\n    labels:\n      {LIVE_LABEL}: \"1\"\n");
-    let (code, _, err) = w
-        .exec(
-            &id,
-            &format!("mkdir -p /var/tmp/stack /root/.wsp && printf '%s' '{stack}' > /var/tmp/stack/compose.yaml && echo /var/tmp/stack > /root/.wsp/roots"),
-        )
-        .await;
+    let (code, _, err) = w.exec(&id, &format!("mkdir -p /var/tmp/stack && printf '%s' '{stack}' > /var/tmp/stack/compose.yaml")).await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
     // No project named on the command line: what compose uses is the name in the environment, and without one it
     // would be the directory's, which every workspace of one project shares.
@@ -3134,6 +3181,138 @@ async fn a_daemon_of_this_computers_runs_nothing_it_found_under_the_home_the_wor
     planted.sweep();
     assert!(!planted.binary.exists() && !planted.marker.exists());
     assert_eq!(listing(Path::new(PLANTED_DIR)), before, "this case left something under the home");
+}
+
+/// A container a workspace starts sits on a bridge of the workspace's own, under the same rules the workspace is
+/// under: the box's cloud metadata is out of its reach, a sibling container of the same workspace answers it by
+/// name, and a container of the box's own on the engine's default bridge does not. The bridge's rule stands on
+/// the box while the network does and goes with the workspace.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspaces_container_sits_on_a_bridge_of_its_own_and_reaches_no_metadata_and_no_neighbour() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
+        eprintln!("this box has no container engine with a socket; the bridge case is skipped");
+        return;
+    };
+    let Some((docker, _)) = box_docker() else {
+        eprintln!("this box has no docker client to land inside; the bridge case is skipped");
+        return;
+    };
+    let mut images = PulledImages::of(&["alpine"]);
+    let mut w = World::open().await;
+    let key = checkout_key();
+    // A container of the box's own on the engine's default bridge: the neighbour the workspace must not reach.
+    let outside = format!("wsp-live-bridge-outside-{key}");
+    on_box(&["rm", "-f", &outside]);
+    let _outside_guard = OutsideContainer { name: outside.clone() };
+    let (code, started, said) = on_box(&["run", "-d", "--name", &outside, "alpine", "sleep", "600"]);
+    assert_eq!(code, 0, "{started}{said}");
+    let (_, neighbour, _) = on_box(&["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", &outside]);
+    let neighbour = neighbour.trim().to_owned();
+    assert!(!neighbour.is_empty(), "the box's own container has no address");
+
+    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-bridge-{key}") }))).await;
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    let (code, out, err) = w.exec(&id, &format!("docker run -d --name wsp-live-net-a --label {LIVE_LABEL}=1 alpine sleep 600 2>&1")).await;
+    show("a container started on no named network, from inside", code, &out, &err);
+    images.pulled();
+    assert_eq!(code, 0, "{out}");
+    let (code, bridge, err) =
+        w.exec(&id, "docker inspect --format '{{range $n, $c := .NetworkSettings.Networks}}{{$n}}{{end}}' wsp-live-net-a").await;
+    show("the network the container joined", code, &bridge, &err);
+    assert_eq!(code, 0);
+    assert_eq!(bridge.trim(), format!("wsp-{id}"), "the container sits on the engine's default bridge");
+    // The link the engine made for it wears the prefix every rule of the workspace table matches.
+    let (_, named, _) =
+        on_box(&["network", "inspect", "--format", "{{index .Options \"com.docker.network.bridge.name\"}}", &format!("wsp-{id}")]);
+    let named = named.trim().to_owned();
+    assert!(named.starts_with("wsp-e"), "the bridge is not under the prefix: {named}");
+    let links: Vec<String> =
+        fs::read_dir("/sys/class/net").unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert!(links.contains(&named), "the box holds no link {named}: {links:?}");
+    // The rule that lets two containers of this workspace reach each other across it.
+    let (_, ruleset, _) = nft_ruleset();
+    assert!(ruleset.contains(&format!("engine bridge {named} of {id}")), "no rule for {named}:\n{ruleset}");
+
+    // The box's cloud metadata, which is the box's.
+    let (code, out, err) = w.exec(&id, "docker run --rm alpine wget -T 3 -q -O- http://169.254.169.254/ 2>&1").await;
+    show("the metadata address from a container of the workspace", code, &out, &err);
+    assert_ne!(code, 0, "a container of the workspace reached the box's metadata: {out}");
+    // The box's own container on the engine's default bridge, which is a neighbour.
+    let (code, out, err) = w.exec(&id, &format!("docker run --rm alpine ping -c 1 -W 3 {neighbour} 2>&1")).await;
+    show("the box's own container from a container of the workspace", code, &out, &err);
+    assert_ne!(code, 0, "a container of the workspace reached the box's own: {out}");
+    // A sibling of the same workspace, by name on their own network.
+    let (code, out, err) = w
+        .exec(
+            &id,
+            &format!("docker run -d --name wsp-live-net-b --label {LIVE_LABEL}=1 alpine sh -c 'while true; do echo hello-from-sibling | nc -l -p 9000; done' 2>&1"),
+        )
+        .await;
+    show("a second container of the same workspace", code, &out, &err);
+    assert_eq!(code, 0, "{out}");
+    let (code, out, err) = w.exec(&id, "sleep 1; docker run --rm alpine sh -c 'nc -w 3 wsp-live-net-b 9000' 2>&1").await;
+    show("the sibling answered by name on the workspace's own network", code, &out, &err);
+    assert!(out.contains("hello-from-sibling"), "{out}");
+
+    w.close().await;
+    let (_, ruleset, _) = nft_ruleset();
+    assert!(!ruleset.contains(&format!("of {id}")), "an engine bridge rule stays after the workspace went:\n{ruleset}");
+    let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
+    assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
+}
+
+/// The box's whole ruleset as nft renders it, for the cases that read what this daemon wrote; empty where the
+/// box carries no nft binary, which reads as a case that proves nothing rather than one that fails.
+fn nft_ruleset() -> (i32, String, String) {
+    match std::process::Command::new("nft").args(["list", "ruleset"]).output() {
+        Ok(out) => (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        ),
+        Err(e) => panic!("this box has no nft to read its ruleset with: {e}"),
+    }
+}
+
+/// The box at host.wsp.internal stays the reach the threat model names, less the ports its own daemon and its own
+/// engine serve: a service the box binds on every address answers a workspace on a high port and on neither of
+/// those. A refusing input chain of the box's own gets the return path and nothing wider.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let network = w.network(&id);
+    // A high port on every address, which is the designed reach and stays one.
+    let open = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+    let open_port = open.local_addr().unwrap().port();
+    let heard = std::thread::spawn(move || accept_line(&open));
+    let (code, _, err) = w.exec(&id, &format!("exec 3<>/dev/tcp/host.wsp.internal/{open_port} && echo hi from $(hostname) >&3")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "the gateway stopped answering a port nothing closes");
+    assert_eq!(heard.join().unwrap().unwrap(), format!("hi from {id}"));
+    // The ports this daemon and the box's engine serve, bound on every address as a service of the box's would
+    // be: both closed at the gateway, whatever the box's own firewall says. The listener accepts nothing, since
+    // the kernel completes the handshake by itself and a connect that returns is the packet having got through.
+    for port in net::gateway_drops(numbers::DEFAULT_PORT) {
+        let Ok(listener) = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)) else {
+            eprintln!("this box already holds port {port}; that one is not read here");
+            continue;
+        };
+        let (code, out, err) = w.exec(&id, &format!("timeout 3 bash -c 'exec 3<>/dev/tcp/host.wsp.internal/{port}'")).await;
+        show(&format!("host.wsp.internal:{port} from inside"), code, &out, &err);
+        assert_ne!(code, 0, "the gateway answered port {port}");
+        drop(listener);
+    }
+    // The rules the box carries for this, read as a person reads them.
+    let (_, ruleset, _) = nft_ruleset();
+    for port in net::gateway_drops(numbers::DEFAULT_PORT) {
+        assert!(ruleset.contains(&format!("gateway port {port}")), "no drop for {port}:\n{ruleset}");
+    }
+    assert!(ruleset.contains(&network.link), "the workspace's own link is in no rule:\n{ruleset}");
+    w.close().await;
 }
 
 /// A link the workspace planted in its own upper at the parent of a destination the next boot mounts: the wake is

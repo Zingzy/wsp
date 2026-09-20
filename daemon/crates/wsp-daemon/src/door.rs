@@ -447,7 +447,7 @@ mod tests {
         let mut options = Options::new(token.path());
         options.root = Some(home.path().to_path_buf());
         options.manifest_path = Some(home.path().join("manifest.json"));
-        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let at = home.path().join("daemon.sock");
         ctx.open_workspace_door("wsp-a", &at);
         assert_eq!(std::fs::metadata(&at).unwrap().permissions().mode() & 0o777, 0o600);
