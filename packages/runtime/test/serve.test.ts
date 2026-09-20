@@ -5,6 +5,7 @@ import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HO
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, type PlaceRecord } from "../src/places.js";
 import { serveRuntime, type ForwardsSource, type PlaceDoctor, type RuntimeServer } from "../src/serve.js";
+import { daemonTokenFor } from "../src/daemon-token.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 import { abortedCall, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
@@ -481,7 +482,7 @@ describe("serveRuntime golden wizard ops", () => {
 
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
     // The route and the token a builder's daemon is opened with are the host's own; no op hands either one out.
-    expect(await runtime.golden.builderReach("m1")).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: DAEMON_TOKEN });
+    expect(await runtime.golden.builderReach("m1")).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: daemonTokenFor(DAEMON_TOKEN, "m1") });
     expect(await c.request("golden.builderReach", { builderId: "m1" })).toMatchObject({ ok: false, error: expect.stringMatching(/Invalid discriminator value/) });
     c.close();
   });

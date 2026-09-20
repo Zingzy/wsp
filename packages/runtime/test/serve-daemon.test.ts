@@ -12,7 +12,7 @@ import { fakeProcTree } from "../../daemon/test/fake-proc.js";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { HERE_PLACE_ID, relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -37,7 +37,11 @@ let inboxDir: string | undefined;
 let procRoot: string | undefined;
 let localRoot: string | undefined;
 
-async function startTestDaemon(token = DAEMON_TOKEN): Promise<DaemonUnderTest> {
+/** The token this suite's runtime writes the first machine it reaches, which is the one the daemon under test
+ * must hold: a machine's token is the seed's answer for that machine's id. */
+const MACHINE_TOKEN = daemonTokenFor(DAEMON_TOKEN, "m1");
+
+async function startTestDaemon(token = MACHINE_TOKEN): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-serve-daemon-"));
   procRoot = fakeProcTree([]);
   return daemonUnderTest({ host: "127.0.0.1", port: 0, token, inbox: inboxDir, rootsPath: rootsPathIn(inboxDir), procRoot, portsIntervalMs: 1000 });
@@ -233,7 +237,7 @@ describe("who may open a channel", () => {
   it("a relayed socket opens a channel only for a workspace it may drive", async () => {
     daemon = await startTestDaemon();
     localRoot = mkdtempSync(join(tmpdir(), "wsp-serve-local-"));
-    const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN };
+    const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: MACHINE_TOKEN };
     const local: LocalWiring = {
       backend: new LocalBackend({ root: localRoot }),
       execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),

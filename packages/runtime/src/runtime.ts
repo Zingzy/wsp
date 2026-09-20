@@ -217,7 +217,7 @@ import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./
 import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
-import { assertTokenShape, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
+import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { nextPortBase } from "./ports.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -931,7 +931,8 @@ export interface RuntimeOptions {
    * `reach` at each turn rather than once, since a host behind a relay is renamed whenever its connector runs.
    * Without an address no turn is given a token at all, so a host no machine can reach spawns nothing. */
   agents?: { reach?: HostReach; wspMcp?: McpServerSpec };
-  /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
+  /** The seed each machine's own daemon token is derived from, so a test that pins one reads a machine's token off
+   * its reach view rather than naming it. Absent, every machine's token is minted at random. */
   daemonToken?: string;
   /** How this host dials a workspace's own daemon: for the frames the runtime sends itself, and for the channel a
    * client of this host drives one frame at a time; the real dial unless a test hands in its own. */
@@ -2837,18 +2838,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
   const transcriptTimers = new Map<string, () => void>();
-  // One token per process, written to a guest the first time a client asks to reach its daemon; the file the
-  // guest carried before (the golden's, or an earlier run's) stops working then. Keyed by machine id: a
-  // resurrect or upgrade brings a fresh guest and file.
-  const daemonToken = opts.daemonToken ?? randomBytes(24).toString("hex");
-  assertTokenShape(daemonToken);
+  // One token per machine, written to a guest the first time a client asks to reach its daemon; the file the
+  // guest carried before (the golden's, or an earlier run's) stops working then. Per machine and not per process:
+  // a machine whose root is hostile reads its own token file, and that token opens no other machine of this host.
+  const daemonSeed = opts.daemonToken;
+  if (daemonSeed !== undefined) assertTokenShape(daemonSeed);
+  const machineTokens = new Map<string, string>();
+  /** The token this machine is given, made once and kept: derived from the seed a caller pinned, or random. */
+  const tokenForMachine = (machineId: string): string => {
+    const held = machineTokens.get(machineId);
+    if (held !== undefined) return held;
+    const minted = daemonSeed === undefined ? randomBytes(24).toString("hex") : daemonTokenFor(daemonSeed, machineId);
+    machineTokens.set(machineId, minted);
+    return minted;
+  };
+  // Whether each machine answered a daemon, keyed by machine id: a resurrect or upgrade brings a fresh guest and file.
   const daemonTokens = new Map<string, { hasDaemon: boolean; at: number }>();
   const daemonTokenOf = async (machine: Machine, path?: string): Promise<string | undefined> => {
+    const token = tokenForMachine(machine.id);
     const cached = daemonTokens.get(machine.id);
-    if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? daemonToken : undefined;
-    const hasDaemon = await rotateDaemonToken(machine, daemonToken, daemonTokenPathOf(machine, path));
+    if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? token : undefined;
+    const hasDaemon = await rotateDaemonToken(machine, token, daemonTokenPathOf(machine, path));
     daemonTokens.set(machine.id, { hasDaemon, at: Date.now() });
-    return hasDaemon ? daemonToken : undefined;
+    return hasDaemon ? token : undefined;
   };
 
   const cancelFlush = (workspaceId: string): void => {

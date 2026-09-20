@@ -15,7 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
-import { HARNESS_DAEMON_TOKEN, startRelayHarness, type RelayHarness } from "./relay-harness.js";
+import { harnessMachineToken, startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -95,7 +95,7 @@ async function nextGuest(ports: readonly FakeListener[]): Promise<string> {
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-ports-inbox-"));
   const procRoot = fakeProcTree([]);
   setListeners(procRoot, ports);
-  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: HARNESS_DAEMON_TOKEN, inbox: inboxDir, procRoot, portsIntervalMs: 50 });
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: harnessMachineToken("m2"), inbox: inboxDir, procRoot, portsIntervalMs: 50 });
   extra.push({ daemon, inboxDir, procRoot });
   const id = await relay!.addWorkspace("second", `ws://127.0.0.1:${daemon.port}`);
   guests.set(id, { procRoot });

@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PtyListReply, rootsPathIn, type PtyListEntry } from "@wsp/protocol";
-import { connectDaemon, createRuntime, memoryStore, serveRuntime, type DaemonReach, type Runtime, type RuntimeServer } from "@wsp/runtime";
+import { connectDaemon, createRuntime, daemonTokenFor, memoryStore, serveRuntime, type DaemonReach, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { fakeProcTree, setListeners, writeSys, type FakeListener, type FakeProc, type FakeSys } from "../../../packages/daemon/test/fake-proc.js";
 import { daemonUnderTest, type DaemonArgs, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
 import { stubBackend, tokenGuest, type StubBackend } from "../../../packages/runtime/test/stub-backend.js";
@@ -17,9 +17,10 @@ import { createOn } from "../../../packages/runtime/test/stub-backend.js";
 const HOST_TOKEN = "relay-harness-host-token";
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 
-/** The token this host mints for every machine it serves; a test writes it to a token file to play a machine that
- * starts refusing it and then takes it. */
-export const HARNESS_DAEMON_TOKEN = DAEMON_TOKEN;
+/** The token this host writes one machine it serves, which is what that machine's daemon must hold: a machine's
+ * token is the seed's answer for that machine's id, and the stub backend names its machines in the order they are
+ * forked. A test writes it to a token file to play a machine that starts refusing it and then takes it. */
+export const harnessMachineToken = (machineId: string): string => daemonTokenFor(DAEMON_TOKEN, machineId);
 
 export interface RelayHarness {
   api: Api;
@@ -67,7 +68,7 @@ export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise
   const daemon = await daemonUnderTest({
     host: "127.0.0.1",
     port: 0,
-    ...(opts.tokenPath !== undefined ? { tokenPath: opts.tokenPath } : { token: opts.daemonToken ?? DAEMON_TOKEN }),
+    ...(opts.tokenPath !== undefined ? { tokenPath: opts.tokenPath } : { token: opts.daemonToken ?? harnessMachineToken("m1") }),
     inbox: inboxDir,
     rootsPath: rootsPathIn(inboxDir),
     procRoot,
@@ -98,7 +99,7 @@ export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise
   // A link of this test's own to the guest's daemon, for what a test reads of the daemon rather than of the page.
   let own: DaemonReach | undefined;
   const ptys = async (): Promise<PtyListEntry[]> => {
-    own ??= connectDaemon({ previewUrl: `ws://127.0.0.1:${daemon.port}`, token: opts.daemonToken ?? DAEMON_TOKEN, onEvent: () => {} });
+    own ??= connectDaemon({ previewUrl: `ws://127.0.0.1:${daemon.port}`, token: opts.daemonToken ?? harnessMachineToken("m1"), onEvent: () => {} });
     await own.ready;
     return PtyListReply.parse(await own.request("pty.list")).ptys;
   };
