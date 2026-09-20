@@ -27,7 +27,7 @@ type LinkKind = (typeof LINK_KINDS)[number];
 
 const NAME_MAX = 64;
 
-/** What the sign-in stamp carries now that no code rides the URL: the page the person came from and goes back to. */
+/** What the sign-in stamp carries: the page the person came from and goes back to, whose address holds no code. */
 const VERIFY_PAGE = "verify";
 
 const isExpired = (row: LinkRow, now: number): boolean => Date.parse(row.expires_at) <= now;
@@ -46,11 +46,8 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
   const now = ctx.deps.now();
   // A Worker has no clock of its own, so the one road anybody takes before a code exists is where the dead ones go.
   await sweepLinks(ctx.env, now);
-  // Both counts are read, and both refusals happen, before a row of this caller's exists.
   const source = sourceOf(ctx);
-  const held = await linksFrom(ctx.env, source, new Date(now - STARTS_WINDOW_MS).toISOString());
-  if (held.pending >= LINK_PENDING_PER_SOURCE) throw refuse(429, `there are already ${LINK_PENDING_PER_SOURCE} codes waiting from here; approve one on the page, or wait fifteen minutes for them to run out`);
-  if (held.recent >= LINK_STARTS_PER_MINUTE) throw refuse(429, "too many links started from here; wait a minute and run the command again");
+  const since = new Date(now - STARTS_WINDOW_MS).toISOString();
   const pollToken = newSecret(ctx.deps.random);
   const row: LinkRow = {
     code: newCode(ctx.deps.random),
@@ -64,7 +61,17 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
     expires_at: new Date(now + LINK_MS).toISOString(),
     source,
   };
-  await insertLink(ctx.env, row);
+  // The caps are counted in the statement that writes the row, so starts racing from one address land as many
+  // rows as the caps allow and no more; the counts are read again only to say which cap refused this one.
+  if (!(await insertLink(ctx.env, row, { pending: LINK_PENDING_PER_SOURCE, recent: LINK_STARTS_PER_MINUTE, since }))) {
+    const held = await linksFrom(ctx.env, source, since);
+    throw refuse(
+      429,
+      held.pending >= LINK_PENDING_PER_SOURCE
+        ? `there are already ${LINK_PENDING_PER_SOURCE} codes waiting from here; approve one on the page, or wait fifteen minutes for them to run out`
+        : "too many links started from here; wait a minute and run the command again",
+    );
+  }
   return Response.json({
     code: row.code,
     verifyUrl: `${ctx.url.origin}/link/verify`,

@@ -124,14 +124,23 @@ export async function deleteClient(env: Env, id: string): Promise<void> {
   await env.DB.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
 }
 
-export async function insertLink(env: Env, row: LinkRow): Promise<void> {
-  await env.DB.prepare("INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at, row.source)
+/** The one write that makes a link code, and the one reading of what its source already holds: both caps are
+ * counted inside the statement that inserts, so a burst of starts from one address makes as many rows as the caps
+ * allow and no more, the shape approveLink and spendLink below hold a race to. Answers whether this row landed. */
+export async function insertLink(env: Env, row: LinkRow, caps: { pending: number; recent: number; since: string }): Promise<boolean> {
+  const { meta } = await env.DB.prepare(
+    "INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at, source)" +
+      " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" +
+      " WHERE (SELECT COUNT(*) FROM link_codes WHERE source = ? AND state = 'pending') < ?" +
+      " AND (SELECT COUNT(*) FROM link_codes WHERE source = ? AND created_at > ?) < ?",
+  )
+    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at, row.source, row.source, caps.pending, row.source, caps.since, caps.recent)
     .run();
+  return (meta.changes ?? 0) > 0;
 }
 
 /** What one source already holds here: its codes still waiting to be approved, and how many it started since the
- * moment named. One statement, since the start reads both before it writes anything. */
+ * moment named. Read after a refused insert, to say which of the two caps refused it. */
 export async function linksFrom(env: Env, source: string, since: string): Promise<{ pending: number; recent: number }> {
   const counts = await env.DB.prepare(
     "SELECT SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS recent FROM link_codes WHERE source = ?",

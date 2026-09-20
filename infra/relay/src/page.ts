@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two pages a person ever sees here. They say what is being approved, who
-// it is being approved as, and that the relay only learns where the box is.
-// Everything rendered from a name somebody else chose is escaped.
+// Every page a person sees here: where the code a command line printed is
+// typed, what that code is asking for and who is approving it, and the two
+// endings, done and a code that is gone. The approval says what the relay
+// learns, which is where a box answers and nothing else. Everything rendered
+// from a name somebody else chose is escaped.
 
 const escape = (text: string): string => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 

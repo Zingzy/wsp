@@ -318,6 +318,28 @@ describe("what one caller can grow here", () => {
     expect((await startFrom(relay, "host", "box 11", "203.0.113.8")).status).toBe(200);
   });
 
+  it("holds a burst from one address to the codes it may have waiting, since the caps are counted where the row is written", async () => {
+    const relay = await relayHarness();
+    const burst = await Promise.all([...Array(20).keys()].map(at => startFrom(relay, "host", `box ${at}`, "203.0.113.99")));
+    expect(burst.filter(res => res.status === 200)).toHaveLength(5);
+    expect(burst.filter(res => res.status === 429)).toHaveLength(15);
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes WHERE source = ?").bind("203.0.113.99").first()) as Record<string, number>).toMatchObject({ n: 5 });
+  });
+
+  it("holds a burst to the minute's cap too, where nothing of that address is waiting", async () => {
+    const relay = await relayHarness();
+    // Eight starts in this minute, each approved as it lands, so nothing of that address is waiting and the
+    // minute is what the burst runs into: two of the twenty land and the rest are refused.
+    for (const at of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      expect((await startFrom(relay, "host", `box ${at}`, "203.0.113.98")).status).toBe(200);
+      await relay.db.prepare("UPDATE link_codes SET state = 'approved' WHERE source = ?").bind("203.0.113.98").run();
+    }
+    const burst = await Promise.all([...Array(20).keys()].map(at => startFrom(relay, "host", `late ${at}`, "203.0.113.98")));
+    expect(burst.filter(res => res.status === 200)).toHaveLength(2);
+    expect(((await burst.find(res => res.status === 429)!.json()) as { error: string }).error).toContain("wait a minute");
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes WHERE source = ?").bind("203.0.113.98").first()) as Record<string, number>).toMatchObject({ n: 10 });
+  });
+
   it("counts one address's codes against that address alone", async () => {
     const relay = await relayHarness();
     for (const at of [1, 2, 3, 4, 5]) expect((await startFrom(relay, "host", `mine ${at}`, "203.0.113.7")).status).toBe(200);
