@@ -3272,3 +3272,51 @@ async fn the_rc_files_the_box_root_runs_are_the_workspaces_own_copies() {
     w.ok("machine.kill", json!({ "machineId": &id })).await;
     w.close().await;
 }
+
+/// What a workspace reads under /etc, /var and /srv is the list of what it needs: the accounts, the mounts, the
+/// certificates and the package database read inside, apt installs to a cache of its own, and the box's own
+/// service credentials are not there to read at all.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspace_reads_the_etc_the_list_allows_and_none_of_the_boxs_own_credentials() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    // A credential of the box's own, planted under a folder of this case's own and taken off at its end: a
+    // workspace that could read it could answer as the box.
+    let planted = PathBuf::from(format!("/srv/wsp-live-secret-{}", checkout_key()));
+    let _ = fs::remove_dir_all(&planted);
+    fs::create_dir_all(&planted).unwrap();
+    fs::write(planted.join("key.pem"), b"the box's own key\n").unwrap();
+    let id = w.create(spec(json!({ "idempotencyKey": format!("live-etc-{}", checkout_key()) }))).await;
+
+    // What a tool inside reads is inside: the accounts, the mounts df reads through the link, the certificates
+    // the boot's own list allows, and the names a shell resolves through.
+    let (code, out, err) = w.exec(&id, "cat /etc/passwd > /dev/null; df > /dev/null; ls /etc/ssl/certs | wc -l; ls /etc/alternatives | wc -l; cat /etc/nsswitch.conf > /dev/null; echo read").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out.lines().last(), Some("read"), "{out}");
+    assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 0, "no certificate reads inside: {out}");
+
+    // The package database the box lends, written to a cache of the workspace's own.
+    let (code, out, err) = w.exec(&id, "dpkg -l | wc -l; apt-get update -qq > /dev/null 2>&1; echo apt-$?").await;
+    assert_eq!(code, 0, "{err}");
+    assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 10, "the package database does not read inside: {out}");
+
+    // And the box's own service credentials are not inside, whether the list left them out or the tree they sat
+    // in is the workspace's own now.
+    let kept = format!(
+        "/etc/shadow /etc/gshadow /etc/ssl/private /etc/apt/auth.conf /etc/apt/auth.conf.d /var/lib/private /var/www {}",
+        planted.display()
+    );
+    let (_, out, _) = w.exec(&id, &format!("for p in {kept}; do if [ -e \"$p\" ]; then echo \"reads $p\"; fi; done; echo done")).await;
+    assert_eq!(out.trim(), "done", "the workspace reads what the box keeps for itself: {out}");
+    // The one on the box is still there, so the case read the fence and not a folder that was never made.
+    assert!(planted.join("key.pem").is_file());
+    // The tools a workspace runs still answer, which is the read that says the list broke nothing.
+    let (code, out, err) = w.exec(&id, "git --version && python3 --version && node --version").await;
+    assert_eq!((code, err.as_str()), (0, ""), "a tool inside stopped answering: {err}");
+    assert_eq!(out.lines().count(), 3, "{out}");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    let _ = fs::remove_dir_all(&planted);
+    w.close().await;
+}

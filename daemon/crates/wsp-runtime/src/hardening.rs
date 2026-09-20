@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! What root inside a workspace does not get, in one list each: the capabilities no workspace holds whatever the
-//! profile was copied from, and the paths of the computer's own that nothing inside may read. A workspace here is
-//! made of the box's own directories, so its /etc is the box's /etc and its /root is the person's own home: the
-//! password hashes, the sudo rules, the keys the box answers ssh on and the keys that let it into other computers
-//! are all a path away from a turn running inside one. Each of them gets the workspace's own empty file or empty
-//! directory over it instead.
+//! What root inside a workspace gets of the box it runs on, in one list each: the capabilities no workspace holds
+//! whatever the profile was copied from, how each tree a workspace's rootfs takes from the box is built, what a
+//! workspace reads of the box's own /etc, and the few paths left that the workspace's own empty file or folder
+//! goes over.
 //!
-//! The bundle walks `covered` once per boot and binds what it names; the profile is held to `DROPPED_CAPS` by a
-//! test. Read on every platform the daemon builds for, so both lists are held to the same test wherever the suite
-//! runs.
+//! A workspace here is made of the box's own directories and its /root is the person's own home, so the rule is an
+//! allowlist and not a list of what to hide: /usr and /opt are the box's whole, /etc is a view of what a tool a
+//! workspace runs reads, and /var and /srv are the workspace's own with the package trees the only thing the box
+//! lends them. The box's password hashes, the keys it answers ssh on, its repository credentials and its services'
+//! own state are not inside to read, rather than hidden inside.
+//!
+//! The bundle reads `TREES` once per boot and builds each tree the way it says, walks `covered` and binds what
+//! that names; the profile is held to `DROPPED_CAPS` by a test. Read on every platform the daemon builds for, so
+//! every list is held to the same test wherever the suite runs.
 
 use std::fs;
 use std::path::Path;
@@ -18,26 +22,166 @@ use std::path::Path;
 /// the profile is held to this list rather than the other way round.
 pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS_BOOT", "CAP_MKNOD"];
 
-/// Every path inside a workspace the box's own file or directory may not show through, covered with the
-/// workspace's own empty one where the box keeps something there. The two /etc files are the box's password
-/// hashes, which are credentials a workspace could take away and crack at its leisure, under the overlay of the
-/// box's /etc; /root/.ssh is the person's own keys and the box's authorized_keys, under the bind of the person's
-/// own home, and a workspace that could write it would let itself back into the box as root; the two engine
-/// folders are the box's images and containers, which a workspace reaches through the fenced socket and nowhere
-/// else.
+/// Every path inside a workspace the box's own directory may not show through, covered with the workspace's own
+/// empty one where the box keeps something there. Two rows, because what a workspace reads under the box's own
+/// system directories is `TREES` and `ETC_ALLOWED` below and no longer a list of what to hide: the password
+/// hashes, the host keys and the engine's own folders are not inside to cover.
 ///
-/// /home covers every other home on the box: the overlays are /usr, /etc, /opt, /var and /srv, so a workspace's
+/// /home covers every other home on the box: the trees are /usr, /etc, /opt, /var and /srv, so a workspace's
 /// /home is the skeleton's own empty directory, and the row is what keeps it empty the day a build binds the box's
-/// root or overlays /home as the five above are overlaid. The one thing under it a workspace does read is a shared
-/// tool root, Homebrew's prefix today: the boot binds those in after this cover, at their own paths and read-only,
-/// so the tools a road installed there answer inside while nobody's home does.
+/// root or takes /home from the box as the five above are taken. The one thing under it a workspace does read is a
+/// shared tool root, Homebrew's prefix today: the boot binds those in after this cover, at their own paths and
+/// read-only, so the tools a road installed there answer inside while nobody's home does.
+///
+/// /root/.ssh is the person's own keys and the box's authorized_keys, under the bind of the person's own home,
+/// and a workspace that could write it would let itself back into the box as root.
 ///
 /// `/root/.wsp` is not here: the boot already binds the workspace's own folder over it, so the daemon inside
 /// writes its token where no other workspace on the box reads it. The sudo rules are not here either: a turn
 /// inside is root in its own namespaces already, so the box's rules grant it nothing, and an empty
 /// `/etc/sudoers` is a file sudo reads as granting nobody anything, which breaks every `sudo` a script inside
 /// types for no credential kept back.
-pub const EMPTY_BINDS: [&str; 6] = ["/etc/shadow", "/etc/gshadow", "/home", "/root/.ssh", "/var/lib/docker", "/var/lib/containerd"];
+pub const EMPTY_BINDS: [&str; 2] = ["/home", "/root/.ssh"];
+
+/// How one of the trees a workspace's rootfs takes from the box is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Built {
+    /// The box's own directory whole, as the overlay's lower: what the box has installed is what a workspace runs.
+    Whole,
+    /// A view of the box's directory holding `ETC_ALLOWED` and nothing else, built fresh at every boot, as the
+    /// overlay's lower. What is not on that list is not inside to read.
+    Allowed,
+    /// The workspace's own, over a view the box lends nothing to: the directories and the links named here made
+    /// in that view, and the box's own trees named here overlaid inside it and nothing else of the box's.
+    Own { dirs: &'static [(&'static str, u32)], links: &'static [(&'static str, &'static str)], from_box: &'static [&'static str] },
+}
+
+/// The directories a workspace's own /var carries, since the box's own is not its lower, with the mode each
+/// wants; /var/tmp is the one every distribution keeps writable by anybody.
+pub const VAR_DIRS: [(&str, u32); 9] = [
+    ("lib", 0o755),
+    ("cache", 0o755),
+    ("log", 0o755),
+    ("tmp", 0o1777),
+    ("spool", 0o755),
+    ("mail", 0o755),
+    ("local", 0o755),
+    ("opt", 0o755),
+    ("backups", 0o755),
+];
+
+/// The two names under /var every distribution keeps as links into the run directory, which inside a workspace is
+/// the workspace's own.
+pub const VAR_LINKS: [(&str, &str); 2] = [("run", "/run"), ("lock", "/run/lock")];
+
+/// The box's own trees lent inside a workspace's own /var, each an overlay of its own: the package database and
+/// the two caches, so apt and dpkg inside read what the box has installed and write their own.
+pub const VAR_FROM_BOX: [&str; 3] = ["/var/lib/dpkg", "/var/lib/apt", "/var/cache/apt"];
+
+/// How each tree a workspace's rootfs takes from the box is built, in the order the boot mounts them. One row per
+/// tree and the bundle reads this and nothing else, so adding a tree is a row here and its lists above. The five
+/// are `OVERLAID`, which a test holds this to.
+pub const TREES: [(&str, Built); 5] = [
+    ("/usr", Built::Whole),
+    ("/etc", Built::Allowed),
+    ("/opt", Built::Whole),
+    ("/var", Built::Own { dirs: &VAR_DIRS, links: &VAR_LINKS, from_box: &VAR_FROM_BOX }),
+    ("/srv", Built::Own { dirs: &[], links: &[], from_box: &[] }),
+];
+
+/// What a workspace reads of the box's own /etc, and nothing else is there to read. The rule for a row: a file a
+/// tool a workspace runs reads, never a file a service of the box's own reads. An entry is a relative name under
+/// /etc, a file, a directory taken whole or a link taken as a link; a name whose last part ends in a star stands
+/// for every name in its folder that begins with the rest of it, since a box names those by version.
+///
+/// Not on it, and so not inside: `apt/auth.conf` and `apt/auth.conf.d`, which are the box's repository
+/// credentials; `shadow` and `gshadow`, its password hashes; `ssh/ssh_host_*` and `ssh/sshd_config`, the keys it
+/// answers ssh on; `ssl/private` and `letsencrypt`, its certificates' keys; `krb5.keytab`; its cron, systemd,
+/// docker, containerd, netplan, NetworkManager, wireguard, openvpn and ipsec configuration. A workspace holding
+/// any of them could answer as the box.
+pub const ETC_ALLOWED: &[&str] = &[
+    "alternatives",
+    "apt/apt.conf.d",
+    "apt/keyrings",
+    "apt/preferences",
+    "apt/preferences.d",
+    "apt/sources.list",
+    "apt/sources.list.d",
+    "apt/trusted.gpg",
+    "apt/trusted.gpg.d",
+    "bash.bashrc",
+    "bash_completion",
+    "bash_completion.d",
+    "ca-certificates",
+    "ca-certificates.conf",
+    "debian_version",
+    "default",
+    "dpkg",
+    "environment",
+    "fonts",
+    "gai.conf",
+    "gitconfig",
+    "group",
+    "host.conf",
+    "hostname",
+    "hosts",
+    "inputrc",
+    "issue",
+    "java-*",
+    "krb5.conf",
+    "ld.so.cache",
+    "ld.so.conf",
+    "ld.so.conf.d",
+    "legal",
+    "locale.alias",
+    "locale.gen",
+    "localtime",
+    "login.defs",
+    "lsb-release",
+    "machine-id",
+    "magic",
+    "magic.mime",
+    "mailcap",
+    "manpath.config",
+    "mime.types",
+    "mtab",
+    "nanorc",
+    "nsswitch.conf",
+    "os-release",
+    "pam.d",
+    "papersize",
+    "passwd",
+    "pip.conf",
+    "pki",
+    "profile",
+    "profile.d",
+    "protocols",
+    "python3",
+    "python3.*",
+    "rpc",
+    "security",
+    "services",
+    "shells",
+    "skel",
+    "ssh/ssh_config",
+    "ssh/ssh_config.d",
+    "ssl/certs",
+    "ssl/ct_log_list.cnf",
+    "ssl/openssl.cnf",
+    "subgid",
+    "subuid",
+    "sudo.conf",
+    "sudoers",
+    "sudoers.d",
+    "terminfo",
+    "timezone",
+    "tmux.conf",
+    "ucf.conf",
+    "vim",
+    "wgetrc",
+    "xdg",
+    "zsh",
+];
 
 /// Every path under the box root's own home that a login shell or a root systemd manager of the box's runs by
 /// name, with whether the box keeps a file or a directory there. A workspace is root in a home the box root
@@ -71,12 +215,6 @@ pub const ROOT_RUN_COVERS: [(&str, bool); 18] = [
     ("/root/.config/autostart", false),
 ];
 
-/// Where a box keeps the keys it answers ssh on, and the name every one of them starts with: they are named by
-/// algorithm, so the directory is read rather than the names written down. A workspace holding the private ones
-/// could answer as the box to anything that trusts it.
-pub const SSH_DIR: &str = "/etc/ssh";
-pub const HOST_KEY_PREFIX: &str = "ssh_host_";
-
 /// One path inside a workspace and what goes over it: the workspace's own empty file where the box keeps a file
 /// there, its own empty directory where it keeps a directory, or its own copy of the box's file where a shell of
 /// the box's runs what that file holds.
@@ -107,11 +245,6 @@ pub fn covered(rootfs: &Path) -> Vec<Cover> {
             out.push(cover);
         }
     }
-    for name in host_keys(rootfs) {
-        if let Some(cover) = cover_of(rootfs, &format!("{SSH_DIR}/{name}")) {
-            out.push(cover);
-        }
-    }
     // Read off the list and not off the rootfs: a path the box keeps nothing at is covered too, since a workspace
     // that could make it there would have the box root's next login run it.
     for (at, file) in ROOT_RUN_COVERS {
@@ -132,37 +265,20 @@ fn cover_of(rootfs: &Path, at: &str) -> Option<Cover> {
     Some(Cover { at: at.to_owned(), file: held.is_file(), own: false })
 }
 
-/// The names under the rootfs's own /etc/ssh that are the box's host keys, public and private alike: a workspace
-/// reading a private one could answer as the box, and the public ones say which box it is.
-fn host_keys(rootfs: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(rootfs.join(SSH_DIR.trim_start_matches('/'))) else { return Vec::new() };
-    let mut names: Vec<String> = entries
-        .flatten()
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.starts_with(HOST_KEY_PREFIX))
-        .collect();
-    names.sort();
-    names
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A rootfs as a boot leaves it, with the box's own files showing through: the /etc of the overlay, the
-    /// person's home under the bind, and the engine's folders.
+    /// A rootfs as a boot leaves it, with what the box lends showing through: the /etc view, the person's home
+    /// under the bind, and another person's home beside it.
     fn a_rootfs(root: &Path) -> std::path::PathBuf {
         let rootfs = root.join("rootfs");
-        for dir in ["etc/sudoers.d", "etc/ssh", "home/someone", "root/.ssh", "var/lib/docker", "var/lib/containerd", "run"] {
+        for dir in ["etc/sudoers.d", "home/someone", "root/.ssh", "var/lib", "run"] {
             fs::create_dir_all(rootfs.join(dir)).unwrap();
         }
         for (file, text) in [
-            ("etc/shadow", "root:$y$j9T$of.the.box:20000:0:99999:7:::\n"),
-            ("etc/gshadow", "root:*::\n"),
             ("etc/sudoers", "root ALL=(ALL:ALL) ALL\n"),
-            ("etc/ssh/ssh_host_ed25519_key", "the box's own private key\n"),
-            ("etc/ssh/ssh_host_ed25519_key.pub", "the box's own public key\n"),
-            ("etc/ssh/sshd_config", "Port 22\n"),
+            ("etc/passwd", "root:x:0:0:root:/root:/bin/bash\n"),
             ("root/.ssh/authorized_keys", "the key that opens the box\n"),
         ] {
             fs::write(rootfs.join(file), text).unwrap();
@@ -175,32 +291,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = a_rootfs(dir.path());
         let covers = covered(&rootfs);
-        // The covers read off the rootfs itself; the ones read off `ROOT_RUN_COVERS` are the case below.
+        // The covers read off the rootfs itself; the ones read off `ROOT_RUN_COVERS` are the case below. Two, and
+        // no more: what the box's own /etc and /var used to show through is not inside to cover.
         let at: Vec<&str> = covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect();
-        assert_eq!(
-            at,
-            [
-                "/etc/gshadow",
-                "/etc/shadow",
-                "/etc/ssh/ssh_host_ed25519_key",
-                "/etc/ssh/ssh_host_ed25519_key.pub",
-                "/home",
-                "/root/.ssh",
-                "/var/lib/containerd",
-                "/var/lib/docker",
-            ]
-        );
+        assert_eq!(at, ["/home", "/root/.ssh"]);
         // A file is covered with a file and a directory with a directory: a bind of one over the other is refused
         // by the kernel, and what the box keeps there is what decides.
         let file_at = |path: &str| covers.iter().find(|c| c.at == path).unwrap().file;
-        assert!(file_at("/etc/shadow") && file_at("/etc/ssh/ssh_host_ed25519_key"));
-        assert!(!file_at("/home") && !file_at("/root/.ssh") && !file_at("/var/lib/docker"));
+        assert!(!file_at("/home") && !file_at("/root/.ssh"));
         // The box's sudo rules are left as they are: a turn inside is root in its own namespaces, so they grant
         // it nothing, and a file sudo reads as granting nobody anything would break every sudo typed inside.
         assert!(!at.iter().any(|path| path.contains("sudoers")), "{at:?}");
-        // The host keys are read off the directory and nothing else in it is taken: sshd_config is the box's
-        // configuration, which says nothing a key says.
-        assert!(!at.iter().any(|path| path.ends_with("sshd_config")), "{at:?}");
         // No path twice, whatever the lists hold.
         let every: Vec<&str> = covers.iter().map(|c| c.at.as_str()).collect();
         let once: std::collections::BTreeSet<&str> = every.iter().copied().collect();
@@ -212,17 +313,78 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = dir.path().join("bare");
         fs::create_dir_all(rootfs.join("etc")).unwrap();
-        // Nothing of the denylist is there: no cover read off the rootfs, and the boot mounts none of them.
+        // Nothing of the two is there: no cover read off the rootfs, and the boot mounts none of them.
         assert!(covered(&rootfs).iter().all(|c| c.own));
         // A path the box keeps as a link: the cover would follow it out of the rootfs, since the kernel resolves
         // an absolute link against this process's own root, and land on the box's own file.
         fs::create_dir_all(rootfs.join("run/nothing")).unwrap();
         std::os::unix::fs::symlink("/run/nothing", rootfs.join("home")).unwrap();
-        fs::write(rootfs.join("etc/shadow"), "root:x:20000:0:99999:7:::\n").unwrap();
+        fs::create_dir_all(rootfs.join("root/.ssh")).unwrap();
         let covers = covered(&rootfs);
-        assert_eq!(covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect::<Vec<_>>(), ["/etc/shadow"]);
+        assert_eq!(covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect::<Vec<_>>(), ["/root/.ssh"]);
         // And the link itself is still a link: nothing here writes through one.
         assert!(fs::symlink_metadata(rootfs.join("home")).unwrap().file_type().is_symlink());
+    }
+
+    /// What a workspace reads of the box's own system directories is a list of what it needs: the table says how
+    /// each tree is built, and the /etc list holds what a tool inside reads and no file a service of the box's
+    /// own reads.
+    #[test]
+    fn the_trees_say_how_each_is_built_and_the_etc_list_holds_no_credential_of_the_boxs() {
+        // One row per tree, the five the doctor holds a daemon root away from, in the boot's own order.
+        assert_eq!(TREES.map(|(dir, _)| dir).to_vec(), wsp_frames::numbers::OVERLAID.to_vec());
+        let built = |dir: &str| TREES.iter().find(|(at, _)| *at == dir).unwrap().1;
+        assert_eq!(built("/usr"), Built::Whole);
+        assert_eq!(built("/opt"), Built::Whole);
+        assert_eq!(built("/etc"), Built::Allowed);
+        assert_eq!(built("/var"), Built::Own { dirs: &VAR_DIRS, links: &VAR_LINKS, from_box: &VAR_FROM_BOX });
+        assert_eq!(built("/srv"), Built::Own { dirs: &[], links: &[], from_box: &[] });
+        // The workspace's own /var carries the skeleton a distribution expects, with the two names it keeps as
+        // links, and the box lends it the package database and the caches and nothing else.
+        assert!(VAR_DIRS.iter().any(|(name, mode)| *name == "tmp" && *mode == 0o1777));
+        assert!(VAR_LINKS.contains(&("run", "/run")) && VAR_LINKS.contains(&("lock", "/run/lock")));
+        assert!(VAR_FROM_BOX.iter().all(|tree| tree.starts_with("/var/")), "{VAR_FROM_BOX:?}");
+
+        // Every entry a relative name under /etc, no two the same, and none of them climbing out of it.
+        for entry in ETC_ALLOWED {
+            assert!(!entry.starts_with('/') && !entry.split('/').any(|part| part == ".." || part.is_empty()), "{entry}");
+        }
+        let once: std::collections::BTreeSet<&&str> = ETC_ALLOWED.iter().collect();
+        assert_eq!(once.len(), ETC_ALLOWED.len());
+        // What a tool inside reads is on it: the package sources, the mounts df and mount read, the certificates
+        // and the accounts a shell resolves a name through.
+        for named in ["apt/sources.list", "mtab", "passwd", "group", "ssl/certs", "ca-certificates.conf", "terminfo", "nsswitch.conf"] {
+            assert!(ETC_ALLOWED.contains(&named), "{named} is not on the list");
+        }
+        // What a service of the box's own reads is not, whole trees and single files alike: the repository
+        // credentials the whole apt tree used to carry, the password hashes, the keys and the certificates.
+        for kept in [
+            "apt",
+            "apt/auth.conf",
+            "apt/auth.conf.d",
+            "shadow",
+            "gshadow",
+            "ssh",
+            "ssh/sshd_config",
+            "ssl",
+            "ssl/private",
+            "letsencrypt",
+            "krb5.keytab",
+            "cron.d",
+            "crontab",
+            "systemd",
+            "docker",
+            "containerd",
+            "netplan",
+            "NetworkManager",
+            "wireguard",
+            "openvpn",
+            "ipsec.secrets",
+        ] {
+            assert!(!ETC_ALLOWED.contains(&kept), "{kept} is on the list");
+        }
+        // And the covers left are the two the trees do not answer for.
+        assert_eq!(EMPTY_BINDS, ["/home", "/root/.ssh"]);
     }
 
     /// What the box root's own login and its systemd run by name is the workspace's own copy or its own folder,

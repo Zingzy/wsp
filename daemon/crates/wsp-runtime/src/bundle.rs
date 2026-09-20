@@ -71,6 +71,16 @@ impl Layout {
     pub fn work_of(&self, id: &str, dir: &str) -> PathBuf {
         self.work(id).join(dir.trim_start_matches('/'))
     }
+    /// The upper and work directories of an overlay of a tree the box lends inside a tree the workspace owns, the
+    /// package database under its own /var among them. Kept apart from that tree's own upper rather than under it:
+    /// one overlay's upper directory sitting inside another's is a shape overlayfs says nothing good about, and
+    /// what the workspace wrote is still one tree to count and one tree to keep.
+    pub fn lent_upper_of(&self, id: &str, at: &str) -> PathBuf {
+        self.upper(id).join("lent").join(at.trim_start_matches('/'))
+    }
+    pub fn lent_work_of(&self, id: &str, at: &str) -> PathBuf {
+        self.work(id).join("lent").join(at.trim_start_matches('/'))
+    }
     /// The workspace's own wsp folder, bound over the box's at `GUEST_WSP_HOME`: where the daemon inside writes
     /// its token, its inbox and its manifest. Its own rather than the computer's, since the box's /root is
     /// shared by every workspace on it and a token is not a thing two workspaces may take turns writing. Kept
@@ -90,6 +100,12 @@ impl Layout {
     /// writes at one of them is not what it writes at another.
     pub fn empty_at(&self, id: &str, at: &str) -> PathBuf {
         self.workspace(id).join("empty").join(at.trim_start_matches('/'))
+    }
+    /// The lower of one tree's overlay where that tree is not the box's own directory taken whole: built fresh at
+    /// every boot, holding what of the box's a workspace is allowed to read and the skeleton the tree needs. One
+    /// directory per tree, under the workspace's own folder, so a stop takes it and a boot writes it again.
+    pub fn view(&self, id: &str, dir: &str) -> PathBuf {
+        self.workspace(id).join("view").join(dir.trim_start_matches('/'))
     }
     /// The workspace's own copy of a file the box keeps under the home every workspace here shares, or its own
     /// folder where the box keeps one: taken at the first boot that finds no copy and kept across wakes as the
@@ -529,13 +545,33 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
         }
         std::os::unix::fs::symlink(&target, &link).map_err(at(&link))?;
     }
-    for dir in OVERLAID {
-        let (upper, work) = (layout.upper_of(id, dir), layout.work_of(id, dir));
-        for made in [&upper, &work] {
-            fs::create_dir_all(made).map_err(at(made))?;
+    for (dir, built) in hardening::TREES {
+        // What this tree reads under it: the box's own directory whole, or a view built fresh under the
+        // workspace's own folder holding what the box lends it and what the tree needs where it lends nothing.
+        let lower = match built {
+            hardening::Built::Whole => PathBuf::from(dir),
+            hardening::Built::Allowed => {
+                let view = layout.view(id, dir);
+                view_of(&view, Path::new(dir), hardening::ETC_ALLOWED, &[], &[])?;
+                view
+            }
+            hardening::Built::Own { dirs, links, .. } => {
+                let view = layout.view(id, dir);
+                view_of(&view, Path::new(dir), &[], dirs, links)?;
+                view
+            }
+        };
+        overlay_inside(&place, dir, &lower, &layout.upper_of(id, dir), &layout.work_of(id, dir))?;
+        // And inside a tree the workspace owns, the box's own trees it lends it: apt and dpkg read what the box
+        // has installed and write their own, and nothing else of the box's /var is there to read.
+        if let hardening::Built::Own { from_box, .. } = built {
+            for tree in from_box {
+                if !Path::new(tree).is_dir() {
+                    continue;
+                }
+                overlay_inside(&place, tree, Path::new(tree), &layout.lent_upper_of(id, tree), &layout.lent_work_of(id, tree))?;
+            }
         }
-        let opened = open_inside(&place, dir, Want::Dir)?;
-        mount_overlay_at(Path::new(dir), &upper, &work, &opened.at(), &opened.named(&place))?;
     }
     // The overlays are up, so this lands in the workspace's own upper: a regular resolv.conf where the box has a
     // link into a /run the workspace does not share.
@@ -575,6 +611,91 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
 /// bind that followed one would land on whatever the computer keeps at that path instead.
 pub fn tool_roots_present<'a>(roots: &[&'a str]) -> Vec<&'a str> {
     roots.iter().copied().filter(|root| fs::symlink_metadata(root).is_ok_and(|held| held.is_dir())).collect()
+}
+
+/// One tree of a workspace's rootfs: the lower given, the workspace's own upper over it, and the mount landed on
+/// the descriptor of the path inside rather than on the path itself.
+fn overlay_inside(place: &Inside, dir: &str, lower: &Path, upper: &Path, work: &Path) -> Result<(), Error> {
+    for made in [upper, work] {
+        fs::create_dir_all(made).map_err(at(made))?;
+    }
+    let opened = open_inside(place, dir, Want::Dir)?;
+    mount_overlay_at(lower, upper, work, &opened.at(), &opened.named(place))
+}
+
+/// The lower of a tree the box does not lend whole, built fresh at every boot: every entry of the allowlist the
+/// box has copied out of its own directory without following a link, then the directories and links the tree
+/// needs where the box lends it nothing. What is not named here is not in the view, so it is not inside.
+fn view_of(view: &Path, from: &Path, allowed: &[&str], dirs: &[(&str, u32)], links: &[(&str, &str)]) -> Result<(), Error> {
+    match fs::remove_dir_all(view) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(at(view)(e)),
+    }
+    fs::create_dir_all(view).map_err(at(view))?;
+    for entry in allowed {
+        for name in named_by(from, entry) {
+            let to = view.join(&name);
+            if let Some(above) = to.parent() {
+                fs::create_dir_all(above).map_err(at(above))?;
+            }
+            copy_no_follow(&from.join(&name), &to)?;
+        }
+    }
+    for (name, mode) in dirs {
+        let made = view.join(name);
+        fs::create_dir_all(&made).map_err(at(&made))?;
+        fs::set_permissions(&made, fs::Permissions::from_mode(*mode)).map_err(at(&made))?;
+    }
+    for (name, target) in links {
+        let made = view.join(name);
+        std::os::unix::fs::symlink(target, &made).map_err(at(&made))?;
+    }
+    Ok(())
+}
+
+/// The names under this directory one allowlist entry stands for: the entry itself where the box has it, and
+/// every name in its folder beginning with the rest where its last part ends in a star.
+fn named_by(from: &Path, entry: &str) -> Vec<String> {
+    let (folder, last) = entry.rsplit_once('/').unwrap_or(("", entry));
+    let Some(prefix) = last.strip_suffix('*') else {
+        return if fs::symlink_metadata(from.join(entry)).is_ok() { vec![entry.to_owned()] } else { Vec::new() };
+    };
+    let Ok(entries) = fs::read_dir(from.join(folder)) else { return Vec::new() };
+    let mut found: Vec<String> = entries
+        .flatten()
+        .map(|held| held.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(prefix))
+        .map(|name| if folder.is_empty() { name } else { format!("{folder}/{name}") })
+        .collect();
+    found.sort();
+    found
+}
+
+/// One entry of the box's own directory copied into a view: a link as the link it is, a directory whole and a
+/// file with its mode. No component is ever followed, so a link in the box's own tree brings in what it names and
+/// never what it points at, and anything that is none of the three is passed over.
+fn copy_no_follow(from: &Path, to: &Path) -> Result<(), Error> {
+    let held = fs::symlink_metadata(from).map_err(at(from))?;
+    let kind = held.file_type();
+    if kind.is_symlink() {
+        let target = fs::read_link(from).map_err(at(from))?;
+        return std::os::unix::fs::symlink(target, to).map_err(at(to));
+    }
+    if kind.is_dir() {
+        fs::create_dir_all(to).map_err(at(to))?;
+        fs::set_permissions(to, held.permissions()).map_err(at(to))?;
+        for entry in fs::read_dir(from).map_err(at(from))? {
+            let entry = entry.map_err(at(from))?;
+            copy_no_follow(&entry.path(), &to.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if kind.is_file() {
+        fs::copy(from, to).map_err(at(from))?;
+        fs::set_permissions(to, held.permissions()).map_err(at(to))?;
+    }
+    Ok(())
 }
 
 /// Which workspace a path is opened inside: the rootfs on the box, the workspace's own uppers, which say whose a
@@ -1174,6 +1295,15 @@ mod tests {
         assert_eq!(l.upper_of("wsp-a", "/usr"), PathBuf::from("/wsp/run/wsp-a/upper/usr"));
         assert_eq!(l.work_of("wsp-a", "/var"), PathBuf::from("/wsp/run/wsp-a/work/var"));
         assert!(OVERLAID.iter().all(|dir| l.upper_of("wsp-a", dir).starts_with(l.upper("wsp-a"))));
+        // A tree the box lends inside a tree the workspace owns keeps its upper beside that tree's and never
+        // under it, since one overlay's upper inside another's is a shape overlayfs says nothing good about.
+        assert_eq!(l.lent_upper_of("wsp-a", "/var/lib/dpkg"), PathBuf::from("/wsp/run/wsp-a/upper/lent/var/lib/dpkg"));
+        assert_eq!(l.lent_work_of("wsp-a", "/var/lib/dpkg"), PathBuf::from("/wsp/run/wsp-a/work/lent/var/lib/dpkg"));
+        for lent in hardening::VAR_FROM_BOX {
+            assert!(l.lent_upper_of("wsp-a", lent).starts_with(l.upper("wsp-a")));
+            assert!(!l.lent_upper_of("wsp-a", lent).starts_with(l.upper_of("wsp-a", "/var")));
+            assert!(!l.lent_work_of("wsp-a", lent).starts_with(l.work_of("wsp-a", "/var")));
+        }
         // The workspace's own wsp folder, which the daemon inside writes its token into: one per workspace, so
         // no two of them are one directory however many run on the computer.
         assert_eq!(l.wsp_home("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home"));
@@ -1675,6 +1805,73 @@ mod tests {
         assert_eq!(take_off_point(&named).unwrap(), None);
     }
 
+    /// What a workspace reads of the box's own /etc is the view the boot builds, holding the allowlist and
+    /// nothing else, and a tree the box lends nothing to is the skeleton it needs. Built over a directory of this
+    /// case's own rather than the box's, and no mount and no root.
+    #[test]
+    fn the_view_of_a_tree_holds_what_the_list_allows_and_nothing_of_the_boxs_own_services() {
+        let dir = tempfile::tempdir().unwrap();
+        let boxs = dir.path().join("etc");
+        for made in ["apt/apt.conf.d", "apt/auth.conf.d", "ssl/private", "ssl/certs", "python3.12/lib", "systemd/system"] {
+            fs::create_dir_all(boxs.join(made)).unwrap();
+        }
+        for (file, text) in [
+            ("passwd", "root:x:0:0:root:/root:/bin/bash\n"),
+            ("shadow", "root:$y$of.the.box\n"),
+            ("apt/sources.list", "deb http://example.invalid x main\n"),
+            ("apt/auth.conf", "machine example.invalid login u password p\n"),
+            ("apt/auth.conf.d/private.conf", "machine x login u password p\n"),
+            ("apt/apt.conf.d/99local", "Acquire::Retries \"3\";\n"),
+            ("ssl/private/box.key", "the box's own key\n"),
+            ("ssl/certs/ca.pem", "a certificate\n"),
+            ("python3.12/lib/sitecustomize.py", "# the box's own\n"),
+            ("systemd/system/wsp.service", "[Service]\n"),
+        ] {
+            fs::write(boxs.join(file), text).unwrap();
+        }
+        // What df and mount read, which every box keeps as a link into proc, and what it points at.
+        std::os::unix::fs::symlink("/proc/self/mounts", boxs.join("mtab")).unwrap();
+
+        let view = dir.path().join("view");
+        view_of(&view, &boxs, hardening::ETC_ALLOWED, &[], &[]).unwrap();
+        // An allowed file, an allowed tree taken whole, and a name the box keeps by version taken through the
+        // star at the end of its row.
+        assert_eq!(fs::read_to_string(view.join("passwd")).unwrap(), "root:x:0:0:root:/root:/bin/bash\n");
+        assert_eq!(fs::read_to_string(view.join("apt/sources.list")).unwrap(), "deb http://example.invalid x main\n");
+        assert!(view.join("apt/apt.conf.d/99local").is_file());
+        assert!(view.join("ssl/certs/ca.pem").is_file());
+        assert!(view.join("python3.12/lib/sitecustomize.py").is_file(), "a versioned name did not come in");
+        // A link comes in as the link it is and what it points at is never read.
+        let held = fs::symlink_metadata(view.join("mtab")).unwrap();
+        assert!(held.file_type().is_symlink());
+        assert_eq!(fs::read_link(view.join("mtab")).unwrap(), Path::new("/proc/self/mounts"));
+        // And what a service of the box's own reads is not there at all, rather than covered inside: the
+        // repository credentials the whole apt tree used to carry among them.
+        for kept in ["shadow", "apt/auth.conf", "apt/auth.conf.d", "ssl/private", "ssl/private/box.key", "systemd"] {
+            assert!(!view.join(kept).exists(), "{kept} is in the view");
+        }
+        // Built again over a box that has moved on: the view is what the box has now and not what it had.
+        fs::remove_file(boxs.join("apt/sources.list")).unwrap();
+        fs::write(boxs.join("passwd"), "root:x:0:0:root:/root:/bin/sh\n").unwrap();
+        view_of(&view, &boxs, hardening::ETC_ALLOWED, &[], &[]).unwrap();
+        assert!(!view.join("apt/sources.list").exists(), "the view carried what the last boot read");
+        assert_eq!(fs::read_to_string(view.join("passwd")).unwrap(), "root:x:0:0:root:/root:/bin/sh\n");
+
+        // A tree the box lends nothing to: the skeleton a distribution expects, the two names it keeps as links,
+        // and nothing of the box's own tree of that name.
+        let var = dir.path().join("view-var");
+        view_of(&var, Path::new("/var"), &[], &hardening::VAR_DIRS, &hardening::VAR_LINKS).unwrap();
+        for (name, mode) in hardening::VAR_DIRS {
+            assert!(var.join(name).is_dir(), "{name}");
+            assert_eq!(fs::symlink_metadata(var.join(name)).unwrap().permissions().mode() & 0o7777, mode, "{name}");
+        }
+        for (name, target) in hardening::VAR_LINKS {
+            assert_eq!(fs::read_link(var.join(name)).unwrap(), Path::new(target));
+        }
+        assert!(!var.join("lib/dpkg").exists(), "the box's own /var showed through the workspace's");
+        assert!(!var.join("lib/cloud").exists() && !var.join("www").exists());
+    }
+
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and
     /// taken down again: the box's own top-level symlinks, the skeleton, an overlay over each of the computer's
     /// system directories with the workspace's own upper under it, the box's /root, an empty directory over every
@@ -1753,10 +1950,29 @@ mod tests {
         // host keys, the keys that open it and every other home on it show nothing inside.
         assert!(mounted(&rootfs.join("root")));
         let covers = hardening::covered(&rootfs);
-        for named in ["/etc/shadow", "/etc/gshadow", "/root/.ssh", "/home", "/var/lib/docker"] {
+        for named in ["/root/.ssh", "/home"] {
             assert!(covers.iter().any(|c| c.at == named), "{named} is not covered: {covers:?}");
         }
-        assert!(covers.iter().any(|c| c.at.starts_with("/etc/ssh/ssh_host_")), "no host key is covered: {covers:?}");
+        // What the covers used to hide is not inside to hide: the box's /etc is a view of what a tool inside
+        // reads, and its /var and /srv are the workspace's own with the package trees the only ones lent.
+        for kept in ["etc/shadow", "etc/gshadow", "etc/ssl/private", "etc/apt/auth.conf", "etc/apt/auth.conf.d", "var/lib/docker"] {
+            assert!(fs::symlink_metadata(rootfs.join(kept)).is_err(), "{kept} reads inside the workspace");
+        }
+        assert!(!rootfs.join("etc/ssh").join("ssh_host_ed25519_key").exists(), "a host key reads inside the workspace");
+        // And what a tool inside reads is there: the accounts, the mounts df reads, the certificates and, where
+        // the box has them, the package database and the caches apt writes its own over.
+        for held in ["etc/passwd", "etc/group", "etc/mtab", "etc/ssl/certs", "etc/os-release"] {
+            assert!(fs::symlink_metadata(rootfs.join(held)).is_ok(), "{held} does not read inside the workspace");
+        }
+        for lent in hardening::VAR_FROM_BOX {
+            if Path::new(lent).is_dir() {
+                assert!(mounted(&rootfs.join(lent.trim_start_matches('/'))), "{lent} is not lent inside the workspace");
+            }
+        }
+        // The workspace's own /var carries the skeleton and nothing else of the box's.
+        assert!(rootfs.join("var/tmp").is_dir() && rootfs.join("var/log").is_dir());
+        assert_eq!(fs::read_link(rootfs.join("var/run")).unwrap(), Path::new("/run"));
+        assert!(fs::symlink_metadata(rootfs.join("var/lib/cloud")).is_err(), "the box's own /var reads inside");
         for cover in &covers {
             let at_path = inside(&rootfs, &cover.at).unwrap();
             assert!(mounted(&at_path), "{} is not covered", cover.at);
