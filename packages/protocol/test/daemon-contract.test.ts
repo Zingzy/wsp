@@ -116,6 +116,7 @@ import {
   hostKeyRefusal,
   hostQuietLine,
   hostRefusedLine,
+  linkOutOfOrderLine,
   linkedLine,
   notAFrameLine,
   placeDaemonPaths,
@@ -241,6 +242,7 @@ const words = (): Record<string, string> => ({
   notAFrame: notAFrameLine("{url}"),
   authUnreadable: authUnreadableLine("{url}", "{error}"),
   hostRefused: hostRefusedLine("{url}", "{refusal}"),
+  linkOutOfOrder: linkOutOfOrderLine("{url}"),
 });
 
 /** The home the owned-paths fixture is rendered for: one letter, so the list reads as the shape of the paths

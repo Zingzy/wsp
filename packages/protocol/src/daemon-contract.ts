@@ -131,6 +131,9 @@ export const dialFailedLine = (url: string, error: string): string => `${url} co
 export const notAFrameLine = (url: string): string => `${url} sent something that is not a frame`;
 export const authUnreadableLine = (url: string, error: string): string => `${url} answered place.auth with something this computer cannot read: ${error}`;
 export const hostRefusedLine = (url: string, refusal: string): string => `${url}: ${refusal}`;
+/** What an address that answered something the handshake's order does not allow is passed over with: the id a frame
+ * carries says nothing about who sent it, so the order is the only thing a place holds a host to before the key. */
+export const linkOutOfOrderLine = (url: string): string => `${url} answered out of order; nothing was sent to it and the next address is tried`;
 
 /** What a socket that never asked to watch guest sessions is told when it answers or ends one. */
 export const GUEST_NOT_WATCHER = "only the socket that sent guest.watch may answer or close a guest session";

@@ -85,6 +85,11 @@ pub(crate) fn ws_url_of(url: &str) -> Result<String, &'static str> {
     Ok(format!("{socket}://{host}{path}/ws"))
 }
 
+/// The sentence a refusing frame carries, or this side's word for one that carries none.
+fn refusal_line(frame: &Value) -> &str {
+    frame.get("error").and_then(Value::as_str).unwrap_or(words::HOST_REFUSED_PLACE)
+}
+
 /// Whole seconds as node's Math.round gives them for the two sentences that name a wait.
 fn seconds(ms: u64) -> u64 {
     (ms as f64 / 1000.0).round() as u64
@@ -92,20 +97,22 @@ fn seconds(ms: u64) -> u64 {
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// What one address gave: a proved socket to hold, a host that says this place is not one it knows, or an address
-/// to pass over for the next.
+/// What one address gave: a proved socket to hold, the word of a host that proved its key and then said this place
+/// is not one it knows, an answer this attempt could not go on with, or nothing at all. Only a host that proved
+/// itself can refuse: an `ok: false` from anyone else is a frame anybody who answers at the address can send.
 enum Outcome {
     Linked(Box<Socket>),
     Refused,
-    Skipped,
+    Answered,
+    Silent,
 }
 
-/// One pass over every address in the place file ended with a link held and then lost, a refusal, or every address
-/// skipped; each has its own wait.
-enum Pass {
-    Held,
-    Refused,
-    Skipped,
+/// Where the handshake stands on one socket. The id a frame carries says nothing about who sent it, so the order is
+/// what a place holds a peer to until the pinned key is proved: an answer that does not fit the state ends the
+/// attempt with nothing served on that socket.
+enum Step {
+    SentAuth,
+    HostProved,
 }
 
 struct Link {
@@ -153,13 +160,14 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
             link.wait(link.refused_retry).await;
             continue;
         };
-        let mut pass = Pass::Skipped;
+        let (mut answers, mut refusals, mut held) = (0usize, 0usize, false);
         for url in &file.host_urls {
             match link.handshake(&file, url).await {
-                Outcome::Skipped => continue,
+                Outcome::Silent => continue,
+                Outcome::Answered => answers += 1,
                 Outcome::Refused => {
-                    pass = Pass::Refused;
-                    break;
+                    answers += 1;
+                    refusals += 1;
                 }
                 Outcome::Linked(ws) => {
                     let linked_at = Instant::now();
@@ -173,15 +181,20 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
                     if linked_at.elapsed() > SETTLED {
                         attempt = 0;
                     }
-                    pass = Pass::Held;
+                    held = true;
                     break;
                 }
             }
         }
-        let ms = match pass {
-            Pass::Refused => link.refused_retry,
-            Pass::Held => link.backoff(attempt + 1),
-            Pass::Skipped => link.backoff(attempt),
+        // The long wait is the answer to a host's own word and to nothing else: it is taken where every address
+        // that proved itself and answered refused, so an address nobody answered at costs nothing and a stranger
+        // that answers ahead of the real host cannot hold this computer off it.
+        let ms = if held {
+            link.backoff(attempt + 1)
+        } else if refusals > 0 && refusals == answers {
+            link.refused_retry
+        } else {
+            link.backoff(attempt)
         };
         link.wait(ms).await;
     }
@@ -200,13 +213,14 @@ impl Link {
         tokio::time::sleep(Duration::from_millis(jittered(ms, draw()))).await;
     }
 
-    /// One address: open, auth, verify the host, prove. The deadline covers the connect and both handshake frames.
+    /// One address: open, auth, verify the host, prove, and take the prove's reply, in that order and no other.
+    /// The deadline covers the connect and every frame of the handshake.
     async fn handshake(&self, file: &PlaceFile, url: &str) -> Outcome {
         let target = match ws_url_of(url) {
             Ok(target) => target,
             Err(why) => {
                 self.log(&words::link_could_not_dial(url, why));
-                return Outcome::Skipped;
+                return Outcome::Silent;
             }
         };
         let deadline = Instant::now() + self.connect;
@@ -214,50 +228,59 @@ impl Link {
             Ok(Ok((ws, _))) => ws,
             Ok(Err(_)) => {
                 self.log(&words::link_no_answer_to_dial(url));
-                return Outcome::Skipped;
+                return Outcome::Silent;
             }
             Err(_) => {
                 self.log(&words::link_no_answer_in(url, seconds(self.connect.as_millis() as u64)));
-                return Outcome::Skipped;
+                return Outcome::Silent;
             }
         };
         let nonce = fresh_nonce();
         let auth = PlaceAuthRequest::new(RequestId::from(1), file.place_id.clone(), nonce.clone());
         if ws.send(Message::text(crate::frame_text(&auth))).await.is_err() {
             self.log(&words::link_no_answer_to_dial(url));
-            return Outcome::Skipped;
+            return Outcome::Silent;
         }
+        let mut step = Step::SentAuth;
         loop {
             let frame = match timeout_at(deadline, ws.next()).await {
                 Err(_) => {
                     self.log(&words::link_no_answer_in(url, seconds(self.connect.as_millis() as u64)));
-                    return self.cut(ws, Outcome::Skipped).await;
+                    return self.cut(ws, Outcome::Silent).await;
                 }
                 Ok(Some(Ok(Message::Text(t)))) => t.to_string(),
                 Ok(Some(Ok(Message::Binary(b)))) => String::from_utf8_lossy(&b).into_owned(),
                 Ok(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => continue,
                 Ok(_) => {
                     self.log(&words::link_no_answer_to_dial(url));
-                    return Outcome::Skipped;
+                    return Outcome::Silent;
                 }
             };
             let Ok(value) = serde_json::from_str::<Value>(&frame) else {
                 self.log(&words::link_not_a_frame(url));
-                return self.cut(ws, Outcome::Skipped).await;
+                return self.cut(ws, Outcome::Answered).await;
             };
-            if value.get("ok") != Some(&Value::Bool(true)) {
-                // The host answered the handshake with a refusal: this place is not one it holds, or its key moved.
-                let line = value.get("error").and_then(Value::as_str).unwrap_or(words::HOST_REFUSED_PLACE);
-                self.log(&words::link_refused(url, line));
-                return self.cut(ws, Outcome::Refused).await;
-            }
-            match value.get("id").and_then(Value::as_u64) {
-                Some(1) => {
+            let ok = value.get("ok") == Some(&Value::Bool(true));
+            match (&step, ok, value.get("id").and_then(Value::as_u64)) {
+                (Step::SentAuth, false, Some(1)) => {
+                    // A no from a peer that has proved nothing, which is a frame anybody who answers at this address
+                    // can send: the sentence is logged, the next address is tried, and no wait of this place's is
+                    // spent on the word of someone who might not be its host at all.
+                    self.log(&words::link_refused(url, refusal_line(&value)));
+                    return self.cut(ws, Outcome::Answered).await;
+                }
+                (Step::HostProved, false, Some(2)) => {
+                    // The host proved the pinned key and then said no: its own word, and the one refusal the long
+                    // wait follows, since nothing changes until a person acts.
+                    self.log(&words::link_refused(url, refusal_line(&value)));
+                    return self.cut(ws, Outcome::Refused).await;
+                }
+                (Step::SentAuth, true, Some(1)) => {
                     let reply = match serde_json::from_value::<PlaceAuthReply>(value.clone()) {
                         Ok(reply) => reply,
                         Err(e) => {
                             self.log(&words::link_unreadable_auth_reply(url, &e.to_string()));
-                            return self.cut(ws, Outcome::Skipped).await;
+                            return self.cut(ws, Outcome::Answered).await;
                         }
                     };
                     let host_bytes = place_link_transcript(LinkRole::Host, &file.place_id, nonce.as_str(), reply.nonce.as_str());
@@ -267,23 +290,27 @@ impl Link {
                         // Nothing of this computer's has been sent yet: the report and the place's own signature
                         // are the next frame, and the attempt ends before it.
                         self.log(&words::host_key_refusal(url));
-                        return self.cut(ws, Outcome::Skipped).await;
+                        return self.cut(ws, Outcome::Answered).await;
                     }
                     let versions = self.agent_versions().await;
                     let prove = match self.prove(file, url, reply.nonce.as_str(), nonce.as_str(), &versions) {
                         Ok(prove) => prove,
                         Err(why) => {
                             self.log(&words::link_refused(url, &why));
-                            return self.cut(ws, Outcome::Skipped).await;
+                            return self.cut(ws, Outcome::Answered).await;
                         }
                     };
                     if ws.send(Message::text(crate::frame_text(&prove))).await.is_err() {
                         self.log(&words::link_no_answer_to_dial(url));
-                        return Outcome::Skipped;
+                        return Outcome::Silent;
                     }
+                    step = Step::HostProved;
                 }
-                Some(2) => return Outcome::Linked(Box::new(ws)),
-                _ => continue,
+                (Step::HostProved, true, Some(2)) => return Outcome::Linked(Box::new(ws)),
+                _ => {
+                    self.log(&words::link_out_of_order(url));
+                    return self.cut(ws, Outcome::Answered).await;
+                }
             }
         }
     }

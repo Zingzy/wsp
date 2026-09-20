@@ -59,7 +59,28 @@ struct FakeHost {
 struct HostOpts {
     key: Option<Pair>,
     wrong_transcript: bool,
+    /// Answers the auth frame with this refusal, having proved nothing: what anyone who answers at the address can
+    /// say, which is why it costs this place no wait of its own.
     refuse: Option<&'static str>,
+    /// Proves its key and then refuses the prove: the host's own word, and the one refusal a long wait follows.
+    refuse_prove: Option<&'static str>,
+    answer: Answer,
+}
+
+/// What the fake host answers `place.auth` with in place of its challenge, which is how a peer that holds neither
+/// key tries to reach the socket the prove would have won it.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Answer {
+    #[default]
+    Challenge,
+    /// The prove's own reply and nothing before it.
+    LinkedFirst,
+    /// A success under an id neither reply uses, then the prove's reply.
+    OtherIdThenLinked,
+    /// The challenge again once the prove has landed, in place of the prove's reply.
+    ChallengeAfterProve,
+    /// Its own challenge, signed with a key this place never pinned, and the prove's reply behind it.
+    ChallengeThenLinked,
 }
 
 impl FakeHost {
@@ -89,6 +110,7 @@ async fn fake_place_host(opts: HostOpts) -> FakeHost {
             let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else { continue };
             let (key, f, p, pk, held_tx) = (Arc::clone(&key), Arc::clone(&f), Arc::clone(&p), pk.clone(), held_tx.clone());
             tokio::spawn(async move {
+                let mut challenged: Option<(String, String)> = None;
                 while let Some(Ok(msg)) = ws.next().await {
                     let Message::Text(text) = msg else { continue };
                     let frame: Value = serde_json::from_str(&text).unwrap();
@@ -103,17 +125,39 @@ async fn fake_place_host(opts: HostOpts) -> FakeHost {
                                 let _ = ws.close(None).await;
                                 return;
                             }
-                            let place_id = frame["placeId"].as_str().unwrap();
-                            let place_nonce = frame["nonce"].as_str().unwrap();
-                            let nonce = B64.encode([9u8; 32]);
-                            let role = if opts.wrong_transcript { LinkRole::Place } else { LinkRole::Host };
-                            let bytes = place_link_transcript(role, place_id, place_nonce, &nonce);
-                            let signature = B64.encode(key.sign(&bytes).to_bytes());
-                            let reply = json!({"id": frame["id"], "ok": true, "nonce": nonce, "hostPublicKey": pk, "signature": signature});
-                            let _ = ws.send(Message::text(reply.to_string())).await;
+                            let place_id = frame["placeId"].as_str().unwrap().to_owned();
+                            let place_nonce = frame["nonce"].as_str().unwrap().to_owned();
+                            challenged = Some((place_id, place_nonce));
+                            for reply in match opts.answer {
+                                Answer::LinkedFirst => vec![json!({"id": 2, "ok": true})],
+                                Answer::OtherIdThenLinked => vec![json!({"id": 9, "ok": true}), json!({"id": 2, "ok": true})],
+                                Answer::ChallengeThenLinked => {
+                                    vec![
+                                        challenge(&key, &pk, opts.wrong_transcript, challenged.as_ref().unwrap()),
+                                        json!({"id": 2, "ok": true}),
+                                    ]
+                                }
+                                _ => vec![challenge(&key, &pk, opts.wrong_transcript, challenged.as_ref().unwrap())],
+                            } {
+                                let _ = ws.send(Message::text(reply.to_string())).await;
+                            }
                         }
                         Some("place.prove") => {
                             p.lock().unwrap().push(frame.clone());
+                            if let Some(refusal) = opts.refuse_prove {
+                                let _ = ws
+                                    .send(Message::text(
+                                        json!({"id": frame["id"], "ok": false, "error": refusal, "kind": "auth"}).to_string(),
+                                    ))
+                                    .await;
+                                let _ = ws.close(None).await;
+                                return;
+                            }
+                            if opts.answer == Answer::ChallengeAfterProve {
+                                let again = challenge(&key, &pk, opts.wrong_transcript, challenged.as_ref().unwrap());
+                                let _ = ws.send(Message::text(again.to_string())).await;
+                                continue;
+                            }
                             let _ = ws.send(Message::text(json!({"id": frame["id"], "ok": true}).to_string())).await;
                             let _ = held_tx.send(ws);
                             return;
@@ -125,6 +169,17 @@ async fn fake_place_host(opts: HostOpts) -> FakeHost {
         }
     });
     FakeHost { url: format!("http://127.0.0.1:{port}"), dials, frames, proofs, socket, public_key }
+}
+
+/// The reply a host that holds this place answers `place.auth` with: its own nonce, its key and its signature over
+/// the host's half of the transcript. `wrong_transcript` signs the place's half instead, which is the one thing a
+/// place must refuse.
+fn challenge(key: &SigningKey, public_key: &str, wrong_transcript: bool, asked: &(String, String)) -> Value {
+    let (place_id, place_nonce) = asked;
+    let nonce = B64.encode([9u8; 32]);
+    let role = if wrong_transcript { LinkRole::Place } else { LinkRole::Host };
+    let signature = B64.encode(key.sign(&place_link_transcript(role, place_id, place_nonce, &nonce)).to_bytes());
+    json!({"id": 1, "ok": true, "nonce": nonce, "hostPublicKey": public_key, "signature": signature})
 }
 
 struct Place {
@@ -266,7 +321,7 @@ async fn dials_the_second_address_when_the_first_refuses_the_connect_and_names_b
 #[tokio::test]
 async fn ends_the_attempt_before_it_sends_its_report_when_the_hosts_signature_is_over_the_wrong_transcript() {
     let key = place_pair();
-    let host = fake_place_host(HostOpts { key: Some(key), wrong_transcript: true, refuse: None }).await;
+    let host = fake_place_host(HostOpts { key: Some(key), wrong_transcript: true, ..HostOpts::default() }).await;
     let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
     let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
     d.until_logged(|l| l == words::host_key_refusal(&host.url)).await;
@@ -288,14 +343,115 @@ async fn refuses_a_host_whose_key_is_not_the_one_this_computer_pinned() {
 }
 
 #[tokio::test]
-async fn stops_dialling_for_minutes_when_the_host_says_it_holds_no_such_place() {
-    let host = fake_place_host(HostOpts { refuse: Some(PLACE_UNKNOWN_REFUSAL), ..HostOpts::default() }).await;
-    let place = place_file(&[&host.url], &place_pair().public_key, &place_pair().private_key_pem);
-    let d = place_daemon(&place, |o| o.link_refused_retry_ms = Some(600_000)).await;
+async fn stops_dialling_for_minutes_when_the_host_that_proved_its_key_refuses_the_prove() {
+    let key = place_pair();
+    let host = fake_place_host(HostOpts { key: Some(key), refuse_prove: Some(PLACE_UNKNOWN_REFUSAL), ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+    })
+    .await;
     d.until_logged(|l| l.contains("holds no place by that id")).await;
-    // Refused is a wait of minutes, not the backoff of seconds: no second dial lands in the time a redial would take.
+    // Refused is a wait of minutes, not the backoff of milliseconds this daemon was given: no second dial lands.
     settled(300).await;
     assert_eq!(host.dials(), 1);
+}
+
+#[tokio::test]
+async fn takes_the_long_wait_when_every_address_that_answered_refused_after_proving_itself() {
+    let key = place_pair();
+    let host = fake_place_host(HostOpts { key: Some(key), refuse_prove: Some(PLACE_UNKNOWN_REFUSAL), ..HostOpts::default() }).await;
+    // An address nothing answers at is passed over and counts for nothing: the refusal of the one host that
+    // answered is still the host's own word, and the wait is its.
+    let place = place_file(&["http://127.0.0.1:1", &host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+        o.link_connect_ms = Some(500);
+    })
+    .await;
+    d.until_logged(|l| l.contains("holds no place by that id")).await;
+    settled(300).await;
+    assert_eq!(host.dials(), 1);
+}
+
+#[tokio::test]
+async fn a_success_under_the_proves_id_before_the_host_proved_links_nothing_and_the_next_address_is_dialled() {
+    let key = place_pair();
+    let stranger = fake_place_host(HostOpts { answer: Answer::LinkedFirst, ..HostOpts::default() }).await;
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&stranger.url, &host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
+    host.held().await;
+    d.until_logged(|l| l == words::link_linked(&host.url)).await;
+    // Nothing of this computer's reached the stranger, and the address it holds was passed over by name.
+    assert!(stranger.proofs.lock().unwrap().is_empty());
+    assert!(stranger.frames.lock().unwrap().is_empty());
+    assert!(d.log().contains(&words::link_out_of_order(&stranger.url)), "{:?}", d.log());
+    assert!(!d.log().contains(&words::link_linked(&stranger.url)));
+}
+
+#[tokio::test]
+async fn a_success_under_an_id_neither_reply_uses_ends_the_attempt_before_the_prove() {
+    let stranger = fake_place_host(HostOpts { answer: Answer::OtherIdThenLinked, ..HostOpts::default() }).await;
+    let place = place_file(&[&stranger.url], &place_pair().public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
+    d.until_logged(|l| l == words::link_out_of_order(&stranger.url)).await;
+    settled(100).await;
+    assert!(stranger.proofs.lock().unwrap().is_empty());
+    assert!(!d.log().contains(&words::link_linked(&stranger.url)));
+}
+
+#[tokio::test]
+async fn a_second_auth_reply_after_the_prove_ends_the_attempt_and_sends_no_second_prove() {
+    let key = place_pair();
+    let host = fake_place_host(HostOpts { key: Some(key), answer: Answer::ChallengeAfterProve, ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
+    d.until_logged(|l| l == words::link_out_of_order(&host.url)).await;
+    settled(100).await;
+    assert_eq!(host.proofs.lock().unwrap().len(), 1);
+    assert!(!d.log().contains(&words::link_linked(&host.url)));
+}
+
+#[tokio::test]
+async fn a_refusal_from_a_peer_that_proved_nothing_is_passed_over_and_the_next_address_links() {
+    let key = place_pair();
+    let stranger = fake_place_host(HostOpts { refuse: Some(PLACE_UNKNOWN_REFUSAL), ..HostOpts::default() }).await;
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&stranger.url, &host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
+    host.held().await;
+    d.until_logged(|l| l == words::link_linked(&host.url)).await;
+    assert_eq!(stranger.dials(), 1);
+}
+
+#[tokio::test]
+async fn a_refusal_from_a_peer_that_proved_nothing_costs_the_backoff_and_not_the_long_wait() {
+    let stranger = fake_place_host(HostOpts { refuse: Some(PLACE_UNKNOWN_REFUSAL), ..HostOpts::default() }).await;
+    let place = place_file(&[&stranger.url], &place_pair().public_key, &place_pair().private_key_pem);
+    let _d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+    })
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while stranger.dials() < 3 {
+        assert!(tokio::time::Instant::now() < deadline, "a stranger's refusal held this computer off its host; {} dials", stranger.dials());
+        settled(10).await;
+    }
+}
+
+#[tokio::test]
+async fn an_auth_reply_under_a_key_this_computer_never_pinned_links_nothing_even_when_a_success_follows_it() {
+    let stranger = fake_place_host(HostOpts { answer: Answer::ChallengeThenLinked, ..HostOpts::default() }).await;
+    let place = place_file(&[&stranger.url], &place_pair().public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.link_backoff_ms = Some(60_000)).await;
+    d.until_logged(|l| l == words::host_key_refusal(&stranger.url)).await;
+    settled(100).await;
+    assert!(stranger.proofs.lock().unwrap().is_empty());
+    assert!(!d.log().contains(&words::link_linked(&stranger.url)));
 }
 
 #[tokio::test]

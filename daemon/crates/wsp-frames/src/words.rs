@@ -109,6 +109,13 @@ pub fn link_no_answer_to_dial(url: &str) -> String {
     format!("{url} did not answer the dial")
 }
 
+/// What an address that answered something the handshake's order does not allow is passed over with. The id a
+/// frame carries says nothing about who sent it, so the order is the only thing a place holds a host to before the
+/// key is proved.
+pub fn link_out_of_order(url: &str) -> String {
+    format!("{url} answered out of order; nothing was sent to it and the next address is tried")
+}
+
 pub fn link_linked(url: &str) -> String {
     format!("linked to the host at {url}")
 }
