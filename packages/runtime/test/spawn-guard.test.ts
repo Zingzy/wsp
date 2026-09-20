@@ -396,8 +396,10 @@ describe("agents spawning agents", () => {
       await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(noWorkspaceRefusal(word));
     }
     // Every id of this host starts ws_, so the start a thread would walk the whole host with answers off its own
-    // listing: one workspace there, never the two a bare prefix would name.
-    expect((await rt.workspaces.resolve(forked.id.slice(0, ID_PREFIX_MIN), asThread(scope))).id).toBe(forked.id);
+    // listing: the shortest prefix that names one workspace there, whatever the ids outside the tree share with it.
+    let n = ID_PREFIX_MIN;
+    while (mine.id.startsWith(forked.id.slice(0, n))) n++;
+    expect((await rt.workspaces.resolve(forked.id.slice(0, n), asThread(scope))).id).toBe(forked.id);
     // A name a workspace outside the tree holds is still taken, which is the thread's own word answered back.
     await expect(createOn(rt, { name: "theirs" }, asThread(scope))).rejects.toThrow(nameTakenRefusal("theirs"));
     // The very word the thread reads as absent is a workspace to the person, which is what makes it a rule and not
