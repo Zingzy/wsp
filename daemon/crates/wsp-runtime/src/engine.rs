@@ -874,16 +874,14 @@ pub fn bind(dir: &Path) -> io::Result<UnixListener> {
     UnixListener::bind(&path)
 }
 
-/// The symlink a Docker client inside follows to the socket, written into the rootfs; one already there stands.
-pub fn link_client_path(rootfs: &Path) -> io::Result<()> {
-    let at = rootfs.join(CLIENT_PATH.trim_start_matches('/'));
-    if let Some(parent) = at.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    match std::os::unix::fs::symlink(format!("{INSIDE_DIR}/{SOCKET_NAME}"), &at) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-        Err(e) => Err(e),
+/// The symlink a Docker client inside follows to the socket, made through the descriptor of the folder it sits
+/// in so no link of the workspace's leads the make anywhere else; one already there stands.
+pub fn link_client_path(place: &crate::bundle::Inside) -> Result<(), crate::bundle::Error> {
+    let (folder, name) = CLIENT_PATH.rsplit_once('/').expect("the client path names a folder");
+    let dir = crate::bundle::open_inside(place, folder, crate::bundle::Want::Dir, crate::bundle::BoxLink::FollowedOnce)?;
+    match nix::unistd::symlinkat(format!("{INSIDE_DIR}/{SOCKET_NAME}").as_str(), dir.fd(), name) {
+        Ok(()) | Err(nix::errno::Errno::EEXIST) => Ok(()),
+        Err(e) => Err(crate::bundle::Error { path: dir.named(place).join(name), source: io::Error::from(e) }),
     }
 }
 
