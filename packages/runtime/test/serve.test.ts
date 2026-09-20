@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import { keyFingerprint } from "@wsp/engine";
-import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
+import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, verifyPlaceBytes, type PlaceKeyPair, type PlaceRecord } from "../src/places.js";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
@@ -63,6 +63,45 @@ describe("serveRuntime auth", () => {
     expect(bad.ok).toBe(false);
     const ok = await c.request("workspaces.list");
     expect(ok.ok).toBe(true);
+    c.close();
+  });
+});
+
+describe("the two limits a socket is held to before it is let in", () => {
+  /** A socket opened by hand, since these cases read the close code and the sentence that came with it. */
+  const opened = async (port: number): Promise<{ ws: WebSocket; frames: unknown[]; closed: Promise<[number, string]> }> => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    const frames: unknown[] = [];
+    ws.on("message", raw => frames.push(JSON.parse(String(raw))));
+    const closed = new Promise<[number, string]>(resolve => ws.once("close", (code, reason) => resolve([code, String(reason)])));
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    return { ws, frames, closed };
+  };
+
+  it("closes a socket that never says anything, with the sentence the machine's own door speaks", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", authDeadlineMs: 60 });
+    const { closed } = await opened(srv.port);
+    expect(await closed).toEqual([4401, DAEMON_AUTH_DEADLINE_PASSED]);
+  });
+
+  it("closes a socket that sends more bytes than the door takes, and answers it nothing", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const { ws, frames, closed } = await opened(srv.port);
+    // A well-formed auth frame with the right token, padded past the cap: the bytes are what refuse it.
+    ws.send(JSON.stringify({ id: 1, op: "auth", token: "secret", pad: "x".repeat(5000) }));
+    expect(await closed).toEqual([4401, DAEMON_PRE_AUTH_BYTES_EXCEEDED]);
+    expect(frames).toEqual([]);
+  });
+
+  it("holds neither limit against a socket that is through the door", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", authDeadlineMs: 60 });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const big = await c.request("workspaces.list", { pad: "x".repeat(8 * 1024) });
+    expect(big.ok).toBe(true);
     c.close();
   });
 });
