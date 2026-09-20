@@ -3,13 +3,14 @@
 // has a presence test of its own, and which directories it links the commands
 // it installs into. Both are read by the recipe job and by the doctor through
 // one planned step, so a computers row and a doctor line cannot disagree about
-// a tool.
+// a tool. And where a job's managers install: under the machine's home for an
+// image, under a folder of wsp's own for a computer somebody owns.
 import { describe, expect, it } from "vitest";
 import { PNPM_HOME } from "@wsp/protocol";
-import { APT_BIN, BREW_PREFIX, CARGO_BIN, FROM_A_READABLE_DIR, HOME_BIN, LOCAL_BIN, ROADS, ROAD_MODULES, asLinuxbrew, roadModule, type InstallRoad } from "../src/index.js";
+import { APT_BIN, BREW_PREFIX, CARGO_BIN, FROM_A_READABLE_DIR, GUEST_HOME, HOME_BIN, INSTALL_HOMES, LOCAL_BIN, ROADS, ROAD_MODULES, TOOL_PREFIX, asLinuxbrew, catalogToolFor, installEnv, installHomes, roadModule, type InstallHomes, type InstallRoad } from "../src/index.js";
 
 const present = (road: InstallRoad, bin = "x"): string | undefined => roadModule(road).present?.(road, bin);
-const bins = (road: InstallRoad): readonly string[] => roadModule(road).bins(road);
+const bins = (road: InstallRoad, homes?: InstallHomes): readonly string[] => roadModule(road).bins(road, homes);
 const check = (road: InstallRoad, bin = "x"): string | undefined => roadModule(road).check?.(road, bin);
 
 describe("a road's own presence read", () => {
@@ -58,5 +59,97 @@ describe("the directories a road links its commands into", () => {
   it("is the script road's own row, and nothing for a script whose row names none", () => {
     expect(bins({ road: "script", script: "curl -o node.tar.gz ...", bins: [LOCAL_BIN] })).toEqual([LOCAL_BIN]);
     expect(bins({ road: "script", script: "apt-get install -y docker-ce" })).toEqual([]);
+  });
+});
+
+describe("where a job's managers install", () => {
+  const homes = installHomes(TOOL_PREFIX);
+  const own = installHomes();
+  const line = (road: InstallRoad, bin: string, at: InstallHomes): string => {
+    const install = roadModule(road).install(road, bin, at);
+    if (typeof install !== "string") throw new Error(install.note);
+    return install;
+  };
+  const rustRoad = catalogToolFor("rust")!.installRoad;
+
+  it("is a folder of wsp's own under the prefix, with every command in the one folder the daemon's fixed PATH holds", () => {
+    // Under /opt, which the protocol brings into every workspace on that computer through an overlay of its own,
+    // so a tool installed here answers inside one while no process in one can write it on the computer itself.
+    expect(TOOL_PREFIX).toBe("/opt/wsp");
+    for (const name of INSTALL_HOMES) {
+      const home = homes[name];
+      expect(home.home.startsWith(`${TOOL_PREFIX}/`), name).toBe(true);
+      expect(home.bin, name).toBe(LOCAL_BIN);
+      // Nothing a manager is told names a directory under the machine's home, which every workspace there writes.
+      for (const [knob, value] of Object.entries(home.env)) expect(value.startsWith(`${TOOL_PREFIX}/`) || value === LOCAL_BIN, `${knob}=${value}`).toBe(true);
+    }
+    // What a step reads its row back by: that one folder for a manager a knob moves, and the manager's own folder
+    // ahead of it for one with no such knob, whose commands are linked from there.
+    expect(bins({ road: "uv", package: "ruff" }, homes)).toEqual([LOCAL_BIN]);
+    expect(bins({ road: "pipx", package: "black" }, homes)).toEqual([LOCAL_BIN]);
+    expect(bins({ road: "bun", package: "wrangler" }, homes)).toEqual([LOCAL_BIN]);
+    expect(bins({ road: "go", module: "github.com/x/y", version: "v1" }, homes)).toEqual([LOCAL_BIN]);
+    expect(bins({ road: "cargo", package: "ripgrep" }, homes)).toEqual([`${TOOL_PREFIX}/cargo/bin`, LOCAL_BIN]);
+    expect(bins({ road: "pnpm", package: "wrangler" }, homes)).toEqual([`${TOOL_PREFIX}/pnpm/bin`, LOCAL_BIN]);
+  });
+
+  it("is each manager's own folder under the machine's home for a job with no prefix, which is the image", () => {
+    expect(bins({ road: "uv", package: "ruff" }, own)).toEqual([HOME_BIN]);
+    expect(bins({ road: "pipx", package: "black" }, own)).toEqual([HOME_BIN]);
+    expect(bins({ road: "bun", package: "wrangler" }, own)).toEqual([`${GUEST_HOME}/.bun/bin`]);
+    expect(bins({ road: "go", module: "github.com/x/y", version: "v1" }, own)).toEqual([`${GUEST_HOME}/go/bin`]);
+    expect(bins({ road: "cargo", package: "ripgrep" }, own)).toEqual([CARGO_BIN]);
+    expect(bins({ road: "pnpm", package: "wrangler" }, own)).toEqual([PNPM_HOME]);
+    // The one knob an image's job exports, the one it has always exported: pnpm has no folder of its own by default.
+    expect(installEnv(own)).toEqual({ PNPM_HOME });
+    // Nothing is linked and nothing is added to the PATH of a line: an image's scripts read as they did.
+    expect(line({ road: "cargo", package: "ripgrep" }, "rg", own)).toBe("cargo install ripgrep");
+    expect(line({ road: "pnpm", package: "wrangler" }, "wrangler", own)).toBe("pnpm add -g wrangler");
+    expect(line(rustRoad, "cargo", own)).toBe(line(rustRoad, "cargo", homes).split("\nfind ")[0]);
+  });
+
+  it("tells each manager its home in the knobs the job exports, every one the manager reads itself", () => {
+    expect(installEnv(homes)).toEqual({
+      PNPM_HOME: `${TOOL_PREFIX}/pnpm`,
+      BUN_INSTALL: `${TOOL_PREFIX}/bun`,
+      BUN_INSTALL_BIN: LOCAL_BIN,
+      UV_TOOL_DIR: `${TOOL_PREFIX}/uv/tools`,
+      UV_TOOL_BIN_DIR: LOCAL_BIN,
+      UV_PYTHON_INSTALL_DIR: `${TOOL_PREFIX}/uv/python`,
+      PIPX_HOME: `${TOOL_PREFIX}/pipx`,
+      PIPX_BIN_DIR: LOCAL_BIN,
+      CARGO_HOME: `${TOOL_PREFIX}/cargo`,
+      RUSTUP_HOME: `${TOOL_PREFIX}/rustup`,
+      GOPATH: `${TOOL_PREFIX}/go`,
+      GOBIN: LOCAL_BIN,
+    });
+  });
+
+  it("links what a manager with no folder knob left in its own folder, and takes the link off again", () => {
+    const link = `find ${TOOL_PREFIX}/cargo/bin -maxdepth 1 -type f -perm -u+x -exec ln -sfn {} ${LOCAL_BIN}/ ';'`;
+    const cargo = line({ road: "cargo", package: "ripgrep" }, "rg", homes);
+    expect(cargo).toContain("cargo install ripgrep");
+    expect(cargo.endsWith(link)).toBe(true);
+    expect(roadModule({ road: "cargo", package: "ripgrep" } as InstallRoad).uninstall({ road: "cargo", package: "ripgrep" }, "rg", homes)).toEqual({ cmd: `export PATH=${TOOL_PREFIX}/cargo/bin:$PATH; cargo uninstall ripgrep\nrm -f ${LOCAL_BIN}/'rg'` });
+    // pnpm refuses to install a global while the folder it links into is off PATH, so its own lines carry it.
+    const pnpm = line({ road: "pnpm", package: "wrangler" }, "wrangler", homes);
+    expect(pnpm).toContain(`export PATH=${TOOL_PREFIX}/pnpm/bin:$PATH; pnpm add -g wrangler`);
+    expect(pnpm.endsWith(`find ${TOOL_PREFIX}/pnpm/bin -maxdepth 1 -type f -perm -u+x -exec ln -sfn {} ${LOCAL_BIN}/ ';'`)).toBe(true);
+    // And the version read runs under the same folder, since pnpm refuses that line too.
+    expect(roadModule({ road: "pnpm", package: "wrangler" } as InstallRoad).installed!({ road: "pnpm", package: "wrangler" }, "wrangler", homes)).toContain(`export PATH=${TOOL_PREFIX}/pnpm/bin:$PATH; `);
+  });
+
+  it("maps the rust row's own command folder to the prefix's and links every command rustup left there", () => {
+    // cargo itself stands in the cargo home's own folder, which the fixed PATH does not hold, so no cargo row
+    // could run on a computer somebody owns until the toolchain moved under the prefix with its commands linked.
+    expect(bins(rustRoad)).toEqual([CARGO_BIN]);
+    expect(bins(rustRoad, homes)).toEqual([`${TOOL_PREFIX}/cargo/bin`, LOCAL_BIN]);
+    const script = line(rustRoad, "cargo", homes);
+    expect(script).toContain("rustup-init");
+    expect(script.endsWith(`find ${TOOL_PREFIX}/cargo/bin -maxdepth 1 -type f -perm -u+x -exec ln -sfn {} ${LOCAL_BIN}/ ';'`)).toBe(true);
+    // A script row whose own folder no manager keeps is the row's own and stands, with nothing linked.
+    const node = catalogToolFor("node")!.installRoad;
+    expect(bins(node, homes)).toEqual([LOCAL_BIN]);
+    expect(line(node, "node", homes)).toBe(line(node, "node", own));
   });
 });

@@ -498,6 +498,9 @@ export interface ImportOptions {
   /** The PATH every install script of this plan exports. The tools PATH where nothing says otherwise, which is
    * the image; a computer somebody owns hands in its probe list, since its home is one the workspaces there write. */
   path?: string;
+  /** The folder of wsp's own the managers install under, told to each of them on that same line; absent for the
+   * image, where every manager keeps its own folder under the machine's home. */
+  prefix?: string;
 }
 
 /** What is at a laptop path: a link is followed and reports where it lands. */
@@ -616,7 +619,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   // The Mac's Homebrew unread (the wizard said so) is an empty table: no tap formula has a release to take.
   const brew: BrewTable = opts.brew ?? new Map();
   const custom = opts.custom ?? [];
-  const tools = toolInstallsFor(bring, brew, custom, opts.path ?? TOOLS_PATH);
+  const tools = toolInstallsFor(bring, brew, custom, opts.path ?? TOOLS_PATH, opts.prefix);
   const agents = agentInstallsFor(bring);
   const mcp = opts.rows !== undefined ? mcpPlanFor(opts.rows, { home, guestHome: GUEST_HOME, agents: MCP_SOURCES, binDirs: MCP_BIN_DIRS }) : undefined;
   const label = (id: string) => bring.find(e => e.id === id)?.label ?? id;
