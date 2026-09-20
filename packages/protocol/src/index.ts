@@ -3727,6 +3727,7 @@ const DAEMON_CONTENTS = [
   "b1c827b22fbdade28b749f72899b610723d5f312e339e9546552da14840013c1",
   "7324cbd1f27eb8983b8ea302c3cd32a629a4eedae7e0d46458acca37440baf88",
   "b83b671323ccc59fe9daa43da46dede2d640451c5b4f0c8e64ae2eef149ba694",
+  "5b5db8f843457bfac71002bb4741d98f0f98bfe11579e7891c1a0955c39eed0f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3908,7 +3909,9 @@ const DAEMON_CONTENTS = [
  * alike, and refuses a frame past the cap with a sentence of its own while the session stays open.
  * Version 62 prints its two kernel knob lines only on Linux and nothing on a Mac start, closes the guest door of a
  * workspace whose init died on its own by watching the init's pidfd and running the stop road, and stops redialling
- * a host that refused its place under a signature over the pinned key. */
+ * a host that refused its place under a signature over the pinned key.
+ * Version 63 counts the bytes a client buffers behind the WebSocket upgrade against the same pre-auth cap as the
+ * bytes after it, so nothing rides the upgrade past the door unweighed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

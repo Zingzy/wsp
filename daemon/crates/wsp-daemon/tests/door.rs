@@ -334,12 +334,66 @@ async fn bash_pty(c: &mut Client) -> String {
 /// A TCP stream past a hand-written upgrade, for the cases about bytes rather than frames.
 async fn upgraded(addr: SocketAddr) -> TcpStream {
     let mut raw = TcpStream::connect(addr).await.unwrap();
-    let request = format!("GET / HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
-    raw.write_all(request.as_bytes()).await.unwrap();
+    raw.write_all(&upgrade_request(addr, 0)).await.unwrap();
     let mut buf = vec![0u8; 4096];
     let n = raw.read(&mut buf).await.unwrap();
     assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 101"), "the upgrade is answered");
     raw
+}
+
+/// The upgrade request as a client writes it, grown to `len` bytes with a header the framing ignores where a
+/// case is about what the request itself costs a peer.
+fn upgrade_request(addr: SocketAddr, len: usize) -> Vec<u8> {
+    let request = |pad: usize| {
+        format!(
+            "GET / HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nX-Pad: {}\r\n\r\n",
+            "p".repeat(pad)
+        )
+    };
+    let bare = request(0).len();
+    request(len.saturating_sub(bare)).into_bytes()
+}
+
+/// A masked text frame as a client sends one.
+fn masked_text(payload: &[u8]) -> Vec<u8> {
+    let mut frame = vec![0x81u8, 0x80 | u8::try_from(payload.len()).unwrap()];
+    frame.extend_from_slice(&[0, 0, 0, 0]);
+    frame.extend_from_slice(payload);
+    frame
+}
+
+/// The upgrade answer read to its blank line, leaving the frames behind it on the stream.
+async fn upgrade_answer(raw: &mut TcpStream) -> String {
+    let mut answer = Vec::new();
+    while !answer.ends_with(b"\r\n\r\n") {
+        let mut byte = [0u8; 1];
+        raw.read_exact(&mut byte).await.unwrap();
+        answer.push(byte[0]);
+    }
+    String::from_utf8(answer).unwrap()
+}
+
+/// The next text frame off a raw stream, unmasked as the daemon sends it.
+async fn server_text(raw: &mut TcpStream) -> Value {
+    let mut head = [0u8; 2];
+    raw.read_exact(&mut head).await.unwrap();
+    assert_eq!(head[0], 0x81, "a text frame");
+    let len = match head[1] {
+        126 => {
+            let mut l = [0u8; 2];
+            raw.read_exact(&mut l).await.unwrap();
+            usize::from(u16::from_be_bytes(l))
+        }
+        127 => {
+            let mut l = [0u8; 8];
+            raw.read_exact(&mut l).await.unwrap();
+            usize::try_from(u64::from_be_bytes(l)).unwrap()
+        }
+        n => usize::from(n),
+    };
+    let mut payload = vec![0u8; len];
+    raw.read_exact(&mut payload).await.unwrap();
+    serde_json::from_slice(&payload).unwrap()
 }
 
 /// Reads until the peer ends the connection (EOF or a reset), within five seconds.
@@ -434,6 +488,37 @@ async fn counts_wire_bytes_not_assembled_messages_a_peer_that_never_finishes_a_h
     let (mut c, closed) = Client::connect(d.addr, TOKEN, None).await;
     assert_eq!(closed, None);
     assert_eq!(c.request("ping", json!({})).await["ok"], true);
+}
+
+#[tokio::test]
+async fn counts_the_bytes_the_upgrade_reads_for_a_head_that_never_ends_against_the_pre_auth_cap() {
+    // A deadline long enough that what cuts this peer is the cap and not the clock.
+    let d = start(Some(30_000)).await;
+    let mut raw = TcpStream::connect(d.addr).await.unwrap();
+    // A request head with no blank line: the door reads its own ceiling of it and leaves the rest to the
+    // framing, whose reads off the socket are the peer's own bytes.
+    let mut head = upgrade_request(d.addr, 16 * 1024);
+    head.truncate(head.len() - 4);
+    raw.write_all(&head).await.unwrap();
+    raw.write_all(&vec![b'p'; 8 * 1024]).await.unwrap();
+    assert!(ends(&mut raw).await, "the peer is cut at the pre-auth cap, not at the framing's own ceiling");
+    let (mut c, closed) = Client::connect(d.addr, TOKEN, None).await;
+    assert_eq!(closed, None);
+    assert_eq!(c.request("ping", json!({})).await["ok"], true);
+}
+
+#[tokio::test]
+async fn an_upgrade_request_of_its_own_costs_a_client_nothing_of_the_pre_auth_cap() {
+    let d = start(None).await;
+    let mut raw = TcpStream::connect(d.addr).await.unwrap();
+    // A head twice the cap and well under the door's ceiling: it is the upgrade request, not the peer's frame.
+    raw.write_all(&upgrade_request(d.addr, 8 * 1024)).await.unwrap();
+    assert!(upgrade_answer(&mut raw).await.starts_with("HTTP/1.1 101"), "the upgrade is answered");
+    raw.write_all(&masked_text(json!({ "id": 1, "op": "auth", "token": TOKEN }).to_string().as_bytes())).await.unwrap();
+    let reply = server_text(&mut raw).await;
+    assert_eq!(reply["id"], json!(1));
+    assert_eq!(reply["ok"], json!(true), "{reply}");
+    assert_eq!(server_text(&mut raw).await["type"], "daemon.hello");
 }
 
 #[tokio::test]
