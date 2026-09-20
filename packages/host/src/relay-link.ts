@@ -177,7 +177,8 @@ async function linkThrough(io: CliIO, deps: RelayDeps, relayUrl: string, kind: "
   const started = await relayCall<LinkStarted>(deps, `${relayUrl}/link/start`, { method: "POST", body: { kind, name } });
   io.log(`code        ${started.code}`);
   io.log(`open        ${started.verifyUrl}`);
-  io.log(`Open that page, sign in and approve ${name}. The code stands for ${fmtDuration(LINK_WAIT_MS)} and is spent by the approval.`);
+  io.log(`type        ${started.code} on that page`);
+  io.log(`Open that page and sign in to approve ${name}. The code stands for ${fmtDuration(LINK_WAIT_MS)} and is spent by the approval.`);
   const deadline = deps.now() + LINK_WAIT_MS;
   // The relay says how long to sleep between polls, held between half a second and half a minute: a relay that
   // says zero would have this line spinning for a quarter of an hour.

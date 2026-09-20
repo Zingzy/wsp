@@ -21,8 +21,20 @@ describe("what the relay keeps", () => {
     const relay = await relayHarness();
     expect(await columnsOf(relay, "accounts")).toEqual(["created_at", "id", "login", "provider", "provider_id"]);
     expect(await columnsOf(relay, "hosts")).toEqual(["account_id", "connector_version", "created_at", "hostname", "id", "last_seen", "name", "tunnel_id"]);
-    expect(await columnsOf(relay, "link_codes")).toEqual(["account_id", "code", "created_at", "expires_at", "host_id", "kind", "name", "poll_hash", "state"]);
+    expect(await columnsOf(relay, "link_codes")).toEqual(["account_id", "code", "created_at", "expires_at", "host_id", "kind", "name", "poll_hash", "source", "state"]);
     expect(await columnsOf(relay, "clients")).toEqual(["account_id", "created_at", "id", "last_seen", "name"]);
+  });
+
+  it("indexes the column the sweep of dead codes reads", async () => {
+    const relay = await relayHarness();
+    const { results } = await relay.db.prepare("SELECT name FROM pragma_index_list(?)").bind("link_codes").all<{ name: string }>();
+    const columns = await Promise.all(
+      results.map(async index => {
+        const { results: on } = await relay.db.prepare("SELECT name FROM pragma_index_info(?)").bind(index.name).all<{ name: string }>();
+        return on.map(row => row.name).join(",");
+      }),
+    );
+    expect(columns).toContain("expires_at");
   });
 
   it("refuses a bound undefined the way D1 does, rather than writing the null JSON would make of it", async () => {

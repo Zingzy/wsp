@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two pages a person ever sees here. They say what is being approved, who
-// it is being approved as, and that the relay only learns where the box is.
-// Everything rendered from a name somebody else chose is escaped.
+// Every page a person sees here: where the code a command line printed is
+// typed, what that code is asking for and who is approving it, and the two
+// endings, done and a code that is gone. The approval says what the relay
+// learns, which is where a box answers and nothing else. Everything rendered
+// from a name somebody else chose is escaped.
 
 const escape = (text: string): string => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -20,6 +22,7 @@ h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1rem; }
 p { color: #a1a1aa; margin: 0 0 1rem; }
 b { color: #e4e4e7; font-weight: 600; }
 button { background: #e4e4e7; color: #09090b; border: 0; border-radius: 6px; font: inherit; font-weight: 600; padding: 0.5rem 1rem; cursor: pointer; }
+input[type=text] { background: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 6px; font: inherit; letter-spacing: 0.15em; margin: 0 0.5rem 0 0; padding: 0.5rem 0.75rem; text-transform: uppercase; }
 </style>
 </head>
 <body><main>${body}</main></body>
@@ -48,6 +51,20 @@ ${what}
 <input type="hidden" name="code" value="${escape(code)}">
 <input type="hidden" name="stamp" value="${escape(stamp)}">
 <button type="submit">${kind === "host" ? `Add ${escape(name)}` : `Sign ${escape(name)} in`}</button>
+</form>`,
+  );
+}
+
+/** Where the person types the code the command line printed. The address of this page carries none, so a link
+ * somebody forwards opens here and approves nothing on its own. */
+export function codePage(login: string): Response {
+  return page(
+    "Enter the code",
+    `<h1>Enter the code</h1>
+<p>Signed in as <b>${escape(login)}</b>. The command line you started this from printed a code of eight characters; type it here to see what it is asking for.</p>
+<form method="post" action="/link/verify">
+<input type="text" name="code" maxlength="8" autocomplete="off" autocapitalize="characters" autofocus required>
+<button type="submit">Continue</button>
 </form>`,
   );
 }

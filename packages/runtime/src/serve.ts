@@ -14,6 +14,10 @@ import {
   ACCOUNT_TICKET_REFUSAL,
   absentComputer,
   ACCOUNT_UNSERVED,
+  AUTH_DEADLINE_MS,
+  DAEMON_AUTH_DEADLINE_PASSED,
+  DAEMON_PRE_AUTH_BYTES_EXCEEDED,
+  PRE_AUTH_MAX_BYTES,
   DEVICES_TICKET_REFUSAL,
   DEVICE_REVOKE_REFUSAL,
   DOCTOR_UNSERVED,
@@ -108,6 +112,9 @@ export interface ServeOptions {
   account?: AccountDoor;
   ticketTtlMs?: number;
   pairTtlMs?: number;
+  /** How long a socket that has not been let in yet has to send its first frame, the protocol's own number unless
+   * a test shortens it. */
+  authDeadlineMs?: number;
   /** Injectable clock for ticket-expiry tests. */
   now?: () => number;
   forwards?: ForwardsSource;
@@ -356,6 +363,36 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       if (bound !== undefined) held.delete(bound);
     });
 
+    /** The wire bytes a socket nobody has let in yet has sent, counted as its socket delivers them rather than as
+     * frames assemble, so a frame the peer never finishes is held to the same cap. Both numbers and both
+     * sentences are the daemon's own, imported rather than spelled again, so the machine's door and this one
+     * cannot drift apart; a socket through the door keeps the library's own ceiling. */
+    let sentBeforeAuth = 0;
+    const beforeAuth = (chunk: Buffer): void => {
+      sentBeforeAuth += chunk.length;
+      if (sentBeforeAuth <= PRE_AUTH_MAX_BYTES) return;
+      throughDoor();
+      ws.close(4401, DAEMON_PRE_AUTH_BYTES_EXCEEDED);
+    };
+    const byDeadline = authed
+      ? undefined
+      : setTimeout(() => {
+          throughDoor();
+          ws.close(4401, DAEMON_AUTH_DEADLINE_PASSED);
+        }, opts.authDeadlineMs ?? AUTH_DEADLINE_MS);
+    // A deadline nobody is waiting on holds no process open.
+    byDeadline?.unref();
+    /** Takes both limits off, the moment this socket is through the door: its auth frame passed, it redeemed a
+     * pairing code, or a place's first frame was answered. */
+    function throughDoor(): void {
+      req.socket.off("data", beforeAuth);
+      clearTimeout(byDeadline);
+    }
+    if (!authed) {
+      req.socket.on("data", beforeAuth);
+      detaches.push(throughDoor);
+    }
+
     /** Remembers the socket under the device that authed it, so a revoke can cut it. */
     const bind = (device: DeviceView): void => {
       me = { kind: "device", device };
@@ -470,6 +507,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             proving = { placeId, expect: opened.expect };
             // The gate opens for exactly one more frame, which the branch above holds to place.prove.
             deciding = false;
+            throughDoor();
             send({ id: msg.id, ok: true, ...opened.reply, ...(opened.notice !== undefined ? { notice: opened.notice } : {}) });
             // The reply carries the host's own half of the agreement, so it is the last frame of this socket that
             // travels in the clear; from here the prove and everything after it are sealed.
@@ -485,6 +523,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               .catch(() => undefined);
             if (paired === undefined) return refuse(PAIR_CODE_REFUSAL);
             authed = true;
+            throughDoor();
             bind(paired.device);
             send({ id: msg.id, ok: true, deviceId: paired.deviceId, deviceToken: paired.deviceToken });
             return;
@@ -495,6 +534,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           // Ahead of the bind and the last seen below, so a copy refused here leaves nothing of itself behind.
           if (who.kind === "device" && who.device.scope !== undefined && !dialledHere(req)) return refuse(SCOPED_TOKEN_ROAD_REFUSAL);
           authed = true;
+          throughDoor();
           if (who.kind === "device") {
             bind(who.device);
             // A token the host minted into a turn's launch is a machine's road into this host, whatever socket it

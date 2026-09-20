@@ -262,6 +262,47 @@ describe("a page at a name this host does not answer at", () => {
   });
 });
 
+describe("what a page carries about this computer", () => {
+  /** A host serving a state file, which is the one thing the boot object names a path of. */
+  async function withState(listen?: string): Promise<{ handle: HostHandle; statePath: string }> {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-state-"));
+    dirs.push(dir);
+    const statePath = join(dir, "state.json");
+    handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, statePath, ...(listen !== undefined ? { listen } : {}) });
+    return { handle, statePath };
+  }
+
+  it("names the state file and the runtime's port on this computer's own page, with the port first for the shell's probe", async () => {
+    const { handle: h, statePath } = await withState();
+    const html = await (await fetch(`http://127.0.0.1:${h.port}/`)).text();
+    expect(html).toContain(`<script>window.__WSP__ = {"wsPort":${h.wsPort},`);
+    const boot = await bootOf(h.port);
+    expect(boot.statePath).toBe(statePath);
+    expect(boot.paired).toBe(true);
+  });
+
+  it("gives a stranger the pairing screen alone: no state path and no runtime port, at a name this host does not answer at or through the connector", async () => {
+    const { handle: h } = await withState();
+    for (const headers of [{ Host: `evil.example:${h.port}` }, { ...THROUGH_CONNECTOR, Host: `127.0.0.1:${h.port}` }]) {
+      const boot = await rawBootOf(h.port, headers);
+      expect(boot.statePath, JSON.stringify(headers)).toBeUndefined();
+      expect(boot.wsPort, JSON.stringify(headers)).toBeUndefined();
+      expect(boot.token, JSON.stringify(headers)).toBeUndefined();
+      expect(boot.paired, JSON.stringify(headers)).toBe(false);
+      // The page still dials the origin it came from, which is the one road a paired device has.
+      expect(boot.wsPath, JSON.stringify(headers)).toBe(WS_PATH);
+    }
+  });
+
+  it("gives every page a host bound beyond this computer serves the same, its own port included", async () => {
+    const { handle: h } = await withState("0.0.0.0");
+    const boot = await bootOf(h.port);
+    expect(boot.statePath).toBeUndefined();
+    expect(boot.wsPort).toBeUndefined();
+    expect(boot.paired).toBe(false);
+  });
+});
+
 describe("a host that listens beyond this computer", () => {
   it("serves the page with no token and paired false", async () => {
     const { handle: h } = await up("0.0.0.0");

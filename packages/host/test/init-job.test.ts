@@ -20,6 +20,7 @@ import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { buildBesideHost, type DoorClient } from "../src/init-beside.js";
+import { envFileFor, writeEnvFile } from "../src/env-keys.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import type { InitIO } from "../src/init.js";
 import { loadRecipe, saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
@@ -149,7 +150,7 @@ async function forkable(f: Fake): Promise<void> {
   await f.rt.projects.add({ source: "https://github.com/dev/first.git", on: "default" });
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean; /** Saves keys the way the command line wires it, through the one writer of the .env beside the state. */ writesEnv?: boolean } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -187,6 +188,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     platform: over.platform ?? "darwin",
     saved: () => env,
     saveKeys: set => {
+      if (over.writesEnv === true) writeEnvFile(envFileFor(statePath), set);
       saved.push(set);
       env = { ...env, ...set };
     },
@@ -306,6 +308,15 @@ describe("the init job, manual road", () => {
     // Nothing typed: nothing written, nothing swapped.
     await f.jobs.keys({});
     expect(f.saved).toHaveLength(1);
+  });
+
+  it("refuses a key value carrying a line break and writes nothing, since one variable is one line", async () => {
+    const f = fake({ env: {}, writesEnv: true });
+    const envPath = envFileFor(f.statePath);
+    writeFileSync(envPath, "OTHER=keep me\n");
+    await expect(f.jobs.keys({ key: "slr_live_typed\nANTHROPIC_API_KEY=sk-ant-x-theirs" })).rejects.toThrow("one variable is one line");
+    expect(readFileSync(envPath, "utf8")).toBe("OTHER=keep me\n");
+    expect((await f.jobs.get()).keys).toEqual({ box: false, solari: false });
   });
 
   it("the keys the view reads are the home's alone: a key in the process environment is not saved, and an agent's key lands under the variable its sign-in row declares", async () => {
