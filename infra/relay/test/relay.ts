@@ -227,8 +227,8 @@ export async function linkedVia(
   const start = (await (
     await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }), ...(who.from !== undefined ? { headers: { "cf-connecting-ip": who.from } } : {}) })
   ).json()) as { code: string; pollToken: string };
-  const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId, start.code));
-  const page = await relay.fetch(`/link/verify?code=${start.code}`, { headers: { cookie } });
+  const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId));
+  const page = await typeCode(relay, start.code, cookie);
   const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
   await relay.fetch("/link/approve", {
     method: "POST",
@@ -239,10 +239,14 @@ export async function linkedVia(
   return { token: answer.token, ...(answer.hostId !== undefined ? { hostId: answer.hostId } : {}), cookie };
 }
 
-/** Signs a person in the way the verify page does, and answers with the session cookie a later request carries.
- * `code` is a code some host is already waiting on, since the verify page is only ever opened for one. */
-export async function signIn(relay: RelayHarness, login: string, githubId: string, code: string): Promise<string> {
-  const start = await relay.fetch(`/link/verify?code=${code}`);
+/** The code typed on the verify page, which is what the relay renders the approve form for: the page's address
+ * carries none, so this is the one road to that form. */
+export const typeCode = (relay: RelayHarness, code: string, cookie: string): Promise<Response> =>
+  relay.fetch("/link/verify", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code }).toString() });
+
+/** Signs a person in the way the verify page does, and answers with the session cookie a later request carries. */
+export async function signIn(relay: RelayHarness, login: string, githubId: string): Promise<string> {
+  const start = await relay.fetch("/link/verify");
   const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
   // The sign-in is bound to this browser, so the callback carries back the nonce the redirect set.
   const nonce = firstCookie(start);

@@ -8,7 +8,7 @@ import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, inser
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
-import { approvePage, approvedPage, gonePage } from "./page.js";
+import { approvePage, approvedPage, codePage, gonePage } from "./page.js";
 import { refuse } from "./refusal.js";
 import { NONCE_COOKIE, SESSION_COOKIE, cookieOf, mintSession, mintStamp, mintToken, nonceCookie, readSession, readStamp, sessionCookie } from "./tokens.js";
 
@@ -26,6 +26,9 @@ const LINK_KINDS = ["host", "client"] as const;
 type LinkKind = (typeof LINK_KINDS)[number];
 
 const NAME_MAX = 64;
+
+/** What the sign-in stamp carries now that no code rides the URL: the page the person came from and goes back to. */
+const VERIFY_PAGE = "verify";
 
 const isExpired = (row: LinkRow, now: number): boolean => Date.parse(row.expires_at) <= now;
 
@@ -64,28 +67,45 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
   await insertLink(ctx.env, row);
   return Response.json({
     code: row.code,
-    verifyUrl: `${ctx.url.origin}/link/verify?code=${row.code}`,
+    verifyUrl: `${ctx.url.origin}/link/verify`,
     pollToken,
     expiresAt: row.expires_at,
     pollAfterMs: POLL_AFTER_MS,
   });
 }
 
-/** The page the person opens. With nobody signed in it goes to GitHub first, carrying the code in a stamp of this relay's own. */
+/** Whoever this browser is signed in as here, or nobody. */
+async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undefined> {
+  const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
+  return account === undefined ? undefined : await accountOf(ctx.env, account);
+}
+
+/** To GitHub, and back to this page afterwards. The state is bound to this browser: a callback URL handed to
+ * somebody else carries a nonce their browser never got, so it cannot sign them in as whoever started the
+ * sign-in. It carries no code, because the page it returns to asks the person for one. */
+async function toSignIn(ctx: Ctx): Promise<Response> {
+  const nonce = newSecret(ctx.deps.random);
+  const state = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", VERIFY_PAGE, ctx.deps.now(), await sha256Hex(nonce));
+  const sent = Response.redirect(authorizeUrl(ctx.env, `${ctx.url.origin}/link/callback`, state), 302);
+  return new Response(sent.body, { status: 302, headers: { location: sent.headers.get("location") ?? "/", "set-cookie": nonceCookie(nonce) } });
+}
+
+/** The page the person opens, which carries nothing of the link in its address: with nobody signed in it goes to
+ * GitHub first, and otherwise it asks for the code the command line printed. A link forwarded to somebody else
+ * opens this same page and approves nothing until that person types a code they were given. */
 export async function linkVerify(ctx: Ctx): Promise<Response> {
-  const code = ctx.url.searchParams.get("code") ?? "";
+  const who = await signedIn(ctx);
+  return who === undefined ? toSignIn(ctx) : codePage(who.login);
+}
+
+/** The code the person typed on that page. The approve form it renders is stamped for this account, so the
+ * approval below takes it from this browser and from nobody it was handed to. */
+export async function linkTyped(ctx: Ctx): Promise<Response> {
+  const who = await signedIn(ctx);
+  if (who === undefined) return toSignIn(ctx);
+  const code = (new URLSearchParams(await bodyText(ctx)).get("code") ?? "").trim().toUpperCase();
   const row = await linkByCode(ctx.env, code);
   if (row === undefined || isExpired(row, ctx.deps.now()) || row.state !== "pending") return gonePage();
-  const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
-  const who = account === undefined ? undefined : await accountOf(ctx.env, account);
-  if (who === undefined) {
-    // The state is bound to this browser: a callback URL handed to somebody else carries a nonce their browser
-    // never got, so it cannot sign them in as whoever started the sign-in.
-    const nonce = newSecret(ctx.deps.random);
-    const state = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", code, ctx.deps.now(), await sha256Hex(nonce));
-    const sent = Response.redirect(authorizeUrl(ctx.env, `${ctx.url.origin}/link/callback`, state), 302);
-    return new Response(sent.body, { status: 302, headers: { location: sent.headers.get("location") ?? "/", "set-cookie": nonceCookie(nonce) } });
-  }
   const stamp = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "approve", code, ctx.deps.now(), who.id);
   return approvePage(row.name, who.login, code, stamp, row.kind);
 }
@@ -95,8 +115,8 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   const oauthCode = ctx.url.searchParams.get("code") ?? "";
   const state = ctx.url.searchParams.get("state") ?? undefined;
   const nonce = cookieOf(ctx.req.headers.get("cookie"), NONCE_COOKIE);
-  const linkCode = nonce === undefined ? undefined : await readStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", state, ctx.deps.now(), await sha256Hex(nonce));
-  if (linkCode === undefined || oauthCode === "") throw refuse(400, "that sign-in did not start in this browser; open the page the command line printed again");
+  const started = nonce === undefined ? undefined : await readStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", state, ctx.deps.now(), await sha256Hex(nonce));
+  if (started === undefined || oauthCode === "") throw refuse(400, "that sign-in did not start in this browser; open the page the command line printed again");
   const user = await githubUser(ctx.env, ctx.deps, oauthCode, `${ctx.url.origin}/link/callback`);
   const now = ctx.deps.now();
   let account = await accountByProvider(ctx.env, GITHUB_PROVIDER, user.id);
@@ -109,7 +129,7 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
     account = { ...account, login: user.login };
   }
   const session = await mintSession(ctx.env.RELAY_SIGNING_KEY, account.id, now);
-  const headers = new Headers({ location: `/link/verify?code=${linkCode}` });
+  const headers = new Headers({ location: "/link/verify" });
   headers.append("set-cookie", sessionCookie(session));
   // The nonce did its one job; it goes with the redirect that spends it.
   headers.append("set-cookie", nonceCookie("", 0));

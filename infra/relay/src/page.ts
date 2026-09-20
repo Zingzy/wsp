@@ -20,6 +20,7 @@ h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1rem; }
 p { color: #a1a1aa; margin: 0 0 1rem; }
 b { color: #e4e4e7; font-weight: 600; }
 button { background: #e4e4e7; color: #09090b; border: 0; border-radius: 6px; font: inherit; font-weight: 600; padding: 0.5rem 1rem; cursor: pointer; }
+input[type=text] { background: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 6px; font: inherit; letter-spacing: 0.15em; margin: 0 0.5rem 0 0; padding: 0.5rem 0.75rem; text-transform: uppercase; }
 </style>
 </head>
 <body><main>${body}</main></body>
@@ -48,6 +49,20 @@ ${what}
 <input type="hidden" name="code" value="${escape(code)}">
 <input type="hidden" name="stamp" value="${escape(stamp)}">
 <button type="submit">${kind === "host" ? `Add ${escape(name)}` : `Sign ${escape(name)} in`}</button>
+</form>`,
+  );
+}
+
+/** Where the person types the code the command line printed. The address of this page carries none, so a link
+ * somebody forwards opens here and approves nothing on its own. */
+export function codePage(login: string): Response {
+  return page(
+    "Enter the code",
+    `<h1>Enter the code</h1>
+<p>Signed in as <b>${escape(login)}</b>. The command line you started this from printed a code of eight characters; type it here to see what it is asking for.</p>
+<form method="post" action="/link/verify">
+<input type="text" name="code" maxlength="8" autocomplete="off" autocapitalize="characters" autofocus required>
+<button type="submit">Continue</button>
 </form>`,
   );
 }
