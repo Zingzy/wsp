@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
-import { catalogEntry } from "@wsp/catalog";
+import { TOOL_PREFIX, catalogEntry } from "@wsp/catalog";
 import { MCP_ID_PREFIX, probePath, type Recipe } from "@wsp/protocol";
-import { AGENT_NODE_STEP, type ProvisionPlan } from "@wsp/engine";
+import { AGENT_NODE_STEP, pathLine, type ProvisionPlan } from "@wsp/engine";
 import { placeProvisioner } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
@@ -62,6 +62,19 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     const exported = plan.steps.flatMap(s => s.cmd.split("\n").filter(l => l.startsWith("export PATH=")));
     expect(exported.length).toBeGreaterThan(0);
     expect(exported.filter(l => l.includes("/root/.local/bin"))).toEqual([]);
+  });
+
+  it("installs under a folder of wsp's own on that computer, told to every manager on every script the job sends", async () => {
+    write(SMALL);
+    const plan = await planner().plan({ home: "/root" });
+    if ("noRecipe" in plan) throw new Error(`no recipe: ${plan.noRecipe}`);
+    expect(plan.prefix).toBe(TOOL_PREFIX);
+    // Every line that puts the job's own list on a script carries the managers' knobs with it, so a row installs
+    // where the daemon's fixed PATH looks and no manager writes under the home the workspaces there share.
+    const exported = plan.steps.flatMap(s => s.cmd.split("\n").filter(l => l.startsWith("export PATH=") && l.includes(probePath("/root"))));
+    expect(exported.length).toBeGreaterThan(0);
+    for (const line of exported) expect(line).toBe(pathLine(probePath("/root"), TOOL_PREFIX));
+    expect(exported[0]).toContain(`CARGO_HOME=${TOOL_PREFIX}/cargo`);
   });
 
   it("says where a recipe would be written when this computer holds none, and reads nothing else", async () => {

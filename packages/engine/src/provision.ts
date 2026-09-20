@@ -9,7 +9,7 @@ import { ROAD_MODULES } from "@wsp/catalog";
 import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
-import { TOOLS_PATH, agentSteps, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { TOOLS_PATH, agentSteps, pathLine, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import type { McpPlan } from "./golden-mcp.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
@@ -26,6 +26,9 @@ export interface ProvisionPlan {
   /** The one PATH every script of this job exports, chosen when the plan was made: the probe list for a computer
    * somebody owns, whose home every workspace on it writes, and the tools PATH for a machine wsp forked. */
   path: string;
+  /** The folder of wsp's own every manager installs under on a computer somebody owns, told to each of them on
+   * the same line as that PATH; absent for a machine wsp forked, whose home is root's alone. */
+  prefix?: string;
   steps: readonly ToolInstall[];
   /** Rows set aside before anything ran, with the plan's reason each. */
   skipped: readonly { id: string; label: string; note: string }[];
@@ -42,13 +45,14 @@ export type ProvisionStage = (detail: string, at?: { label: string; index: numbe
 /** The plan off a golden import: the agents as steps of the one tools loop, then the tools, and the import's own
  * set-aside rows as the plan's. The files, the shell and the MCP servers of that import are not put on a computer
  * somebody lives on; what installs is what this plan carries. */
-export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string): ProvisionPlan {
-  const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path);
+export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string, prefix?: string): ProvisionPlan {
+  const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path, prefix);
   const files = imp.files;
   const once = onceDests(imp);
   return {
     recipeAt,
     path,
+    ...(prefix !== undefined ? { prefix } : {}),
     steps: [...agents, ...imp.tools],
     skipped: [
       ...(imp.skippedAgents ?? []).map(a => ({ id: a.id, label: a.name, note: a.note })),
@@ -123,11 +127,12 @@ export interface PresentRead {
   path?: string;
 }
 
-/** The steps the computer already satisfies, by the rule above, read on the tools PATH, a page of reads to an exec
- * by the one paging rule every batched read here takes, each with what its read said about it. A page that could
- * not be made says nothing is present in it, which installs those steps again rather than skipping one that is not
- * there. */
-export async function presentSteps(machine: Machine, steps: readonly ToolInstall[], path: string = TOOLS_PATH): Promise<Map<string, PresentRead>> {
+/** The steps the computer already satisfies, by the rule above, a page of reads to an exec by the one paging rule
+ * every batched read here takes, each with what its read said about it. The reads run on the job's own PATH and
+ * under its managers' knobs: a row's version read is its manager's own command and answers about the folder that
+ * manager was told to keep its tools in. A page that could not be made says nothing is present in it, which
+ * installs those steps again rather than skipping one that is not there. */
+export async function presentSteps(machine: Machine, steps: readonly ToolInstall[], path: string = TOOLS_PATH, prefix?: string): Promise<Map<string, PresentRead>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
     return tests.length === 0 ? [] : [{ step, tests }];
@@ -139,7 +144,7 @@ export async function presentSteps(machine: Machine, steps: readonly ToolInstall
     machine,
     asked,
     (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s %s\\n' ${at} "${row.step.bin === undefined ? "" : `$(command -v ${shellQuote(row.step.bin)} 2>/dev/null)`}"; fi`,
-    `export PATH=${path}`,
+    pathLine(path, prefix),
   );
   for (const { rows, res } of pages) {
     if (res.exitCode !== 0) continue;
@@ -234,9 +239,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   // image build files them under.
   const base = await installBase(machine, (_which, detail) => {
     if (detail !== undefined) stage(detail);
-  }, { caches: "keep", path: plan.path });
+  }, { caches: "keep", path: plan.path, ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}) });
   stage(base.line);
-  const read = await presentSteps(machine, plan.steps, plan.path);
+  const read = await presentSteps(machine, plan.steps, plan.path, plan.prefix);
   // The steps nothing can be asked about carry no read of their own: what says they are there is the rows behind them.
   const present = new Map<string, PresentRead>([...read, ...[...presentByWhatWaits(plan.steps, new Set(read.keys()))].map(id => [id, {}] as [string, PresentRead])]);
   const stepOf = new Map(plan.steps.map(step => [step.id, step]));
@@ -254,6 +259,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
       present: new Set(present.keys()),
       caches: "keep",
       path: plan.path,
+      ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}),
       onTool: result => {
         const row = rowOf(result, present, stepOf.get(result.id));
         said.set(result.id, rowLine(row));
