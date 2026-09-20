@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -168,6 +168,23 @@ function loadPage(webDir: string, boot: BootPayload): string {
  * computer, and adding them only takes the token away from itself. */
 function throughConnector(req: IncomingMessage): boolean {
   return req.headers["cf-connecting-ip"] !== undefined || req.headers["cf-ray"] !== undefined;
+}
+
+/** The name in the Host header, without the port an authority carries: what the request asked for, which is not
+ * what this host bound. A request naming nothing has no name here, and everything below reads that as not here. */
+function hostnameAsked(req: IncomingMessage): string | undefined {
+  return servedHostname(`http://${req.headers.host ?? ""}`);
+}
+
+/** Whether a request may write here or open a socket: one carrying no Origin is a tool on this computer, a daemon
+ * link or a place join, and is what it always was; one carrying an Origin is a page, and a page drives only the
+ * host it was served by. Hostnames and not ports, since the page on the app's port dials the runtime's. */
+function originAllows(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (origin === undefined || origin === "") return true;
+  const from = servedHostname(origin);
+  const at = hostnameAsked(req);
+  return from !== undefined && at !== undefined && from === at;
 }
 
 /** The token an Authorization header carries, or nothing when it carries none in the one scheme this host takes.
@@ -398,6 +415,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     };
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
+      // Before the body is read and before anyone is named: a write asked for by a page at another name changes
+      // nothing here, whatever token it carries.
+      if (req.method !== "GET" && req.method !== "HEAD" && !originAllows(req)) {
+        sendJson(res, 403, { error: crossOriginRefusal(req.headers.origin ?? "", req.headers.host ?? "") });
+        return;
+      }
       if (req.method === "GET" && path === "/") {
         sendPage();
         return;
@@ -449,8 +472,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   };
 
   // What the host bound is not the whole of who can reach it: a relay tunnel lands on that same loopback port, and
-  // the request is what tells the two apart rather than the address both arrive at.
-  const server = createServer(handler(req => boundHere && !throughConnector(req)));
+  // the request is what tells the two apart rather than the address both arrive at. The name the request asked for
+  // decides beside them: a page whose hostname was pointed at this loopback port is not this computer.
+  const server = createServer(handler(req => boundHere && !throughConnector(req) && isLoopback(hostnameAsked(req) ?? "")));
 
   // The door a computer you own dials: a second listener on the wildcard, built from the same request handler with
   // the page's token withheld, whose upgrades reach the one runtime. Its port is fixed rather than stepped over,
@@ -536,6 +560,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       port: opts.wsPort ?? DEFAULT_WS_PORT,
       host: address,
       attach: [server, doorServer],
+      originAllowed: originAllows,
       door: { open: openDoor },
       devices: rt.devices,
       authToken,

@@ -13,7 +13,7 @@ import { terminalEmptyLine, terminalPaneState, terminalPaneTitle } from "../src/
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
-import { HARNESS_DAEMON_TOKEN, startRelayHarness, type RelayHarness } from "./relay-harness.js";
+import { harnessMachineToken, startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -173,7 +173,7 @@ describe("wireTerminals", () => {
   }, 15_000);
 
   it("a daemon from before the version says so in its hello, its refusals read unavailable instead of pending, and a redeployed daemon fills the rows", async () => {
-    oldDaemon = await startOldDaemon(HARNESS_DAEMON_TOKEN);
+    oldDaemon = await startOldDaemon(harnessMachineToken("m1"));
     relay!.setRoad(`ws://127.0.0.1:${oldDaemon.port}`);
     const { api } = fakeApi([view("ws_a")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });

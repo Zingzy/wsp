@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LocalBackend } from "@wsp/engine";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
-import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { HERE_PLACE_ID, relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
@@ -37,7 +37,9 @@ let inboxDir: string | undefined;
 let procRoot: string | undefined;
 let localRoot: string | undefined;
 
-async function startTestDaemon(token = DAEMON_TOKEN): Promise<DaemonUnderTest> {
+const MACHINE_TOKEN = machineDaemonToken(DAEMON_TOKEN, "m1");
+
+async function startTestDaemon(token = MACHINE_TOKEN): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-serve-daemon-"));
   procRoot = fakeProcTree([]);
   return daemonUnderTest({ host: "127.0.0.1", port: 0, token, inbox: inboxDir, rootsPath: rootsPathIn(inboxDir), procRoot, portsIntervalMs: 1000 });
@@ -233,7 +235,7 @@ describe("who may open a channel", () => {
   it("a relayed socket opens a channel only for a workspace it may drive", async () => {
     daemon = await startTestDaemon();
     localRoot = mkdtempSync(join(tmpdir(), "wsp-serve-local-"));
-    const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN };
+    const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: MACHINE_TOKEN };
     const local: LocalWiring = {
       backend: new LocalBackend({ root: localRoot }),
       execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),

@@ -83,6 +83,10 @@ export interface ServeOptions {
    * More than one because the host serves the page twice: on the person's own loopback port and on the door a
    * computer they own dials, and both carry the one protocol. */
   attach?: HttpServer | HttpServer[];
+  /** Whether a browser's upgrade may open a socket here, read off the request's own headers by the host that
+   * serves the page: a page drives only the host it was served by. Without it every upgrade is taken, which is
+   * what a runtime served with no page in front of it means. */
+  originAllowed?: (req: IncomingMessage) => boolean;
   /** The door computers you own dial, when the host that serves this runtime opens one; without it places.door is
    * refused rather than answering a port nothing listens on. */
   door?: PlaceDoorControl;
@@ -250,10 +254,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
    * still driving the host until the client happens to redial. */
   const held = new Set<{ deviceId: string; cut: () => void }>();
 
-  const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port });
+  const originAllowed = opts.originAllowed ?? ((): boolean => true);
+  const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port, verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req) });
   const attachTo = opts.attach === undefined ? [] : Array.isArray(opts.attach) ? opts.attach : [opts.attach];
   const attached = attachTo.length === 0 ? undefined : new WebSocketServer({ noServer: true });
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    if (!originAllowed(req)) {
+      // Before the handshake, so no frame of this socket is ever read. The listener goes on before the write for
+      // the same reason the refusal below carries one: a peer that resets here would otherwise end the process.
+      socket.on("error", () => socket.destroy());
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n", () => socket.destroy());
+      return;
+    }
     if (new URL(req.url ?? "/", "ws://localhost").pathname !== WS_PATH) {
       // The listener goes on before the write. A peer that resets right after its upgrade raises an error on this
       // raw socket, and an unhandled one ends the process, so on a host bound beyond loopback a stranger who

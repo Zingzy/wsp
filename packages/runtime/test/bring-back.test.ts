@@ -6,6 +6,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import { branchUnreadRefusal, noGitCredentialLine, noHostCliLine, noParentWorkspaceLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
+import { daemonTokenFor } from "../src/daemon-token.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
@@ -92,7 +93,7 @@ describe("workspaces.bringBack", () => {
       stat: [" src/page.tsx | 4 ++--"],
       pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" },
     });
-    expect(daemon.dials.map(({ url, token }) => ({ url, token }))).toEqual([{ url: "http://127.0.0.1:7070", token: DAEMON_TOKEN }]);
+    expect(daemon.dials.map(({ url, token }) => ({ url, token }))).toEqual([{ url: "http://127.0.0.1:7070", token: daemonTokenFor(DAEMON_TOKEN, "m1") }]);
     expect(daemon.closed).toBe(1);
   });
 

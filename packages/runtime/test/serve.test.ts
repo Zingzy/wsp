@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
-import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
+import WebSocket from "ws";
+import { DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, type PlaceRecord } from "../src/places.js";
 import { serveRuntime, type ForwardsSource, type PlaceDoctor, type RuntimeServer } from "../src/serve.js";
+import { daemonTokenFor } from "../src/daemon-token.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 import { abortedCall, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
@@ -59,6 +61,41 @@ describe("serveRuntime auth", () => {
     const ok = await c.request("workspaces.list");
     expect(ok.ok).toBe(true);
     c.close();
+  });
+});
+
+describe("serveRuntime and the page an upgrade came from", () => {
+  /** What a dial gets when the host refuses the upgrade: the socket never opens and no frame is sent. */
+  const refused = (url: string): Promise<string> =>
+    new Promise((done, fail) => {
+      const ws = new WebSocket(url);
+      ws.once("error", (e: Error) => done(e.message));
+      ws.once("open", () => {
+        ws.close();
+        fail(new Error(`${url} opened`));
+      });
+    });
+
+  it("closes an upgrade the host's reading refuses, on its own port as well as on an attached server's", async () => {
+    const app = createServer((_req, res) => res.end("hi"));
+    await new Promise<void>(done => app.listen(0, "127.0.0.1", done));
+    const appPort = (app.address() as { port: number }).port;
+    let allowed = false;
+    try {
+      srv = await serveRuntime(rt(), { port: 0, authToken: "secret", attach: app, originAllowed: () => allowed });
+      expect(await refused(`ws://127.0.0.1:${srv.port}`)).toMatch(/Unexpected server response/);
+      expect(await refused(`ws://127.0.0.1:${appPort}${WS_PATH}`)).toContain("403");
+
+      // And the same dials once the host's reading takes them: the door decides, this file only asks it.
+      allowed = true;
+      const own = await WsClient.connect(srv.port, { token: "secret" });
+      const attached = await WsClient.connectTo(`ws://127.0.0.1:${appPort}${WS_PATH}`, { token: "secret" });
+      own.close();
+      attached.close();
+    } finally {
+      app.closeAllConnections();
+      await new Promise<void>(done => app.close(() => done()));
+    }
   });
 });
 
@@ -445,7 +482,7 @@ describe("serveRuntime golden wizard ops", () => {
 
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
     // The route and the token a builder's daemon is opened with are the host's own; no op hands either one out.
-    expect(await runtime.golden.builderReach("m1")).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: DAEMON_TOKEN });
+    expect(await runtime.golden.builderReach("m1")).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: daemonTokenFor(DAEMON_TOKEN, "m1") });
     expect(await c.request("golden.builderReach", { builderId: "m1" })).toMatchObject({ ok: false, error: expect.stringMatching(/Invalid discriminator value/) });
     c.close();
   });

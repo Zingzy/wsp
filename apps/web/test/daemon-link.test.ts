@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemonLink, DaemonRequestError, UNWORDED_REFUSAL, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { startRefusingDoor, type RefusingDoor } from "../../../packages/runtime/test/refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
-import { HARNESS_DAEMON_TOKEN, startRelayHarness, type RelayHarness } from "./relay-harness.js";
+import { harnessMachineToken, startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -87,7 +87,7 @@ describe("connectDaemonLink over the host's relay", () => {
     await until(() => link!.status() === "reauth-needed");
     await expect(link.request("ping")).rejects.toThrow("daemon unreachable");
 
-    writeFileSync(tokenPath, HARNESS_DAEMON_TOKEN);
+    writeFileSync(tokenPath, harnessMachineToken("m1"));
     await until(() => link!.status() === "live");
     expect(statuses).toContain("reauth-needed");
     expect(statuses.indexOf("live")).toBeGreaterThan(statuses.indexOf("reauth-needed"));

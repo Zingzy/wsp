@@ -10,7 +10,7 @@ import { DAEMON_TOKEN_PATH, type DaemonResponse, type ForwardEvent } from "@wsp/
 import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
-import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { guestDoor, type GuestOpening } from "../src/guest.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
@@ -22,6 +22,7 @@ runsFromItsOwnFolder();
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "0123456789abcdef".repeat(2);
+const MACHINE_TOKEN = machineDaemonToken(TOKEN, "m1");
 const GOLDEN: GoldenManifest = {
   head: 1,
   versions: [{ version: 1, snapshotId: "snap_gold", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z", smoke: { cmd: "true", exitCode: 0 } }],
@@ -1318,7 +1319,7 @@ describe("callback relay end to end through a real daemon", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-relay-e2e-"));
     const sockPath = join(dir, "open.sock");
     procRoot = fakeProcTree([]);
-    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: sockPath, procRoot });
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: MACHINE_TOKEN, openSocket: sockPath, procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
     await createOn(rt, { golden: "snap_gold", name: "task-1" });
 
@@ -1837,7 +1838,7 @@ describe("localhost forwards end to end through a real daemon", () => {
   it("a URL printed in a workspace pty forwards its port; a request here reaches the guest listener; stop closes it", { timeout: 15_000 }, async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-forward-e2e-"));
     procRoot = fakeProcTree([]);
-    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: join(dir, "open.sock"), procRoot });
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: MACHINE_TOKEN, openSocket: join(dir, "open.sock"), procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
     const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
 
@@ -1879,7 +1880,7 @@ describe("localhost forwards end to end through a real daemon", () => {
     // A wsp terminal: a pty on the daemon, the tool prints its URL. The typed line carries the port only
     // as a variable: readline wraps its own echo at the pty width, and a wrap inside a literal URL is not
     // what a tool's output looks like.
-    const sock = await connectDaemonSocket({ url: `ws://127.0.0.1:${daemon.port}`, token: TOKEN });
+    const sock = await connectDaemonSocket({ url: `ws://127.0.0.1:${daemon.port}`, token: MACHINE_TOKEN });
     try {
       const created = await sock.op("pty.create", { shell: "bash" });
       await sock.op("pty.write", { ptyId: created["ptyId"], data: `P=${port}; printf 'Serving HTTP on 0.0.0.0 port %s (http://0.0.0.0:%s/) ...\\n' $P $P\n` });
@@ -1904,7 +1905,7 @@ describe("localhost forwards end to end through a real daemon", () => {
     await until(() => !linked, 5000);
     expect(relay.forwards()).toMatchObject([{ port, kind: "url" }]);
     for (let i = 0; i < 50 && daemon === undefined; i++) {
-      daemon = await daemonUnderTest({ host: "127.0.0.1", port: daemonPort, token: TOKEN, procRoot }).catch(() => undefined);
+      daemon = await daemonUnderTest({ host: "127.0.0.1", port: daemonPort, token: MACHINE_TOKEN, procRoot }).catch(() => undefined);
       if (daemon === undefined) await new Promise(r => setTimeout(r, 100));
     }
     expect(daemon).toBeDefined();

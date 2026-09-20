@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, assertTokenShape, daemonTokenPathOf, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
 import type { Machine } from "@wsp/engine";
 
 const TOKEN = "0123456789abcdef".repeat(3);
@@ -21,6 +21,21 @@ describe("where a machine's daemon token is written", () => {
     expect(daemonTokenPathOf(machine(), "/home/dev/.wsp/daemon-token")).toBe("/home/dev/.wsp/daemon-token");
     // Nothing asked and nothing named leaves the rotation's own default standing.
     expect(daemonTokenPathOf(machine())).toBeUndefined();
+  });
+});
+
+describe("a machine's own daemon token", () => {
+  it("is the seed's one answer for that machine: the same machine twice, never another machine's, never another seed's", () => {
+    // A token read off one machine opens that machine alone: one token rotated onto every machine let a box that
+    // was taken over hold what every other machine of that host accepts.
+    expect(daemonTokenFor(TOKEN, "m1")).toBe(daemonTokenFor(TOKEN, "m1"));
+    expect(daemonTokenFor(TOKEN, "m1")).not.toBe(daemonTokenFor(TOKEN, "m2"));
+    expect(daemonTokenFor(TOKEN, "m1")).not.toBe(daemonTokenFor("beefcafe".repeat(3), "m1"));
+  });
+
+  it("is hex, so the write needs no quoting, and a seed that is not hex is refused where it is given", () => {
+    expect(daemonTokenFor(TOKEN, "m1")).toMatch(/^[0-9a-f]+$/);
+    expect(() => daemonTokenFor("it's not hex", "m1")).toThrow(/hex/);
   });
 });
 

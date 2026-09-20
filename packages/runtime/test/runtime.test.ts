@@ -11,7 +11,7 @@ import { projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protoc
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
 import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
@@ -2033,13 +2033,13 @@ describe("runtime daemon reach", () => {
     };
 
     const reach = await rt.workspaces.daemonReach(ws.id);
-    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: TOKEN });
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: expect.stringMatching(/^[0-9a-f]+$/) });
     await rt.workspaces.daemonReach(ws.id);
     expect(minted).toBe(1);
-    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(reach.daemonToken!)]);
   });
 
-  it("mints a token per process, hex so the write needs no quoting, unless one is given", async () => {
+  it("mints a token per machine, hex so the write needs no quoting, unless a seed is given", async () => {
     const written: string[] = [];
     const tokens: string[] = [];
     for (let i = 0; i < 2; i++) {
@@ -2059,6 +2059,47 @@ describe("runtime daemon reach", () => {
     expect(tokens[0]).not.toBe(tokens[1]);
     expect(written).toEqual(tokens);
     expect(() => createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: "it's not hex" })).toThrow(/hex/);
+  });
+
+  it("gives two machines of one runtime two tokens, each its own on its own reach view, and writes a machine no second one", async () => {
+    const backend = stubBackend();
+    const written: string[] = [];
+    backend.execImpl = (_m, cmd) => {
+      const named = /^WSP_DAEMON_TOKEN='([^']*)'$/m.exec(cmd);
+      if (named) written.push(named[1]!);
+      return { exitCode: 0, stdout: DAEMON_TOKEN_SET, stderr: "" };
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
+    const one = await createOn(rt, { golden: "snap_g", name: "a" });
+    const two = await createOn(rt, { golden: "snap_g", name: "b" });
+    for (const m of backend.machines) m.previewUrl = async (port: number) => ({ url: `https://${m.id}-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+    const first = (await rt.workspaces.daemonReach(one.id)).daemonToken!;
+    const second = (await rt.workspaces.daemonReach(two.id)).daemonToken!;
+    // The token read off one box opens no other machine this host rotated onto.
+    expect(first).not.toBe(second);
+    expect(written).toEqual([first, second]);
+    // A machine keeps the token it was written; a second ask writes nothing and hands back the same one.
+    expect((await rt.workspaces.daemonReach(one.id)).daemonToken).toBe(first);
+    expect(written).toEqual([first, second]);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(first)]);
+    expect(backend.machines[1]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(second)]);
+    await rt.close();
+  });
+
+  it("derives each machine's token from the seed a caller pinned, so two runtimes on one seed write one machine one token", async () => {
+    const reachOf = async (): Promise<string> => {
+      const backend = stubBackend();
+      backend.execImpl = tokenGuest;
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      backend.machines[0]!.previewUrl = async (port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const token = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
+      await rt.close();
+      return token;
+    };
+    expect(await reachOf()).toBe(daemonTokenFor(TOKEN, "m1"));
+    expect(await reachOf()).toBe(daemonTokenFor(TOKEN, "m1"));
   });
 
   it("omits the daemon token when the guest has none and refuses backends without preview urls", async () => {
@@ -2091,15 +2132,15 @@ describe("runtime daemon reach", () => {
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     m.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    const token = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
     const before = m.execLog.length;
 
     await rt.workspaces.updateDaemon(ws.id);
     expect(deployed).toEqual(["m1"]);
-    // The deploy started the daemon on its own token; the rotation after it is what makes the runtime's token open it.
+    // The deploy started the daemon on its own token; the rotation after it is what makes this machine's token open it.
     const after = m.execLog.slice(before);
-    expect(after).toEqual(["DEPLOY_DAEMON", rotateDaemonTokenScript(TOKEN)]);
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    expect(after).toEqual(["DEPLOY_DAEMON", rotateDaemonTokenScript(token)]);
+    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(token);
     expect(m.execLog.length).toBe(before + 2);
 
     await rt.workspaces.nap(ws.id);
@@ -2379,8 +2420,8 @@ describe("runtime daemon reach", () => {
     // The row said what was being done while it was being done, and says nothing once the daemon answers again.
     expect(pushed.filter(st => st.daemonNote === DAEMON_RESTARTING).length).toBeGreaterThanOrEqual(1);
     expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
-    // The redeploy went through the same road the verb takes, so the runtime's own token opens the new daemon.
-    expect(backend.machines[0]!.execLog).toContain(rotateDaemonTokenScript(TOKEN));
+    // The redeploy went through the same road the verb takes, so this machine's own token opens the new daemon.
+    expect(backend.machines[0]!.execLog).toContain(rotateDaemonTokenScript(daemonTokenFor(TOKEN, "m1")));
   });
 
   it("leaves a machine alone whose daemon answers again on the next poll: one silence is not a dead daemon", async () => {
@@ -2526,21 +2567,22 @@ describe("runtime daemon reach", () => {
     await expect(rt.workspaces.updateDaemon("ws_nobody")).rejects.toThrow("no such workspace");
   });
 
-  it("writes the token again after a resurrect replaces the machine", async () => {
+  it("writes a token again after a resurrect replaces the machine, the new machine's own", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const mint = async (port: number) => ({ url: `https://x-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
     backend.machines[0]!.previewUrl = mint;
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
+    const gone = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
 
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true;
     await rt.workspaces.wake(ws.id);
     backend.machines[1]!.previewUrl = mint;
-    expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
-    expect(backend.machines[1]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
+    const fresh = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
+    expect(fresh).not.toBe(gone);
+    expect(backend.machines[1]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(fresh)]);
   });
 });
 
@@ -2798,10 +2840,10 @@ describe("runtime golden builders", () => {
     };
 
     const reach = await rt.golden.builderReach(b.id);
-    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: TOKEN });
+    expect(reach).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: daemonTokenFor(TOKEN, "m1") });
     await rt.golden.builderReach(b.id);
     expect(minted).toBe(1);
-    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(TOKEN)]);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(reach.daemonToken!)]);
     await expect(rt.golden.builderReach("m_nobody")).rejects.toThrow(/no such builder/);
   });
 
@@ -3347,7 +3389,8 @@ async function helloOf(port: number): Promise<number> {
   }
 }
 
-/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox and its fake machine. */
+/** A real daemon on a loopback port for the runtime to ping, holding the first machine's own token, torn down with
+ * its inbox and its fake machine. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
   const { fakeProcTree } = await import("../../daemon/test/fake-proc.js");
   const { daemonUnderTest } = await import("../../daemon/test/harness.js");
@@ -3356,7 +3399,8 @@ async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
   const { join } = await import("node:path");
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
   const procRoot = fakeProcTree([]);
-  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
+  const { machineDaemonToken } = await import("../../daemon/test/harness.js");
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: machineDaemonToken(TOKEN, "m1"), inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
   try {
     return await fn(daemon.port);
   } finally {

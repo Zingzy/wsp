@@ -4210,6 +4210,13 @@ export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; ru
  * device token. */
 export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
 
+/** The refusal a write route and a browser's upgrade answer with when the page that sent them was loaded at
+ * another name than the one this host was reached at. A page may only drive the host it was served by, and the
+ * hostname is the whole of the reading: a page on the app's port dialling the runtime's is the same page. */
+export function crossOriginRefusal(origin: string, host: string): string {
+  return `this request came from ${origin} and this host was reached at ${host}; the page and its socket open from the address the host answers at`;
+}
+
 /** A frame the page sends a daemon through the host: the daemon's own op and params, no id. The host numbers
  * frames on its socket to the daemon and hands the daemon's answer back under the request that carried the frame,
  * so a page's ids never reach a machine. auth is refused: the host sent the auth frame when it opened the channel. */
