@@ -152,6 +152,7 @@ describe("mcp servers", () => {
         verbose: { command: "npx", args: ["-y", "some-server", "--verbose", "sk-test-token"] },
         own: { command: `${HOME}/bin/server`, args: ["sk-test-token"] },
         docker: { command: "docker", args: ["run", "-i", "--rm", "-e", "GITHUB_TOKEN=ghp-test-flag-secret", "ghcr.io/x/y"] },
+        dockerEq: { command: "docker", args: ["run", "--env=GITHUB_TOKEN=ghp-test-eq-secret", "ghcr.io/x/y"] },
         env: { command: "npx", args: ["-y", "some-server", "--env", "API_KEY=sk-test-flag-secret"] },
         dashes: { command: "npx", args: ["-y", "some-server", "--", "--verbose", "sk-after-dashes"] },
       },
@@ -165,11 +166,13 @@ describe("mcp servers", () => {
       ["stdio: ~/bin/server …; needs ~/bin/server on the machine; carries a secret: arg 1 (13 B)", true],
       // A flag's value is read like any other argument, so a variable set behind -e or --env is a variable.
       ["stdio: docker … -i --rm -e GITHUB_TOKEN=… …; needs docker on the machine; carries secrets: arg 1 (3 B), arg GITHUB_TOKEN (20 B), arg 6 (11 B)", true],
+      // The short spelling of the same argument reads the same as the spaced one.
+      ["stdio: docker … --env=GITHUB_TOKEN=… …; needs docker on the machine; carries secrets: arg 1 (3 B), arg GITHUB_TOKEN (18 B), arg 3 (11 B)", true],
       ["stdio: npx some-server --env API_KEY=…; runs via npx; carries a secret: arg API_KEY (19 B)", true],
       // Past the two dashes there are no flags left: what follows is the program's own, whatever it is spelled like.
       ["stdio: npx some-server -- … …; runs via npx; carries secrets: arg 4 (9 B), arg 5 (15 B)", true],
     ]);
-    expect(JSON.stringify(rows)).not.toMatch(/sk-test-bare-token|ghp-test-flag-secret|sk-test-flag-secret|sk-after-dashes/);
+    expect(JSON.stringify(rows)).not.toMatch(/sk-test-bare-token|ghp-test-flag-secret|ghp-test-eq-secret|sk-test-flag-secret|sk-after-dashes/);
   });
 
   it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or unticks the row without locking it when it is not here yet", async () => {

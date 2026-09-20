@@ -171,7 +171,13 @@ function readArgs(t: { command: string; args: readonly string[] }, home: string)
       const hides = flag !== undefined && hidesValue(flag);
       if (a.includes("=")) {
         const value = a.slice(a.indexOf("=") + 1);
-        out.push(hides ? { show: `${flag!}=…`, secret: `flag ${flag!} ${size(value)}` } : { show: shown(a) });
+        if (hides) {
+          out.push({ show: `${flag!}=…`, secret: `flag ${flag!} ${size(value)}` });
+          continue;
+        }
+        // `--env=NAME=value` is the spaced spelling written short: its value is read the same way.
+        const assigned = assignRead(value);
+        out.push(assigned === undefined ? { show: shown(a) } : { show: `${a.slice(0, a.indexOf("=") + 1)}${assigned.show!}`, secret: assigned.secret });
         continue;
       }
       out.push({ show: a });
