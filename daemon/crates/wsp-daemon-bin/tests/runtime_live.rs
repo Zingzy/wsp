@@ -3314,3 +3314,202 @@ async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
     assert!(ruleset.contains(&network.link), "the workspace's own link is in no rule:\n{ruleset}");
     w.close().await;
 }
+
+/// A link the workspace planted in its own upper at the parent of a destination the next boot mounts: the wake is
+/// refused in one sentence naming the path, and the folder the link pointed at on the box holds nothing and
+/// carries no mount. The copy's destination stands for every destination here, since the boot opens each of them
+/// through the one walk.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_link_planted_in_a_workspaces_own_upper_refuses_its_wake_and_lands_nothing_outside() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-planted-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    // The folder the planted link points at: the case's own, under this suite's root and outside every rootfs.
+    let outside = root().join(format!("live-outside-{key}"));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    // A destination under /srv, so its parent is the workspace's own upper and a link there is the workspace's.
+    let at = format!("/srv/planted-{key}/checkout");
+    let id = w
+        .create(spec(json!({
+            "copy": { "from": from.display().to_string(), "at": &at },
+            "idempotencyKey": format!("live-planted-{key}"),
+        })))
+        .await;
+    let (code, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!((code, out.as_str()), (0, "the checkout\n"));
+
+    // Asleep, its mounts down and its upper on the box's disk: the parent of the destination replaced by a link
+    // out of the workspace, which is what a process inside can write there.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    let parent = root().join("run").join(&id).join("upper/srv").join(format!("planted-{key}"));
+    fs::remove_dir_all(&parent).unwrap();
+    std::os::unix::fs::symlink(&outside, &parent).unwrap();
+
+    let refused = w.ask("machine.resume", json!({ "machineId": &id })).await;
+    assert_eq!(refused["ok"], false, "the wake mounted through a link the workspace planted: {refused}");
+    let said = refused["error"].as_str().unwrap_or_default();
+    assert!(said.contains(&format!("/srv/planted-{key}")), "{said}");
+    assert!(said.contains("replace the link with a folder and wake the workspace"), "{said}");
+    // And nothing of the boot reached where the link pointed: no directory made, no copy, no mount.
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0, "the wake wrote where the link pointed");
+    let table = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    assert!(!table.contains(&outside.display().to_string()), "the wake landed a mount where the link pointed");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    let _ = fs::remove_dir_all(&outside);
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
+}
+
+/// A link the box root keeps under the home every workspace here shares, which is a dotfiles checkout on a box
+/// somebody works on: the boot follows it once, the share lands where it leads beneath the rootfs, and the box's
+/// own disk carries nothing of it. The one case here that writes under the box's home, and it writes inside one
+/// folder of this checkout's own that it removes at its end, never a bare name beside the person's own files.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_the_workspace() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let logins = root().join("logins/live-follow");
+    fs::create_dir_all(&logins).unwrap();
+    let source = logins.join("auth.json");
+    fs::write(&source, b"{\"live\":\"a login\"}\n").unwrap();
+    // The box root's own link, inside one folder of this checkout's own under that home, leading to a path the
+    // workspace's own /var holds. The folder is what this case removes at its end, so the person's own home reads
+    // as it did before the run.
+    let proof = PathBuf::from(format!("/root/.wsp-live-follow-{key}"));
+    let link = proof.join("dotfiles");
+    let led = format!("/var/tmp/wsp-landed-{key}");
+    let _ = fs::remove_dir_all(&proof);
+    fs::create_dir_all(&proof).unwrap();
+    std::os::unix::fs::symlink(&led, &link).unwrap();
+    let id = w
+        .create(spec(json!({
+            "shares": [{ "source": source.display().to_string(), "target": format!("{}/auth.json", link.display()) }],
+            "idempotencyKey": format!("live-follow-{key}"),
+        })))
+        .await;
+
+    // Inside, the login reads at the path the tool looks at and at the path the link leads to, which are one file.
+    let said = "{\"live\":\"a login\"}\n";
+    let (code, out, err) = w.exec(&id, &format!("cat {}/auth.json; cat {led}/auth.json", link.display())).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out, format!("{said}{said}"), "{out}");
+    // And the box carries nothing of it: the follow landed beneath the rootfs, so the path the link leads to is
+    // the workspace's own and the record names no mount point on the computer.
+    assert!(!Path::new(&led).exists(), "the boot made the link's target on the box itself");
+    let record: Value = serde_json::from_slice(&fs::read(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
+    assert_eq!(record["madePoints"].as_array().map(Vec::len).unwrap_or(0), 0, "{record}");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert!(!Path::new(&led).exists(), "the kill left the link's target on the box");
+    fs::remove_dir_all(&proof).unwrap();
+    let _ = fs::remove_dir_all(&logins);
+    w.close().await;
+}
+
+/// What the box root's own login runs by name is the workspace's own copy of it: a line a workspace writes into
+/// its `/root/.bashrc` is in that copy, the box's own file is byte for byte as it was, and a wake reads the line
+/// still. The one write under the box's home is into the workspace's own copy, which is the rule this reads.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn the_rc_files_the_box_root_runs_are_the_workspaces_own_copies() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let rc = Path::new("/root/.bashrc");
+    let before = fs::read(rc).ok();
+    let id = w.create(spec(json!({ "idempotencyKey": format!("live-rc-{}", checkout_key()) }))).await;
+
+    // The copy the boot took reads inside as the box's file read out here at the first boot.
+    let (code, out, err) = w.exec(&id, "cat /root/.bashrc").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out.as_bytes(), before.clone().unwrap_or_default().as_slice(), "the copy inside is not the box's file");
+
+    // A line written inside goes into that copy and nowhere else.
+    let line = format!("# wsp-live-{}", checkout_key());
+    let (code, _, err) = w.exec(&id, &format!("echo '{line}' >> /root/.bashrc")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (_, out, _) = w.exec(&id, "tail -1 /root/.bashrc").await;
+    assert_eq!(out.trim(), line, "the workspace's own copy did not take the line");
+    match &before {
+        Some(held) => assert_eq!(fs::read(rc).ok().as_ref(), Some(held), "the write inside reached the box root's own rc file"),
+        // A box that keeps no such file gains the empty file the cover lands on, and nothing is written into it.
+        None => assert_eq!(fs::metadata(rc).unwrap().len(), 0, "the cover's mount point on the box is not empty"),
+    }
+
+    // And the copy is kept as the uppers are: the wake reads the line back and the box's file is still its own.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let (_, out, _) = w.exec(&id, "tail -1 /root/.bashrc").await;
+    assert_eq!(out.trim(), line, "the wake lost the workspace's own copy");
+    if before.is_some() {
+        assert_eq!(fs::read(rc).ok(), before, "the wake reached the box root's own rc file");
+    }
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    w.close().await;
+}
+
+/// What a workspace reads under /etc, /var and /srv is the list of what it needs: the accounts, the mounts, the
+/// certificates and the package database read inside, apt installs to a cache of its own, and the box's own
+/// service credentials are not there to read at all.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspace_reads_the_etc_the_list_allows_and_none_of_the_boxs_own_credentials() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    // A credential of the box's own, planted under a folder of this case's own and taken off at its end: a
+    // workspace that could read it could answer as the box.
+    let planted = PathBuf::from(format!("/srv/wsp-live-secret-{}", checkout_key()));
+    let _ = fs::remove_dir_all(&planted);
+    fs::create_dir_all(&planted).unwrap();
+    fs::write(planted.join("key.pem"), b"the box's own key\n").unwrap();
+    let id = w.create(spec(json!({ "idempotencyKey": format!("live-etc-{}", checkout_key()) }))).await;
+
+    // What a tool inside reads is inside: the accounts, the mounts df reads through the link, the certificates
+    // the boot's own list allows, and the names a shell resolves through.
+    let (code, out, err) = w.exec(&id, "cat /etc/passwd > /dev/null; df > /dev/null; ls /etc/ssl/certs | wc -l; ls /etc/alternatives | wc -l; cat /etc/nsswitch.conf > /dev/null; echo read").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out.lines().last(), Some("read"), "{out}");
+    assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 0, "no certificate reads inside: {out}");
+
+    // The package database the box lends, and a download written to a cache of the workspace's own: apt's own
+    // exit is what says the cache took it, and the box's cache is not the one it wrote.
+    let (code, out, err) = w.exec(&id, "dpkg -l | wc -l").await;
+    assert_eq!(code, 0, "{err}");
+    assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 10, "the package database does not read inside: {out}");
+    let boxs_cache = fs::read_dir("/var/cache/apt/archives").map(|d| d.count()).unwrap_or(0);
+    let (code, out, err) = w.exec(&id, "apt-get update -qq > /dev/null 2>&1; apt-get install -y --download-only hello; echo apt-$?").await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.lines().last(), Some("apt-0"), "apt could not write its own cache: {out}");
+    assert_eq!(
+        fs::read_dir("/var/cache/apt/archives").map(|d| d.count()).unwrap_or(0),
+        boxs_cache,
+        "the download landed in the box's cache"
+    );
+
+    // And the box's own service credentials are not inside, whether the list left them out or the tree they sat
+    // in is the workspace's own now.
+    let kept = format!(
+        "/etc/shadow /etc/gshadow /etc/ssl/private /etc/apt/auth.conf /etc/apt/auth.conf.d /var/lib/private /var/www {}",
+        planted.display()
+    );
+    let (_, out, _) = w.exec(&id, &format!("for p in {kept}; do if [ -e \"$p\" ]; then echo \"reads $p\"; fi; done; echo done")).await;
+    assert_eq!(out.trim(), "done", "the workspace reads what the box keeps for itself: {out}");
+    // The one on the box is still there, so the case read the fence and not a folder that was never made.
+    assert!(planted.join("key.pem").is_file());
+    // The tools a workspace runs still answer, which is the read that says the list broke nothing.
+    let (code, out, err) = w.exec(&id, "git --version && python3 --version && node --version").await;
+    assert_eq!((code, err.as_str()), (0, ""), "a tool inside stopped answering: {err}");
+    assert_eq!(out.lines().count(), 3, "{out}");
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    let _ = fs::remove_dir_all(&planted);
+    w.close().await;
+}

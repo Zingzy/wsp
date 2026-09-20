@@ -488,6 +488,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         fetched: true,
         carried: "deps-and-config",
         excluded: [".next", "node_modules/.cache"],
+        skipped: ["node_modules/.cache: node_modules is a link or not a folder, so nothing under it was removed"],
         bytes: 6442450944,
         ms: 4900,
       },

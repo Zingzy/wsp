@@ -960,6 +960,9 @@ impl Ops {
             no_computer_tree(at)?;
         }
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
+        // Every destination under this workspace's rootfs is opened through this, beneath the rootfs and with no
+        // link of the workspace's followed, before a mount or a create lands on it.
+        let place = self.layout.inside_of(&id);
         // Read at every boot and written on no record: a Homebrew installed on this computer after the create is
         // inside the workspace at its next wake, and one taken off it is gone from the next boot.
         let tool_roots = bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
@@ -968,7 +971,7 @@ impl Ops {
         // travels inside with it, and the daemon goes on seeing it at the same path out here. A wake binds the
         // copy the stop left on disk, so everything the workspace wrote in the project is still there.
         if let Some(made) = &record.copy {
-            bundle::bind_into(&self.layout.copy_of(&id), &bundle::inside(&self.layout.rootfs(&id), &made.at)?)?;
+            bundle::bind_inside(&place, &self.layout.copy_of(&id), &made.at)?;
         }
         // The computer's own logins, each mounted at the path its tool reads inside. A file bind needs the file
         // to be there inside, so the runtime makes an empty one where the image carries none; a login this
@@ -990,19 +993,19 @@ impl Ops {
                 held.extend(points_of(&self.layout, &id)?);
                 held
             };
-            make_points(&self.layout, &id, &record.shares, &held)?
+            make_points(&place, &self.layout, &id, &record.shares, &held)?
         };
         record.made_points = made_points;
         // The folders of the computer's own this workspace was made with, bound where it reads them: made here
         // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
         // workspace mounts under one of them never reaches the computer.
         for bind in &record.binds {
-            bundle::bind_into(Path::new(&bind.source), &bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
+            bundle::bind_inside(&place, Path::new(&bind.source), &bind.target)?;
         }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
             fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
-            engine::link_client_path(&self.layout.rootfs(&id))?;
+            engine::link_client_path(&place)?;
         }
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
@@ -1062,7 +1065,7 @@ impl Ops {
         // The wsp a process inside runs, written into the workspace's own upper onto the init already bound in
         // read-only: the computer's own wsp is under a folder this workspace covers, so without this the word is
         // missing inside. Written at every boot, as the workspace's resolv.conf is.
-        bundle::write_wsp_shim_inside(&self.layout.rootfs(&id))?;
+        bundle::write_wsp_shim_inside(&place)?;
         self.told(|watcher| watcher.booted(&id, &self.layout.guest_socket(&id)));
         self.arm(&id, &record.init);
         Ok(record)
@@ -1366,8 +1369,10 @@ fn take_off_points(layout: &Layout, id: &str, points: &[String]) -> Result<(), O
         if bound.iter().any(|target| target == point) {
             continue;
         }
-        if fs::metadata(point).is_ok_and(|held| held.is_file() && held.len() == 0) {
-            fs::remove_file(point).map_err(|e| OpError::plain(format!("{point}: {e}")))?;
+        // Walked from the tree it sits under with no link followed and unlinked through its folder's own
+        // descriptor: a link one of these paths now runs through is somebody's, and the point stays standing.
+        if let Some(why) = bundle::take_off_point(point).map_err(|e| OpError::plain(e.to_string()))? {
+            eprintln!("{why}");
         }
     }
     Ok(())
@@ -1377,25 +1382,34 @@ fn take_off_points(layout: &Layout, id: &str, points: &[String]) -> Result<(), O
 /// of wsp's own among them named under the claim as they are made: the shares to write into the config, and the
 /// points to write into the record.
 ///
-/// A name goes into the claim's file before the file it names is made, and the file is rewritten at every name.
-/// A boot that refuses partway through this loop, on a target that is no path inside a workspace or a disk with
-/// nothing left, has already put the earlier points on the computer's own home, and until the record is written
-/// the claim's file is the only thing that can name them for the remove and the open's sweep. Naming one that
-/// this boot then failed to make costs them nothing: what the take-off removes is an empty file that stands.
-fn make_points(layout: &Layout, id: &str, wanted: &[Share], held: &[String]) -> Result<(Vec<Share>, Vec<String>), OpError> {
+/// A name goes into the claim's file the moment the file it names exists, and the file is rewritten at every
+/// name. A boot that refuses partway through this loop, on a target that is no path inside a workspace or a disk
+/// with nothing left, has already put the earlier points on the computer's own home, and until the record is
+/// written the claim's file is the only thing that can name them for the remove and the open's sweep. One the
+/// walk refused made no file, so there is nothing of it to take off.
+///
+/// The point recorded is where the file landed and not where the share asked for it: under the home every
+/// workspace here shares, a link the box root keeps is followed once, so the empty file sits at the link's target
+/// and that is the path the take-off has to find it by, which is also why the name is known only once the walk
+/// has run.
+fn make_points(
+    place: &bundle::Inside,
+    layout: &Layout,
+    id: &str,
+    wanted: &[Share],
+    held: &[String],
+) -> Result<(Vec<Share>, Vec<String>), OpError> {
     let mut shares = Vec::new();
     let mut made_points = Vec::new();
     for share in wanted {
         if !Path::new(&share.source).is_file() {
             continue;
         }
-        let at = bundle::inside(&layout.rootfs(id), &share.target)?;
-        let stood = at.exists();
-        if point_is_ours(&share.target, stood, held) {
-            made_points.push(share.target.clone());
+        let opened = bundle::open_inside(place, &share.target, bundle::Want::File, bundle::BoxLink::FollowedOnce)?;
+        if point_is_ours(&opened.landed, !opened.made, held) {
+            made_points.push(opened.landed.clone());
             bundle::write_json(&layout.points(id), &made_points)?;
         }
-        bundle::empty_file(&at)?;
         shares.push(share.clone());
     }
     Ok((shares, made_points))
@@ -2481,6 +2495,37 @@ mod tests {
         assert!(!point_is_ours("/srv/logins/auth.json", true, &["/srv/logins/auth.json".to_owned()]));
     }
 
+    /// A share whose folder inside is a link the box root keeps under the home every workspace here shares: the
+    /// empty file lands where the link leads, beneath the rootfs, and the point recorded is that path, since the
+    /// take-off has to find the file the boot made and nothing else.
+    #[test]
+    fn a_point_is_recorded_where_it_landed_and_never_where_the_share_asked_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        let id = "wsp-landed";
+        let place = layout.inside_of(id);
+        fs::create_dir_all(place.rootfs().join("root")).unwrap();
+        let source = layout.logins().join("codex/auth.json");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"{}").unwrap();
+        // The box root's own dotfiles folder, kept as a link: the boot follows it once and lands beneath the
+        // rootfs, which here is a folder of the workspace's own /var and nothing of the computer's.
+        std::os::unix::fs::symlink("/var/tmp/dotfiles/codex", place.rootfs().join("root/.codex")).unwrap();
+        let share = Share { source: source.display().to_string(), target: "/root/.codex/auth.json".to_owned() };
+        let (shares, made) = make_points(&place, &layout, id, std::slice::from_ref(&share), &[]).unwrap();
+        assert_eq!(shares, std::slice::from_ref(&share));
+        assert!(place.rootfs().join("var/tmp/dotfiles/codex/auth.json").is_file());
+        // Nothing on the computer: the landed path is the workspace's own upper, so it is no point to take off.
+        assert!(made.is_empty(), "a point inside the workspace was recorded as one on the computer: {made:?}");
+        assert!(!Path::new("/var/tmp/dotfiles").exists(), "the boot made a folder on the computer itself");
+        // And one that does land under the home the workspaces share is recorded at the path it landed at.
+        let under = format!("/root/.wsp-landed-proof-{}", std::process::id());
+        std::os::unix::fs::symlink(&under, place.rootfs().join("root/.claude-cfg")).unwrap();
+        let share = Share { source: source.display().to_string(), target: "/root/.claude-cfg/auth.json".to_owned() };
+        let (_, made) = make_points(&place, &layout, id, std::slice::from_ref(&share), &[]).unwrap();
+        assert_eq!(made, [format!("{under}/auth.json")]);
+    }
+
     /// Two workspaces sharing one login share the one mount point under the computer's home: the first to stop may
     /// not unlink what the second still has bound, and the last one to go is what takes it off.
     #[test]
@@ -2548,13 +2593,13 @@ mod tests {
         fs::write(&source, b"{}").unwrap();
         let share = Share { source: source.display().to_string(), target: target.clone() };
         bundle::empty_file(&bundle::inside(&layout.rootfs("wsp-two"), &target).unwrap()).unwrap();
-        let (shares, made) = make_points(&layout, "wsp-two", std::slice::from_ref(&share), &held).unwrap();
+        let (shares, made) = make_points(&layout.inside_of("wsp-two"), &layout, "wsp-two", std::slice::from_ref(&share), &held).unwrap();
         assert_eq!(made, [target.as_str()], "the boot that came second owns nothing of the point it shares");
         assert_eq!(shares, std::slice::from_ref(&share));
         assert_eq!(points_of(&layout, "wsp-two").unwrap(), [target.as_str()]);
         // And the same point standing with nothing here naming it is the person's own file, which no boot
         // records and no stop takes off.
-        assert!(make_points(&layout, "wsp-two", std::slice::from_ref(&share), &[]).unwrap().1.is_empty());
+        assert!(make_points(&layout.inside_of("wsp-two"), &layout, "wsp-two", std::slice::from_ref(&share), &[]).unwrap().1.is_empty());
     }
 
     /// A sign-in made on the computer itself since the boot writes the person's own login into the file the boot
@@ -2607,10 +2652,10 @@ mod tests {
     }
 
     /// A boot that refuses partway through its shares has put the earlier points on the computer's own home
-    /// already, so each point is named under the claim before the file it names is made. The second share here
-    /// cannot have its mount point made, a file standing where its folder would go, and the first share's point
-    /// is named all the same. What the remove and the open's sweep take off is what the reader answers, which
-    /// the case below drives all the way to the unlink.
+    /// already, so each point is named under the claim the moment the file it names exists. The second share here
+    /// cannot have its mount point made, a file standing where its folder would go, so no claim names it and
+    /// there is nothing of it to take off. What the remove and the open's sweep take off is what the reader
+    /// answers, which the case below drives all the way to the unlink.
     #[test]
     fn a_boot_that_refuses_inside_the_shares_loop_leaves_the_points_it_made_named() {
         let dir = tempfile::tempdir().unwrap();
@@ -2633,14 +2678,15 @@ mod tests {
         fs::create_dir_all(&under).unwrap();
         fs::write(under.join("two"), b"a file where the second share's folder would go").unwrap();
 
-        let refused = make_points(&layout, id, &shares, &[]).unwrap_err();
+        let refused = make_points(&layout.inside_of(id), &layout, id, &shares, &[]).unwrap_err();
         assert!(refused.message.contains("two"), "{refused:?}");
         // The first share's point was made before the refusal, and the claim names it: that is what the remove
-        // and the open's sweep take off. The second is named and was never made, which costs them nothing, since
-        // what the take-off removes is an empty file that stands.
+        // and the open's sweep take off. The second was never made, so no claim names it and nothing stands on
+        // the computer's home under that name.
         assert!(under.join("one.json").is_file());
-        assert_eq!(bundle::read_points(&layout.points(id)).unwrap(), [first.as_str(), second.as_str()]);
-        assert_eq!(points_of(&layout, id).unwrap(), [first.as_str(), second.as_str()]);
+        assert!(!under.join("two/two.json").exists());
+        assert_eq!(bundle::read_points(&layout.points(id)).unwrap(), [first.as_str()]);
+        assert_eq!(points_of(&layout, id).unwrap(), [first.as_str()]);
     }
 
     /// The create that fails between the mount point and its record: the claim names the point, so the open's
