@@ -129,8 +129,8 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     if (wrote !== undefined && wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
     return data;
   };
-  // Write-through with rename so a crash mid-write never truncates the store. The file holds every running turn's
-  // token and every unspent pairing code, so it is the owner's alone, as is the folder it sits in.
+  // The file holds every running turn's token and every unspent pairing code, so it is the owner's: writeOwn says
+  // what that means, and its rename is also what keeps a crash mid-write from truncating the store.
   const save = (data: Data): void => {
     writeOwn(dirname(path), basename(path), JSON.stringify({ ...data, [STATE_SHAPE_KEY]: shapeNow(writer) }, null, 2));
   };

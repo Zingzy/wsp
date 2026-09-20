@@ -7247,17 +7247,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
-  /** Deletes what a version's forks boot from, and the sign-ins that version was sealed with. The template goes
-   * first: the provider refuses to delete a snapshot while a template stands on it, and a template already gone is
-   * no failure. */
-  const dropImage = async (v: GoldenVersion, name: string, at: MachineBackend = backend): Promise<void> => {
+  /** Deletes what a version's forks boot from. The template goes first: the provider refuses to delete a snapshot
+   * while a template stands on it, and a template already gone is no failure. The sealed vault is not this
+   * function's: a manifest counts its own place's versions, and the record's blob is keyed by the record's, so
+   * only the seal that replaces a version may take that version's blob. */
+  const dropImage = async (v: GoldenVersion, at: MachineBackend = backend): Promise<void> => {
     if (v.templateId !== undefined) {
       await templatesOf(at)?.delete(v.templateId).catch((e: unknown) => {
         if (!isMissing(e)) throw e;
       });
     }
     await at.deleteSnapshot(v.snapshotId);
-    await store.deleteBlob(IMAGE_VAULTS, vaultKey(name, v.version));
   };
 
   const golden: Runtime["golden"] = {
@@ -7577,7 +7577,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             builderKept = false;
           }
           try {
-            await dropImage(head, name, at);
+            await dropImage(head, at);
             manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
             await putCopy(place, name, manifest);
             await dropCopyRecipe(place, name, head.version);
@@ -7709,7 +7709,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (plan === undefined) return { dropped, failed };
       for (const v of plan.drop) {
         try {
-          await dropImage(v, key);
+          await dropImage(v);
         } catch (e) {
           // A snapshot the provider already lost is gone either way; its version goes with it.
           if (!isMissing(e)) {
@@ -7898,7 +7898,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (record.vault !== undefined && tar === undefined) throw conflict(`the vault of ${name} v${record.version} is not on this computer any more; cut the next version to take it again`);
     if (tar !== undefined && record.vault?.held !== undefined) {
       try {
-        refuseForeignMembers(tar, record.vault.held);
+        refuseForeignMembers("import", tar, record.vault.held);
       } catch (e) {
         throw conflict(e instanceof Error ? e.message : String(e));
       }

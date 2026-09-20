@@ -3587,11 +3587,15 @@ export const isJoinedComputer = (place: { id: string; kind: string }): boolean =
 export const placeBuildsNoImageLine = (place: string): string =>
   `${place} takes no copy of your image: a copy is built by forking a machine there and copying its disk, and ${place} does neither`;
 
-/** What a vault archive is refused with, at the seal that takes it and at the copy that imports it alike: where the
- * reading stopped and why. The archive is refused whole, since a builder that wrote one member nobody asked for
+/** The two rooms the member rule is read in: the seal that takes the archive off a builder on the person's own
+ * place, and the import that lands it on a copy somewhere else. */
+export type VaultRoad = "seal" | "import";
+
+/** What a vault archive is refused with: where the reading stopped, why, and what that refusal did, which is not
+ * the same on the two roads. The archive is refused whole, since a builder that wrote one member nobody asked for
  * wrote every other member too. */
-export const vaultMemberRefusal = (member: string, why: string): string =>
-  `the image's sign-in archive is refused at ${member}: ${why}; nothing of it was imported`;
+export const vaultMemberRefusal = (road: VaultRoad, member: string, why: string): string =>
+  `the image's sign-in archive is refused at ${member}: ${why}; ${road === "seal" ? "the seal is refused and no version is recorded" : "nothing of it was imported"}`;
 
 /** What a copy is refused with for a record whose vault kept no path list: sealed before the record held which
  * paths its sign-ins live at, so no other place can tell a member the seal asked for from one it did not. */

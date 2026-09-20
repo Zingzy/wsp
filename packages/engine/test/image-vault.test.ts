@@ -185,8 +185,8 @@ describe("the member rule the seal and the copy both read", () => {
       { path: "root/.config/gh/hosts.yml", mode: 0o600, content: "x" },
       { path: "root/.config/gh/link", target: "hosts.yml" },
     ]);
-    expect(vaultMembers(tar).map(m => m.name)).toEqual(["root/.codex/auth.json", "root/.config/gh", "root/.config/gh/hosts.yml", "root/.config/gh/link"]);
-    expect(() => refuseForeignMembers(tar, HELD)).not.toThrow();
+    expect(vaultMembers("import", tar).map(m => m.name)).toEqual(["root/.codex/auth.json", "root/.config/gh", "root/.config/gh/hosts.yml", "root/.config/gh/link"]);
+    expect(() => refuseForeignMembers("import", tar, HELD)).not.toThrow();
     const g = guest([]);
     await importImageVault(g.machine, tar, { fetch: g.fetch });
     expect(g.puts).toHaveLength(1);
@@ -197,13 +197,14 @@ describe("the member rule the seal and the copy both read", () => {
       ["etc/cron.d/x", tarOf([{ path: "etc/cron.d/x", mode: 0o644, content: "* * * * * root sh" }]), /etc\/cron\.d\/x/],
       ["root/../etc/x", tarOf([{ path: "root/../etc/x", mode: 0o644, content: "x" }]), /walks out/],
       ["a symbolic link out", tarOf([{ path: "root/.config/gh", target: "/etc" }]), /points at \/etc/],
-      ["a hard link out", archive(header({ name: "root/.codex/auth.json", type: "1", target: "etc/shadow" })), /points at etc\/shadow/],
+      ["a hard link out of a held folder", archive(header({ name: "root/.config/gh/x", type: "1", target: "etc/shadow" })), /points at etc\/shadow/],
       ["a device node", archive(header({ name: "root/.codex/auth.json", type: "3" })), /type flag is 3/],
     ];
     for (const [what, tar, reads] of cases) {
       const g = guest([]);
-      expect(() => refuseForeignMembers(tar, HELD), what).toThrow(reads);
-      expect(() => refuseForeignMembers(tar, HELD), what).toThrow(/nothing of it was imported/);
+      expect(() => refuseForeignMembers("import", tar, HELD), what).toThrow(reads);
+      expect(() => refuseForeignMembers("import", tar, HELD), what).toThrow(/nothing of it was imported/);
+      expect(() => refuseForeignMembers("seal", tar, HELD), what).toThrow(/the seal is refused and no version is recorded/);
       expect(g.puts, what).toHaveLength(0);
       expect(g.execCmds, what).toHaveLength(0);
     }
@@ -218,20 +219,20 @@ describe("the member rule the seal and the copy both read", () => {
       header({ name: "root/.config/gh/hosts.yml", size: 512 }),
       header({ name: "etc/cron.d/x" }),
     );
-    expect(() => refuseForeignMembers(tar, HELD)).toThrow(/etc\/cron\.d\/x/);
+    expect(() => refuseForeignMembers("import", tar, HELD)).toThrow(/etc\/cron\.d\/x/);
   });
 
   it("a pax path and linkpath are what the member is judged by", () => {
     const named = archive(header({ name: "root/.codex/auth.json", type: "x", size: 25 }), filled("25 path=etc/cron.d/x\n"), header({ name: "root/.codex/auth.json" }));
-    expect(() => refuseForeignMembers(named, HELD)).toThrow(/etc\/cron\.d\/x/);
+    expect(() => refuseForeignMembers("import", named, HELD)).toThrow(/etc\/cron\.d\/x/);
     const pointed = archive(header({ name: "root/.codex/auth.json", type: "x", size: 26 }), filled("26 linkpath=/etc/shadow\n"), header({ name: "root/.codex/auth.json", type: "2", target: "auth.json" }));
-    expect(() => refuseForeignMembers(pointed, HELD)).toThrow(/points at \/etc\/shadow/);
+    expect(() => refuseForeignMembers("import", pointed, HELD)).toThrow(/points at \/etc\/shadow/);
   });
 
   it("a GNU long name is honoured for the header behind it, and a long name beside a long link target is one member", () => {
     const long = `etc/${"d".repeat(120)}/x`;
     const tar = archive(header({ name: "././@LongLink", type: "L", size: long.length + 1 }), filled(`${long}\0`), header({ name: "root/.codex/auth.json" }));
-    expect(() => refuseForeignMembers(tar, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
+    expect(() => refuseForeignMembers("import", tar, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
     const target = `/etc/${"e".repeat(120)}/secret`;
     const both = archive(
       header({ name: "././@LongLink", type: "K", size: target.length + 1 }),
@@ -240,43 +241,43 @@ describe("the member rule the seal and the copy both read", () => {
       filled(`${long}\0`),
       header({ name: "root/.config/gh/link", type: "2", target: "hosts.yml" }),
     );
-    expect(() => refuseForeignMembers(both, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
+    expect(() => refuseForeignMembers("import", both, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
     const twice = archive(header({ name: "x", type: "L", size: 6 }), filled("etc/x\0"), header({ name: "x", type: "L", size: 6 }), filled("etc/y\0"), header({ name: "root/.codex/auth.json" }));
-    expect(() => vaultMembers(twice)).toThrow(/two long name entries of the same kind/);
+    expect(() => vaultMembers("import", twice)).toThrow(/two long name entries of the same kind/);
   });
 
   it("a header that fails its own checksum is refused, and the members behind it are never read", () => {
     const tar = archive(header({ name: "root/.codex/auth.json", checksum: "000000\0 " }), header({ name: "etc/cron.d/x" }));
-    expect(() => vaultMembers(tar)).toThrow(/fails its own checksum/);
-    expect(() => vaultMembers(tar)).not.toThrow(/etc\/cron\.d\/x/);
+    expect(() => vaultMembers("import", tar)).toThrow(/fails its own checksum/);
+    expect(() => vaultMembers("import", tar)).not.toThrow(/etc\/cron\.d\/x/);
   });
 
   it("a base-256 numeric, a global pax record, an unknown type flag and a foreign magic are each a refusal", () => {
     const base256 = Buffer.alloc(12);
     base256[0] = 0x80;
     base256[11] = 1;
-    expect(() => vaultMembers(archive(header({ name: "root/.codex/auth.json", sizeField: base256 })))).toThrow(/base-256/);
-    expect(() => vaultMembers(archive(header({ name: "PaxHeaders/g", type: "g", size: 10 }), filled("10 x=y\n")))).toThrow(/type flag is g/);
-    expect(() => vaultMembers(archive(header({ name: "root/.codex/auth.json", type: "7" })))).toThrow(/type flag is 7/);
-    expect(() => vaultMembers(archive(header({ name: "root/.codex/auth.json", magic: "wsp\0\0\0" })))).toThrow(/neither a ustar nor a GNU header/);
+    expect(() => vaultMembers("import", archive(header({ name: "root/.codex/auth.json", sizeField: base256 })))).toThrow(/base-256/);
+    expect(() => vaultMembers("import", archive(header({ name: "PaxHeaders/g", type: "g", size: 10 }), filled("10 x=y\n")))).toThrow(/type flag is g/);
+    expect(() => vaultMembers("import", archive(header({ name: "root/.codex/auth.json", type: "7" })))).toThrow(/type flag is 7/);
+    expect(() => vaultMembers("import", archive(header({ name: "root/.codex/auth.json", magic: "wsp\0\0\0" })))).toThrow(/neither a ustar nor a GNU header/);
   });
 
   it("a pax key this reading does not read, and a pax record beside a long name for one member, are refusals", () => {
-    expect(() => vaultMembers(archive(header({ name: "x", type: "x", size: 30 }), filled("30 SCHILY.xattr.user.x=y\n"), header({ name: "root/.codex/auth.json" })))).toThrow(/SCHILY\.xattr\.user\.x/);
+    expect(() => vaultMembers("import", archive(header({ name: "x", type: "x", size: 30 }), filled("30 SCHILY.xattr.user.x=y\n"), header({ name: "root/.codex/auth.json" })))).toThrow(/SCHILY\.xattr\.user\.x/);
     const both = archive(header({ name: "x", type: "x", size: 25 }), filled("25 path=etc/cron.d/x\n"), header({ name: "@LongLink", type: "L", size: 5 }), filled("etc\0"), header({ name: "root/.codex/auth.json" }));
-    expect(() => vaultMembers(both)).toThrow(/both a pax record and a long name/);
+    expect(() => vaultMembers("import", both)).toThrow(/both a pax record and a long name/);
   });
 
   it("two gzip members concatenated read as one archive, and bytes behind the last that are no member are a refusal", () => {
     const blocks = Buffer.concat([header({ name: "root/.codex/auth.json" }), header({ name: "etc/cron.d/x" }), Buffer.alloc(BLOCK * 2)]);
     const split = Buffer.concat([gzipSync(blocks.subarray(0, BLOCK)), gzipSync(blocks.subarray(BLOCK))]);
-    expect(vaultMembers(split).map(m => m.name)).toEqual(["root/.codex/auth.json", "etc/cron.d/x"]);
-    expect(() => vaultMembers(Buffer.concat([archive(header({ name: "root/.codex/auth.json" })), Buffer.from("trailing")]))).toThrow(/do not decompress/);
+    expect(vaultMembers("import", split).map(m => m.name)).toEqual(["root/.codex/auth.json", "etc/cron.d/x"]);
+    expect(() => vaultMembers("import", Buffer.concat([archive(header({ name: "root/.codex/auth.json" })), Buffer.from("trailing")]))).toThrow(/do not decompress/);
   });
 
   it("a member whose data runs past the end of the archive is a refusal, as is an archive that never ends", () => {
-    expect(() => vaultMembers(archive(header({ name: "root/.codex/auth.json", size: 4096 })))).toThrow(/runs past the end/);
-    expect(() => vaultMembers(gzipSync(header({ name: "root/.codex/auth.json" })))).toThrow(/without the two zero blocks/);
+    expect(() => vaultMembers("import", archive(header({ name: "root/.codex/auth.json", size: 4096 })))).toThrow(/runs past the end/);
+    expect(() => vaultMembers("import", gzipSync(header({ name: "root/.codex/auth.json" })))).toThrow(/without the two zero blocks/);
   });
 
   it("the rule reads a folder and a link that stay inside, and a relative link that climbs out", () => {
@@ -284,6 +285,20 @@ describe("the member rule the seal and the copy both read", () => {
     expect(refusedMember({ name: "./root/.config/gh/x", kind: "file" }, HELD)).toBeUndefined();
     expect(refusedMember({ name: "root/.config/gh/x", kind: "symlink", target: "../gh/hosts.yml" }, HELD)).toBeUndefined();
     expect(refusedMember({ name: "root/.config/gh/x", kind: "symlink", target: "../../.ssh/id_ed25519" }, HELD)).toMatch(/points at/);
+  });
+
+  it("a hard link's target is an archive name rooted where tar extracts, never a path from the link's own folder", () => {
+    // tar links the new name to that member itself, so a name inside a held folder linked to a name outside one is
+    // that outside file standing inside the copy. Read against the link's own folder it would pass as
+    // /root/.config/gh/etc/shadow, which is under the held folder and lands nowhere.
+    expect(refusedMember({ name: "root/.config/gh/x", kind: "hardlink", target: "etc/shadow" }, HELD)).toMatch(/points at etc\/shadow/);
+    expect(refusedMember({ name: "root/.config/gh/x", kind: "hardlink", target: "/etc/shadow" }, HELD)).toMatch(/points at \/etc\/shadow/);
+    expect(refusedMember({ name: "root/.config/gh/x", kind: "hardlink", target: "root/.config/gh/hosts.yml" }, HELD)).toBeUndefined();
+    // A symbolic link with the same words is a path on the guest read from the folder the link lands in, and that
+    // one stays inside.
+    expect(refusedMember({ name: "root/.config/gh/x", kind: "symlink", target: "hosts.yml" }, HELD)).toBeUndefined();
+    const tar = archive(header({ name: "root/.config/gh/x", type: "1", target: "etc/shadow" }));
+    expect(() => refuseForeignMembers("import", tar, ["/root/.config/gh"])).toThrow(/points at etc\/shadow/);
   });
 });
 

@@ -6,7 +6,7 @@
 // carries a machine's work, this one carries the person's logins.
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { shellQuote, vaultMemberRefusal, type SealedPin } from "@wsp/protocol";
+import { shellQuote, vaultMemberRefusal, type SealedPin, type VaultRoad } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
 import { exportPaths, importInto, type VaultOptions } from "./vault.js";
@@ -42,7 +42,7 @@ export async function presentPaths(machine: Machine, paths: readonly string[]): 
 export async function exportImageVault(machine: Machine, paths: readonly string[], opts: VaultOptions = {}): Promise<ImageVault> {
   const present = await presentPaths(machine, paths);
   const tar = await exportPaths(machine, present, opts);
-  refuseForeignMembers(tar, present);
+  refuseForeignMembers("seal", tar, present);
   return { tar, sha256: createHash("sha256").update(tar).digest("hex"), paths: present.length, held: present };
 }
 
@@ -68,7 +68,7 @@ const TAR_BLOCK = 512;
  * reads, and the whole point of this reading is that it sees what tar sees. */
 const PAX_READ = new Set(["path", "linkpath", "size"]);
 
-const refusal = (where: string, why: string): Error => new Error(vaultMemberRefusal(where, why));
+const refusal = (road: VaultRoad, where: string, why: string): Error => new Error(vaultMemberRefusal(road, where, why));
 
 /** A NUL-ended string field. */
 const fieldText = (block: Buffer, at: number, length: number): string => {
@@ -80,20 +80,20 @@ const fieldText = (block: Buffer, at: number, length: number): string => {
 /** A ustar numeric field as tar reads it: octal digits ended by a NUL or a space. A field whose first byte carries
  * the high bit is base-256, a form this reader does not read, and a header it cannot read is refused rather than
  * guessed at. */
-const fieldNumber = (block: Buffer, at: number, length: number, where: string, what: string): number => {
+const fieldNumber = (road: VaultRoad, block: Buffer, at: number, length: number, where: string, what: string): number => {
   const raw = block.subarray(at, at + length);
-  if ((raw[0]! & 0x80) !== 0) throw refusal(where, `its ${what} is written base-256, a form this reading does not read`);
+  if ((raw[0]! & 0x80) !== 0) throw refusal(road, where, `its ${what} is written base-256, a form this reading does not read`);
   const text = raw.toString("latin1").replace(/\0/g, " ").trim();
   if (text === "") return 0;
-  if (!/^[0-7]+$/.test(text)) throw refusal(where, `its ${what} is not an octal number`);
+  if (!/^[0-7]+$/.test(text)) throw refusal(road, where, `its ${what} is not an octal number`);
   return Number.parseInt(text, 8);
 };
 
 /** The checksum as tar checks it: the header summed with its own checksum field read as spaces, matched against the
  * field as the unsigned sum and as the signed sum, since tars have written both. A header that fails is refused
  * here and never skipped: skipping one is how a reader and tar come to disagree about where the next header is. */
-const checksumOk = (block: Buffer, where: string): boolean => {
-  const want = fieldNumber(block, 148, 8, where, "checksum");
+const checksumOk = (road: VaultRoad, block: Buffer, where: string): boolean => {
+  const want = fieldNumber(road, block, 148, 8, where, "checksum");
   let unsigned = 0;
   let signed = 0;
   for (let i = 0; i < TAR_BLOCK; i++) {
@@ -105,24 +105,24 @@ const checksumOk = (block: Buffer, where: string): boolean => {
 };
 
 /** The pax records of an `x` block's data: `<len> <key>=<value>\n`, each read whole. */
-const paxOf = (data: Buffer, where: string): { path?: string; linkpath?: string; size?: number } => {
+const paxOf = (road: VaultRoad, data: Buffer, where: string): { path?: string; linkpath?: string; size?: number } => {
   const held: { path?: string; linkpath?: string; size?: number } = {};
   let at = 0;
   while (at < data.length) {
     if (data[at] === 0) break;
     const space = data.indexOf(0x20, at);
-    if (space === -1) throw refusal(where, "its pax record has no length");
+    if (space === -1) throw refusal(road, where, "its pax record has no length");
     const length = Number(data.subarray(at, space).toString("latin1"));
-    if (!Number.isInteger(length) || length <= 0 || at + length > data.length) throw refusal(where, "its pax record runs past the block it is written in");
+    if (!Number.isInteger(length) || length <= 0 || at + length > data.length) throw refusal(road, where, "its pax record runs past the block it is written in");
     const record = data.subarray(space + 1, at + length).toString("utf8").replace(/\n$/, "");
     const eq = record.indexOf("=");
-    if (eq === -1) throw refusal(where, "its pax record carries no key");
+    if (eq === -1) throw refusal(road, where, "its pax record carries no key");
     const key = record.slice(0, eq);
     const value = record.slice(eq + 1);
-    if (!PAX_READ.has(key)) throw refusal(where, `its pax record carries ${key}, which this reading does not read`);
+    if (!PAX_READ.has(key)) throw refusal(road, where, `its pax record carries ${key}, which this reading does not read`);
     if (key === "size") {
       const size = Number(value);
-      if (!Number.isInteger(size) || size < 0) throw refusal(where, "its pax size is not a whole number of bytes");
+      if (!Number.isInteger(size) || size < 0) throw refusal(road, where, "its pax size is not a whole number of bytes");
       held.size = size;
     } else if (key === "path") held.path = value;
     else held.linkpath = value;
@@ -134,14 +134,14 @@ const paxOf = (data: Buffer, where: string): { path?: string; linkpath?: string;
 /** Every member of a gzipped tar, read on this computer as the guest's tar would extract it. Every divergence from
  * that reading is a refusal of the whole archive rather than a skip: a member this side passes over and tar lands
  * is the hole the member rule stands in front of. */
-export function vaultMembers(tar: Buffer): VaultMember[] {
+export function vaultMembers(road: VaultRoad, tar: Buffer): VaultMember[] {
   let raw: Buffer;
   try {
     raw = gunzipSync(tar);
   } catch (e) {
-    throw refusal("its first bytes", `they do not decompress as tar's gzip reads them (${e instanceof Error ? e.message : String(e)})`);
+    throw refusal(road, "its first bytes", `they do not decompress as tar's gzip reads them (${e instanceof Error ? e.message : String(e)})`);
   }
-  if (raw.length % TAR_BLOCK !== 0) throw refusal("its last bytes", `the archive is ${raw.length} bytes, which is not a whole number of tar blocks`);
+  if (raw.length % TAR_BLOCK !== 0) throw refusal(road, "its last bytes", `the archive is ${raw.length} bytes, which is not a whole number of tar blocks`);
   const members: VaultMember[] = [];
   let pax: { path?: string; linkpath?: string; size?: number } | undefined;
   let longName: string | undefined;
@@ -153,31 +153,31 @@ export function vaultMembers(tar: Buffer): VaultMember[] {
       // Two zero blocks end tar's read and everything behind them is nothing tar extracts; one on its own is a
       // stream that stopped mid-archive.
       if (at + 2 * TAR_BLOCK <= raw.length && raw.subarray(at + TAR_BLOCK, at + 2 * TAR_BLOCK).every(b => b === 0)) return members;
-      throw refusal(where, "a zero block stands where tar reads two to end the archive");
+      throw refusal(road, where, "a zero block stands where tar reads two to end the archive");
     }
     const ustar = raw.subarray(at + 257, at + 263).toString("latin1") === "ustar\0";
     const gnu = raw.subarray(at + 257, at + 265).toString("latin1") === "ustar  \0";
-    if (!ustar && !gnu) throw refusal(where, "its header is neither a ustar nor a GNU header");
-    if (!checksumOk(block, where)) throw refusal(where, "its header fails its own checksum");
+    if (!ustar && !gnu) throw refusal(road, where, "its header is neither a ustar nor a GNU header");
+    if (!checksumOk(road, block, where)) throw refusal(road, where, "its header fails its own checksum");
     const type = block[156] === 0 ? "0" : String.fromCharCode(block[156]!);
-    const size = pax?.size ?? fieldNumber(block, 124, 12, where, "size");
+    const size = pax?.size ?? fieldNumber(road, block, 124, 12, where, "size");
     const dataBlocks = Math.ceil(size / TAR_BLOCK);
     const dataAt = at + TAR_BLOCK;
-    if (dataAt + dataBlocks * TAR_BLOCK > raw.length) throw refusal(where, "its data runs past the end of the archive");
+    if (dataAt + dataBlocks * TAR_BLOCK > raw.length) throw refusal(road, where, "its data runs past the end of the archive");
     const data = raw.subarray(dataAt, dataAt + size);
     at += dataBlocks * TAR_BLOCK;
     if (type === "x" || type === "L" || type === "K") {
       // A member named twice over is a member two readers name differently. GNU writes a long name and a long link
       // target for one member, which is one description in two entries and is read as one.
-      if (pax !== undefined || (type === "x" && (longName !== undefined || longLink !== undefined))) throw refusal(where, "one member carries both a pax record and a long name entry");
-      if (type === "L" ? longName !== undefined : type === "K" && longLink !== undefined) throw refusal(where, "one member carries two long name entries of the same kind");
-      if (type === "x") pax = paxOf(data, where);
+      if (pax !== undefined || (type === "x" && (longName !== undefined || longLink !== undefined))) throw refusal(road, where, "one member carries both a pax record and a long name entry");
+      if (type === "L" ? longName !== undefined : type === "K" && longLink !== undefined) throw refusal(road, where, "one member carries two long name entries of the same kind");
+      if (type === "x") pax = paxOf(road, data, where);
       else if (type === "L") longName = fieldText(data, 0, data.length);
       else longLink = fieldText(data, 0, data.length);
       continue;
     }
-    if (type !== "0" && type !== "1" && type !== "2" && type !== "5") throw refusal(where, `its type flag is ${type}, which is not a file, a folder or a link`);
-    if (type !== "0" && size !== 0) throw refusal(where, "a folder or a link carries data, so where its next header stands cannot be read");
+    if (type !== "0" && type !== "1" && type !== "2" && type !== "5") throw refusal(road, where, `its type flag is ${type}, which is not a file, a folder or a link`);
+    if (type !== "0" && size !== 0) throw refusal(road, where, "a folder or a link carries data, so where its next header stands cannot be read");
     const prefix = ustar ? fieldText(block, 345, 155) : "";
     const named = fieldText(block, 0, 100);
     const name = pax?.path ?? longName ?? (prefix === "" ? named : `${prefix}/${named}`);
@@ -188,7 +188,7 @@ export function vaultMembers(tar: Buffer): VaultMember[] {
     const kind = type === "5" ? "dir" : type === "2" ? "symlink" : type === "1" ? "hardlink" : "file";
     members.push({ name, kind, ...(kind === "symlink" || kind === "hardlink" ? { target } : {}) });
   }
-  throw refusal("its last bytes", "the archive ends without the two zero blocks tar reads to end it");
+  throw refusal(road, "its last bytes", "the archive ends without the two zero blocks tar reads to end it");
 }
 
 /** Where a name lands under `-C /`, as tar roots it: leading slashes and `.` segments gone. Nothing where a `..`
@@ -198,7 +198,8 @@ const landsAt = (name: string): string | undefined => {
   return parts.includes("..") ? undefined : `/${parts.join("/")}`;
 };
 
-/** Where a link's target points, absolute as written or resolved against the folder the link itself lands in. */
+/** Where a symbolic link's target points: a path on the guest, absolute as written or read from the folder the
+ * link itself lands in. */
 const pointsAt = (target: string, from: string): string | undefined => {
   const parts = (target.startsWith("/") ? target : `${from.slice(0, from.lastIndexOf("/"))}/${target}`).split("/");
   const out: string[] = [];
@@ -218,23 +219,24 @@ const underHeld = (path: string, held: readonly string[]): boolean =>
 
 /** Why a member may not land, or nothing when it may: the one rule the seal and the copy both read. A name that
  * walks out with `..`, a name outside the paths the seal asked for, and a link pointing out of them are the three
- * ways an archive reaches somewhere nobody asked it to. */
+ * ways an archive reaches somewhere nobody asked it to. A hard link's target is an archive name and is rooted
+ * where tar extracts, never against the link's own folder, since tar links the new name to that file itself. */
 export function refusedMember(member: VaultMember, held: readonly string[]): string | undefined {
   const lands = landsAt(member.name);
   if (lands === undefined) return "its name walks out of where it lands with ..";
   if (!underHeld(lands, held)) return `it lands at ${lands}, which is not one of the paths the seal asked for or under one`;
   if (member.target === undefined || member.target === "") return undefined;
-  const points = pointsAt(member.target, lands);
+  const points = member.kind === "hardlink" ? landsAt(member.target) : pointsAt(member.target, lands);
   if (points === undefined || !underHeld(points, held)) return `it points at ${member.target}, which is not under the paths the seal asked for`;
   return undefined;
 }
 
 /** The archive against the paths the seal asked for, read whole before any of it is handed to a machine: one member
  * outside them refuses all of it, since a builder that wrote that member wrote every other one too. */
-export function refuseForeignMembers(tar: Buffer, held: readonly string[]): void {
-  for (const member of vaultMembers(tar)) {
+export function refuseForeignMembers(road: VaultRoad, tar: Buffer, held: readonly string[]): void {
+  for (const member of vaultMembers(road, tar)) {
     const why = refusedMember(member, held);
-    if (why !== undefined) throw new Error(vaultMemberRefusal(member.name, why));
+    if (why !== undefined) throw new Error(vaultMemberRefusal(road, member.name, why));
   }
 }
 

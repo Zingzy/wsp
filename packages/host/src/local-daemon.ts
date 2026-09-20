@@ -165,8 +165,7 @@ export class LocalDaemon {
   static async start(opts: LocalDaemonOptions): Promise<LocalDaemon> {
     const bin = opts.binary ?? daemonBinaryHere();
     const token = randomBytes(24).toString("hex");
-    // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own,
-    // for this user alone since what lands in it is a turn's work.
+    // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
     ownFolder(opts.inboxDir);
     // The daemon reads its token off a file at every auth frame and takes none on its command line, so the file is
     // made in a folder of this daemon's own, never beside the host's files under the person's home. The manifest

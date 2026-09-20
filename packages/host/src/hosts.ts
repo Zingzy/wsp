@@ -124,8 +124,7 @@ export function readHost(home: string, alias: string): HostRecord | undefined {
 }
 
 export function writeHost(home: string, alias: string, record: HostRecord): void {
-  // The token in here opens the host, so it goes through the one writer of the owner's files: a record left at
-  // 0644 by an older build is replaced rather than rewritten.
+  // The token in here opens the host, so the record is the owner's: writeOwn says what that means.
   writeOwn(home, relative(home, hostFile(home, alias)), `${JSON.stringify(record, null, 2)}\n`);
 }
 

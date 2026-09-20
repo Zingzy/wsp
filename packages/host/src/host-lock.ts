@@ -184,8 +184,7 @@ export function refuseIfServed(lockPath: string, statePath: string): void {
 export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
-  // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken,
-  // and one an older build left at the umask's word is repaired rather than trusted.
+  // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken.
   ownFolder(dirname(statePath));
   ownFolder(dirname(lockPath));
   rmSync(lockPath, { force: true });

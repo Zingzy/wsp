@@ -1297,11 +1297,17 @@ describe("goldenImage", () => {
 });
 
 describe("the sentences a vault archive is refused with", () => {
-  it("the member refusal names the member and the reason and says nothing landed", () => {
-    const line = vaultMemberRefusal("etc/cron.d/x", "it lands at /etc/cron.d/x, which is not one of the paths the seal asked for or under one");
-    expect(line).toContain("etc/cron.d/x");
-    expect(line).toContain("not one of the paths the seal asked for");
-    expect(line).toContain("nothing of it was imported");
+  it("the member refusal names the member, the reason and what that refusal did in the room it is read in", () => {
+    const why = "it lands at /etc/cron.d/x, which is not one of the paths the seal asked for or under one";
+    for (const road of ["seal", "import"] as const) {
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("etc/cron.d/x");
+      expect(vaultMemberRefusal(road, "etc/cron.d/x", why)).toContain("not one of the paths the seal asked for");
+    }
+    // Nothing was ever going to be imported at the seal, and no copy is what the import stopped.
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).toContain("the seal is refused and no version is recorded");
+    expect(vaultMemberRefusal("seal", "etc/cron.d/x", why)).not.toContain("imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).toContain("nothing of it was imported");
+    expect(vaultMemberRefusal("import", "etc/cron.d/x", why)).not.toContain("the seal is refused");
   });
 
   it("the unlisted refusal names the image and its version and says to cut the next one", () => {
@@ -1311,7 +1317,7 @@ describe("the sentences a vault archive is refused with", () => {
   });
 
   it("neither sentence carries a path of the computer the record sits on", () => {
-    for (const line of [vaultMemberRefusal("root/.codex/auth.json", "it points at /etc"), vaultUnlistedRefusal("default", 2)]) {
+    for (const line of [vaultMemberRefusal("seal", "root/.codex/auth.json", "it points at /etc"), vaultMemberRefusal("import", "root/.codex/auth.json", "it points at /etc"), vaultUnlistedRefusal("default", 2)]) {
       expect(line).not.toMatch(/\/Users\/|\/home\/|\.wsp|state\.json/);
     }
   });

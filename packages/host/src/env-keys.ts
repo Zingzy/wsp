@@ -57,7 +57,8 @@ export function vaultOf(env: Readonly<Record<string, string | undefined>>): Reco
   return Object.fromEntries([...VAULT_VARIABLES].flatMap(name => (keyIn(env, name) !== undefined ? [[name, env[name]!]] : [])));
 }
 
-/** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */
+/** The one writer of the wsp home's .env: a key line it knows is rewritten in place and the rest appended, through
+ * the owner's writer. */
 export function writeEnvFile(path: string, set: Record<string, string>): void {
   const pending = new Map(Object.entries(set));
   const lines: string[] = [];

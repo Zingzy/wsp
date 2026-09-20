@@ -42,6 +42,21 @@ function twoPlaces() {
   return { other, places };
 }
 
+/** A record on the store as a seal left it, with the archive its builder handed back: what a second place reads
+ * before it boots anything. */
+async function recorded(store: Store, o: { held?: string[]; tar: Buffer; version?: number; place?: string }): Promise<void> {
+  const version = o.version ?? 1;
+  const vault = {
+    sha256: createHash("sha256").update(o.tar).digest("hex"),
+    bytes: o.tar.length,
+    paths: 1,
+    ...(o.held !== undefined ? { held: o.held } : {}),
+    takenAt: "2026-09-01T00:00:00.000Z",
+  };
+  await store.put("images", "default", { name: "default", version, hash: "a".repeat(64), recipeHash: "h1", recipe: SMALL, pins: [], logins: [], sealedAt: "2026-09-01T00:00:00.000Z", sealedFrom: "h1", vault, place: o.place ?? "box" });
+  await store.putBlob("image-vaults", `default@v${version}`, o.tar);
+}
+
 describe("the image record a seal writes", () => {
   it("a seal through a recipe with vault paths writes the record, its hash and the vault blob, and stamps the hash on the version", async () => {
     const { store, rt } = started();
@@ -302,20 +317,6 @@ describe("building the image at a second place", () => {
     await rt.close();
   });
 
-  /** A record on the store as a seal left it, with the archive its builder handed back: what a second place reads
-   * before it boots anything. */
-  async function recorded(store: Store, o: { held?: string[]; tar: Buffer }): Promise<void> {
-    const vault = {
-      sha256: createHash("sha256").update(o.tar).digest("hex"),
-      bytes: o.tar.length,
-      paths: 1,
-      ...(o.held !== undefined ? { held: o.held } : {}),
-      takenAt: "2026-09-01T00:00:00.000Z",
-    };
-    await store.put("images", "default", { name: "default", version: 1, hash: "a".repeat(64), recipeHash: "h1", recipe: SMALL, pins: [], logins: [], sealedAt: "2026-09-01T00:00:00.000Z", sealedFrom: "h1", vault, place: "box" });
-    await store.putBlob("image-vaults", "default@v1", o.tar);
-  }
-
   it("a copy reads the archive against the paths the seal asked for, and one carrying a foreign member boots no builder", async () => {
     const { other, places } = twoPlaces();
     const store = memoryStore();
@@ -374,7 +375,11 @@ describe("a version's sign-ins live as long as the version and no longer", () =>
     await rt.close();
   });
 
-  it("prune takes the blob of every version it drops and leaves the ones it keeps", async () => {
+  it("prune reads a copy place's own version numbers and takes no blob: the record's sign-ins are the record's", async () => {
+    // The blob is keyed by the record's name and version, and a manifest counts the versions of the place it sits
+    // at. Here the record was sealed at another place and stands at v2, while the manifest at the place this host
+    // forks on counts four rebuilds of its own copy; a prune that dropped blobs by those numbers would take the
+    // live record's sign-ins and leave every later copy build asking for a blob this host itself removed.
     const store = memoryStore();
     const backend = stubBackend();
     const versions = [1, 2, 3, 4].map(n => ({
@@ -390,14 +395,12 @@ describe("a version's sign-ins live as long as the version and no longer", () =>
     for (const n of [1, 2, 3, 4]) {
       backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: (7 + n) * 1e9, createdAt: versions[n - 1]!.createdAt });
       await store.put("golden-recipes", copyKey("default", `default@v${n}`), { ticks: [], files: [] });
-      await store.putBlob("image-vaults", `default@v${n}`, Buffer.from(`sign-ins v${n}`));
     }
+    await recorded(store, { held: ["/root/.codex/auth.json"], tar: tarOf([{ path: "root/.codex/auth.json", mode: 0o600, content: "{}" }]), version: 2, place: "spoo" });
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
     expect((await rt.golden.prune()).dropped.map(v => v.version)).toEqual([1, 2]);
-    expect(await store.getBlob("image-vaults", "default@v1")).toBeUndefined();
-    expect(await store.getBlob("image-vaults", "default@v2")).toBeUndefined();
-    expect(await store.getBlob("image-vaults", "default@v3")).toBeDefined();
-    expect(await store.getBlob("image-vaults", "default@v4")).toBeDefined();
+    expect(await store.getBlob("image-vaults", "default@v2")).toBeDefined();
+    expect(((await store.get("images", "default")) as SealedImage).version).toBe(2);
     await rt.close();
   });
 });

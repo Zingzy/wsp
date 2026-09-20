@@ -35,7 +35,7 @@ export function writeOwn(root: string, rel: string, bytes: string | Uint8Array):
   }
   const tmp = `${target}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
   writeFileSync(tmp, bytes, { mode: OWN_FILE_MODE });
-  // writeFileSync's mode is the umask's to narrow, and a file that lands wider than this is the whole finding.
+  // writeFileSync's mode is the umask's to narrow.
   chmodSync(tmp, OWN_FILE_MODE);
   renameSync(tmp, target);
 }
