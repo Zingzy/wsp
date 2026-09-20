@@ -41,6 +41,8 @@ describe("the wsp skill", () => {
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
     expect(WSP_SKILL).toContain(`\`${notifyLine("1a2b3c4d-0000", { status: "completed", durationMs: 724_000, costUsd: 0.41, text: "first line\n<last line of the reply>" })}\``);
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
+    // A target is a thread this caller drives, so the flag's own paragraph says which threads it takes.
+    expect(WSP_SKILL).toContain("`--notify <thread>` names another thread outright, one you started or one under it");
   });
 
   it("tells an orchestrating agent to start its builders with notify me and end its turn, and hands the blocking wait to a shell script", () => {
