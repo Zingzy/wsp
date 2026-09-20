@@ -2235,8 +2235,9 @@ describe("a fork on a computer you joined", () => {
     // inside one; a tab that names its own keeps it.
     const created = await channel.send({ op: "pty.create", cols: 80, rows: 24 });
     expect(place.frames.at(-1)).toMatchObject({ op: "pty.create", cwd, cols: 80, machineId: made.machineId });
-    await channel.send({ op: "pty.create", cols: 80, rows: 24, cwd: `${cwd}/docs` });
+    const own = await channel.send({ op: "pty.create", cols: 80, rows: 24, cwd: `${cwd}/docs` });
     expect(place.frames.at(-1)).toMatchObject({ op: "pty.create", cwd: `${cwd}/docs` });
+    const killed = await channel.send({ op: "pty.create", cols: 80, rows: 24 });
 
     // The two a pane opens every link with: the ports and the load that computer's daemon reads are the whole
     // computer's, so they are answered here and nothing goes up the link.
@@ -2253,6 +2254,15 @@ describe("a fork on a computer you joined", () => {
     place.push({ type: "pty.data", ptyId, data: "hello" });
     await until(() => heard.length > 1);
     expect(heard.slice(1)).toEqual([{ type: "pty.data", ptyId, data: "hello" }]);
+
+    // A shell that ended and one this pane killed hold no listener worth taking off; the shell that stands does.
+    const exited = String((own as Record<string, unknown>)["ptyId"]);
+    const gone = String((killed as Record<string, unknown>)["ptyId"]);
+    await channel.send({ op: "pty.attach", ptyId: exited });
+    await channel.send({ op: "pty.attach", ptyId: gone });
+    await channel.send({ op: "pty.kill", ptyId: gone });
+    place.push({ type: "pty.exit", ptyId: exited, exitCode: 0 });
+    await until(() => heard.some(e => e["type"] === "pty.exit"));
 
     // Every pane on that computer rides the one link, so a pane that closes takes its own listeners off rather
     // than leaving its bytes riding it.

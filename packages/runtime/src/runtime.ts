@@ -109,7 +109,7 @@ import {
   LOCAL_MACHINE_ID,
   TOOLS_PATH,
 } from "@wsp/engine";
-import type { DaemonFrame, DaemonResponse } from "@wsp/protocol";
+import type { DaemonFrame, DaemonResponse, PlaceReport } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -3038,8 +3038,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const servedByItsComputer = (entry: LiveWorkspace): ((frame: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined =>
     entry.machine.daemonFrame?.bind(entry.machine);
 
-  /** One dial of a workspace's own daemon for the frames this host sends itself, closed however the work ends: the
-   * road the app's panes take for git.status, taken here for the two a bring back is made of. A refusal comes back
+  /** One dial of a workspace's own daemon, for the frames this host sends itself and for a client of this host
+   * driving that daemon one frame at a time: the road its kind answers, and the one sentence for a machine with no
+   * daemon answering on it yet. The caller closes what it opened. */
+  const ownDaemonChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> => {
+    const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
+    if (reach.daemonToken === undefined) throw new Error(`${entry.record.name} has no daemon answering yet`);
+    return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
+  };
+
+  /** The frames this host sends a workspace's daemon itself, on a channel closed however the work ends: the road
+   * the app's panes take for git.status, taken here for the two a bring back is made of. A refusal comes back
    * with the code the daemon put on it, so a caller reads the reason rather than the sentence.
    *
    * Where the workspace's daemon is the computer's own, the frames go up that computer's link with the workspace
@@ -3056,9 +3065,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw new DaemonRefusal(typeof reply["code"] === "string" ? reply["code"] : undefined, String(reply["error"] ?? `${frame.op} was refused`));
       });
     }
-    const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
-    if (reach.daemonToken === undefined) throw new Error(`${entry.record.name} has no daemon answering yet`);
-    const channel = await openChannel({ url: reach.url, token: reach.daemonToken, onEvent: () => {} });
+    const channel = await ownDaemonChannel(entry, () => {});
     try {
       return await work(async frame => {
         const reply = (await channel.send(frame)) as Record<string, unknown>;
@@ -3074,13 +3081,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * than the one this wsp deploys reads no workspace name on a files or git frame and would resolve the path
    * against its own home, which is a refusal a person cannot act on. The word is the one the computers table
    * already shows for a computer that is behind, with the line that moves it on. */
+  const behindLine = (placeId: string, report: PlaceReport | undefined): string | undefined => {
+    if (report === undefined || placeDoor === undefined) return undefined;
+    const behind = placeDaemonBehind(report);
+    return behind === undefined ? undefined : placeBehindLine(placeDoor.nameOf(placeId), behind);
+  };
+
+  /** The same reading where nothing else needs the report: read for this and thrown away. */
   const placeBehind = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const placeId = entry.record.place;
     if (placeId === undefined || placeDoor === undefined) return undefined;
-    const report = await placeDoor.reportOf(placeId);
-    if (report === undefined) return undefined;
-    const behind = placeDaemonBehind(report);
-    return behind === undefined ? undefined : placeBehindLine(placeDoor.nameOf(placeId), behind);
+    return behindLine(placeId, await placeDoor.reportOf(placeId));
   };
 
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
@@ -3108,10 +3119,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const placeId = entry.record.place;
     // A machine that answers its own daemon frames is one on a computer this host holds a link to.
     if (placeId === undefined || placeDoor === undefined) throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
-    const behind = await placeBehind(entry);
-    if (behind !== undefined) throw new Error(behind);
     const door = placeDoor;
-    const version = (await door.reportOf(placeId))?.daemonVersion;
+    // One read of what that computer last reported, and both facts an open needs off it.
+    const report = await door.reportOf(placeId);
+    const behind = behindLine(placeId, report);
+    if (behind !== undefined) throw new Error(behind);
+    const version = report?.daemonVersion;
     const machineId = entry.machine.id;
     const checkout = checkoutOf(entry.record);
     /** The ptys on that computer this channel named, so an event of a pty another pane opened is not pushed at
@@ -3124,7 +3137,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (event["machineId"] === machineId) onEvent(event);
         return;
       }
-      if (PTY_EVENTS.includes(type) && named.has(String(event["ptyId"]))) onEvent(event);
+      if (!PTY_EVENTS.includes(type) || !named.has(String(event["ptyId"]))) return;
+      // A pty that exited holds no listener worth taking off, so the close below asks only for the ones that stand.
+      if (type === "pty.exit") attached.delete(String(event["ptyId"]));
+      onEvent(event);
     });
     if (link === undefined) throw new Error(absentComputer(door.nameOf(placeId), null).sentence);
     /** What this channel now holds on the far end, off a frame it sent and the answer to it. */
@@ -3142,7 +3158,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         named.add(ptyId);
         attached.add(ptyId);
       }
-      if (op === "pty.detach") attached.delete(ptyId);
+      if (op === "pty.detach" || op === "pty.kill") attached.delete(ptyId);
     };
     onEvent({ type: "daemon.hello", root: checkout, ...(version !== undefined ? { version } : {}) });
     return {
@@ -5394,10 +5410,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
       const served = servedByItsComputer(entry);
-      if (served !== undefined) return servedChannel(entry, served, onEvent);
-      const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
-      if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
-      return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
+      return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent);
     },
 
     async servedByItsComputer(id, origin) {
