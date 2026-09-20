@@ -136,22 +136,37 @@ interface ArgRead {
   secret?: string;
 }
 
+const size = (v: string): string => `(${Buffer.byteLength(v)} B)`;
+
+/** An `API_KEY=value` argument wherever it stands, a bare one or a flag's value: the name is shown and the value
+ * hidden and counted, so a variable set behind `-e` reads as the variable it is. Nothing for any other argument. */
+const assignRead = (arg: string): ArgRead | undefined => {
+  const name = assignName(arg);
+  return name === undefined ? undefined : { show: `${name}=…`, secret: `arg ${name} ${size(arg.slice(arg.indexOf("=") + 1))}` };
+};
+
 /** The one reading of a definition's arguments, for the line a person reads and for what the row carries alike.
- * npx's own yes switch is dropped and takes no value. A dashed flag's next argument is that flag's value, shown
- * unless the flag is secret-named or hides its value whatever its name says. Every argument past the program is
- * a value this definition does not name, so it is hidden and counted, and the row takes the copy answer. */
+ * npx's own yes switch is dropped and takes no value. A dashed flag's next argument is that flag's value, read
+ * like any other argument and shown unless the flag is secret-named or hides its value whatever its name says.
+ * `--` ends the flags. Every argument past the program is a value this definition does not name, so it is hidden
+ * and counted, and the row takes the copy answer. */
 function readArgs(t: { command: string; args: readonly string[] }, home: string): ArgRead[] {
   const out: ArgRead[] = [];
   const shown = (a: string): string => (isUrl(a) ? `(${shownUrl(a)})` : tilde(home, a));
-  const size = (v: string): string => `(${Buffer.byteLength(v)} B)`;
   let program = RUNNERS.has(binaryOf(t.command, home));
+  let flags = true;
   for (let i = 0; i < t.args.length; i++) {
     const a = t.args[i]!;
-    if (a === "-y" || a === "--yes" || a === "--") {
-      out.push(a === "--" ? { show: a } : {});
+    if (flags && (a === "-y" || a === "--yes")) {
+      out.push({});
       continue;
     }
-    if (a.startsWith("-")) {
+    if (flags && a === "--") {
+      flags = false;
+      out.push({ show: a });
+      continue;
+    }
+    if (flags && a.startsWith("-")) {
       const flag = flagName(a);
       const hides = flag !== undefined && hidesValue(flag);
       if (a.includes("=")) {
@@ -163,12 +178,12 @@ function readArgs(t: { command: string; args: readonly string[] }, home: string)
       const value = t.args[i + 1];
       if (!takesValue(value)) continue;
       i++;
-      out.push(hides ? { show: "…", secret: `flag ${a} ${size(value)}` } : { show: shown(value) });
+      out.push(hides ? { show: "…", secret: `flag ${a} ${size(value)}` } : (assignRead(value) ?? { show: shown(value) }));
       continue;
     }
-    const assign = assignName(a);
-    if (assign !== undefined) {
-      out.push({ show: `${assign}=…`, secret: `arg ${assign} ${size(a.slice(a.indexOf("=") + 1))}` });
+    const assigned = assignRead(a);
+    if (assigned !== undefined) {
+      out.push(assigned);
       continue;
     }
     if (program) {

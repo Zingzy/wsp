@@ -651,7 +651,7 @@ describe("packPlan: excludes and consent rows", () => {
 });
 
 describe("packPlan: the never list under a ticked path", () => {
-  it("leaves a .env under a ticked folder home and names it, judges a link by its target, and carries both on a row the person answered copy", async () => {
+  it("leaves a .env under a ticked folder home and names it, judges a link by its own name and its target, and carries them on a row the person answered copy", async () => {
     const home = laptop();
     mkdirSync(join(home, ".config", "tool"), { recursive: true });
     writeFileSync(join(home, ".config", "tool", "config.toml"), "a = 1\n");
@@ -659,16 +659,20 @@ describe("packPlan: the never list under a ticked path", () => {
     mkdirSync(join(home, ".config", "tool", ".env.d"));
     writeFileSync(join(home, ".config", "tool", ".env.d", "one.toml"), "b = 2\n");
     writeFileSync(join(home, ".netrc"), "machine example.com password sk-ant-x\n");
+    writeFileSync(join(home, "values.txt"), "TOKEN=sk-ant-x\n");
     symlinkSync(join(home, ".netrc"), join(home, ".config", "tool", "creds"));
+    symlinkSync(join(home, "values.txt"), join(home, ".config", "tool", ".env.local"));
     const tool: ManifestEntry = row({ rung: "shell", id: "shell/tool", paths: ["~/.config/tool"] });
     const packed = await packPlan(planFiles([tool], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     const paths = listTar(packed.tar).map(e => e.path);
     expect(paths).toContain(".config/tool/config.toml");
     // The name rule is about files: a directory named .env.d is config, and it travels.
     expect(paths).toContain(".config/tool/.env.d/one.toml");
-    expect(paths.filter(p => /tool\/\.env$|creds/.test(p))).toEqual([]);
+    expect(paths.filter(p => /tool\/\.env$|\.env\.local|creds/.test(p))).toEqual([]);
     expect([...packed.skipped].sort((a, b) => a.path.localeCompare(b.path))).toEqual([
       { id: "shell/tool", path: "~/.config/tool/.env", note: ".env files are never copied; set the values on the machine" },
+      // A link is refused by its own name whatever it points at, as the row's own path would be.
+      { id: "shell/tool", path: "~/.config/tool/.env.local", note: ".env files are never copied; set the values on the machine" },
       { id: "shell/tool", path: "~/.config/tool/creds", note: "a link to ~/.netrc: .netrc is never copied; sign in on the machine" },
     ]);
     // The same folder on a credential row the person answered copy carries both, as its own path would.
@@ -676,6 +680,7 @@ describe("packPlan: the never list under a ticked path", () => {
     const dir = extract(consented.tar);
     expect(readFileSync(join(dir, ".config", "tool", ".env"), "utf8")).toBe("TOKEN=sk-ant-x\n");
     expect(readFileSync(join(dir, ".config", "tool", "creds"), "utf8")).toBe("machine example.com password sk-ant-x\n");
+    expect(readFileSync(join(dir, ".config", "tool", ".env.local"), "utf8")).toBe("TOKEN=sk-ant-x\n");
     expect(consented.skipped).toEqual([]);
   });
 });
@@ -1025,10 +1030,13 @@ describe("digestOf", () => {
     writeFileSync(join(demo, "settings.json"), "{}\n");
     writeFileSync(join(demo, ".env"), "TOKEN=one\n");
     writeFileSync(join(home, ".netrc"), "machine example.com\n");
+    writeFileSync(join(home, "values.txt"), "TOKEN=one\n");
     symlinkSync(join(home, ".netrc"), join(demo, "creds"));
+    symlinkSync(join(home, "values.txt"), join(demo, ".env.local"));
     const d0 = digestOf(plannedAt(demo, home), home);
     writeFileSync(join(demo, ".env"), "TOKEN=two, and longer\n");
     writeFileSync(join(home, ".netrc"), "machine example.com password sk-ant-x\n");
+    writeFileSync(join(home, "values.txt"), "TOKEN=two, and longer\n");
     expect(digestOf(plannedAt(demo, home), home)).toBe(d0);
     // On a row answered copy the pack carries both, so their bytes are this golden's.
     const consent = { consent: true };
@@ -1036,6 +1044,9 @@ describe("digestOf", () => {
     expect(c0).not.toBe(d0);
     writeFileSync(join(demo, ".env"), "TOKEN=three\n");
     expect(digestOf(plannedAt(demo, home, consent), home)).not.toBe(c0);
+    const c1 = digestOf(plannedAt(demo, home, consent), home);
+    writeFileSync(join(home, "values.txt"), "TOKEN=four\n");
+    expect(digestOf(plannedAt(demo, home, consent), home)).not.toBe(c1);
   });
 });
 

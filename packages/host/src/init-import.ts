@@ -316,12 +316,14 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         else if (entered.has(real)) skipped.push({ id: f.id, path: shown, note: "a link into a directory already copied" });
         else {
           const dir = statSync(real).isDirectory();
-          const why = neverCopied(f, relative(opts.home, real), dir);
+          // A link is judged by its own name and by the file it lands on, the reading the row's own path got.
+          const own = neverCopied(f, relative(opts.home, src), dir);
+          const why = own ?? neverCopied(f, relative(opts.home, real), dir);
           if (why === undefined) {
             if (dir) entered.add(real);
             return true;
           }
-          skipped.push({ id: f.id, path: shown, note: `a link to ~/${relative(opts.home, real)}: ${why}` });
+          skipped.push({ id: f.id, path: shown, note: own !== undefined ? own : `a link to ~/${relative(opts.home, real)}: ${why}` });
         }
         return false;
       };
@@ -559,10 +561,14 @@ export function digestOf(file: PlannedFile, home: string): string {
           return;
         }
         // The pack's rules for a link, in its order: never out of home, never back into the directory being
-        // walked or one already walked, never into a refused path.
+        // walked or one already walked, never a name the row refuses and never into a refused path.
         const parent = resolved(dirname(abs)) ?? dirname(abs);
         const own = parent === target || parent.startsWith(`${target}/`);
-        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : neverCopied(file, relative(home, target), statSync(target).isDirectory());
+        const refused = (): string | undefined => {
+          const dir = statSync(target).isDirectory();
+          return neverCopied(file, relative(home, abs), dir) ?? neverCopied(file, relative(home, target), dir);
+        };
+        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refused();
         if (why !== undefined) {
           hash.update(`L ${rel} ${relative(home, target)} ${why}\n`);
           return;
