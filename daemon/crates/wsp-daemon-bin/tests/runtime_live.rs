@@ -1300,7 +1300,8 @@ async fn a_firewall_that_ends_its_chains_in_a_reject_gets_the_accepts_at_its_hea
     let input = lab.comments("filter_INPUT");
     assert_eq!(&forward[..2], [net::RULE_COMMENT, net::RULE_COMMENT], "{forward:?}");
     assert_eq!(forward[2..], ["lab: not a workspace's", "lab: the final reject"], "{forward:?}");
-    assert_eq!(input, [net::RULE_COMMENT, "lab: not a workspace's", "lab: the final reject"], "{input:?}");
+    assert_eq!(&input[..2], [net::RULE_COMMENT, net::RULE_COMMENT], "{input:?}");
+    assert_eq!(input[2..], ["lab: not a workspace's", "lab: the final reject"], "{input:?}");
     let (code, out, err) = w.exec(&id, &get_from_inside("registry-1.docker.io", 80, "/v2/")).await;
     assert_eq!((code, err.as_str()), (0, ""), "{out}");
     assert!(out.starts_with("HTTP/1.1 301"), "{out}");

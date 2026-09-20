@@ -49,12 +49,17 @@
 //! A box whose own firewall ends its input or forward chain in a refusal (ufw's policy drop, firewalld's final
 //! reject) refuses the workspaces' packets there too, since an accept in one chain does not carry to the next; so
 //! each such chain gets accepts for the workspace interfaces at its head, marked with a comment, as Docker puts its
-//! jump at the head of FORWARD: on forward `iifname "wsp-*" accept` and `oifname "wsp-*" accept`, and on input the
-//! return path alone, `iifname "wsp-*" ct state established,related accept`. What a workspace opens toward the box
-//! is that box's own firewall's to allow or refuse, and nothing here widens it. That input accept is written as the
-//! conntrack match iptables itself writes rather than the kernel's own expression, since iptables refuses to render
-//! a chain holding one of those and the box's own tooling reads these chains; a kernel that will not take it gets
-//! the native expression instead. They go with the last workspace.
+//! jump at the head of FORWARD: on forward `iifname "wsp-*" accept` and `oifname "wsp-*" accept`, and on input two,
+//! `iifname "wsp-*" ip daddr 10.65.0.0/16 accept` for the way to the box at `host.wsp.internal`, which a workspace
+//! reaches by design, and `iifname "wsp-*" ct state established,related accept` for the answers a container's
+//! published port sends back, whose address is the box's loopback and not the range. The ports a workspace holds
+//! no business with are closed ahead of both in our own input chain, whose lower priority puts its drops before
+//! any of this and ends the packet there whatever a foreign chain accepts. The conntrack accept is written as the
+//! match iptables itself writes rather than the kernel's own expression, since iptables refuses to render a chain
+//! holding one of those and the box's own tooling reads these chains; a kernel that will not take it gets the
+//! native expression instead. A chain whose marked rules are not the accepts this daemon writes has them replaced
+//! in the same batch, so a box that ran an earlier daemon does not keep the old shape until its last workspace
+//! stops. They go with the last workspace.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -586,25 +591,33 @@ fn refuses_at_its_end(chain: &nft::ChainRow, rules: &[nft::RuleRow]) -> bool {
     is_a_foreign_filter(chain) && (chain.policy == Some(nft::NF_DROP) || rules.last().is_some_and(nft::RuleRow::refuses_all))
 }
 
-/// The accepts a refusing chain gets at its head, for its hook. On input the return path alone: what a workspace
-/// opens toward the box is that box's own firewall's to allow or refuse, and an accept wider than this one would
-/// take that decision away from it. `as_iptables_writes_it` picks the encoding of the conntrack match, the one
-/// iptables renders or the kernel's own, which a box whose kernel refuses the first gets instead.
+/// The accepts a refusing chain gets at its head, for its hook. On input two: the way a workspace's own packets
+/// to its gateway take, which is the reach a workspace has by design, and the return path the answers of a
+/// published port take, addressed to the box's loopback and not to the range. `as_iptables_writes_it` picks the
+/// encoding of the conntrack match, the one iptables renders or the kernel's own, which a box whose kernel
+/// refuses the first gets instead.
 fn accepts_for(chain: &nft::ChainRow, as_iptables_writes_it: bool) -> Vec<nft::Msg> {
     let rule = |exprs: Vec<Expr>| nft::new_rule(chain.family, &chain.table, &chain.name, &exprs, RULE_COMMENT, true);
     if chain.hook == Some(nft::NF_INET_LOCAL_IN) {
-        let mut answers: Vec<Expr> = Vec::new();
-        if chain.family == nft::NFPROTO_INET {
-            answers.extend(nft::nfproto_ipv4());
-        }
-        answers.extend(nft::iifname_starts(LINK_PREFIX));
+        let from_a_workspace = || {
+            let mut exprs: Vec<Expr> = Vec::new();
+            if chain.family == nft::NFPROTO_INET {
+                exprs.extend(nft::nfproto_ipv4());
+            }
+            exprs.extend(nft::iifname_starts(LINK_PREFIX));
+            exprs
+        };
+        let mut to_the_gateway = from_a_workspace();
+        to_the_gateway.extend(nft::ip_addr_in(true, RANGE, RANGE_PREFIX, false));
+        to_the_gateway.push(nft::verdict(nft::NF_ACCEPT));
+        let mut answers = from_a_workspace();
         if as_iptables_writes_it {
             answers.push(nft::xt_ct_established_or_related());
         } else {
             answers.extend(nft::ct_established_or_related());
         }
         answers.push(nft::verdict(nft::NF_ACCEPT));
-        return vec![rule(answers)];
+        return vec![rule(to_the_gateway), rule(answers)];
     }
     // Plain interface matches alone: iptables renders those and refuses a chain holding a native conntrack rule,
     // and what reaches a workspace here already passed our own chain, which lets answers through and nothing else.
@@ -632,6 +645,21 @@ fn table_differs(conn: &mut Conn, default: Option<&str>, guard: Option<&str>, da
         }
     }
     Ok(held != wanted)
+}
+
+/// Whether the marked rules a refusing chain already holds are the accepts this daemon writes for it, in either
+/// encoding of the conntrack match, in whatever order the head insertion left them. A chain holding accepts of
+/// an older shape has them replaced rather than kept: the rules of the daemon before this one would otherwise
+/// stand until the box's last workspace stops.
+fn accepts_stand(chain: &nft::ChainRow, held: &[nft::RuleRow]) -> bool {
+    let mut ours: Vec<Vec<String>> = held.iter().filter(|r| r.comment.as_deref() == Some(RULE_COMMENT)).map(|r| r.exprs.clone()).collect();
+    ours.sort();
+    [true, false].into_iter().any(|as_iptables_writes_it| {
+        let mut wanted: Vec<Vec<String>> =
+            accepts_for(chain, as_iptables_writes_it).iter().filter_map(nft::shape_of).map(|(_, exprs, _)| exprs).collect();
+        wanted.sort();
+        ours == wanted
+    })
 }
 
 /// Puts the table and the accepts in place where they are not, and replaces the table where its rules are not
@@ -668,14 +696,20 @@ pub fn rules_up(daemon_port: u16) -> Result<(), Error> {
             continue;
         }
         let rules = conn.rules(chain.family, &chain.table, &chain.name)?;
-        if rules.iter().any(|r| r.comment.as_deref() == Some(RULE_COMMENT)) || !refuses_at_its_end(&chain, &rules) {
+        if !refuses_at_its_end(&chain, &rules) || accepts_stand(&chain, &rules) {
             continue;
         }
-        refusing.push(chain);
+        let older: Vec<nft::Msg> = rules
+            .iter()
+            .filter(|r| r.comment.as_deref() == Some(RULE_COMMENT))
+            .map(|r| nft::del_rule(chain.family, &chain.table, &chain.name, r.handle))
+            .collect();
+        refusing.push((chain, older));
     }
     let batch = |as_iptables_writes_it: bool| {
         let mut all = table.clone();
-        for chain in &refusing {
+        for (chain, older) in &refusing {
+            all.extend(older.iter().cloned());
             all.extend(accepts_for(chain, as_iptables_writes_it));
         }
         all
@@ -1337,14 +1371,21 @@ mod tests {
         );
         assert_eq!(accepts_for(&ufw, true).len(), 2);
         let refusing_input = chain("filter", nft::NFPROTO_IPV4, "filter", nft::NF_INET_LOCAL_IN, nft::NF_DROP);
-        assert_eq!(accepts_for(&refusing_input, true).len(), 1);
-        // The return path alone, and nothing wider: what a workspace opens toward the box is that box's own
-        // firewall's to decide, and the accept is the match iptables writes so the chain still renders there.
-        let (_, exprs, comment) = nft::shape_of(&accepts_for(&refusing_input, true)[0]).unwrap();
-        assert_eq!(exprs, ["meta", "cmp", "match", "immediate"]);
+        let written = accepts_for(&refusing_input, true);
+        assert_eq!(written.len(), 2);
+        // The way to the gateway, then the return path; the conntrack match is the one iptables writes, so the
+        // box's own tooling still renders the chain.
+        let (_, to_the_gateway, comment) = nft::shape_of(&written[0]).unwrap();
+        assert_eq!(to_the_gateway, ["meta", "cmp", "payload", "bitwise", "cmp", "immediate"]);
         assert_eq!(comment.as_deref(), Some(RULE_COMMENT));
-        let (_, native, _) = nft::shape_of(&accepts_for(&refusing_input, false)[0]).unwrap();
+        let (_, answers, comment) = nft::shape_of(&written[1]).unwrap();
+        assert_eq!(answers, ["meta", "cmp", "match", "immediate"]);
+        assert_eq!(comment.as_deref(), Some(RULE_COMMENT));
+        let (_, native, _) = nft::shape_of(&accepts_for(&refusing_input, false)[1]).unwrap();
         assert_eq!(native, ["meta", "cmp", "ct", "bitwise", "cmp", "immediate"]);
+        let inet_input = chain("firewalld", nft::NFPROTO_INET, "filter", nft::NF_INET_LOCAL_IN, nft::NF_DROP);
+        let (_, on_inet, _) = nft::shape_of(&accepts_for(&inet_input, true)[0]).unwrap();
+        assert_eq!(on_inet, ["meta", "cmp", "meta", "cmp", "payload", "bitwise", "cmp", "immediate"], "the family match rides ahead");
         let drops = 2 + usize::from(wsp_frames::numbers::DEFAULT_PORT != 0);
         assert_eq!(own_table(Some("eth0"), None, wsp_frames::numbers::DEFAULT_PORT).len(), 4 + 7 + drops);
         assert_eq!(
@@ -1361,6 +1402,39 @@ mod tests {
         assert_eq!(guarded_interface("wsp workspaces: forwarding turned on for eth0"), Some("eth0"));
         assert_eq!(guarded_interface(RULE_COMMENT), None);
         assert_eq!(forwarding_file("wsp-3"), "/proc/sys/net/ipv4/conf/wsp-3/forwarding");
+    }
+
+    /// A refusing chain keeps the accepts it holds only where they are the ones this daemon writes; the shape an
+    /// earlier daemon left is replaced instead of passed over.
+    #[test]
+    fn a_refusing_chain_keeps_only_the_accepts_this_daemon_writes() {
+        let chain = nft::ChainRow {
+            family: nft::NFPROTO_IPV4,
+            table: "filter".into(),
+            name: "INPUT".into(),
+            kind: Some("filter".into()),
+            hook: Some(nft::NF_INET_LOCAL_IN),
+            policy: Some(nft::NF_DROP),
+        };
+        let held = |written: Vec<nft::Msg>| -> Vec<nft::RuleRow> {
+            written
+                .iter()
+                .filter_map(nft::shape_of)
+                .enumerate()
+                .map(|(at, (_, exprs, comment))| nft::RuleRow { handle: at as u64 + 1, comment, exprs, verdict: Some(nft::NF_ACCEPT) })
+                .collect()
+        };
+        assert!(accepts_stand(&chain, &held(accepts_for(&chain, true))));
+        assert!(accepts_stand(&chain, &held(accepts_for(&chain, false))), "the native encoding of the conntrack match reads as ours");
+        let mut as_the_head_insertion_leaves_them = held(accepts_for(&chain, true));
+        as_the_head_insertion_leaves_them.reverse();
+        assert!(accepts_stand(&chain, &as_the_head_insertion_leaves_them));
+        assert!(!accepts_stand(&chain, &[]), "a chain holding none of ours gets both");
+        assert!(!accepts_stand(&chain, &held(accepts_for(&chain, true))[1..]), "the return path alone is the older shape");
+        assert!(!accepts_stand(&chain, &held(accepts_for(&chain, true))[..1]), "the way in alone is not the pair either");
+        let mut beside_a_rule_of_the_boxs = held(accepts_for(&chain, true));
+        beside_a_rule_of_the_boxs.push(nft::RuleRow { handle: 9, comment: None, exprs: vec!["counter".into()], verdict: None });
+        assert!(accepts_stand(&chain, &beside_a_rule_of_the_boxs), "a rule that is not ours says nothing about ours");
     }
 
     /// The rules as a person reads them off the box, in the order they are appended: what a container of a
