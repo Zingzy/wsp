@@ -35,6 +35,8 @@ import {
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
   THREAD_OPS,
+  peerAddress,
+  SCOPED_TOKEN_ROAD_REFUSAL,
   TICKET_ORIGIN,
   UNAUTHORIZED,
   WS_PATH,
@@ -87,6 +89,11 @@ export interface ServeOptions {
    * serves the page: a page drives only the host it was served by. Without it every upgrade is taken, which is
    * what a runtime served with no page in front of it means. */
   originAllowed?: (req: IncomingMessage) => boolean;
+  /** Whether a request reached this host over the road it serves its own workspaces' guests on, read off the
+   * request by the host that serves this runtime, whose `ownRoad` holds that rule and why a scoped token is held
+   * to it. Without it every road is the host's own, which is what a runtime served with no host in front of it
+   * means. */
+  ownRoad?: (req: IncomingMessage) => boolean;
   /** The door computers you own dial, when the host that serves this runtime opens one; without it places.door is
    * refused rather than answering a port nothing listens on. */
   door?: PlaceDoorControl;
@@ -255,6 +262,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const held = new Set<{ deviceId: string; cut: () => void }>();
 
   const originAllowed = opts.originAllowed ?? ((): boolean => true);
+  /** The host's own reading of the road a request arrived on, the rule and its reason on that host's `ownRoad`.
+   * Named apart from the `ownRoad()` a socket carries below, which says what that socket is rather than where its
+   * bytes came from. */
+  const dialledHere: (req: IncomingMessage) => boolean = opts.ownRoad ?? (() => true);
   const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port, verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req) });
   const attachTo = opts.attach === undefined ? [] : Array.isArray(opts.attach) ? opts.attach : [opts.attach];
   const attached = attachTo.length === 0 ? undefined : new WebSocketServer({ noServer: true });
@@ -280,10 +291,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
 
   const onConnection = (ws: WebSocket, req: IncomingMessage): void => {
     const url = new URL(req.url ?? "/", "ws://localhost");
-    // Where this socket came from, as the app shows it beside a computer that just joined. An IPv4 address that
-    // arrived over a dual-stack listener wears the ::ffff: prefix, which is not what a person typed on the other
-    // screen, so it is unwrapped once here.
-    const from = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
+    // Where this socket came from, as the app shows it beside a computer that just joined.
+    const from = peerAddress(req.socket.remoteAddress);
     const ticketParam = url.searchParams.get("ticket");
     let authed = false;
     // What this socket is, decided when it is let in and never again: the ticket it redeemed says whether its
@@ -457,6 +466,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           if (msg.op !== "auth") return refuse(UNAUTHORIZED);
           const who = await whoIs(msg.token).catch(() => undefined);
           if (who === undefined) return refuse(UNAUTHORIZED);
+          // Ahead of the bind and the last seen below, so a copy refused here leaves nothing of itself behind.
+          if (who.kind === "device" && who.device.scope !== undefined && !dialledHere(req)) return refuse(SCOPED_TOKEN_ROAD_REFUSAL);
           authed = true;
           if (who.kind === "device") {
             bind(who.device);
@@ -701,7 +712,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "workspaces.landing":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project })) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project }, origin)) });
               return;
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });

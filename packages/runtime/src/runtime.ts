@@ -209,8 +209,8 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
-import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1233,7 +1233,7 @@ export interface Runtime {
     /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
      * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
      * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o: { project: string }): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
+    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
@@ -2560,9 +2560,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
+  /** The rule as the caller reads it. A person is told which rule hid the workspace, since what this host holds is
+   * theirs; a thread is told absence and nothing more, since a sentence naming a workspace or a project outside its
+   * tree is how a thread learns what else stands here. No word rides the thread's: every verb that reaches this
+   * found the workspace itself rather than being handed it. */
   const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined): void => {
     const line = refusalFor(record, caller);
-    if (line !== undefined) throw new Error(line);
+    if (line === undefined) return;
+    throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
+  };
+  /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
+   * sentence for an id this host does not hold and for one outside its tree alike, since telling the two apart is
+   * how a thread walks what else stands here. A caller that is no thread reads what it always did, an id nobody
+   * holds being nobody's to refuse for. */
+  const refuseNamed = (workspaceId: string, caller: Caller | undefined): void => {
+    const record = live.get(workspaceId)?.record;
+    if (record === undefined && scopeOf(caller) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
+    refuseRelayed(record, caller);
   };
   const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
   /** Every workspace this host holds, as any door serves them: one a create has not finished is not there yet. */
@@ -4622,7 +4636,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
-    if (!entry || entry.creating) throw new Error(`no such workspace: ${id}`);
+    // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
+    // apart is how a thread walks what else stands here.
+    if (!entry || entry.creating) {
+      if (scopeOf(origin) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
+      throw new Error(`${noWorkspaceRefusal()}: ${id}`);
+    }
     refuseRelayed(entry.record, origin);
     return entry;
   };
@@ -4918,9 +4937,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const workspaces: Runtime["workspaces"] = {
-    async landing(o) {
+    async landing(o, origin) {
       await ready();
-      const project = await projectsDoor.resolve(o.project);
+      const project = await projectsDoor.resolve(o.project, origin);
       const computer = project.computer;
       const kind = kindForComputer(computer);
       if (worksInPlace(kind)) return { name: placeName(HERE_PLACE_ID), capabilities: backendOfKind(kind).capabilities };
@@ -4931,9 +4950,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async create(opts, origin) {
       await ready();
-      // A create a thread asked for is a child of the workspace that thread runs on, named or not: a thread's
-      // workspaces are its own tree, and nothing it makes stands beside it as a sibling of the person's.
-      const bornOf = opts.parent ?? scopeOf(origin)?.workspaceId;
+      const asked = scopeOf(origin);
+      // A thread forks the image its own workspace's project runs and names none.
+      if (asked !== undefined && opts.golden !== undefined) throw Object.assign(new Error(spawnGoldenRefusal(asked.threadId)), { kind: "invalid" });
+      // A create a thread asked for is a child of the workspace that thread runs on and of no other, named or not:
+      // a thread's workspaces are its own tree, nothing it makes stands beside it as a sibling of the person's, and
+      // a workspace it names is one whose branch it may not read.
+      const bornOf = asked === undefined ? opts.parent : asked.workspaceId;
       const o = { ...opts, name: nameGiven(opts.name), ...(bornOf !== undefined ? { parent: bornOf } : {}) };
       const project = await projectsDoor.resolve(o.project, origin);
       // The project's computer decides which road this create takes, off the one table that says whether a kind
@@ -4948,10 +4971,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const inPlace = worksInPlace(kind);
       if (!inPlace) refuseRelayed({ kind, name: o.name, project: project.id }, origin);
       // A child of another workspace starts where that workspace is now, not where the project starts. A parent
-      // this host does not hold is refused rather than dropped, since a create that dropped it would land as
-      // somebody's root; the branch itself is read off the parent's machine below, once this create is allowed.
+      // this host does not hold, and one whose own create has not finished, are refused rather than dropped, since
+      // a create that dropped it would land as somebody's root; the branch itself is read off the parent's machine
+      // below, once this create is allowed.
       const parent = o.parent === undefined ? undefined : live.get(o.parent);
-      if (o.parent !== undefined && parent === undefined) throw Object.assign(new Error(noParentWorkspaceLine(o.parent)), { kind: "invalid" });
+      if (o.parent !== undefined && (parent === undefined || parent.creating === true)) throw Object.assign(new Error(noParentWorkspaceLine(o.parent)), { kind: "invalid" });
+      // A child is a second checkout of its parent's project on the branch that parent is on, so a parent holding
+      // another project has no branch this child could start from and land its work back in.
+      if (parent !== undefined && parent.record.project !== project.id) {
+        throw Object.assign(new Error(parentProjectRefusal(parent.record.name, projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
+      }
       if (inPlace) return recordExisting(project, o, origin, parent);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
@@ -5042,7 +5071,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async resolve(ref, origin) {
       await ready();
-      const rows = held();
+      const scope = scopeOf(origin);
+      const rows = scope === undefined ? held() : listedFor(origin);
       // The whole of an id, then the whole of a name, as a thread's own reference does: a name names one workspace at
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
@@ -5052,6 +5082,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
       const entry = exact ?? started[0];
       if (entry === undefined) {
+        if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
         const place = (await placeDoor?.find(ref)) ?? [];
@@ -6686,7 +6717,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       // A listing that names a workspace refuses like any other verb naming one; a listing of them all leaves out
       // the rows the caller may not drive, as workspaces.list does.
-      if (workspaceId !== undefined) refuseRelayed(live.get(workspaceId)?.record, origin);
+      if (workspaceId !== undefined) refuseNamed(workspaceId, origin);
       const all = [...sessions.values()].filter(s => drivesId(s.view.workspaceId, origin));
       const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
       const rows = held.map(s => s.view);
@@ -8199,10 +8230,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return computerRows();
     },
 
-    async resolve(ref: string, _origin?: Caller): Promise<ProjectView> {
+    async resolve(ref: string, origin?: Caller): Promise<ProjectView> {
       await ready();
       const all = [...projectsHeld.values()];
       const found = all.find(p => p.id === ref) ?? all.find(p => p.name === ref);
+      // A thread works on the project its own workspace holds: every other word reads as absent here, so a word
+      // that names another project and one that names nothing are one sentence and neither says what else stands.
+      // A thread whose workspace this host no longer holds works on none, so every word reads the same for it.
+      const scope = scopeOf(origin);
+      if (scope !== undefined) {
+        const mine = projectOfScope(scope);
+        if (found === undefined || mine === undefined || found.id !== mine) throw notFoundRefusal(bareNoSuchProjectLine(ref));
+        return found;
+      }
       if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));
       return found;
     },
@@ -8468,10 +8508,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const shown = new Set(listedFor(origin).map(e => e.record.id));
         return rows.filter(row => shown.has(row.id));
       },
-      // A cost read answers for a workspace this host no longer holds, so the origin rule is read off the record when
-      // there is one rather than through entryOf, which refuses an id it does not know.
+      // A cost read answers for a workspace this host no longer holds, which is why the rule for a named id is read
+      // here rather than through entryOf, which refuses an id it does not know.
       history: async (workspaceId, origin) => {
-        refuseRelayed(live.get(workspaceId)?.record, origin);
+        refuseNamed(workspaceId, origin);
         return status.history(workspaceId);
       },
     },

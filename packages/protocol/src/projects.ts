@@ -157,9 +157,13 @@ export const seedMemoryKeptLine = (computer: string): string =>
 export const projectInUseRefusal = (name: string, workspaces: readonly string[]): string =>
   `${name} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${workspaces.join(", ")}; delete ${workspaces.length === 1 ? "it" : "them"} first`;
 
+/** The whole of what a caller held to one project reads about a word naming another: absence and nothing else,
+ * since the names of what else this host holds are not a thread's to learn from a refusal. */
+export const bareNoSuchProjectLine = (ref: string): string => `no project ${JSON.stringify(ref)}`;
+
 /** Why a word names no project here, with the ones it could have named. */
 export const noSuchProjectLine = (ref: string, names: readonly string[]): string =>
-  `no project ${JSON.stringify(ref)}; ${names.length === 0 ? "wsp add <folder> records one" : `this host holds ${names.join(", ")}`}`;
+  `${bareNoSuchProjectLine(ref)}; ${names.length === 0 ? "wsp add <folder> records one" : `this host holds ${names.join(", ")}`}`;
 
 /** Why a workspace cannot be made without naming its project, with the projects to name. */
 export const nameTheProjectLine = (names: readonly string[]): string =>
