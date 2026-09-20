@@ -3714,6 +3714,7 @@ const DAEMON_CONTENTS = [
   "cec7af13cc254d8325bf77409aedc4daeb072d5dc0413b58aaf45f8428698721",
   "b1c827b22fbdade28b749f72899b610723d5f312e339e9546552da14840013c1",
   "7324cbd1f27eb8983b8ea302c3cd32a629a4eedae7e0d46458acca37440baf88",
+  "b83b671323ccc59fe9daa43da46dede2d640451c5b4f0c8e64ae2eef149ba694",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3892,7 +3893,10 @@ const DAEMON_CONTENTS = [
  * sent, seals every frame of the link at both ends so whoever carries it reads and writes nothing, resolves no command
  * through a folder a workspace can write, and holds a token of its own machine's rather than one every machine shares.
  * Version 61 bounds the guest bytes in flight per workspace on a place and per daemon inside a fork, queued and unsent
- * alike, and refuses a frame past the cap with a sentence of its own while the session stays open. */
+ * alike, and refuses a frame past the cap with a sentence of its own while the session stays open.
+ * Version 62 prints its two kernel knob lines only on Linux and nothing on a Mac start, closes the guest door of a
+ * workspace whose init died on its own by watching the init's pidfd and running the stop road, and stops redialling
+ * a host that refused its place under a signature over the pinned key. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
