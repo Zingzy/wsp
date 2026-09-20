@@ -61,8 +61,8 @@ describe("mcp servers", () => {
       detail: "stdio: ~/Library/Application Support/Notes/mcp; carries no secret",
     });
     expect(rows[4]).toEqual({
-      rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
-      detail: "local to ~; stdio: npx mcp-remote (mcp.zomato.com/mcp); runs via npx; its saved sign-in (1 KB) travels on the mcp-remote sign-ins row",
+      rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true,
+      detail: "local to ~; stdio: npx mcp-remote …; runs via npx; carries a secret: arg 2 (26 B); its saved sign-in (1 KB) travels on the mcp-remote sign-ins row",
     });
     // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
@@ -88,7 +88,7 @@ describe("mcp servers", () => {
       default: "skip", reason: "no saved sign-in the current bridge reads; older versions' folders are left here",
     });
     const viaRemote = await detectMcp(fakeHost({ files: { "~/.claude.json": JSON.stringify({ mcpServers: { z: { command: "npx", args: ["-y", "mcp-remote", "https://z.example/mcp"] } } }) } }));
-    expect(viaRemote.map(r => r.detail)).toEqual(["stdio: npx mcp-remote (z.example/mcp); runs via npx; no saved sign-in; the browser sign-in runs again on the machine"]);
+    expect(viaRemote.map(r => r.detail)).toEqual(["stdio: npx mcp-remote …; runs via npx; carries a secret: arg 3 (21 B); no saved sign-in; the browser sign-in runs again on the machine"]);
   });
 
   it("Codex: mcp_servers tables in config.toml, env sub-tables included, with the bearer variable named as something to set", async () => {
@@ -122,7 +122,7 @@ describe("mcp servers", () => {
     expect(rows.map(r => [r.id, r.default, r.reason, r.detail])).toEqual([
       ["agents/mcp/codex/grafana", "bring", undefined, "stdio: /opt/homebrew/bin/uvx mcp-grafana; needs uv, installed on the machine when missing; carries a secret: env GRAFANA_SERVICE_ACCOUNT_TOKEN (15 B)"],
       ["agents/mcp/codex/sentry", "bring", undefined, "http: mcp.sentry.dev/mcp; nothing to install; reads SENTRY_TOKEN from the environment, set it on the machine; carries no secret"],
-      ["agents/mcp/codex/my server", "skip", "path /Applications/Tool.app/Contents/mcp.js is macOS-only, will not run", "stdio: node /Applications/Tool.app/Contents/mcp.js; carries a secret: env A_KEY (4 B)"],
+      ["agents/mcp/codex/my server", "skip", "path /Applications/Tool.app/Contents/mcp.js is macOS-only, will not run", "stdio: node …; carries secrets: env A_KEY (4 B), arg 1 (38 B)"],
     ]);
   });
 
@@ -144,6 +144,26 @@ describe("mcp servers", () => {
     expect(JSON.stringify(rows)).not.toMatch(/sk-123|abcdef|zzz/);
   });
 
+  it("an argument the definition does not name is a value, hidden and counted so the row takes the copy answer; a flag's value is the flag's word", async () => {
+    const config = JSON.stringify({
+      mcpServers: {
+        bare: { command: "npx", args: ["-y", "some-server", "sk-test-bare-token"] },
+        port: { command: "npx", args: ["-y", "some-server", "--port", "3000"] },
+        verbose: { command: "npx", args: ["-y", "some-server", "--verbose", "sk-test-token"] },
+        own: { command: `${HOME}/bin/server`, args: ["sk-test-token"] },
+      },
+    });
+    const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config } }));
+    expect(rows.map(r => [r.detail, r.consent])).toEqual([
+      ["stdio: npx some-server …; runs via npx; carries a secret: arg 3 (18 B)", true],
+      ["stdio: npx some-server --port 3000; runs via npx; carries no secret", undefined],
+      // A flag's value is the flag's word: the definition names it, so it is shown whatever it holds.
+      ["stdio: npx some-server --verbose sk-test-token; runs via npx; carries no secret", undefined],
+      ["stdio: ~/bin/server …; needs ~/bin/server on the machine; carries a secret: arg 1 (13 B)", true],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("sk-test-bare-token");
+  });
+
   it("a secret-named env value pointing outside home is named without its value; a home path the server runs against is a dependency, or unticks the row without locking it when it is not here yet", async () => {
     const config = JSON.stringify({
       mcpServers: {
@@ -156,7 +176,7 @@ describe("mcp servers", () => {
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config, "/etc/creds.json": 10, "~/whatsapp-mcp/server/main.py": 20 } }));
     expect(rows.map(r => [r.default, r.reason, r.detail])).toEqual([
       ["bring", undefined, "stdio: npx x; runs via npx; the file CREDENTIALS_PATH points at is outside your home and is not copied"],
-      ["bring", undefined, "stdio: ~/.local/bin/uv --directory ~/whatsapp-mcp/server run main.py; needs uv, installed on the machine when missing; depends on ~/whatsapp-mcp/server, which comes along only if a row carries it; carries no secret"],
+      ["bring", undefined, "stdio: ~/.local/bin/uv --directory ~/whatsapp-mcp/server run …; needs uv, installed on the machine when missing; depends on ~/whatsapp-mcp/server, which comes along only if a row carries it; carries a secret: arg 4 (7 B)"],
       ["skip", undefined, "stdio: npx @modelcontextprotocol/server-memory; runs via npx; ~/.claude/memory.json is not on this computer; unticked, tick it if the server creates it on first start; carries no secret"],
       ["skip", undefined, "stdio: uvx mcp-server-sqlite --db-path ~/notes.db; needs uv, installed on the machine when missing; ~/notes.db is not on this computer; unticked, tick it if the server creates it on first start; carries no secret"],
     ]);
@@ -172,7 +192,7 @@ describe("mcp servers", () => {
     });
     const rows = await detectMcp(fakeHost({ files: { "~/.claude.json": config } }));
     expect(rows.map(r => r.detail)).toEqual([
-      "stdio: npx mcp-remote (mcp.notion.com/mcp) --static-oauth-client-info …; runs via npx; carries a secret: flag --static-oauth-client-info (48 B); no saved sign-in; the browser sign-in runs again on the machine",
+      "stdio: npx mcp-remote … --static-oauth-client-info …; runs via npx; carries secrets: arg 2 (26 B), flag --static-oauth-client-info (48 B); no saved sign-in; the browser sign-in runs again on the machine",
       "stdio: npx some-server --auth --transport http-only; runs via npx; carries no secret",
     ]);
     expect(JSON.stringify(rows)).not.toContain("shh-secret");

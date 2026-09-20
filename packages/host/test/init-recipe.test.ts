@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Manifest, type ManifestEntry, parseManifest } from "@wsp/collect";
@@ -211,6 +211,20 @@ describe("consent rows", () => {
     const stale = { ...token, choice: "skip" as const };
     const rows = answeredRows({ entries: [byId("agents/claude"), stale, byId("shell/zshrc")] }, new Set(["agents/claude", "agents/mcp/claude/github"]), new Map([["agents/mcp/claude/github", "copy"], ["agents/claude", "nonsense"]]));
     expect(rows).toEqual([{ ...byId("agents/claude"), bring: true }, { ...token, bring: true, choice: "copy" }, { ...byId("shell/zshrc"), bring: false }]);
+  });
+
+  it("the saved recipe is this user's alone, whatever mode the file stood at", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    try {
+      const path = join(dir, "golden-recipe.json");
+      saveRecipe(path, FIXTURE, new Set(["shell/zshrc"]));
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      writeFileSync(path, "{}\n", { mode: 0o644 });
+      saveRecipe(path, FIXTURE, new Set(["shell/zshrc"]));
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("the recipe round-trips a consent row and an excludes list: tick, answer and excludes come back as saved", () => {

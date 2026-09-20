@@ -3,7 +3,7 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginSignIn, loginStatePaths, mintsToken } from "@wsp/catalog";
@@ -284,9 +284,13 @@ export function answeredRows(manifest: Manifest, ticks: ReadonlySet<string>, cho
   });
 }
 
+/** The rows as the screens left them, beside the state. The file holds every login answer and the detail of every
+ * definition the collector read, so it is this user's alone; a mode handed to the write applies on creation, and a
+ * file an older build left wider is repaired. */
 export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ entries: answeredRows(manifest, ticks, choices) }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ entries: answeredRows(manifest, ticks, choices) }, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 export function agentName(e: ManifestEntry): string {

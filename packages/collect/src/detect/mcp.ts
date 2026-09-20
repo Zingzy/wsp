@@ -108,16 +108,12 @@ const HIDDEN_FLAGS = new Set(["--header", "-H", "--static-oauth-client-info"]);
 /** A flag takes the next argument as its value unless that argument is itself a flag. */
 const takesValue = (next: string | undefined): next is string => next !== undefined && !next.startsWith("-");
 
-/** `--api-key`, `--token=`: a flag whose name is secret-shaped; its value is a secret. */
-const secretFlag = (arg: string): string | undefined => {
-  const m = /^(--?[A-Za-z][\w-]*)(=|$)/.exec(arg);
-  return m !== null && secretNamed(m[1]!.replace(/-/g, "_")) ? m[1]! : undefined;
-};
-/** `API_KEY=...` as an argument. */
-const secretAssign = (arg: string): string | undefined => {
-  const m = /^([A-Za-z_]\w*)=/.exec(arg);
-  return m !== null && secretNamed(m[1]!) ? m[1]! : undefined;
-};
+/** The flag an argument names: `--api-key`, `--token=`, `-H`; nothing where the argument is no flag. */
+const flagName = (arg: string): string | undefined => /^(--?[A-Za-z][\w-]*)(=|$)/.exec(arg)?.[1];
+/** The variable an `API_KEY=...` argument sets. */
+const assignName = (arg: string): string | undefined => /^([A-Za-z_]\w*)=/.exec(arg)?.[1];
+/** A flag whose value is never shown: one that hides it whatever its name says, or a secret-shaped name. */
+const hidesValue = (flag: string): boolean => HIDDEN_FLAGS.has(flag) || secretNamed(flag.replace(/-/g, "_"));
 
 const shownUrl = (url: string): string => {
   try {
@@ -128,32 +124,69 @@ const shownUrl = (url: string): string => {
   }
 };
 
-/** The definition in a few words: the command and its arguments with npx's yes flag dropped, urls shown as
- * host and path, and every value that is a secret hidden: after --header, after or inside a secret-named flag,
- * inside a secret-named NAME=value. */
-function transportLine(t: McpTransport, home: string): string {
-  if (t.kind === "http") return `http: ${shownUrl(t.url)}`;
-  const shown: string[] = [];
+/** The runners a definition names its own program after; every other command is the program itself. */
+const RUNNERS = new Set(["npx", "uvx", "uv"]);
+
+/** What one argument of a stdio definition comes to: the words the detail line shows for it, and how the count of
+ * what the row carries names it. */
+interface ArgRead {
+  /** Nothing where the line drops the argument. */
+  show?: string;
+  /** Nothing where the argument carries no value of the person's. */
+  secret?: string;
+}
+
+/** The one reading of a definition's arguments, for the line a person reads and for what the row carries alike.
+ * npx's own yes switch is dropped and takes no value. A dashed flag's next argument is that flag's value, shown
+ * unless the flag is secret-named or hides its value whatever its name says. Every argument past the program is
+ * a value this definition does not name, so it is hidden and counted, and the row takes the copy answer. */
+function readArgs(t: { command: string; args: readonly string[] }, home: string): ArgRead[] {
+  const out: ArgRead[] = [];
+  const shown = (a: string): string => (isUrl(a) ? `(${shownUrl(a)})` : tilde(home, a));
+  const size = (v: string): string => `(${Buffer.byteLength(v)} B)`;
+  let program = RUNNERS.has(binaryOf(t.command, home));
   for (let i = 0; i < t.args.length; i++) {
     const a = t.args[i]!;
-    if (a === "-y" || a === "--yes") continue;
-    const flag = secretFlag(a);
-    const assign = secretAssign(a);
-    if (HIDDEN_FLAGS.has(a) || (flag !== undefined && !a.includes("="))) {
-      shown.push(a);
-      if (takesValue(t.args[i + 1])) {
-        shown.push("…");
-        i++;
+    if (a === "-y" || a === "--yes" || a === "--") {
+      out.push(a === "--" ? { show: a } : {});
+      continue;
+    }
+    if (a.startsWith("-")) {
+      const flag = flagName(a);
+      const hides = flag !== undefined && hidesValue(flag);
+      if (a.includes("=")) {
+        const value = a.slice(a.indexOf("=") + 1);
+        out.push(hides ? { show: `${flag!}=…`, secret: `flag ${flag!} ${size(value)}` } : { show: shown(a) });
+        continue;
       }
+      out.push({ show: a });
+      const value = t.args[i + 1];
+      if (!takesValue(value)) continue;
+      i++;
+      out.push(hides ? { show: "…", secret: `flag ${a} ${size(value)}` } : { show: shown(value) });
       continue;
     }
-    if (flag !== undefined || assign !== undefined) {
-      shown.push(`${flag ?? assign}=…`);
+    const assign = assignName(a);
+    if (assign !== undefined) {
+      out.push({ show: `${assign}=…`, secret: `arg ${assign} ${size(a.slice(a.indexOf("=") + 1))}` });
       continue;
     }
-    shown.push(isUrl(a) ? `(${shownUrl(a)})` : tilde(home, a));
+    if (program) {
+      program = false;
+      out.push({ show: shown(a) });
+      continue;
+    }
+    out.push({ show: "…", secret: `arg ${i + 1} ${size(a)}` });
   }
-  const cut = shown.length > 5 ? [...shown.slice(0, 5), "…"] : shown;
+  return out;
+}
+
+/** The definition in a few words: the command and its arguments as the reading above leaves them, urls shown as
+ * host and path, and every value hidden behind a placeholder. */
+function transportLine(t: McpTransport, home: string): string {
+  if (t.kind === "http") return `http: ${shownUrl(t.url)}`;
+  const words = readArgs(t, home).flatMap(r => (r.show === undefined ? [] : [r.show]));
+  const cut = words.length > 5 ? [...words.slice(0, 5), "…"] : words;
   return `stdio: ${[tilde(home, t.command), ...cut].join(" ")}`;
 }
 
@@ -225,20 +258,7 @@ async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTok
     }
     out.secrets.push(`env ${k} (${Buffer.byteLength(v)} B)`);
   }
-  for (let i = 0; i < t.args.length; i++) {
-    const a = t.args[i]!;
-    const flag = secretFlag(a);
-    const assign = secretAssign(a);
-    const hidden = HIDDEN_FLAGS.has(a) ? a : flag;
-    if (hidden !== undefined && !a.includes("=")) {
-      const value = t.args[i + 1];
-      if (!takesValue(value)) continue;
-      out.secrets.push(`flag ${hidden} (${Buffer.byteLength(value)} B)`);
-      i++;
-    } else if (flag !== undefined || assign !== undefined) {
-      out.secrets.push(`${flag !== undefined ? "flag" : "arg"} ${flag ?? assign} (${Buffer.byteLength(a.slice(a.indexOf("=") + 1))} B)`);
-    }
-  }
+  for (const r of readArgs(t, host.home)) if (r.secret !== undefined) out.secrets.push(r.secret);
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
