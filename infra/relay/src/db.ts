@@ -34,6 +34,8 @@ export interface LinkRow {
   host_id: string | null;
   created_at: string;
   expires_at: string;
+  /** The address the start came from, empty where the connector named none; what the caps on the start are counted under. */
+  source: string;
 }
 
 export async function accountOf(env: Env, id: string): Promise<AccountRow | undefined> {
@@ -123,9 +125,20 @@ export async function deleteClient(env: Env, id: string): Promise<void> {
 }
 
 export async function insertLink(env: Env, row: LinkRow): Promise<void> {
-  await env.DB.prepare("INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at)
+  await env.DB.prepare("INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at, row.source)
     .run();
+}
+
+/** What one source already holds here: its codes still waiting to be approved, and how many it started since the
+ * moment named. One statement, since the start reads both before it writes anything. */
+export async function linksFrom(env: Env, source: string, since: string): Promise<{ pending: number; recent: number }> {
+  const counts = await env.DB.prepare(
+    "SELECT SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS recent FROM link_codes WHERE source = ?",
+  )
+    .bind(since, source)
+    .first<{ pending: number | null; recent: number | null }>();
+  return { pending: counts?.pending ?? 0, recent: counts?.recent ?? 0 };
 }
 
 export async function linkByCode(env: Env, code: string): Promise<LinkRow | undefined> {

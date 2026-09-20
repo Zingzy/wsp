@@ -215,14 +215,17 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
 export const cfOk = (result: unknown): unknown => ({ success: true, errors: [], messages: [], result });
 
 /** The whole device code flow for one host or one client, as the tests that start from a linked host need it:
- * the code, the sign in, the approval and the poll that hands the token over. */
+ * the code, the sign in, the approval and the poll that hands the token over. `who.from` is the address the start
+ * is made from, which the relay counts its caps under: a case that starts several links gives each its own. */
 export async function linkedVia(
   relay: RelayHarness,
   kind: "host" | "client",
   name: string,
-  who: { login: string; githubId: string; cookie?: string },
+  who: { login: string; githubId: string; cookie?: string; from?: string },
 ): Promise<{ token: string; hostId?: string; cookie: string }> {
-  const start = (await (await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }) })).json()) as { code: string; pollToken: string };
+  const start = (await (
+    await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }), ...(who.from !== undefined ? { headers: { "cf-connecting-ip": who.from } } : {}) })
+  ).json()) as { code: string; pollToken: string };
   const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId, start.code));
   const page = await relay.fetch(`/link/verify?code=${start.code}`, { headers: { cookie } });
   const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";

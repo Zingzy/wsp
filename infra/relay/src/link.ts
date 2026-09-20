@@ -4,7 +4,7 @@
 // it as themselves, and the box collects a token of its own once. The code is
 // spent by the approval and the token by the first poll that takes it.
 import { jsonBody } from "./body.js";
-import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertClient, insertHost, insertLink, linkByCode, linkByPoll, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
@@ -16,6 +16,11 @@ import { NONCE_COOKIE, SESSION_COOKIE, cookieOf, mintSession, mintStamp, mintTok
 export const LINK_MS = 15 * 60_000;
 /** How long a waiting box sleeps between polls, which it reads off the start answer rather than deciding for itself. */
 export const POLL_AFTER_MS = 3_000;
+/** A start takes no token, so what one caller can grow here is bounded twice: the codes of theirs still waiting,
+ * and the starts they make in a minute. */
+export const LINK_PENDING_PER_SOURCE = 5;
+export const LINK_STARTS_PER_MINUTE = 10;
+const STARTS_WINDOW_MS = 60_000;
 
 const LINK_KINDS = ["host", "client"] as const;
 type LinkKind = (typeof LINK_KINDS)[number];
@@ -24,6 +29,10 @@ const NAME_MAX = 64;
 
 const isExpired = (row: LinkRow, now: number): boolean => Date.parse(row.expires_at) <= now;
 
+/** Who asked, as the connector in front of this Worker names them. A request it named nobody for shares the empty
+ * source with every other such request, which holds them to one budget between them rather than to none. */
+const sourceOf = (ctx: Ctx): string => ctx.req.headers.get("cf-connecting-ip") ?? "";
+
 /** A box asks for a code. The poll token it gets back is the only thing that can collect the answer, and only its hash is kept. */
 export async function linkStart(ctx: Ctx): Promise<Response> {
   const body = await jsonBody(ctx);
@@ -31,10 +40,15 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
   if (typeof kind !== "string" || !LINK_KINDS.includes(kind as LinkKind)) throw refuse(400, `a link is for ${LINK_KINDS.join(" or ")}, not ${JSON.stringify(kind)}`);
   const name = typeof body["name"] === "string" ? body["name"].trim().slice(0, NAME_MAX) : "";
   if (name === "") throw refuse(400, "a link needs the name to show the person on the page");
-  const pollToken = newSecret(ctx.deps.random);
   const now = ctx.deps.now();
   // A Worker has no clock of its own, so the one road anybody takes before a code exists is where the dead ones go.
   await sweepLinks(ctx.env, now);
+  // Both counts are read, and both refusals happen, before a row of this caller's exists.
+  const source = sourceOf(ctx);
+  const held = await linksFrom(ctx.env, source, new Date(now - STARTS_WINDOW_MS).toISOString());
+  if (held.pending >= LINK_PENDING_PER_SOURCE) throw refuse(429, `there are already ${LINK_PENDING_PER_SOURCE} codes waiting from here; approve one on the page, or wait fifteen minutes for them to run out`);
+  if (held.recent >= LINK_STARTS_PER_MINUTE) throw refuse(429, "too many links started from here; wait a minute and run the command again");
+  const pollToken = newSecret(ctx.deps.random);
   const row: LinkRow = {
     code: newCode(ctx.deps.random),
     poll_hash: await sha256Hex(pollToken),
@@ -45,6 +59,7 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
     host_id: null,
     created_at: new Date(now).toISOString(),
     expires_at: new Date(now + LINK_MS).toISOString(),
+    source,
   };
   await insertLink(ctx.env, row);
   return Response.json({

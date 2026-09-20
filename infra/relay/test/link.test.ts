@@ -3,11 +3,16 @@ import { describe, expect, it } from "vitest";
 import { readToken } from "../src/tokens.js";
 import { RELAY_ORIGIN, firstCookie, relayHarness, signIn, type RelayHarness } from "./relay.js";
 
-async function started(relay: RelayHarness, kind: "host" | "client", name: string): Promise<{ code: string; pollToken: string; verifyUrl: string }> {
-  const res = await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }) });
+/** A start, from an address of its own where the case makes several: the relay counts its caps per source, and a
+ * case that shared one would be held to them. */
+async function started(relay: RelayHarness, kind: "host" | "client", name: string, from?: string): Promise<{ code: string; pollToken: string; verifyUrl: string }> {
+  const res = await startFrom(relay, kind, name, from);
   expect(res.status).toBe(200);
   return (await res.json()) as { code: string; pollToken: string; verifyUrl: string };
 }
+
+const startFrom = (relay: RelayHarness, kind: "host" | "client", name: string, from?: string): Promise<Response> =>
+  relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }), ...(from !== undefined ? { headers: { "cf-connecting-ip": from } } : {}) });
 
 const poll = (relay: RelayHarness, pollToken: string): Promise<Response> => relay.fetch("/link/poll", { method: "POST", body: JSON.stringify({ pollToken }) });
 
@@ -150,8 +155,8 @@ describe("the device code flow", () => {
 
   it("sweeps the codes nobody came back for, and the host an approval left behind", async () => {
     const relay = await relayHarness();
-    for (const name of ["one", "two", "three"]) await started(relay, "host", name);
-    const approved = await started(relay, "host", "four");
+    for (const [at, name] of ["one", "two", "three"].entries()) await started(relay, "host", name, `10.0.0.${at + 1}`);
+    const approved = await started(relay, "host", "four", "10.0.0.9");
     const cookie = await signIn(relay, "maya", "4242", approved.code);
     const page = await relay.fetch(`/link/verify?code=${approved.code}`, { headers: { cookie } });
     const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
@@ -160,7 +165,7 @@ describe("the device code flow", () => {
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 1 });
 
     relay.tick(16 * 60_000);
-    await started(relay, "host", "five");
+    await started(relay, "host", "five", "10.0.0.5");
     // Only the fresh one is left, and the host nobody ever collected a token for went with its code.
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 1 });
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 0 });
@@ -198,7 +203,7 @@ describe("the device code flow", () => {
   it("refuses an approve with no session and one stamped for another code", async () => {
     const relay = await relayHarness();
     const { code } = await started(relay, "host", "box");
-    const other = await started(relay, "host", "attic");
+    const other = await started(relay, "host", "attic", "10.0.0.2");
     const cookie = await signIn(relay, "maya", "4242", code);
     const page = await relay.fetch(`/link/verify?code=${code}`, { headers: { cookie } });
     const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
@@ -225,14 +230,14 @@ describe("the device code flow", () => {
     };
     expect((await approve(first.code)).status).toBe(200);
 
-    const second = await started(relay, "host", "box");
+    const second = await started(relay, "host", "box", "10.0.0.2");
     const refused = await approve(second.code);
     expect(refused.status).toBe(409);
     expect(await refused.text()).toContain("--name");
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 1 });
 
     // Another person's account is another namespace: the same name there is fine.
-    const theirs = await started(relay, "host", "box");
+    const theirs = await started(relay, "host", "box", "10.0.0.3");
     const sam = await signIn(relay, "sam", "7", theirs.code);
     const page = await relay.fetch(`/link/verify?code=${theirs.code}`, { headers: { cookie: sam } });
     const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
@@ -257,7 +262,7 @@ describe("the device code flow", () => {
     const relay = await relayHarness();
     const first = await started(relay, "host", "box");
     await signIn(relay, "maya", "4242", first.code);
-    const second = await started(relay, "host", "attic");
+    const second = await started(relay, "host", "attic", "10.0.0.2");
     const cookie = await signIn(relay, "maya-elsewhere", "4242", second.code);
 
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM accounts").first()) as Record<string, number>).toMatchObject({ n: 1 });
@@ -280,5 +285,55 @@ describe("the device code flow", () => {
     const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
     expect(claims?.kind).toBe("client");
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 0 });
+  });
+});
+
+describe("what one caller can grow here", () => {
+  it("refuses the sixth code waiting from one address, and takes it again once the old ones ran out", async () => {
+    const relay = await relayHarness();
+    for (const at of [1, 2, 3, 4, 5]) expect((await startFrom(relay, "host", `box ${at}`, "203.0.113.7")).status).toBe(200);
+    const sixth = await startFrom(relay, "host", "box 6", "203.0.113.7");
+    expect(sixth.status).toBe(429);
+    expect(((await sixth.json()) as { error: string }).error).toContain("codes waiting from here");
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 5 });
+
+    // The five ran out, and the sweep the next start makes is what frees the budget.
+    relay.tick(16 * 60_000);
+    expect((await startFrom(relay, "host", "box 6", "203.0.113.7")).status).toBe(200);
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 1 });
+  });
+
+  it("refuses the eleventh start in a minute from one address, and takes it once the minute passed", async () => {
+    const relay = await relayHarness();
+    // Approved codes are still that address's starts, so ten of them is the minute's budget whatever became of them.
+    for (const at of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+      expect((await startFrom(relay, "host", `box ${at}`, "203.0.113.8")).status).toBe(200);
+      await relay.db.prepare("UPDATE link_codes SET state = 'approved'").run();
+    }
+    const eleventh = await startFrom(relay, "host", "box 11", "203.0.113.8");
+    expect(eleventh.status).toBe(429);
+    expect(((await eleventh.json()) as { error: string }).error).toContain("wait a minute");
+
+    relay.tick(61_000);
+    expect((await startFrom(relay, "host", "box 11", "203.0.113.8")).status).toBe(200);
+  });
+
+  it("counts one address's codes against that address alone", async () => {
+    const relay = await relayHarness();
+    for (const at of [1, 2, 3, 4, 5]) expect((await startFrom(relay, "host", `mine ${at}`, "203.0.113.7")).status).toBe(200);
+    for (const at of [1, 2, 3, 4, 5]) expect((await startFrom(relay, "host", `theirs ${at}`, "198.51.100.4")).status).toBe(200);
+    expect((await startFrom(relay, "host", "one more", "203.0.113.7")).status).toBe(429);
+    expect((await startFrom(relay, "host", "one more", "198.51.100.4")).status).toBe(429);
+    expect((await startFrom(relay, "host", "one more", "192.0.2.19")).status).toBe(200);
+  });
+
+  it("writes the address the start came from, and nothing where the connector named none", async () => {
+    const relay = await relayHarness();
+    const { code } = await started(relay, "host", "box", "203.0.113.7");
+    const row = (await relay.db.prepare("SELECT * FROM link_codes WHERE code = ?").bind(code).first()) as Record<string, string>;
+    expect(row["source"]).toBe("203.0.113.7");
+    const bare = await started(relay, "host", "attic");
+    const bareRow = (await relay.db.prepare("SELECT * FROM link_codes WHERE code = ?").bind(bare.code).first()) as Record<string, string>;
+    expect(bareRow["source"]).toBe("");
   });
 });
