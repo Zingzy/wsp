@@ -63,8 +63,12 @@ export function vaultOf(env: Readonly<Record<string, string | undefined>>): Reco
 }
 
 /** The one writer of the wsp home's .env: a key line it knows is rewritten in place and the rest appended, through
- * the owner's writer. */
+ * the owner's writer. One variable is one line here and one line in the reader above, so a value carrying a line
+ * break is refused before anything is written rather than becoming a second variable of its own. */
 export function writeEnvFile(path: string, set: Record<string, string>): void {
+  for (const [name, value] of Object.entries(set)) {
+    if (/[\n\r]/.test(value)) throw new Error(`the value for ${name} carries a line break, and one variable is one line`);
+  }
   const pending = new Map(Object.entries(set));
   const lines: string[] = [];
   if (existsSync(path)) {

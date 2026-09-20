@@ -9,7 +9,7 @@ import { exitClassOf, keyRefusedLine, LOOPBACK, savedKeyRefusedLine } from "@wsp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, optsFor, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
-import { keysOf, savedEnv, vaultOf } from "../src/env-keys.js";
+import { keysOf, savedEnv, vaultOf, writeEnvFile } from "../src/env-keys.js";
 import { vaultNow } from "../src/cli.js";
 import { BOX_KEY_ENV, PROVIDER_ENV, SOLARI_KEY_ENV, providerBackendFor, wiredProviderId } from "../src/providers.js";
 
@@ -226,6 +226,23 @@ describe("the environment every verb is handed", () => {
     } finally {
       process.chdir(back);
     }
+  });
+});
+
+describe("the one writer of a host's own .env", () => {
+  it("refuses a value that would write a second variable line, and leaves the file as it stood", () => {
+    setup();
+    mkdirSync(home);
+    const envPath = join(home, ".env");
+    writeFileSync(envPath, "OTHER=keep me\n");
+    for (const carried of ["sk-ant-x-one\nANTHROPIC_API_KEY=sk-ant-x-two", "sk-ant-x-one\rANTHROPIC_API_KEY=sk-ant-x-two"]) {
+      expect(() => writeEnvFile(envPath, { ANTHROPIC_API_KEY: carried })).toThrow("the value for ANTHROPIC_API_KEY carries a line break, and one variable is one line");
+    }
+    expect(readFileSync(envPath, "utf8")).toBe("OTHER=keep me\n");
+
+    // A value with no break in it is written as it always was.
+    writeEnvFile(envPath, { ANTHROPIC_API_KEY: "sk-ant-x-fine" });
+    expect(readFileSync(envPath, "utf8").split("\n")).toEqual(expect.arrayContaining(["OTHER=keep me", "ANTHROPIC_API_KEY=sk-ant-x-fine"]));
   });
 });
 
