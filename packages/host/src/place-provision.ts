@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import type { Manifest, Platform } from "@wsp/collect";
 import { agentStateFile, provisionBox, provisionPlanOf, type BrewTable } from "@wsp/engine";
 import { probePath } from "@wsp/protocol";
+import { TOOL_PREFIX } from "@wsp/catalog";
 import type { PlaceProvisioner } from "@wsp/runtime";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
@@ -41,14 +42,17 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       // directory under the home it shares with the workspaces on it left out, since a process inside one of them
       // writes there and the job runs as root outside them.
       const path = probePath(on.home);
+      // And the folder every manager installs under there: wsp's own under /opt, which that list holds through
+      // /usr/local/bin and no workspace on that computer can write. Nothing of the job lands under the home.
+      const prefix = TOOL_PREFIX;
       const imp = planImport(
         rows.filter(e => e.bring === true),
         // The files that travel to a computer somebody owns are the agents' own: their skills, their standing
         // instructions and their configuration, in the agents' homes there. A dotfile, a login's store and a
         // shell's rc are the person's computer, and the computer they joined is one they already live on.
-        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile, path },
+        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile, path, prefix },
       );
-      return provisionPlanOf(imp, recipe.at, path);
+      return provisionPlanOf(imp, recipe.at, path, prefix);
     },
     run: (machine, plan, stage, on) => provisionBox(machine, plan, stage, on),
   };

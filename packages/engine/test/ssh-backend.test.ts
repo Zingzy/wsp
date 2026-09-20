@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ARCH_READ, OS_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -96,9 +96,9 @@ describe("ssh backend", () => {
     expect(shape).toEqual({ cpu: 8, memMb: 16000 });
     // The turn's environment is the machine's own login: its home, who it runs as, and the PATH their shell gives.
     expect(login).toEqual({ HOME: "/home/dev", USER: "dev", PATH: "/home/dev/.local/bin:/usr/bin" });
-    expect(sshReachOf(machine)).toEqual(REACH);
+    expect(parseSshMachineId(machine.id)).toEqual(REACH);
     // The record keeps the id alone, and a later host process reaches the same machine from it.
-    expect(sshReachOf(await backend.get(machine.id))).toEqual(REACH);
+    expect(parseSshMachineId((await backend.get(machine.id)).id)).toEqual(REACH);
   });
 
   it("holds each folder of the machine's own PATH to the rule the home is held to, and falls back with nothing left", () => {

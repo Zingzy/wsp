@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -219,12 +219,17 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain('Environment="PATH=/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin"');
   });
 
-  it("adds its BROWSER line to the person's own login file once, behind its own name", () => {
+  it("adds its BROWSER line to the person's own login file once, guarded on the file it names", () => {
     const s = script();
     expect(s).toContain("printf 'export BROWSER=%s\\nunset DISPLAY\\n' '/home/maya/.local/bin/wsp-open' > '/home/maya/.wsp/profile.sh'");
-    // Their .profile is theirs: the line is added only when it is not there, so a second deploy adds nothing, and
-    // the line itself is the one the sweep on either road matches by.
-    expect(s).toContain(`grep -q '/home/maya/.wsp/profile.sh' '/home/maya/.profile' 2>/dev/null || printf '%s\\n' '${profileSourceLine("/home/maya/.wsp/profile.sh")}' >> '/home/maya/.profile'`);
+    // A workspace on a box binds the computer's /root and keeps its own wsp folder inside it, so the file the
+    // line names is not there and a login shell printed an error for it: the line reads the file first.
+    expect(profileSourceLine("/home/maya/.wsp/profile.sh")).toBe("[ -f /home/maya/.wsp/profile.sh ] && . /home/maya/.wsp/profile.sh");
+    // Their .profile is theirs: every line naming wsp's file goes out before this one goes in, so a second
+    // deploy leaves one line and a computer joined before the guard is left with the guarded spelling alone.
+    expect(s).toContain(`grep -vF '/home/maya/.wsp/profile.sh' '/home/maya/.profile'`);
+    expect(s).toContain(`printf '%s\\n' '${profileSourceLine("/home/maya/.wsp/profile.sh")}' >> '/home/maya/.profile'`);
+    expect(s).not.toContain("grep -q '/home/maya/.wsp/profile.sh'");
   });
 
   it("never writes the token into a command, since every account on the machine can read a running one", () => {
@@ -364,7 +369,9 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     }
     // The one line wsp added to their own login file goes too: left behind it would print an error at every
     // login for a file that is gone.
-    expect(off).toContain(`grep -vF '. ${at.profileFile}' '/home/maya/.profile'`);
+    // Matched by the file it names and not by one spelling of the line, so the removal takes out the line a
+    // computer joined before the guard carries as surely as the one written now.
+    expect(off).toContain(`grep -vF '${at.profileFile}' '/home/maya/.profile'`);
     // The working copy goes whether the rewrite landed or not: a read that failed must not leave them an empty
     // login file, and must not leave a file of wsp's beside their own either.
     expect(off).toContain("rm -f '/home/maya/.profile.wsp-out'");
@@ -402,7 +409,8 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
       expect(existsSync(`${join(home, ".profile")}.wsp-out`)).toBe(false);
 
-      // And with wsp's line in it, the line goes and everything else stays, the symlink and inode with it.
+      // And with wsp's line in it, in the spelling a computer joined before the guard carries, the line goes and
+      // everything else stays, the symlink and inode with it.
       const at = sshDaemonPaths(home);
       writeFileSync(real, `# mine\n. ${at.profileFile}\nexport EDITOR=vim\n`);
       const kept = statSync(real).ino;
@@ -410,6 +418,38 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       expect(readFileSync(real, "utf8")).toBe(theirs);
       expect(statSync(real).ino).toBe(kept);
       expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
+
+      // The guarded spelling a deploy writes now goes the same way, and a file holding nothing but wsp's own line
+      // loses it too, which reading what grep says about a file it selected nothing from is there for.
+      writeFileSync(real, `# mine\n[ -f ${at.profileFile} ] && . ${at.profileFile}\n`);
+      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
+      expect(readFileSync(real, "utf8")).toBe("# mine\n");
+      writeFileSync(real, `. ${at.profileFile}\n`);
+      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
+      expect(readFileSync(real, "utf8")).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes its one line under set -e on a login with no file of its own, and leaves one line on a second deploy", async () => {
+    // The deploy runs under set -e, so the step that takes wsp's older line out must not fail on a login file
+    // that is not there, nor on one holding nothing else; the append makes the file as the old step did.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-profile-step-"));
+    try {
+      const home = join(dir, "home");
+      mkdirSync(home, { recursive: true });
+      const place = sshDaemonPlace({ home, path: "/usr/bin" });
+      const step = profileSourceStep(place).join("\n");
+      const run = async (): Promise<void> => void (await promisify(execFile)("sh", ["-ec", step]));
+      await run();
+      expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`${profileSourceLine(place.profileFile)}\n`);
+      // A second deploy replaces it rather than sitting beside it, and a line of theirs is kept.
+      writeFileSync(join(home, ".profile"), `. ${place.profileFile}\nexport EDITOR=vim\n`);
+      await run();
+      expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`export EDITOR=vim\n${profileSourceLine(place.profileFile)}\n`);
+      await run();
+      expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`export EDITOR=vim\n${profileSourceLine(place.profileFile)}\n`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
