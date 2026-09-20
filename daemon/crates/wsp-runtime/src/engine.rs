@@ -13,7 +13,11 @@
 //!
 //! One engine connection per client request, both sides told to close: the Docker client pools connections and
 //! sends its next request on an idle one, and the head of every request has to be read here, so keep-alive is
-//! turned off rather than framed. An upgrade (exec start, attach) is copied raw once the head has passed.
+//! turned off rather than framed. What the client sends after the head is copied on within the request's own
+//! framing, its Content-Length or its chunks, and the connection to the engine is closed there: a second request
+//! pipelined behind the body reaches nothing. The two routes the engine may hand a connection over on, an attach
+//! and an exec start, keep their connection headers and are copied raw once the engine has taken them; an upgrade
+//! asked for on any other route is dropped from the head before it goes.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -24,7 +28,7 @@ use std::sync::Arc;
 
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use wsp_frames::numbers::DAEMON_ROOTS_PATH;
 
@@ -108,9 +112,10 @@ pub enum Route {
         id: String,
         verb: Option<String>,
     },
-    /// A route naming one exec, whose container must be the workspace's.
+    /// A route naming one exec, whose container must be the workspace's; `verb` is what follows the id.
     Exec {
         id: String,
+        verb: Option<String>,
     },
     Network {
         id: String,
@@ -119,6 +124,19 @@ pub enum Route {
     Volume {
         name: String,
     },
+}
+
+impl Route {
+    /// Whether the engine may answer this request by handing the connection over: the two routes a Docker client
+    /// attaches a terminal through, and no other. Every other route's answer is one response, so an upgrade asked
+    /// for on one of them is a raw pipe to the box's engine and is not passed on.
+    pub fn hijacks(&self, method: &str) -> bool {
+        match self {
+            Route::Container { verb, .. } => method == "POST" && verb.as_deref() == Some("attach"),
+            Route::Exec { verb, .. } => method == "POST" && verb.as_deref() == Some("start"),
+            _ => false,
+        }
+    }
 }
 
 fn not_served(path: &str) -> String {
@@ -146,7 +164,7 @@ pub fn route(method: &str, path: &str) -> Route {
             Route::Refused(format!("{bare} reaches everything on this computer; remove the workspace's own by name"))
         }
         (Some("containers"), Some(id), verb) => Route::Container { id: id.to_owned(), verb: verb.map(str::to_owned) },
-        (Some("exec"), Some(id), _) => Route::Exec { id: id.to_owned() },
+        (Some("exec"), Some(id), verb) => Route::Exec { id: id.to_owned(), verb: verb.map(str::to_owned) },
         (Some("networks"), None, _) => Route::List,
         (Some("networks"), Some("create"), None) if method == "POST" => Route::Labelled,
         (Some("networks"), Some(id), verb) => Route::Network { id: id.to_owned(), verb: verb.map(str::to_owned) },
@@ -448,7 +466,6 @@ pub struct Head {
     pub headers: Vec<(String, String)>,
     pub content_length: Option<usize>,
     pub chunked: bool,
-    pub upgrade: bool,
 }
 
 /// Bytes up to and including the blank line that ends a head, and whatever came after it.
@@ -486,20 +503,20 @@ fn parse_request(head: &[u8]) -> Result<Head, String> {
     let find = |name: &str| headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_owned());
     let content_length = find("content-length").and_then(|v| v.parse().ok());
     let chunked = find("transfer-encoding").is_some_and(|v| v.to_ascii_lowercase().contains("chunked"));
-    let upgrade = find("connection").is_some_and(|v| v.to_ascii_lowercase().contains("upgrade")) || find("upgrade").is_some();
-    Ok(Head { method, path, headers, content_length, chunked, upgrade })
+    Ok(Head { method, path, headers, content_length, chunked })
 }
 
-/// The head as this proxy sends it on: the path given, the body's length named when known, and the connection told
-/// to close unless the request is an upgrade, whose connection headers ride along as they came.
-fn request_head(head: &Head, path: &str, body_length: Option<usize>) -> Vec<u8> {
+/// The head as this proxy sends it on: the path given, the body's length named where this socket rewrote the
+/// body, and the connection told to close. Where the body rides on in the client's own framing, that framing
+/// rides on the head with it, since the copy is held to it. Where the route is one the engine may hand the
+/// connection over on, the connection headers ride along as they came, since that hand-over is what they ask for.
+fn request_head(head: &Head, path: &str, body_length: Option<usize>, hijacks: bool) -> Vec<u8> {
     let mut out = format!("{} {} HTTP/1.1\r\n", head.method, path);
     for (name, value) in &head.headers {
         let lower = name.to_ascii_lowercase();
-        if lower == "content-length" || (lower == "connection" && !head.upgrade) {
-            continue;
-        }
-        if lower == "transfer-encoding" && body_length.is_some() {
+        if ((lower == "content-length" || lower == "transfer-encoding") && body_length.is_some())
+            || ((lower == "connection" || lower == "upgrade") && !hijacks)
+        {
             continue;
         }
         out.push_str(&format!("{name}: {value}\r\n"));
@@ -507,16 +524,26 @@ fn request_head(head: &Head, path: &str, body_length: Option<usize>) -> Vec<u8> 
     if let Some(n) = body_length {
         out.push_str(&format!("Content-Length: {n}\r\n"));
     }
-    if !head.upgrade {
+    if !hijacks {
         out.push_str("Connection: close\r\n");
     }
     out.push_str("\r\n");
     out.into_bytes()
 }
 
-/// A response head as the engine sent it, with the connection told to close unless it is an upgrade. Answers the
-/// status too.
-fn response_head(head: &[u8]) -> Result<(u16, Vec<u8>), String> {
+/// The two content types a hijacked answer carries under a 200, which the engine sends instead of a 101 where the
+/// client asked for no upgrade.
+const RAW_STREAMS: [&str; 2] = ["application/vnd.docker.raw-stream", "application/vnd.docker.multiplexed-stream"];
+
+/// The engine's answer as this proxy sends it on: the status, whether the engine handed the connection over, and
+/// the head with the connection told to close unless it did.
+struct Answer {
+    status: u16,
+    raw: bool,
+    head: Vec<u8>,
+}
+
+fn response_head(head: &[u8]) -> Result<Answer, String> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut response = httparse::Response::new(&mut headers);
     match response.parse(head) {
@@ -525,8 +552,15 @@ fn response_head(head: &[u8]) -> Result<(u16, Vec<u8>), String> {
         Err(e) => return Err(format!("a response head that does not parse: {e}")),
     }
     let status = response.code.ok_or("a response without a status")?;
+    let kind = response
+        .headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("content-type"))
+        .map(|h| String::from_utf8_lossy(h.value).trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let raw = status == 101 || (status == 200 && RAW_STREAMS.contains(&kind.as_str()));
     if status == 101 {
-        return Ok((status, head.to_vec()));
+        return Ok(Answer { status, raw, head: head.to_vec() });
     }
     let mut out = format!("HTTP/1.1 {status} {}\r\n", response.reason.unwrap_or(""));
     for h in response.headers.iter() {
@@ -536,7 +570,7 @@ fn response_head(head: &[u8]) -> Result<(u16, Vec<u8>), String> {
         out.push_str(&format!("{}: {}\r\n", h.name, String::from_utf8_lossy(h.value)));
     }
     out.push_str("Connection: close\r\n\r\n");
-    Ok((status, out.into_bytes()))
+    Ok(Answer { status, raw, head: out.into_bytes() })
 }
 
 fn dechunk(body: &[u8]) -> Vec<u8> {
@@ -629,11 +663,113 @@ fn encoded(word: &str) -> String {
     utf8_percent_encode(word, NON_ALPHANUMERIC).to_string()
 }
 
-/// What one request comes to after the fence: the head to send, the body to send, and whether a start's port hook
-/// runs once the engine has answered; or the response the client gets instead.
+/// What one request comes to after the fence: the head to send, the body to send with it, and the container whose
+/// published ports are joined once the engine has taken its start; or the response the client gets instead.
 enum Verdict {
-    Forward { head: Vec<u8>, body: Vec<u8>, started: bool },
+    Forward { head: Vec<u8>, body: Body, started: Option<String> },
     Answer(Vec<u8>),
+}
+
+/// The bytes of a request's body as the fence hands them on.
+enum Body {
+    /// Exactly these and nothing more: a body this socket read whole and wrote again.
+    Whole(Vec<u8>),
+    /// These, and then the rest of the request's own framing copied on from the client as it comes.
+    Framed(Vec<u8>),
+}
+
+/// What came from the client past the head, read on as the framing asks for more. What has been written on is
+/// dropped at each read, so a body of any size costs one buffer.
+struct Held<'a, S> {
+    client: &'a mut S,
+    bytes: Vec<u8>,
+    at: usize,
+}
+
+impl<'a, S: AsyncRead + Unpin> Held<'a, S> {
+    fn new(client: &'a mut S, bytes: Vec<u8>) -> Held<'a, S> {
+        Held { client, bytes, at: 0 }
+    }
+
+    fn rest(&self) -> &[u8] {
+        &self.bytes[self.at..]
+    }
+
+    /// One more read from the client; false where the client closed first.
+    async fn more(&mut self) -> Result<bool, String> {
+        self.bytes.drain(..self.at);
+        self.at = 0;
+        let mut buf = [0u8; 64 * 1024];
+        let n = self.client.read(&mut buf).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(false);
+        }
+        self.bytes.extend_from_slice(&buf[..n]);
+        Ok(true)
+    }
+
+    /// The next `n` bytes written on to the engine.
+    async fn copy<W: AsyncWrite + Unpin>(&mut self, engine: &mut W, n: usize) -> Result<(), String> {
+        let mut left = n;
+        while left > 0 {
+            if self.rest().is_empty() && !self.more().await? {
+                return Err("the body ended early".into());
+            }
+            let take = self.rest().len().min(left);
+            engine.write_all(&self.bytes[self.at..self.at + take]).await.map_err(|e| e.to_string())?;
+            self.at += take;
+            left -= take;
+        }
+        Ok(())
+    }
+
+    /// The next line with its own newline, written on to the engine and answered.
+    async fn copy_line<W: AsyncWrite + Unpin>(&mut self, engine: &mut W) -> Result<Vec<u8>, String> {
+        loop {
+            if let Some(end) = self.rest().windows(2).position(|w| w == b"\r\n") {
+                let line = self.bytes[self.at..self.at + end + 2].to_vec();
+                self.at += end + 2;
+                engine.write_all(&line).await.map_err(|e| e.to_string())?;
+                return Ok(line);
+            }
+            if self.rest().len() > HEAD_MAX {
+                return Err(format!("a chunked body's line over the {HEAD_MAX} bytes this socket reads"));
+            }
+            if !self.more().await? {
+                return Err("the body ended early".into());
+            }
+        }
+    }
+}
+
+/// The client's body copied on to the engine within the request's own framing and not one byte past it: a length
+/// counts down, a chunked body runs through its terminator and its trailer, and a request that frames no body
+/// carries none. Whatever the client sent behind the framing goes with the connection.
+async fn copy_body<S: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    client: &mut S,
+    engine: &mut W,
+    head: &Head,
+    rest: Vec<u8>,
+) -> Result<(), String> {
+    let mut held = Held::new(client, rest);
+    if let Some(length) = head.content_length {
+        return held.copy(engine, length).await;
+    }
+    if !head.chunked {
+        return Ok(());
+    }
+    loop {
+        let line = held.copy_line(engine).await?;
+        let text = String::from_utf8_lossy(&line);
+        let word = text.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(word, 16).map_err(|_| format!("a chunk size this socket cannot read: {word}"))?;
+        if size == 0 {
+            break;
+        }
+        held.copy(engine, size + 2).await?;
+    }
+    while held.copy_line(engine).await? != b"\r\n" {}
+    Ok(())
 }
 
 async fn read_body<S: AsyncRead + Unpin>(stream: &mut S, head: &Head, mut rest: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -675,15 +811,20 @@ fn split_query(path: &str) -> (&str, Option<&str>) {
 
 /// One request judged: the fence's reading of the head, the body where the route needs it, and every name it
 /// carries checked against the label.
-async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head, rest: Vec<u8>) -> Verdict {
+async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head, asked: Route, rest: Vec<u8>) -> Verdict {
     let refused = |sentence: String| Verdict::Answer(json_message(403, &sentence));
     let failed = |e: Error| Verdict::Answer(json_message(502, &format!("the engine did not answer: {e}")));
     let (bare, query) = split_query(&head.path);
-    match route(&head.method, &head.path) {
+    let hijacks = asked.hijacks(&head.method);
+    match asked {
         Route::Refused(sentence) => refused(sentence),
-        Route::Pass => Verdict::Forward { head: request_head(head, &head.path, None), body: rest, started: false },
+        Route::Pass => Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None },
         Route::List => match filtered_query(query, &fence.workspace) {
-            Ok(filtered) => Verdict::Forward { head: request_head(head, &format!("{bare}?{filtered}"), None), body: rest, started: false },
+            Ok(filtered) => Verdict::Forward {
+                head: request_head(head, &format!("{bare}?{filtered}"), None, hijacks),
+                body: Body::Framed(rest),
+                started: None,
+            },
             Err(e) => Verdict::Answer(json_message(400, &e)),
         },
         Route::Create => {
@@ -711,7 +852,7 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                 }
             }
             let text = body.to_string().into_bytes();
-            Verdict::Forward { head: request_head(head, &head.path, Some(text.len())), body: text, started: false }
+            Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
         }
         Route::Labelled => {
             let body = match read_body(stream, head, rest).await.and_then(|b| json_body(&b)) {
@@ -723,7 +864,7 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                 return Verdict::Answer(json_message(400, &e));
             }
             let text = body.to_string().into_bytes();
-            Verdict::Forward { head: request_head(head, &head.path, Some(text.len())), body: text, started: false }
+            Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
         }
         Route::Container { id, verb } => {
             match owned_container(fence, &id).await {
@@ -740,19 +881,25 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                     return refused(sentence);
                 }
                 let text = body.to_string().into_bytes();
-                return Verdict::Forward { head: request_head(head, &head.path, Some(text.len())), body: text, started: false };
+                return Verdict::Forward {
+                    head: request_head(head, &head.path, Some(text.len()), hijacks),
+                    body: Body::Whole(text),
+                    started: None,
+                };
             }
-            let started = verb.as_deref() == Some("start") && head.method == "POST";
-            Verdict::Forward { head: request_head(head, &head.path, None), body: rest, started }
+            let started = (verb.as_deref() == Some("start") && head.method == "POST").then(|| id.clone());
+            Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started }
         }
-        Route::Exec { id } => {
+        Route::Exec { id, .. } => {
             let container = match exec_container(fence, &id).await {
                 Ok(Some(container)) => container,
                 Ok(None) => return Verdict::Answer(no_such("exec instance", &id)),
                 Err(e) => return failed(e),
             };
             match owned_container(fence, &container).await {
-                Ok(Some(_)) => Verdict::Forward { head: request_head(head, &head.path, None), body: rest, started: false },
+                Ok(Some(_)) => {
+                    Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
+                }
                 Ok(None) => Verdict::Answer(no_such("exec instance", &id)),
                 Err(e) => failed(e),
             }
@@ -775,28 +922,25 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                     Err(e) => return failed(e),
                 }
                 let text = body.to_string().into_bytes();
-                return Verdict::Forward { head: request_head(head, &head.path, Some(text.len())), body: text, started: false };
+                return Verdict::Forward {
+                    head: request_head(head, &head.path, Some(text.len()), hijacks),
+                    body: Body::Whole(text),
+                    started: None,
+                };
             }
-            Verdict::Forward { head: request_head(head, &head.path, None), body: rest, started: false }
+            Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
         }
         Route::Volume { name } => match owned_volume(fence, &name).await {
-            Ok(true) => Verdict::Forward { head: request_head(head, &head.path, None), body: rest, started: false },
+            Ok(true) => Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None },
             Ok(false) => Verdict::Answer(no_such("volume", &name)),
             Err(e) => failed(e),
         },
     }
 }
 
-/// The container a start route named, off its path, for the port hook.
-fn container_of(path: &str) -> Option<String> {
-    match route("POST", path) {
-        Route::Container { id, .. } => Some(id),
-        _ => None,
-    }
-}
-
-/// One client connection: one request, judged, forwarded on a fresh engine connection, the answer copied back and
-/// both sides closed. A start that the engine took joins the container's published ports afterwards.
+/// One client connection: one request, judged, forwarded on a fresh engine connection, the body copied on within
+/// its own framing, the answer copied back and both sides closed. A start that the engine took joins the
+/// container's published ports afterwards.
 async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> {
     let (head_bytes, rest) = read_head(&mut client).await?;
     let head = match parse_request(&head_bytes) {
@@ -806,7 +950,9 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
             return Ok(());
         }
     };
-    let (mut forward, body, started) = match judge(&fence, &mut client, &head, rest).await {
+    let asked = route(&head.method, &head.path);
+    let hijacks = asked.hijacks(&head.method);
+    let (forward, body, started) = match judge(&fence, &mut client, &head, asked, rest).await {
         Verdict::Answer(bytes) => {
             client.write_all(&bytes).await?;
             let _ = client.shutdown().await;
@@ -814,7 +960,6 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
         }
         Verdict::Forward { head, body, started } => (head, body, started),
     };
-    forward.extend_from_slice(&body);
     let mut engine = match UnixStream::connect(&fence.engine).await {
         Ok(engine) => engine,
         Err(e) => {
@@ -823,24 +968,40 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
         }
     };
     engine.write_all(&forward).await?;
+    match body {
+        Body::Whole(bytes) => engine.write_all(&bytes).await?,
+        Body::Framed(rest) => {
+            if let Err(e) = copy_body(&mut client, &mut engine, &head, rest).await {
+                client.write_all(&json_message(400, &e)).await?;
+                return Ok(());
+            }
+        }
+    }
+    // The request ends here for every route but the two the engine hands a connection over on, so what the client
+    // sent behind the body reaches nothing.
+    if !hijacks {
+        let _ = engine.shutdown().await;
+    }
     let (answer_head, answer_rest) = read_head(&mut engine).await?;
-    let (status, answer) = match response_head(&answer_head) {
+    let answer = match response_head(&answer_head) {
         Ok(parsed) => parsed,
         Err(e) => {
             client.write_all(&json_message(502, &e)).await?;
             return Ok(());
         }
     };
-    client.write_all(&answer).await?;
+    client.write_all(&answer.head).await?;
     client.write_all(&answer_rest).await?;
-    let _ = tokio::io::copy_bidirectional(&mut client, &mut engine).await;
+    if hijacks && answer.raw {
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut engine).await;
+    } else {
+        let _ = tokio::io::copy(&mut engine, &mut client).await;
+    }
     let _ = client.shutdown().await;
-    if started && status == 204 {
-        if let Some(id) = container_of(&head.path) {
-            if let Ok(Some(inspect)) = owned_container(&fence, &id).await {
-                for (inside, box_port) in published_ports(&inspect) {
-                    fence.ports.published(&fence.workspace, inside, box_port);
-                }
+    if let (Some(id), 204) = (started, answer.status) {
+        if let Ok(Some(inspect)) = owned_container(&fence, &id).await {
+            for (inside, box_port) in published_ports(&inspect) {
+                fence.ports.published(&fence.workspace, inside, box_port);
             }
         }
     }
@@ -970,7 +1131,8 @@ mod tests {
         assert_eq!(route("DELETE", "/v1.55/containers/abc?force=1"), Route::Container { id: "abc".into(), verb: None });
         assert_eq!(route("GET", "/v1.55/containers/abc/logs?follow=1"), Route::Container { id: "abc".into(), verb: Some("logs".into()) });
         assert_eq!(route("POST", "/v1.55/containers/abc/attach"), Route::Container { id: "abc".into(), verb: Some("attach".into()) });
-        assert_eq!(route("POST", "/v1.55/exec/e1/start"), Route::Exec { id: "e1".into() });
+        assert_eq!(route("POST", "/v1.55/exec/e1/start"), Route::Exec { id: "e1".into(), verb: Some("start".into()) });
+        assert_eq!(route("GET", "/v1.55/exec/e1/json"), Route::Exec { id: "e1".into(), verb: Some("json".into()) });
         assert_eq!(route("GET", "/v1.55/networks/n1"), Route::Network { id: "n1".into(), verb: None });
         assert_eq!(route("GET", "/v1.55/volumes/v1"), Route::Volume { name: "v1".into() });
         for path in [
@@ -1189,29 +1351,102 @@ mod tests {
     fn heads_are_read_and_rewritten_with_the_connection_told_to_close() {
         let head = parse_request(b"POST /v1.55/containers/create?name=x HTTP/1.1\r\nHost: docker\r\nUser-Agent: Docker-Client\r\nContent-Length: 12\r\nContent-Type: application/json\r\n\r\n").unwrap();
         assert_eq!(
-            (head.method.as_str(), head.path.as_str(), head.content_length, head.chunked, head.upgrade),
-            ("POST", "/v1.55/containers/create?name=x", Some(12), false, false)
+            (head.method.as_str(), head.path.as_str(), head.content_length, head.chunked),
+            ("POST", "/v1.55/containers/create?name=x", Some(12), false)
         );
-        let sent = String::from_utf8(request_head(&head, "/v1.55/containers/create?name=x", Some(40))).unwrap();
+        let sent = String::from_utf8(request_head(&head, "/v1.55/containers/create?name=x", Some(40), false)).unwrap();
         assert!(sent.starts_with("POST /v1.55/containers/create?name=x HTTP/1.1\r\n"));
         assert!(sent.contains("Content-Length: 40\r\n") && !sent.contains("Content-Length: 12"));
+        // A body this socket does not rewrite keeps the framing it came with, since the copy is held to it.
+        let riding = String::from_utf8(request_head(&head, &head.path, None, false)).unwrap();
+        assert!(riding.contains("Content-Length: 12\r\n"), "{riding}");
+        let chunked =
+            parse_request(b"PUT /v1.55/containers/x/archive HTTP/1.1\r\nHost: docker\r\nTransfer-Encoding: chunked\r\n\r\n").unwrap();
+        let riding = String::from_utf8(request_head(&chunked, &chunked.path, None, false)).unwrap();
+        assert!(riding.contains("Transfer-Encoding: chunked\r\n"), "{riding}");
         assert!(sent.contains("User-Agent: Docker-Client\r\n") && sent.ends_with("Connection: close\r\n\r\n"));
         let upgrade = parse_request(
             b"POST /v1.55/exec/e/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n",
         )
         .unwrap();
-        assert!(upgrade.upgrade);
-        let sent = String::from_utf8(request_head(&upgrade, &upgrade.path, None)).unwrap();
+        let sent = String::from_utf8(request_head(&upgrade, &upgrade.path, None, true)).unwrap();
         assert!(sent.contains("Connection: Upgrade\r\n") && sent.contains("Upgrade: tcp\r\n") && !sent.contains("Connection: close"));
-        let (status, answer) = response_head(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n").unwrap();
-        assert_eq!(status, 200);
+        let answer = response_head(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n").unwrap();
+        assert_eq!((answer.status, answer.raw), (200, false));
         assert_eq!(
-            String::from_utf8(answer).unwrap(),
+            String::from_utf8(answer.head).unwrap(),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n"
         );
-        let (status, raw) = response_head(b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n").unwrap();
-        assert_eq!((status, raw.as_slice()), (101, &b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n"[..]));
+        let raw = response_head(b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n").unwrap();
+        assert_eq!(
+            (raw.status, raw.raw, raw.head.as_slice()),
+            (101, true, &b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n"[..])
+        );
         assert_eq!(dechunk(b"5\r\nhello\r\n1\r\n!\r\n0\r\n\r\n"), b"hello!");
         assert!(parse_request(b"garbage\r\n\r\n").is_err());
+    }
+
+    /// The two routes the engine may hand a connection over on, and the reading that an upgrade asked for on any
+    /// other one is dropped from the head before it goes.
+    #[test]
+    fn an_attach_and_an_exec_start_hijack_and_no_other_route_does() {
+        assert!(route("POST", "/v1.55/containers/abc/attach?stream=1").hijacks("POST"));
+        assert!(route("POST", "/v1.55/exec/e1/start").hijacks("POST"));
+        assert!(!route("GET", "/v1.55/containers/abc/attach").hijacks("GET"));
+        assert!(!route("POST", "/v1.55/containers/abc/start").hijacks("POST"));
+        assert!(!route("GET", "/v1.55/exec/e1/json").hijacks("GET"));
+        assert!(!route("HEAD", "/_ping").hijacks("HEAD"));
+        assert!(!route("GET", "/v1.55/containers/abc/logs?follow=1").hijacks("GET"));
+        let pinged = parse_request(b"HEAD /_ping HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n").unwrap();
+        let sent = String::from_utf8(request_head(&pinged, &pinged.path, None, false)).unwrap();
+        assert!(!sent.to_ascii_lowercase().contains("upgrade"), "{sent}");
+        assert!(sent.ends_with("Connection: close\r\n\r\n"), "{sent}");
+    }
+
+    /// A body of each framing copied on, and nothing behind it: whatever the client pipelined after the framed
+    /// body is left on the connection this socket closes.
+    #[tokio::test]
+    async fn a_body_is_copied_within_its_framing_and_what_follows_it_is_not() {
+        let framed = |method: &str, headers: &str| {
+            parse_request(format!("{method} /x HTTP/1.1\r\nHost: docker\r\n{headers}\r\n").as_bytes()).unwrap()
+        };
+        // A length: exactly that many bytes, the rest of what arrived with the head left where it is.
+        let head = framed("POST", "Content-Length: 5\r\n");
+        let (mut client, _idle) = tokio::io::duplex(64);
+        let mut engine = Vec::new();
+        copy_body(&mut client, &mut engine, &head, b"helloGET /containers/json HTTP/1.1\r\n\r\n".to_vec()).await.unwrap();
+        assert_eq!(engine, b"hello");
+        // A length whose bytes come after the head, in a write of their own.
+        let (mut client, mut sending) = tokio::io::duplex(64);
+        let waited = tokio::spawn(async move {
+            let mut engine = Vec::new();
+            copy_body(&mut client, &mut engine, &framed("POST", "Content-Length: 12\r\n"), Vec::new()).await.unwrap();
+            engine
+        });
+        sending.write_all(b"twelve bytes").await.unwrap();
+        sending.write_all(b"GET /containers/json HTTP/1.1\r\n\r\n").await.unwrap();
+        assert_eq!(waited.await.unwrap(), b"twelve bytes");
+        // Chunks: through the terminator and its blank line, and nothing behind it.
+        let head = framed("PUT", "Transfer-Encoding: chunked\r\n");
+        let (mut client, mut sending) = tokio::io::duplex(64);
+        let waited = tokio::spawn(async move {
+            let mut engine = Vec::new();
+            copy_body(&mut client, &mut engine, &head, b"5\r\nhello".to_vec()).await.unwrap();
+            engine
+        });
+        sending.write_all(b"\r\n2\r\n!!\r\n0\r\n\r\nGET /containers/json HTTP/1.1\r\n\r\n").await.unwrap();
+        assert_eq!(waited.await.unwrap(), b"5\r\nhello\r\n2\r\n!!\r\n0\r\n\r\n");
+        // Neither framing: the request carries no body at all, whatever came in behind the head.
+        let head = framed("GET", "");
+        let (mut client, _idle) = tokio::io::duplex(64);
+        let mut engine = Vec::new();
+        copy_body(&mut client, &mut engine, &head, b"GET /containers/json HTTP/1.1\r\n\r\n".to_vec()).await.unwrap();
+        assert!(engine.is_empty());
+        // A size line that is not a size ends the request rather than being passed on.
+        let head = framed("PUT", "Transfer-Encoding: chunked\r\n");
+        let (mut client, _idle) = tokio::io::duplex(64);
+        let mut engine = Vec::new();
+        let refused = copy_body(&mut client, &mut engine, &head, b"nonsense\r\n".to_vec()).await.unwrap_err();
+        assert!(refused.contains("a chunk size this socket cannot read"), "{refused}");
     }
 }

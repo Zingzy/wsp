@@ -14,10 +14,26 @@ use wsp_runtime::engine::{self, Fence, Ports, LABEL, PORTS_LABEL};
 
 const WORKSPACE: &str = "wsp-a";
 
-/// What the fake engine saw: method, path, body.
-type Seen = Arc<Mutex<Vec<(String, String, String)>>>;
+/// One request the fake engine was handed, whole.
+#[derive(Clone, Debug)]
+struct Seen {
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+    body: String,
+}
 
-async fn read_request(stream: &mut UnixStream) -> (String, String, Vec<(String, String)>, Vec<u8>) {
+impl Seen {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+    }
+}
+
+type Record = Arc<Mutex<Vec<Seen>>>;
+
+/// The request as the engine reads it: the head, then the body by whichever framing the head named. A chunked
+/// body is read to its terminator and answered without its framing, so a case reads what a client sent.
+async fn read_request(stream: &mut UnixStream) -> Seen {
     let mut held = Vec::new();
     let mut buf = [0u8; 4096];
     let split = loop {
@@ -36,13 +52,39 @@ async fn read_request(stream: &mut UnixStream) -> (String, String, Vec<(String, 
     let path = first.next().unwrap().to_owned();
     let headers: Vec<(String, String)> =
         lines.filter(|l| !l.is_empty()).filter_map(|l| l.split_once(": ").map(|(k, v)| (k.to_ascii_lowercase(), v.to_owned()))).collect();
+    let chunked = headers.iter().any(|(k, v)| k == "transfer-encoding" && v.contains("chunked"));
     let wanted: usize = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
     while rest.len() < wanted {
         let n = stream.read(&mut buf).await.unwrap();
         assert!(n > 0);
         rest.extend_from_slice(&buf[..n]);
     }
-    (method, path, headers, rest)
+    if chunked {
+        while !rest.windows(5).any(|w| w == b"0\r\n\r\n") {
+            let n = stream.read(&mut buf).await.unwrap();
+            assert!(n > 0, "the chunked body ended before its terminator");
+            rest.extend_from_slice(&buf[..n]);
+        }
+        rest = dechunk(&rest);
+    }
+    Seen { method, path, headers, body: String::from_utf8_lossy(&rest).into_owned() }
+}
+
+/// A chunked body without its framing, as the engine would read it.
+fn dechunk(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < body.len() {
+        let Some(end) = body[at..].windows(2).position(|w| w == b"\r\n") else { break };
+        let size = usize::from_str_radix(String::from_utf8_lossy(&body[at..at + end]).trim(), 16).unwrap_or(0);
+        at += end + 2;
+        if size == 0 {
+            break;
+        }
+        out.extend_from_slice(&body[at..(at + size).min(body.len())]);
+        at += size + 2;
+    }
+    out
 }
 
 fn json_response(status: u16, body: &Value) -> Vec<u8> {
@@ -92,27 +134,43 @@ fn answer(method: &str, path: &str) -> Vec<u8> {
         ["containers", _, "start"] | ["containers", _, "stop"] => b"HTTP/1.1 204 No Content\r\n\r\n".to_vec(),
         ["containers", _] if method == "DELETE" => b"HTTP/1.1 204 No Content\r\n\r\n".to_vec(),
         ["containers", _, "logs"] => b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.raw-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n".to_vec(),
+        ["containers", _, "archive"] if method == "PUT" => b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
         ["_ping"] => b"HTTP/1.1 200 OK\r\nApi-Version: 1.55\r\nContent-Length: 2\r\n\r\nOK".to_vec(),
         _ => json_response(200, &json!({ "ok": true, "path": bare })),
     }
 }
 
+/// Whether the request is one the engine hands the connection over on: a client that asked to upgrade gets a
+/// 101, and an exec start that asked for nothing gets the 200 raw stream the engine answers instead.
+fn hands_over(seen: &Seen) -> Option<&'static [u8]> {
+    if seen.header("upgrade") == Some("tcp") {
+        return Some(
+            b"HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n",
+        );
+    }
+    let bare = seen.path.split('?').next().unwrap();
+    let segments: Vec<&str> = bare.trim_start_matches("/v1.55").split('/').filter(|s| !s.is_empty()).collect();
+    match segments.as_slice() {
+        ["exec", _, "start"] => Some(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.multiplexed-stream\r\n\r\n"),
+        _ => None,
+    }
+}
+
 /// The fake engine on a socket under the directory, recording what it is handed.
-fn fake_engine(dir: &Path) -> (PathBuf, Seen) {
+fn fake_engine(dir: &Path) -> (PathBuf, Record) {
     let path = dir.join("engine.sock");
     let listener = UnixListener::bind(&path).unwrap();
-    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let seen: Record = Arc::new(Mutex::new(Vec::new()));
     let record = Arc::clone(&seen);
     tokio::spawn(async move {
         loop {
             let (mut stream, _) = listener.accept().await.unwrap();
             let record = Arc::clone(&record);
             tokio::spawn(async move {
-                let (method, path, headers, body) = read_request(&mut stream).await;
-                record.lock().unwrap().push((method.clone(), path.clone(), String::from_utf8_lossy(&body).into_owned()));
-                let upgrade = headers.iter().any(|(k, v)| k == "upgrade" && v == "tcp");
-                if upgrade {
-                    stream.write_all(b"HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n").await.unwrap();
+                let request = read_request(&mut stream).await;
+                record.lock().unwrap().push(request.clone());
+                if let Some(head) = hands_over(&request) {
+                    stream.write_all(head).await.unwrap();
                     let mut buf = [0u8; 1024];
                     while let Ok(n) = stream.read(&mut buf).await {
                         if n == 0 {
@@ -123,7 +181,7 @@ fn fake_engine(dir: &Path) -> (PathBuf, Seen) {
                     }
                     return;
                 }
-                stream.write_all(&answer(&method, &path)).await.unwrap();
+                stream.write_all(&answer(&request.method, &request.path)).await.unwrap();
                 let _ = stream.shutdown().await;
             });
         }
@@ -141,7 +199,7 @@ impl Ports for Joined {
 
 struct World {
     socket: PathBuf,
-    seen: Seen,
+    seen: Record,
     joined: Arc<Joined>,
     rootfs: PathBuf,
     _dir: tempfile::TempDir,
@@ -183,12 +241,21 @@ impl World {
         (status, head, all[split..].to_vec())
     }
 
-    fn reached(&self) -> Vec<(String, String, String)> {
+    fn reached(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
 
-    fn engine_saw(&self, method: &str, path_starts: &str) -> Option<(String, String, String)> {
-        self.reached().into_iter().find(|(m, p, _)| m == method && p.starts_with(path_starts))
+    fn engine_saw(&self, method: &str, path_starts: &str) -> Option<Seen> {
+        self.reached().into_iter().find(|r| r.method == method && r.path.starts_with(path_starts))
+    }
+
+    /// One request written on the socket byte for byte, and everything the socket answered before it closed.
+    async fn raw(&self, request: &[u8]) -> Vec<u8> {
+        let mut stream = UnixStream::connect(&self.socket).await.unwrap();
+        stream.write_all(request).await.unwrap();
+        let mut all = Vec::new();
+        stream.read_to_end(&mut all).await.unwrap();
+        all
     }
 
     fn message(body: &[u8]) -> String {
@@ -205,8 +272,7 @@ async fn ping_and_version_pass_and_the_answer_closes_the_connection() {
     let (status, _, body) = w.call("GET", "/v1.55/version", None).await;
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["path"], "/v1.55/version");
-    let sent = w.engine_saw("GET", "/v1.55/version").unwrap();
-    assert_eq!(sent.1, "/v1.55/version");
+    assert_eq!(w.engine_saw("GET", "/v1.55/version").unwrap().path, "/v1.55/version");
 }
 
 #[tokio::test]
@@ -220,7 +286,7 @@ async fn image_routes_pass_unchanged() {
     ] {
         let (status, _, _) = w.call(method, path, None).await;
         assert_eq!(status, 200, "{path}");
-        assert_eq!(w.engine_saw(method, path).unwrap().1, path);
+        assert_eq!(w.engine_saw(method, path).unwrap().path, path);
     }
 }
 
@@ -235,15 +301,15 @@ async fn a_container_create_reaches_the_engine_labelled_with_its_ports_on_the_lo
     let (status, _, _) = w.call("POST", "/v1.55/containers/create?name=web", Some(&body)).await;
     assert_eq!(status, 200);
     let sent = w.engine_saw("POST", "/v1.55/containers/create").unwrap();
-    assert_eq!(sent.1, "/v1.55/containers/create?name=web");
-    let reached: Value = serde_json::from_str(&sent.2).unwrap();
+    assert_eq!(sent.path, "/v1.55/containers/create?name=web");
+    let reached: Value = serde_json::from_str(&sent.body).unwrap();
     assert_eq!(reached["Labels"][LABEL], WORKSPACE);
     assert_eq!(reached["Labels"][PORTS_LABEL], "80/tcp=18080");
     assert_eq!(reached["HostConfig"]["PortBindings"]["80/tcp"], json!([{ "HostIp": "127.0.0.1", "HostPort": "" }]));
     let mapped = w.rootfs.join("root/demo/html").canonicalize().unwrap();
     assert_eq!(reached["HostConfig"]["Binds"], json!([format!("{}:/usr/share/nginx/html:ro", mapped.display())]));
     // The network it joins was checked for the label first, once, though the create names it twice.
-    assert_eq!(w.reached().iter().filter(|(m, p, _)| m == "GET" && p == "/networks/netours1").count(), 1);
+    assert_eq!(w.reached().iter().filter(|r| r.method == "GET" && r.path == "/networks/netours1").count(), 1);
 }
 
 #[tokio::test]
@@ -307,7 +373,7 @@ async fn listings_reach_the_engine_with_the_workspaces_label_filter() {
         let (status, _, _) = w.call("GET", path, None).await;
         assert_eq!(status, 200, "{path}");
         let sent = w.engine_saw("GET", prefix).unwrap_or_else(|| panic!("{path}: {:?}", w.reached()));
-        let filters = percent_encoding::percent_decode_str(sent.1.split("filters=").nth(1).unwrap()).decode_utf8().unwrap();
+        let filters = percent_encoding::percent_decode_str(sent.path.split("filters=").nth(1).unwrap()).decode_utf8().unwrap();
         assert_eq!(serde_json::from_str::<Value>(&filters).unwrap()["label"], json!([format!("{LABEL}={WORKSPACE}")]), "{path}");
     }
     let compose = format!(
@@ -315,8 +381,8 @@ async fn listings_reach_the_engine_with_the_workspaces_label_filter() {
         percent_encoding::utf8_percent_encode(r#"{"label":["com.docker.compose.project=demo"]}"#, percent_encoding::NON_ALPHANUMERIC)
     );
     w.call("GET", &compose, None).await;
-    let sent = w.reached().into_iter().rfind(|(_, p, _)| p.starts_with("/v1.55/containers/json")).unwrap();
-    let filters = percent_encoding::percent_decode_str(sent.1.split("filters=").nth(1).unwrap()).decode_utf8().unwrap();
+    let sent = w.reached().into_iter().rfind(|r| r.path.starts_with("/v1.55/containers/json")).unwrap();
+    let filters = percent_encoding::percent_decode_str(sent.path.split("filters=").nth(1).unwrap()).decode_utf8().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&filters).unwrap()["label"],
         json!(["com.docker.compose.project=demo", format!("{LABEL}={WORKSPACE}")])
@@ -336,13 +402,13 @@ async fn a_network_or_volume_create_reaches_the_engine_labelled() {
     assert_eq!(status, 200);
     let sent = w.engine_saw("POST", "/v1.55/networks/create").unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&sent.2).unwrap()["Labels"],
+        serde_json::from_str::<Value>(&sent.body).unwrap()["Labels"],
         json!({ "com.docker.compose.network": "default", LABEL: WORKSPACE })
     );
     let (status, _, _) = w.call("POST", "/v1.55/volumes/create", Some(&json!({ "Name": "data" }))).await;
     assert_eq!(status, 200);
     let sent = w.engine_saw("POST", "/v1.55/volumes/create").unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&sent.2).unwrap()["Labels"][LABEL], WORKSPACE);
+    assert_eq!(serde_json::from_str::<Value>(&sent.body).unwrap()["Labels"][LABEL], WORKSPACE);
 }
 
 #[tokio::test]
@@ -372,7 +438,7 @@ async fn container_routes_reach_the_engine_for_the_workspaces_own_and_are_not_fo
         assert_eq!((status, World::message(&body).as_str()), (404, "No such container: theirs1"), "{path}");
     }
     let after: Vec<_> = w.reached()[before..].to_vec();
-    assert!(after.iter().all(|(m, p, _)| m == "GET" && p == "/containers/theirs1/json"), "{after:?}");
+    assert!(after.iter().all(|r| r.method == "GET" && r.path == "/containers/theirs1/json"), "{after:?}");
     let (status, _, body) = w.call("GET", "/v1.55/containers/nobody/json", None).await;
     assert_eq!((status, World::message(&body).as_str()), (404, "No such container: nobody"));
 }
@@ -430,7 +496,7 @@ async fn an_exec_is_fenced_at_its_create_and_its_start_is_copied_raw_after_the_u
         echoed.push_str(&String::from_utf8_lossy(&buf[..n]));
     }
     let start = w.engine_saw("POST", "/v1.55/exec/execours1/start").unwrap();
-    assert_eq!(start.2, body, "the body after the head reached the engine");
+    assert_eq!(start.body, body, "the body after the head reached the engine");
 }
 
 #[tokio::test]
@@ -503,7 +569,7 @@ async fn the_removal_takes_every_container_network_and_volume_of_the_workspace_a
     let (engine, seen) = fake_engine(dir.path());
     // The fake answers a plain listing with an object, which is no array: nothing to remove, and no error.
     assert_eq!(engine::remove_all(&engine, WORKSPACE).await.unwrap(), (0, 0, 0));
-    let listed: Vec<String> = seen.lock().unwrap().iter().map(|(_, p, _)| p.clone()).collect();
+    let listed: Vec<String> = seen.lock().unwrap().iter().map(|r| r.path.clone()).collect();
     assert_eq!(listed.len(), 3);
     for (path, prefix) in listed.iter().zip(["/containers/json?all=1&filters=", "/networks?all=1&filters=", "/volumes?all=1&filters="]) {
         assert!(path.starts_with(prefix), "{path}");
@@ -512,4 +578,117 @@ async fn the_removal_takes_every_container_network_and_volume_of_the_workspace_a
     let (status, value) = engine::ask(&engine, "GET", "/containers/ours1/json", None).await.unwrap();
     assert_eq!(status, 200);
     assert_eq!(engine::published_ports(&value), vec![(18080, 40001)]);
+}
+
+/// An upgrade header on a route the engine never hands a connection over on: the two connection headers are
+/// dropped before the head goes, the connection is told to close, and a second request the client pipelined in
+/// the same segment behind it is not a body, so it reaches nothing.
+#[tokio::test]
+async fn an_upgrade_on_an_allowed_route_opens_no_pipe_and_what_follows_it_reaches_nothing() {
+    let w = world();
+    let answered = w
+        .raw(
+            concat!(
+                "HEAD /_ping HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n",
+                "GET /v1.55/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await;
+    let answered = String::from_utf8(answered).unwrap();
+    assert!(answered.starts_with("HTTP/1.1 200 OK\r\n"), "{answered}");
+    assert!(answered.contains("Connection: close"), "{answered}");
+    assert_eq!(answered.matches("HTTP/1.1 ").count(), 1, "one request, one answer: {answered}");
+    let ping = w.engine_saw("HEAD", "/_ping").unwrap();
+    assert_eq!(ping.header("connection"), Some("close"));
+    assert_eq!(ping.header("upgrade"), None);
+    assert_eq!(ping.body, "");
+    assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
+}
+
+/// A body the client streams after the head, which is what an image load, an image import and an archive put
+/// are: it rides on inside the request's own framing, and the bytes behind that framing do not.
+#[tokio::test]
+async fn a_body_that_arrives_after_the_head_reaches_the_engine_whole_and_nothing_behind_it_does() {
+    let w = world();
+    let mut stream = UnixStream::connect(&w.socket).await.unwrap();
+    stream
+        .write_all(b"POST /v1.55/images/load HTTP/1.1\r\nHost: docker\r\nContent-Type: application/x-tar\r\nContent-Length: 12\r\n\r\n")
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    stream.write_all(b"twelve bytes").await.unwrap();
+    stream.write_all(b"GET /v1.55/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n").await.unwrap();
+    let mut all = Vec::new();
+    stream.read_to_end(&mut all).await.unwrap();
+    let load = w.engine_saw("POST", "/v1.55/images/load").unwrap();
+    assert_eq!(load.body, "twelve bytes");
+    assert_eq!(load.header("content-length"), Some("12"));
+    assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
+
+    // The same for a chunked body, sent in two segments, which is how the client puts an archive into a container.
+    let mut stream = UnixStream::connect(&w.socket).await.unwrap();
+    stream
+        .write_all(b"PUT /v1.55/containers/ours1/archive?path=/ HTTP/1.1\r\nHost: docker\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello")
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    stream.write_all(b"\r\n2\r\n!!\r\n0\r\n\r\nGET /v1.55/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n").await.unwrap();
+    let mut all = Vec::new();
+    stream.read_to_end(&mut all).await.unwrap();
+    let put = w.engine_saw("PUT", "/v1.55/containers/ours1/archive").unwrap();
+    assert_eq!(put.body, "hello!!", "the chunks reached the engine whole through their terminator");
+    assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
+}
+
+/// The exec start the engine answers with a raw stream under a 200 rather than a 101, which is what it sends a
+/// client that asked for no upgrade: the connection is handed over all the same.
+#[tokio::test]
+async fn an_exec_start_the_engine_answers_a_raw_stream_to_is_copied_raw() {
+    let w = world();
+    let mut stream = UnixStream::connect(&w.socket).await.unwrap();
+    let body = r#"{"Detach":false,"Tty":false}"#;
+    stream
+        .write_all(
+            format!(
+                "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut buf = vec![0u8; 4096];
+    let n = stream.read(&mut buf).await.unwrap();
+    let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n") && head.contains("multiplexed-stream"), "{head}");
+    let mut echoed = head.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+    stream.write_all(b"stdin bytes").await.unwrap();
+    while !echoed.contains("echo:stdin bytes") {
+        let n = stream.read(&mut buf).await.unwrap();
+        assert!(n > 0, "the stream ended before the echo: {echoed}");
+        echoed.push_str(&String::from_utf8_lossy(&buf[..n]));
+    }
+    assert_eq!(w.engine_saw("POST", "/v1.55/exec/execours1/start").unwrap().body, body);
+}
+
+/// A followed log stream: the engine's bytes are copied to the client until the engine closes, and nothing the
+/// client sends behind the head goes the other way.
+#[tokio::test]
+async fn a_followed_log_is_copied_back_and_nothing_behind_the_head_goes_to_the_engine() {
+    let w = world();
+    let answered = w
+        .raw(
+            concat!(
+                "GET /v1.55/containers/ours1/logs?follow=1&stdout=1 HTTP/1.1\r\nHost: docker\r\n\r\n",
+                "GET /v1.55/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await;
+    let answered = String::from_utf8(answered).unwrap();
+    assert!(answered.ends_with("5\r\nhello\r\n0\r\n\r\n"), "{answered}");
+    let logs = w.engine_saw("GET", "/v1.55/containers/ours1/logs").unwrap();
+    assert_eq!(logs.body, "");
+    assert!(w.engine_saw("GET", "/v1.55/containers/json").is_none(), "{:?}", w.reached());
 }
