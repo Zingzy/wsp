@@ -99,6 +99,17 @@ fn dechunk(body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Everything the socket answered, up to the close. Bounded, since a socket this fence leaves open is a socket
+/// a client waits on for ever: a case reading one says so rather than holding the whole suite.
+async fn read_to_close(stream: &mut UnixStream) -> Vec<u8> {
+    let mut all = Vec::new();
+    tokio::time::timeout(std::time::Duration::from_secs(10), stream.read_to_end(&mut all))
+        .await
+        .expect("the socket was never closed, so the answer never ended")
+        .unwrap();
+    all
+}
+
 fn json_response(status: u16, body: &Value) -> Vec<u8> {
     let text = body.to_string();
     format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{text}", text.len()).into_bytes()
@@ -310,8 +321,7 @@ impl World {
         request.push_str("\r\n");
         request.push_str(&text);
         stream.write_all(request.as_bytes()).await.unwrap();
-        let mut all = Vec::new();
-        stream.read_to_end(&mut all).await.unwrap();
+        let all = read_to_close(&mut stream).await;
         let split = all.windows(4).position(|w| w == b"\r\n\r\n").expect("a response head") + 4;
         let head = String::from_utf8(all[..split].to_vec()).unwrap();
         let status: u16 = head.split(' ').nth(1).unwrap().parse().unwrap();
@@ -330,9 +340,7 @@ impl World {
     async fn raw(&self, request: &[u8]) -> Vec<u8> {
         let mut stream = UnixStream::connect(&self.socket).await.unwrap();
         stream.write_all(request).await.unwrap();
-        let mut all = Vec::new();
-        stream.read_to_end(&mut all).await.unwrap();
-        all
+        read_to_close(&mut stream).await
     }
 
     fn message(body: &[u8]) -> String {
@@ -933,10 +941,7 @@ async fn a_hijack_route_the_engine_did_not_hand_over_ends_the_engines_connection
         "POST /v1.55/exec/execours1/start HTTP/1.1\r\nHost: docker\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
-    let answered = tokio::time::timeout(std::time::Duration::from_secs(10), w.raw(request.as_bytes()))
-        .await
-        .expect("the engine's connection was never ended, so the answer never came back");
-    let answered = String::from_utf8(answered).unwrap();
+    let answered = String::from_utf8(w.raw(request.as_bytes()).await).unwrap();
     assert!(answered.starts_with("HTTP/1.1 200 "), "{answered}");
     assert!(answered.contains("Connection: close"), "{answered}");
     assert_eq!(w.engine_saw("POST", "/v1.55/exec/execours1/start").unwrap().body, body);
