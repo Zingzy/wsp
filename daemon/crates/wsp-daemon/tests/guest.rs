@@ -424,8 +424,8 @@ async fn guest_bytes_past_the_cap_are_refused_and_the_sessions_stand() {
     );
     assert!(sent * fat().to_string().len() <= numbers::GUEST_IN_FLIGHT_CAP_BYTES, "the daemon held more than the cap");
 
-    // The sessions stood through the refusal: a watcher arrives, everything waiting reaches it, and the bytes it
-    // carried away are the room the next message goes in.
+    // The sessions stood through the refusal: a watcher arrives, everything waiting reaches it, and the session
+    // that was refused carries the next message up.
     let mut host = Client::connect(d.addr).await;
     host.request("guest.watch", json!({})).await;
     for _ in 0..guests.len() + sent {
@@ -434,4 +434,13 @@ async fn guest_bytes_past_the_cap_are_refused_and_the_sessions_stand() {
     let again = guests[0].request("guest.send", json!({ "message": "after" })).await;
     assert_eq!(again["ok"], json!(true), "{again}");
     assert_eq!(host.next_event().await["message"], json!("after"));
+
+    // Every one of those frames left through the socket rather than being dropped with it, so the only thing that
+    // can have freed the room is the count the door gives back after the write. With nobody watching again, the
+    // same flood fits a second time only if it did.
+    host.close().await;
+    for n in 0..sent {
+        let reply = guests[0].request("guest.send", json!({ "message": fat() })).await;
+        assert_eq!(reply["ok"], json!(true), "frame {n} was refused, so the bytes the watcher carried away never came back: {reply}");
+    }
 }

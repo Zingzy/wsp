@@ -74,8 +74,10 @@ fn fresh_life() -> String {
     format!("{:016x}", u64::from_le_bytes(bytes))
 }
 
-fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    state.lock().unwrap_or_else(|e| e.into_inner())
+/// The one way this module takes a lock: a holder that panicked leaves a routing table behind, which the next
+/// caller reads rather than panicking on in its turn.
+fn lock<T>(held: &Mutex<T>) -> MutexGuard<'_, T> {
+    held.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn no_such_session(session: &str) -> OpError {
@@ -325,7 +327,7 @@ pub(crate) struct InFlight(Mutex<HashMap<Option<String>, usize>>);
 impl InFlight {
     /// One frame's bytes, taken where the cap leaves room for them; none past it, where nothing is taken.
     fn take(self: &Arc<Self>, at: &Option<String>, bytes: usize) -> Option<GuestBytes> {
-        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut held = lock(&self.0);
         let waiting = held.get(at).copied().unwrap_or(0);
         if waiting + bytes > numbers::GUEST_IN_FLIGHT_CAP_BYTES {
             return None;
@@ -335,7 +337,7 @@ impl InFlight {
     }
 
     fn give_back(&self, at: &Option<String>, bytes: usize) {
-        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut held = lock(&self.0);
         let Some(waiting) = held.get_mut(at) else { return };
         *waiting = waiting.saturating_sub(bytes);
         if *waiting == 0 {
