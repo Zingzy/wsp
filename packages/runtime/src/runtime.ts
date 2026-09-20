@@ -2351,9 +2351,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // Nothing on this computer answers for a machine wsp only reaches yet; the round that gives this kind's
             // turns the wsp command answers the address with it.
             hostUrl: () => undefined,
-            // No road to a daemon on such a machine: the road that carried one dialled a port on this computer
-            // that any other process here could have bound first, and handed it the daemon's token. A road comes
-            // back when the peer on it proves it is the daemon before a token goes out.
+            // No road to a daemon on such a machine, here or in anything a host wires: the road that carried one
+            // dialled a port on this computer that any other process here could have bound first, and handed it
+            // the daemon's token. A road comes back when the peer on it proves it is the daemon before one goes out.
             hasDaemon: () => false,
             daemonRoad: entry => Promise.reject(new Error(noSshDaemonLine(entry.record.name))),
             scratch: entry => sshDaemonPaths(sshHomeDir(entry)).wsp,

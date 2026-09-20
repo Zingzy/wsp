@@ -2592,13 +2592,11 @@ export function noMachineHomeLine(name: string): string {
   return `${name} carries no home folder for its machine; add that computer again with wsp add user@host`;
 }
 
-/** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
- * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
- * host offers one again on its own, so the line says that rather than naming a verb: nothing a person types puts
- * a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said it needed.
- * Later, not at every start: a machine that answered with what it lacks is left alone until its window is out. */
+/** What the roads that need a daemon are refused with on a machine reached over ssh: a daemon may well be running
+ * there, and this host opens no road to it, so the panes that ride one have nothing to dial. The line names no
+ * verb and promises no later try, since neither a person nor the host puts that road back. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host offers it again later on its own`;
+  return `${name} is ${OVER_SSH}, and this host opens no road to a daemon on one, so its terminal, files and ports are not served`;
 }
 
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind

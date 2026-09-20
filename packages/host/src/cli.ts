@@ -584,9 +584,7 @@ export function localWiring(
  * nothing at all is kept between dials.
  *
  * The daemon on such a machine is put under the login it answered with and binds that machine's own loopback, so
- * nothing there listens where the network can reach it. This host opens no road to it: a road off a port on this
- * computer is a port another process here can bind first, and a token is sent to no peer that has not proved it
- * is the daemon. */
+ * nothing there listens where the network can reach it, and this host wires no road to it. */
 export function sshWiring(): SshWiring {
   return {
     backend: new SshBackend(),

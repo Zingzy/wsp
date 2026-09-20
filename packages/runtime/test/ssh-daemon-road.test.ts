@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the roads that need a daemon answer on a machine reached over ssh. The
-// daemon there binds that machine's own loopback, and this host picks no port
-// on this computer to carry it: a port here is one any other process on this
-// computer can bind first, and whatever answered on it would be handed the
-// daemon's token. So the kind says it has no daemon and its road refuses.
+// What a record of a machine reached over ssh answers the roads that need a
+// daemon: the kind's refusal to a caller, and unsupported on its row.
 import { afterEach, describe, expect, it } from "vitest";
 import { sshMachineId } from "@wsp/engine";
 import { noSshDaemonLine } from "@wsp/protocol";
@@ -56,11 +53,10 @@ async function hostWithOne(): Promise<Runtime> {
 }
 
 describe("the road to a daemon on a machine reached over ssh", () => {
-  it("is none: the kind's own sentence to whoever asks, and no port on this computer dialled for the row", async () => {
+  it("is refused in the kind's own sentence, and leaves the row unsupported", async () => {
     const rt = await hostWithOne();
     await expect(rt.workspaces.daemonReach("ws_1a2b3c4d")).rejects.toThrow(noSshDaemonLine("box"));
-    // Unsupported is the word for a machine there is no way at all to ask, which is what this kind is now: a
-    // row that read anything else would have come off a port this host picked and dialled.
+    // Unsupported is the word for a machine there is no way at all to ask.
     const [row] = await rt.status.list({ zombieProbe: false });
     expect(row?.reach.state).toBe("unsupported");
   });
