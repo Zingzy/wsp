@@ -257,6 +257,11 @@ pub fn iifname_is(name: &str) -> [Expr; 2] {
     [meta(NFT_META_IIFNAME), cmp(NFT_CMP_EQ, &whole_name(name))]
 }
 
+/// `oifname "<name>"`.
+pub fn oifname_is(name: &str) -> [Expr; 2] {
+    [meta(NFT_META_OIFNAME), cmp(NFT_CMP_EQ, &whole_name(name))]
+}
+
 /// `oifname != "<name>"`.
 pub fn oifname_is_not(name: &str) -> [Expr; 2] {
     [meta(NFT_META_OIFNAME), cmp(NFT_CMP_NEQ, &whole_name(name))]
@@ -406,6 +411,20 @@ fn comment_of_udata(udata: &[u8]) -> Option<String> {
         rest = &rest[2 + len..];
     }
     None
+}
+
+/// The chain a rule message names, the names of its expressions and its comment, read back off the message the
+/// same way a dump of the kernel's own rule reads them: what a comparison of the rules this daemon would write
+/// against the rules the kernel holds is made of. `None` for a message that is not a rule.
+pub fn shape_of(msg: &Msg) -> Option<(String, Vec<String>, Option<String>)> {
+    if msg.kind != NFT_MSG_NEWRULE {
+        return None;
+    }
+    let top = attrs(&msg.attrs);
+    let chain = top.iter().find(|(k, _)| *k == NFTA_RULE_CHAIN).map(|(_, v)| text(v))?;
+    let (exprs, _) = top.iter().find(|(k, _)| *k == NFTA_RULE_EXPRESSIONS).map(|(_, v)| exprs_of(v)).unwrap_or_default();
+    let comment = top.iter().find(|(k, _)| *k == NFTA_RULE_USERDATA).and_then(|(_, v)| comment_of_udata(v));
+    Some((chain, exprs, comment))
 }
 
 /// A base chain the kernel holds, as a dump lists it; a chain with no hook is a regular chain and reads `None`.
@@ -810,7 +829,20 @@ mod tests {
         assert!(!matched_drop.refuses_all() && !bare_accept.refuses_all());
         let [_, whole] = iifname_is("eth0");
         assert_eq!(attrs(attrs(&whole.data)[2].1)[0].1.len(), IFNAMSIZ);
+        assert_eq!(attrs(attrs(&oifname_is("eth0")[1].data)[2].1)[0].1.len(), IFNAMSIZ);
         assert_eq!(attrs(&reject().data).len(), 2);
+        // A rule reads back as the chain it names, its expressions and its comment, which is what a table this
+        // daemon would write is compared to the kernel's by.
+        let shape = shape_of(&new_rule(NFPROTO_IPV4, "wsp", "forward", &exprs, "wsp workspaces", false));
+        assert_eq!(
+            shape,
+            Some((
+                "forward".to_owned(),
+                vec!["meta".to_owned(), "cmp".to_owned(), "immediate".to_owned()],
+                Some("wsp workspaces".to_owned())
+            ))
+        );
+        assert_eq!(shape_of(&new_table(NFPROTO_IPV4, "wsp")), None);
     }
 
     #[test]

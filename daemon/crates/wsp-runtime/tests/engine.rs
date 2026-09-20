@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use wsp_runtime::engine::{self, Fence, Ports, LABEL, PORTS_LABEL};
+use wsp_runtime::engine::{self, Bridges, Fence, Ports, LABEL, PORTS_LABEL};
 
 const WORKSPACE: &str = "wsp-a";
 
@@ -100,6 +100,10 @@ fn inspect(id: &str, workspace: &str) -> Value {
     })
 }
 
+/// The bridge the fake engine says it made for a network of the workspace's, which the fence reads off the
+/// inspect when the network goes.
+const FAKE_BRIDGE: &str = "wsp-e0000002a";
+
 /// The fake engine's answer to one request, by its path: containers, execs, networks and volumes whose id starts
 /// with `ours` wear the workspace's label, `theirs` wear another's, anything else is not there.
 fn answer(method: &str, path: &str) -> Vec<u8> {
@@ -123,8 +127,13 @@ fn answer(method: &str, path: &str) -> Vec<u8> {
             Some(_) => json_response(200, &json!({ "ID": id, "ContainerID": id.trim_start_matches("exec") })),
             None => json_response(404, &json!({ "message": "no such exec" })),
         },
+        ["networks", "create"] if method == "POST" => json_response(201, &json!({ "Id": "netours-made", "Warning": "" })),
+        ["networks", _] if method == "DELETE" => b"HTTP/1.1 204 No Content\r\n\r\n".to_vec(),
         ["networks", id] if method == "GET" => match owner(id.trim_start_matches("net")) {
-            Some(w) => json_response(200, &json!({ "Id": id, "Labels": { LABEL: w } })),
+            Some(w) => json_response(
+                200,
+                &json!({ "Id": id, "Labels": { LABEL: w }, "Options": { "com.docker.network.bridge.name": FAKE_BRIDGE } }),
+            ),
             None => json_response(404, &json!({ "message": "no such network" })),
         },
         ["volumes", name] if method == "GET" => match owner(name.trim_start_matches("vol")) {
@@ -197,10 +206,26 @@ impl Ports for Joined {
     }
 }
 
+/// The daemon's side of a network the fence makes, with the box standing in: every bridge the engine was told
+/// to make reads as made, and each one written and taken off is recorded.
+struct Bridged(Mutex<Vec<(String, String, bool)>>);
+
+impl Bridges for Bridged {
+    fn made(&self, workspace: &str, bridge: &str) -> bool {
+        self.0.lock().unwrap().push((workspace.to_owned(), bridge.to_owned(), true));
+        true
+    }
+
+    fn gone(&self, workspace: &str, bridge: &str) {
+        self.0.lock().unwrap().push((workspace.to_owned(), bridge.to_owned(), false));
+    }
+}
+
 struct World {
     socket: PathBuf,
     seen: Record,
     joined: Arc<Joined>,
+    bridged: Arc<Bridged>,
     _dir: tempfile::TempDir,
 }
 
@@ -218,6 +243,7 @@ fn world() -> World {
     // What a workspace writes where the allowlist used to live, which nothing reads now.
     std::fs::write(rootfs.join("root/.wsp/roots"), "/\n").unwrap();
     let joined = Arc::new(Joined(Mutex::new(Vec::new())));
+    let bridged = Arc::new(Bridged(Mutex::new(Vec::new())));
     let listener = engine::bind(&dir.path().join("ws")).unwrap();
     let fence = Fence::new(
         WORKSPACE.into(),
@@ -226,9 +252,10 @@ fn world() -> World {
         binds,
         engine,
         Arc::clone(&joined) as Arc<dyn Ports>,
+        Arc::clone(&bridged) as Arc<dyn Bridges>,
     );
     tokio::spawn(engine::serve(listener, Arc::new(fence)));
-    World { socket: dir.path().join("ws").join(engine::SOCKET_NAME), seen, joined, _dir: dir }
+    World { socket: dir.path().join("ws").join(engine::SOCKET_NAME), seen, joined, bridged, _dir: dir }
 }
 
 impl World {
@@ -411,7 +438,7 @@ async fn a_network_or_volume_create_reaches_the_engine_labelled() {
             Some(&json!({ "Name": "demo_default", "Labels": { "com.docker.compose.network": "default" } })),
         )
         .await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 201, "the fence makes a network itself and answers what the engine answered");
     let sent = w.engine_saw("POST", "/v1.55/networks/create").unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&sent.body).unwrap()["Labels"],
@@ -531,7 +558,7 @@ async fn network_and_volume_routes_are_the_workspaces_own_alone() {
     let (status, _, _) = w.call("GET", "/v1.55/networks/netours1", None).await;
     assert_eq!(status, 200);
     let (status, _, _) = w.call("DELETE", "/v1.55/networks/netours1", None).await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 204);
     assert!(w.engine_saw("DELETE", "/v1.55/networks/netours1").is_some());
     let (status, _, body) = w.call("DELETE", "/v1.55/networks/nettheirs1", None).await;
     assert_eq!((status, World::message(&body).as_str()), (404, "No such network: nettheirs1"));
@@ -757,4 +784,76 @@ async fn a_create_attaches_the_workspaces_own_volumes_alone() {
     });
     let (status, _, body) = w.call("POST", "/v1.55/containers/create", Some(&mounted)).await;
     assert_eq!((status, World::message(&body).as_str()), (404, "No such volume: voltheirs1"));
+}
+
+/// A workspace's network is a bridge of its own, named by this computer so the table's rules read a container
+/// on it as they read the workspace; the daemon is told the moment the engine has made the link.
+#[tokio::test]
+async fn a_network_create_is_a_bridge_of_the_workspaces_own_and_the_daemon_is_told() {
+    let w = world();
+    for (body, says) in [
+        (json!({ "Name": "n", "Driver": "macvlan" }), "the driver macvlan is refused"),
+        (json!({ "Name": "n", "EnableIPv6": true }), "EnableIPv6 is refused"),
+        (json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": "10.65.4.0/24" }] } }), "overlaps 10.65.0.0/16"),
+        (json!({ "Name": "n", "Options": { "com.docker.network.bridge.name": "docker0" } }), "is named by this computer"),
+    ] {
+        let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&body)).await;
+        assert_eq!(status, 403, "{}", World::message(&answered));
+        assert!(World::message(&answered).contains(says), "{}", World::message(&answered));
+    }
+    assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "demo_default" }))).await;
+    assert_eq!(status, 201, "{}", World::message(&answered));
+    let sent: Value = serde_json::from_str(&w.engine_saw("POST", "/v1.55/networks/create").unwrap().body).unwrap();
+    let bridge = sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().to_owned();
+    assert!(bridge.starts_with("wsp-e") && bridge.len() == 13, "{bridge}");
+    assert_eq!(sent["Labels"][LABEL], WORKSPACE);
+    assert_eq!(w.bridged.0.lock().unwrap().clone(), vec![(WORKSPACE.to_owned(), bridge, true)]);
+    // And the rule goes with the network at its delete, off the bridge name the engine's own inspect carries.
+    let (status, _, _) = w.call("DELETE", "/v1.55/networks/netours1", None).await;
+    assert_eq!(status, 204);
+    assert_eq!(w.bridged.0.lock().unwrap().last().unwrap().clone(), (WORKSPACE.to_owned(), FAKE_BRIDGE.to_owned(), false));
+}
+
+/// A container that asked for no network of its own: the engine's default bridge is the box's, so the create is
+/// rewritten to the workspace's own network, which the fence makes the first time it is needed.
+#[tokio::test]
+async fn a_container_on_no_named_network_joins_the_workspaces_own() {
+    let w = world();
+    let own = format!("wsp-{WORKSPACE}");
+    for plain in ["", "default", "bridge"] {
+        let body = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": plain } });
+        let (status, _, answered) = w.call("POST", "/v1.55/containers/create", Some(&body)).await;
+        assert_eq!(status, 200, "{plain}: {}", World::message(&answered));
+        let sent = w.reached().into_iter().rfind(|r| r.path.starts_with("/v1.55/containers/create")).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&sent.body).unwrap()["HostConfig"]["NetworkMode"], own, "{plain}");
+    }
+    // The workspace's own network was made once for each create, since this fake engine holds none afterwards.
+    let made: Vec<Value> = w
+        .reached()
+        .into_iter()
+        .filter(|r| r.method == "POST" && r.path == "/networks/create")
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .collect();
+    assert_eq!(made.len(), 3, "{made:?}");
+    assert_eq!(made[0]["Name"], own);
+    assert_eq!(made[0]["Labels"][LABEL], WORKSPACE);
+    assert!(made[0]["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"));
+    // A create this fence refuses leaves the engine as it found it: every name a create carries is read before
+    // anything is made for it, so the refusal of a network the workspace does not own makes no network first.
+    let before = w.reached().iter().filter(|r| r.path == "/networks/create").count();
+    let both = json!({
+        "Image": "alpine",
+        "HostConfig": { "NetworkMode": "bridge" },
+        "NetworkingConfig": { "EndpointsConfig": { "ztheirs1": {} } }
+    });
+    let (status, _, answered) = w.call("POST", "/v1.55/containers/create", Some(&both)).await;
+    assert_eq!((status, World::message(&answered).as_str()), (404, "No such network: ztheirs1"));
+    assert_eq!(w.reached().iter().filter(|r| r.path == "/networks/create").count(), before, "a refused create made a network");
+    // A container asking for no network at all still gets none.
+    let (status, _, _) =
+        w.call("POST", "/v1.55/containers/create", Some(&json!({ "Image": "alpine", "HostConfig": { "NetworkMode": "none" } }))).await;
+    assert_eq!(status, 200);
+    let sent = w.reached().into_iter().rfind(|r| r.path.starts_with("/v1.55/containers/create")).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&sent.body).unwrap()["HostConfig"]["NetworkMode"], "none");
 }

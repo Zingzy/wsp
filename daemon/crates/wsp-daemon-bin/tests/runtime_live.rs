@@ -3165,3 +3165,96 @@ async fn a_daemon_of_this_computers_runs_nothing_it_found_under_the_home_the_wor
     assert!(!planted.binary.exists() && !planted.marker.exists());
     assert_eq!(listing(Path::new(PLANTED_DIR)), before, "this case left something under the home");
 }
+
+/// A container a workspace starts sits on a bridge of the workspace's own, under the same rules the workspace is
+/// under: the box's cloud metadata is out of its reach, a sibling container of the same workspace answers it by
+/// name, and a container of the box's own on the engine's default bridge does not. The bridge's rule stands on
+/// the box while the network does and goes with the workspace.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspaces_container_sits_on_a_bridge_of_its_own_and_reaches_no_metadata_and_no_neighbour() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
+        eprintln!("this box has no container engine with a socket; the bridge case is skipped");
+        return;
+    };
+    let Some((docker, _)) = box_docker() else {
+        eprintln!("this box has no docker client to land inside; the bridge case is skipped");
+        return;
+    };
+    let mut images = PulledImages::of(&["alpine"]);
+    let mut w = World::open().await;
+    let key = checkout_key();
+    // A container of the box's own on the engine's default bridge: the neighbour the workspace must not reach.
+    let outside = format!("wsp-live-bridge-outside-{key}");
+    on_box(&["rm", "-f", &outside]);
+    let _outside_guard = OutsideContainer { name: outside.clone() };
+    let (code, started, said) = on_box(&["run", "-d", "--name", &outside, "alpine", "sleep", "600"]);
+    assert_eq!(code, 0, "{started}{said}");
+    let (_, neighbour, _) = on_box(&["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", &outside]);
+    let neighbour = neighbour.trim().to_owned();
+    assert!(!neighbour.is_empty(), "the box's own container has no address");
+
+    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-bridge-{key}") }))).await;
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    let (code, out, err) = w.exec(&id, &format!("docker run -d --name wsp-live-net-a --label {LIVE_LABEL}=1 alpine sleep 600 2>&1")).await;
+    show("a container started on no named network, from inside", code, &out, &err);
+    images.pulled();
+    assert_eq!(code, 0, "{out}");
+    let (code, bridge, err) =
+        w.exec(&id, "docker inspect --format '{{range $n, $c := .NetworkSettings.Networks}}{{$n}}{{end}}' wsp-live-net-a").await;
+    show("the network the container joined", code, &bridge, &err);
+    assert_eq!(code, 0);
+    assert_eq!(bridge.trim(), format!("wsp-{id}"), "the container sits on the engine's default bridge");
+    // The link the engine made for it wears the prefix every rule of the workspace table matches.
+    let (_, named, _) =
+        on_box(&["network", "inspect", "--format", "{{index .Options \"com.docker.network.bridge.name\"}}", &format!("wsp-{id}")]);
+    let named = named.trim().to_owned();
+    assert!(named.starts_with("wsp-e"), "the bridge is not under the prefix: {named}");
+    let links: Vec<String> =
+        fs::read_dir("/sys/class/net").unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert!(links.contains(&named), "the box holds no link {named}: {links:?}");
+    // The rule that lets two containers of this workspace reach each other across it.
+    let (_, ruleset, _) = nft_ruleset();
+    assert!(ruleset.contains(&format!("engine bridge {named} of {id}")), "no rule for {named}:\n{ruleset}");
+
+    // The box's cloud metadata, which is the box's.
+    let (code, out, err) = w.exec(&id, "docker run --rm alpine wget -T 3 -q -O- http://169.254.169.254/ 2>&1").await;
+    show("the metadata address from a container of the workspace", code, &out, &err);
+    assert_ne!(code, 0, "a container of the workspace reached the box's metadata: {out}");
+    // The box's own container on the engine's default bridge, which is a neighbour.
+    let (code, out, err) = w.exec(&id, &format!("docker run --rm alpine ping -c 1 -W 3 {neighbour} 2>&1")).await;
+    show("the box's own container from a container of the workspace", code, &out, &err);
+    assert_ne!(code, 0, "a container of the workspace reached the box's own: {out}");
+    // A sibling of the same workspace, by name on their own network.
+    let (code, out, err) = w
+        .exec(
+            &id,
+            &format!("docker run -d --name wsp-live-net-b --label {LIVE_LABEL}=1 alpine sh -c 'while true; do echo hello-from-sibling | nc -l -p 9000; done' 2>&1"),
+        )
+        .await;
+    show("a second container of the same workspace", code, &out, &err);
+    assert_eq!(code, 0, "{out}");
+    let (code, out, err) = w.exec(&id, "sleep 1; docker run --rm alpine sh -c 'nc -w 3 wsp-live-net-b 9000' 2>&1").await;
+    show("the sibling answered by name on the workspace's own network", code, &out, &err);
+    assert!(out.contains("hello-from-sibling"), "{out}");
+
+    w.close().await;
+    let (_, ruleset, _) = nft_ruleset();
+    assert!(!ruleset.contains(&format!("of {id}")), "an engine bridge rule stays after the workspace went:\n{ruleset}");
+    let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
+    assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
+}
+
+/// The box's whole ruleset as nft renders it, for the cases that read what this daemon wrote; empty where the
+/// box carries no nft binary, which reads as a case that proves nothing rather than one that fails.
+fn nft_ruleset() -> (i32, String, String) {
+    match std::process::Command::new("nft").args(["list", "ruleset"]).output() {
+        Ok(out) => (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        ),
+        Err(e) => panic!("this box has no nft to read its ruleset with: {e}"),
+    }
+}

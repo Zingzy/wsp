@@ -22,6 +22,7 @@
 //!         iifname "eth0" oifname != "wsp-*" drop                 only where this daemon turned eth0's forwarding on
 //!     }
 //!     chain input { type filter hook input priority -10; policy accept;
+//!         iifname "wsp-*" ct state established,related accept   answers to what the box asked for come back
 //!         iifname "wsp-*" ip daddr != 10.65.0.0/16 drop         a workspace reaches its box at host.wsp.internal alone
 //!     }
 //!     chain postrouting { type nat hook postrouting priority srcnat; policy accept;
@@ -29,6 +30,14 @@
 //!     }
 //! }
 //! ```
+//!
+//! A workspace that asked for the box's container engine gets its containers on bridges of its own, named by the
+//! fence under the same `wsp-` prefix, so every rule above reads them as it reads the workspace: the box's cloud
+//! metadata and a neighbour are as far out of a container's reach as out of the workspace's. Frames between two
+//! containers of one workspace cross the forward hook under the bridge netfilter the engine turns on, and the
+//! one-road-out drop would take them, so each such bridge gets one rule of its own at the head of the forward
+//! chain, `iifname "<bridge>" oifname "<bridge>" accept`, marked with a comment naming the bridge and the
+//! workspace; it goes when the network does and with the workspace.
 //!
 //! Forwarding is turned on per interface, never for the box as a whole: on each `wsp-<k>` for what a workspace
 //! sends, and on the default route's interface for the answers that come back, which is where the last rule above
@@ -86,6 +95,9 @@ pub const HOST_NAME: &str = "host.wsp.internal";
 pub const TABLE: &str = "wsp";
 /// The comment on every rule this daemon writes into a chain that is not its own, which is how it finds them again.
 pub const RULE_COMMENT: &str = "wsp workspaces";
+/// What the comment on one engine bridge's rule begins with; the bridge and the workspace follow, so the rule
+/// goes with its own network and a workspace's remove takes every one of them.
+const BRIDGE_COMMENT: &str = "wsp workspaces: engine bridge ";
 /// The pair the self check makes and removes, named outside the prefix so no sweep takes it for a workspace's.
 const CHECK_LINK: &str = "wspcheck0";
 const CHECK_PEER: &str = "wspcheck1";
@@ -468,6 +480,12 @@ fn own_rules(default: Option<&str>, guard: Option<&str>) -> Vec<nft::Msg> {
         only_into.push(nft::verdict(nft::NF_DROP));
         rules.push(rule("forward", only_into, &format!("{FORWARDING_COMMENT}{guard}")));
     }
+    // Ahead of the drops below: a container of a workspace's own publishes a port the engine binds out on the
+    // box's loopback, and the answer it sends back crosses this hook from a bridge under the same prefix.
+    let mut answers_in: Vec<Expr> = nft::iifname_starts(LINK_PREFIX).into();
+    answers_in.extend(nft::ct_established_or_related());
+    answers_in.push(nft::verdict(nft::NF_ACCEPT));
+    rules.push(rule("input", answers_in, RULE_COMMENT));
     let mut gateway_only: Vec<Expr> = nft::iifname_starts(LINK_PREFIX).into();
     gateway_only.extend(nft::ip_addr_in(true, RANGE, RANGE_PREFIX, true));
     gateway_only.push(nft::verdict(nft::NF_DROP));
@@ -477,6 +495,26 @@ fn own_rules(default: Option<&str>, guard: Option<&str>) -> Vec<nft::Msg> {
     nat.push(nft::masquerade());
     rules.push(rule("postrouting", nat, RULE_COMMENT));
     rules
+}
+
+/// The comment on one engine bridge's rule: the bridge, so the rule goes with its own network, and the
+/// workspace, so a remove takes every one of them.
+fn bridge_comment(bridge: &str, id: &str) -> String {
+    format!("{BRIDGE_COMMENT}{bridge} of {id}")
+}
+
+/// The bridge and the workspace such a comment names.
+fn bridged(comment: &str) -> Option<(&str, &str)> {
+    comment.strip_prefix(BRIDGE_COMMENT)?.split_once(" of ")
+}
+
+/// The rule one engine bridge gets at the head of our own forward chain: two containers of one workspace reach
+/// each other across it, and the one-road-out drop below takes everything else it carries.
+fn bridge_rule(bridge: &str, id: &str) -> nft::Msg {
+    let mut exprs: Vec<Expr> = nft::iifname_is(bridge).into();
+    exprs.extend(nft::oifname_is(bridge));
+    exprs.push(nft::verdict(nft::NF_ACCEPT));
+    nft::new_rule(nft::NFPROTO_IPV4, TABLE, "forward", &exprs, &bridge_comment(bridge, id), true)
 }
 
 fn own_table(default: Option<&str>, guard: Option<&str>) -> Vec<nft::Msg> {
@@ -535,12 +573,45 @@ fn accepts_for(chain: &nft::ChainRow) -> Vec<nft::Msg> {
     vec![rule(out), rule(back)]
 }
 
-/// Puts the table and the accepts in place where they are not. The table is written with the default route as it
-/// is at that moment, and forwarding on its interface turned on where it was off.
+/// Whether the table the kernel holds is the table this daemon would write now: the rules of each of our chains
+/// by their expressions and their comments, in the order they are appended, less the engine bridge rules, which
+/// come and go with the networks they were written for. A daemon that landed new rules replaces the table rather
+/// than leaving a box whose workspaces are running on the rules of the daemon before it.
+fn table_differs(conn: &mut Conn, default: Option<&str>, guard: Option<&str>) -> Result<bool, Error> {
+    let wanted: Vec<(String, Vec<String>, Option<String>)> = own_rules(default, guard).iter().filter_map(nft::shape_of).collect();
+    let mut held = Vec::new();
+    for chain in ["forward", "input", "postrouting"] {
+        for rule in conn.rules(nft::NFPROTO_IPV4, TABLE, chain)? {
+            if rule.comment.as_deref().and_then(bridged).is_some() {
+                continue;
+            }
+            held.push((chain.to_owned(), rule.exprs, rule.comment));
+        }
+    }
+    Ok(held != wanted)
+}
+
+/// Puts the table and the accepts in place where they are not, and replaces the table where its rules are not
+/// the ones this daemon writes. The table is written with the default route as it is at that moment, and
+/// forwarding on its interface turned on where it was off; a replacement keeps the guard the standing table
+/// named, since the forwarding it turned on is still on, and writes every engine bridge rule again.
 pub fn rules_up() -> Result<(), Error> {
     let mut conn = Conn::open()?;
     let mut batch = Vec::new();
-    if !conn.tables()?.contains(&(nft::NFPROTO_IPV4, TABLE.to_owned())) {
+    if conn.tables()?.contains(&(nft::NFPROTO_IPV4, TABLE.to_owned())) {
+        let standing = conn.rules(nft::NFPROTO_IPV4, TABLE, "forward")?;
+        let guard = standing.iter().find_map(|r| r.comment.as_deref().and_then(guarded_interface).map(str::to_owned));
+        let default = Route::open()?.default_interface()?;
+        if table_differs(&mut conn, default.as_deref(), guard.as_deref())? {
+            batch.push(nft::del_table(nft::NFPROTO_IPV4, TABLE));
+            batch.extend(own_table(default.as_deref(), guard.as_deref()));
+            for rule in &standing {
+                if let Some((bridge, id)) = rule.comment.as_deref().and_then(bridged) {
+                    batch.push(bridge_rule(bridge, id));
+                }
+            }
+        }
+    } else {
         let default = Route::open()?.default_interface()?;
         let guard = match &default {
             Some(iface) => turn_forwarding_on(iface)?.then_some(iface.as_str()),
@@ -1060,6 +1131,43 @@ impl Net {
         Ok(())
     }
 
+    /// The rule for one bridge the engine made for a workspace's network, where the box holds a link by that
+    /// name: two containers of the workspace reach each other across it and nothing else does. False where the
+    /// engine made no such bridge, which is the fence's word to take the network away again.
+    pub fn bridge_up(&self, id: &str, bridge: &str) -> Result<bool, Error> {
+        if !Route::open()?.links()?.iter().any(|link| link.name == bridge) {
+            return Ok(false);
+        }
+        rules_up()?;
+        Conn::open()?.batch(&[bridge_rule(bridge, id)], "writing an engine bridge rule")?;
+        Ok(true)
+    }
+
+    /// That rule taken off, by the comment naming the bridge and the workspace.
+    pub fn bridge_down(&self, id: &str, bridge: &str) -> Result<(), Error> {
+        self.sweep_bridges(|named, workspace| named == bridge && workspace == id)
+    }
+
+    /// Every one of a workspace's engine bridge rules taken off, as its remove takes its containers.
+    pub fn bridges_down(&self, id: &str) -> Result<(), Error> {
+        self.sweep_bridges(|_, workspace| workspace == id)
+    }
+
+    fn sweep_bridges(&self, wanted: impl Fn(&str, &str) -> bool) -> Result<(), Error> {
+        let mut conn = Conn::open()?;
+        if !conn.tables()?.contains(&(nft::NFPROTO_IPV4, TABLE.to_owned())) {
+            return Ok(());
+        }
+        let mut batch = Vec::new();
+        for rule in conn.rules(nft::NFPROTO_IPV4, TABLE, "forward")? {
+            if rule.comment.as_deref().and_then(bridged).is_some_and(|(bridge, id)| wanted(bridge, id)) {
+                batch.push(nft::del_rule(nft::NFPROTO_IPV4, TABLE, "forward", rule.handle));
+            }
+        }
+        conn.batch(&batch, "removing the engine bridge rules")?;
+        Ok(())
+    }
+
     async fn hold(&self, id: &str, port: u16, bound: TcpListener, dial: Dial, quiet: Option<Arc<Quiet>>) {
         let box_port = bound.local_addr().map(|a| a.port()).unwrap_or(0);
         let task = tokio::spawn(serve(bound, Arc::new(dial), quiet));
@@ -1169,12 +1277,44 @@ mod tests {
         );
         assert_eq!(accepts_for(&ufw).len(), 2);
         assert_eq!(accepts_for(&chain("filter", nft::NFPROTO_IPV4, "filter", nft::NF_INET_LOCAL_IN, nft::NF_DROP)).len(), 1);
-        assert_eq!(own_table(Some("eth0"), None).len(), 4 + 6);
-        assert_eq!(own_table(Some("eth0"), Some("eth0")).len(), 4 + 7, "the guard rides along where this daemon turned forwarding on");
-        assert_eq!(own_table(None, None).len(), 4 + 6, "no default route: the one road rule drops everything a workspace forwards");
+        assert_eq!(own_table(Some("eth0"), None).len(), 4 + 7);
+        assert_eq!(own_table(Some("eth0"), Some("eth0")).len(), 4 + 8, "the guard rides along where this daemon turned forwarding on");
+        assert_eq!(own_table(None, None).len(), 4 + 7, "no default route: the one road rule drops everything a workspace forwards");
         assert_eq!(guarded_interface("wsp workspaces: forwarding turned on for eth0"), Some("eth0"));
         assert_eq!(guarded_interface(RULE_COMMENT), None);
         assert_eq!(forwarding_file("wsp-3"), "/proc/sys/net/ipv4/conf/wsp-3/forwarding");
+    }
+
+    /// The rules as a person reads them off the box, in the order they are appended: what a container of a
+    /// workspace's own engine bridge meets is what the workspace meets, and a bridge's own rule stands ahead of
+    /// the drop that would take frames between two containers of one workspace.
+    #[test]
+    fn the_rules_read_in_order_and_an_engine_bridge_carries_one_of_its_own() {
+        let shapes = |rules: Vec<nft::Msg>| -> Vec<(String, Option<String>)> {
+            rules.iter().filter_map(nft::shape_of).map(|(chain, _, comment)| (chain, comment)).collect()
+        };
+        let chains: Vec<String> = shapes(own_rules(Some("eth0"), Some("eth0"))).into_iter().map(|(chain, _)| chain).collect();
+        assert_eq!(chains, ["forward", "forward", "forward", "forward", "forward", "input", "input", "postrouting"]);
+        // The established accept on input stands ahead of the gateway drop, so a container's answer to a port
+        // the engine published on the box's loopback comes back.
+        let input: Vec<Vec<String>> =
+            own_rules(None, None).iter().filter_map(nft::shape_of).filter(|(chain, _, _)| chain == "input").map(|(_, e, _)| e).collect();
+        assert_eq!(input[0], ["ct", "bitwise", "cmp", "immediate"]);
+        assert_eq!(input[1], ["meta", "cmp", "payload", "bitwise", "cmp", "immediate"]);
+        // One bridge, one rule, marked so it goes with its own network and with the workspace that made it.
+        let (chain, exprs, comment) = nft::shape_of(&bridge_rule("wsp-e0000002a", "wsp-a")).unwrap();
+        assert_eq!(
+            (chain.as_str(), exprs),
+            ("forward", vec!["meta", "cmp", "meta", "cmp", "immediate"].into_iter().map(str::to_owned).collect())
+        );
+        assert_eq!(comment.as_deref(), Some("wsp workspaces: engine bridge wsp-e0000002a of wsp-a"));
+        assert_eq!(bridged(&comment.unwrap()), Some(("wsp-e0000002a", "wsp-a")));
+        assert_eq!(bridged(RULE_COMMENT), None);
+        assert_eq!(bridged("wsp workspaces: forwarding turned on for eth0"), None);
+        // An engine bridge wears the workspaces' prefix and is no workspace's block, so the sweep leaves it and
+        // the open counts it as a link standing on the box.
+        assert!("wsp-e0000002a".starts_with(LINK_PREFIX));
+        assert_eq!(index_of_link("wsp-e0000002a"), None);
     }
 
     /// The clock the host's idle firing reads: nothing since the last byte or the last command, growing while

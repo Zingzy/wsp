@@ -353,6 +353,7 @@ impl Ops {
             binds,
             socket,
             Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
+            Arc::new(Bridged { net: Arc::clone(&self.net) }),
         );
         let task = tokio::spawn(engine::serve(listener, Arc::new(fence)));
         if let Some(old) = self.engines.lock().await.insert(id.to_owned(), task) {
@@ -1157,6 +1158,8 @@ impl Ops {
             if let Ok(socket) = engine::socket_of(&crate::doctor::read_facts()) {
                 let _ = engine::remove_all(&socket, id).await;
             }
+            // The networks went with them, and so do the rules their bridges carried.
+            let _ = self.net.bridges_down(id);
         }
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
@@ -1414,6 +1417,23 @@ fn clear_binds(binds: &Path) -> Result<(), OpError> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(OpError::plain(format!("{}: {e}", binds.display()))),
+    }
+}
+
+/// The rule one engine bridge of a workspace gets on the box, written the moment the engine has made the link
+/// and taken off with the network it was written for. Read on the fence's own task, since the create waits on
+/// the answer: a link dump and one rule are one netlink turn each.
+struct Bridged {
+    net: Arc<Net>,
+}
+
+impl engine::Bridges for Bridged {
+    fn made(&self, workspace: &str, bridge: &str) -> bool {
+        self.net.bridge_up(workspace, bridge).unwrap_or(false)
+    }
+
+    fn gone(&self, workspace: &str, bridge: &str) {
+        let _ = self.net.bridge_down(workspace, bridge);
     }
 }
 

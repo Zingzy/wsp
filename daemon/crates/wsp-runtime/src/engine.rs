@@ -52,8 +52,11 @@ const PODMAN_SOCKET: &str = "/run/podman/podman.sock";
 const BODY_MAX: usize = 4 * 1024 * 1024;
 const HEAD_MAX: usize = 64 * 1024;
 const LOOPBACK: &str = "127.0.0.1";
-/// The network modes that name no network of the box's.
-const PLAIN_NETWORKS: [&str; 4] = ["", "default", "bridge", "none"];
+/// The three network modes the engine reads as its own default bridge, which is the box's and shared with every
+/// container on it: each is rewritten to the workspace's own network.
+const DEFAULT_NETWORKS: [&str; 3] = ["", "default", "bridge"];
+/// The mode that is no network at all, which passes as it came.
+const NO_NETWORK: &str = "none";
 
 #[derive(Debug)]
 pub struct Error(pub String);
@@ -200,6 +203,81 @@ fn word(v: Option<&Value>) -> &str {
     v.and_then(Value::as_str).unwrap_or("")
 }
 
+/// The workspace's own default network, which every container of it that asked for no network of its own joins.
+pub fn default_network(workspace: &str) -> String {
+    format!("wsp-{workspace}")
+}
+
+/// The name the box's link for one of a workspace's networks wears: under the prefix every rule of the
+/// workspace table matches, so a container on it meets the same drops the workspace does, and short enough for
+/// an interface name. Off the workspace and the network's own name, so one network asked for twice is one
+/// bridge; a box already holding a link by that name refuses the create, which is a collision saying so.
+fn bridge_name(workspace: &str, network: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in workspace.bytes().chain(std::iter::once(b'/')).chain(network.bytes()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{}e{:08x}", crate::net::LINK_PREFIX, hash as u32)
+}
+
+/// Whether a subnet a create asked for shares an address with the range every workspace's own network draws
+/// from: two blocks overlap where each masked to the shorter of the two prefixes is the same network.
+fn overlaps_workspaces(subnet: &str) -> Option<bool> {
+    let (address, prefix) = subnet.split_once('/')?;
+    let address: std::net::Ipv4Addr = address.parse().ok()?;
+    let prefix: u8 = prefix.parse().ok().filter(|p| *p <= 32)?;
+    let shorter = prefix.min(crate::net::RANGE_PREFIX);
+    let mask = if shorter == 0 { 0 } else { u32::MAX << (32 - u32::from(shorter)) };
+    Some(u32::from(address) & mask == u32::from(crate::net::RANGE) & mask)
+}
+
+/// The fence over a network create: a workspace's network is an IPv4 bridge of its own whose link on the box the
+/// fence names, since the rules that keep a workspace off the box's metadata and off its neighbours match on that
+/// name. Answers the bridge name the engine is being told to make.
+pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
+    let driver = word(body.get("Driver"));
+    if !matches!(driver, "" | "bridge") {
+        return Err(format!("a workspace's network is a bridge of its own on this computer; the driver {driver} is refused"));
+    }
+    if body.get("EnableIPv6").and_then(Value::as_bool) == Some(true) {
+        return Err("a workspace's network carries IPv4 alone; EnableIPv6 is refused".into());
+    }
+    for config in body.pointer("/IPAM/Config").and_then(Value::as_array).into_iter().flatten() {
+        let subnet = word(config.get("Subnet"));
+        if subnet.is_empty() {
+            continue;
+        }
+        match overlaps_workspaces(subnet) {
+            Some(false) => {}
+            Some(true) => {
+                return Err(format!(
+                    "a workspace's network takes no address out of the range the workspaces themselves are on; the subnet {subnet} overlaps {}/{}",
+                    crate::net::RANGE,
+                    crate::net::RANGE_PREFIX
+                ))
+            }
+            None => return Err(format!("a workspace's network names its subnet as an address and a prefix, and {subnet} is not one")),
+        }
+    }
+    let name = word(body.get("Name")).to_owned();
+    let bridge = bridge_name(workspace, &name);
+    let options =
+        body.as_object_mut().ok_or_else(|| "a create carries a JSON object".to_owned())?.entry("Options").or_insert_with(|| json!({}));
+    if options.is_null() {
+        *options = json!({});
+    }
+    let options = options.as_object_mut().ok_or_else(|| "Options is an object".to_owned())?;
+    if options.contains_key(BRIDGE_NAME) {
+        return Err(format!("a workspace's network is named by this computer; {BRIDGE_NAME} is refused"));
+    }
+    options.insert(BRIDGE_NAME.into(), Value::String(bridge.clone()));
+    Ok(bridge)
+}
+
+/// The engine option naming the link a bridge network is made on.
+const BRIDGE_NAME: &str = "com.docker.network.bridge.name";
+
 /// A container another container shares a namespace or volumes with, off `container:<id>` or `<id>[:ro]`.
 fn named_container(mode: &str) -> Option<String> {
     mode.strip_prefix("container:").map(|rest| rest.split(':').next().unwrap_or(rest).to_owned())
@@ -251,13 +329,25 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
     if network == "host" {
         return Err("a workspace's container cannot join this computer's network; NetworkMode host is refused".into());
     }
+    // The engine's default bridge is the box's, shared with every container on it and outside every rule that
+    // keeps a workspace off the box's metadata and off its neighbours, so the three words naming it are read as
+    // the workspace's own network instead.
+    let own_default = default_network(workspace);
+    let mut mode = None;
     if let Some(id) = named_container(network) {
         fenced.containers.push(id);
-    } else if !PLAIN_NETWORKS.contains(&network) {
-        fenced.networks.push(network.to_owned());
+    } else if network != NO_NETWORK {
+        let named = if DEFAULT_NETWORKS.contains(&network) { own_default.clone() } else { network.to_owned() };
+        mode = Some(named.clone());
+        fenced.networks.push(named);
     }
-    if let Some(endpoints) = body.pointer("/NetworkingConfig/EndpointsConfig").and_then(Value::as_object) {
-        fenced.networks.extend(endpoints.keys().filter(|k| !PLAIN_NETWORKS.contains(&k.as_str())).cloned());
+    if let Some(endpoints) = body.pointer_mut("/NetworkingConfig/EndpointsConfig").and_then(Value::as_object_mut) {
+        for plain in DEFAULT_NETWORKS {
+            if let Some(held) = endpoints.remove(plain) {
+                endpoints.insert(own_default.clone(), held);
+            }
+        }
+        fenced.networks.extend(endpoints.keys().filter(|k| *k != NO_NETWORK).cloned());
     }
     for from in host.get("VolumesFrom").and_then(Value::as_array).into_iter().flatten() {
         if let Some(id) = from.as_str().map(|s| s.split(':').next().unwrap_or(s)) {
@@ -315,6 +405,9 @@ pub fn fence_create(body: &mut Value, workspace: &str, map_bind: &dyn Fn(&str) -
     }
     let host_config = body.as_object_mut().and_then(|o| o.entry("HostConfig").or_insert_with(|| json!({})).as_object_mut());
     if let Some(host_config) = host_config {
+        if let Some(mode) = mode {
+            host_config.insert("NetworkMode".into(), Value::String(mode));
+        }
         if !binds.is_empty() {
             host_config.insert("Binds".into(), Value::Array(binds));
         }
@@ -540,6 +633,15 @@ pub trait Ports: Send + Sync {
     fn published(&self, workspace: &str, inside: u16, box_port: u16);
 }
 
+/// What the daemon does on the box for a network the fence lets the engine make.
+pub trait Bridges: Send + Sync {
+    /// Whether the box holds a link by that name now; where it does, the rule letting two containers of this
+    /// workspace reach each other across it goes in with it. False is the fence's word to take the network away.
+    fn made(&self, workspace: &str, bridge: &str) -> bool;
+    /// That rule taken off again, with the network it was written for.
+    fn gone(&self, workspace: &str, bridge: &str);
+}
+
 /// One workspace's fence: what its socket may reach and how its paths map.
 pub struct Fence {
     pub workspace: String,
@@ -552,6 +654,7 @@ pub struct Fence {
     pub binds: PathBuf,
     pub engine: PathBuf,
     pub ports: Arc<dyn Ports>,
+    pub bridges: Arc<dyn Bridges>,
     /// The next staging entry's name. One entry per bind source per create, since the alternative is reusing an
     /// inode a workspace may have replaced since.
     staged: std::sync::atomic::AtomicUsize,
@@ -565,8 +668,9 @@ impl Fence {
         binds: PathBuf,
         engine: PathBuf,
         ports: Arc<dyn Ports>,
+        bridges: Arc<dyn Bridges>,
     ) -> Fence {
-        Fence { workspace, rootfs, roots, binds, engine, ports, staged: std::sync::atomic::AtomicUsize::new(0) }
+        Fence { workspace, rootfs, roots, binds, engine, ports, bridges, staged: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn map_bind(&self, source: &str) -> Result<PathBuf, String> {
@@ -710,17 +814,32 @@ fn dechunk(body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn json_message(status: u16, message: &str) -> Vec<u8> {
-    let body = json!({ "message": message }).to_string();
-    let reason = match status {
+/// The reason word beside a status, for the answers this socket writes itself.
+fn reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
-        400 => "Bad Request",
+        409 => "Conflict",
+        500 => "Internal Server Error",
         _ => "Bad Gateway",
-    };
+    }
+}
+
+fn json_message(status: u16, message: &str) -> Vec<u8> {
+    json_answer(status, &json!({ "message": message }))
+}
+
+/// One JSON answer this socket writes itself, for the routes it runs against the engine rather than forwarding.
+fn json_answer(status: u16, body: &Value) -> Vec<u8> {
+    let text = body.to_string();
     format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+        reason(status),
+        text.len()
     )
     .into_bytes()
 }
@@ -762,26 +881,55 @@ async fn owned_container(fence: &Fence, id: &str) -> Result<Option<Value>, Error
     Ok(ours.then_some(inspect))
 }
 
-async fn owned_network(fence: &Fence, id: &str) -> Result<bool, Error> {
-    let (status, inspect) = ask(&fence.engine, "GET", &format!("/networks/{}", encoded(id)), None).await?;
-    Ok(status == 200 && inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str()))
-}
-
-/// What the engine holds under a volume name.
+/// What the engine holds under a name the fence asked it about.
 #[derive(Debug, PartialEq, Eq)]
-enum Volume {
+enum Owned {
     Ours,
     Another,
     Nothing,
 }
 
-async fn held_volume(fence: &Fence, name: &str) -> Result<Volume, Error> {
-    let (status, inspect) = ask(&fence.engine, "GET", &format!("/volumes/{}", encoded(name)), None).await?;
+/// The engine's inspect of a network or a volume and whose it is: both wear the label at the top of the inspect,
+/// which is what tells one workspace's from another's.
+async fn owned(fence: &Fence, path: &str) -> Result<(Owned, Value), Error> {
+    let (status, inspect) = ask(&fence.engine, "GET", path, None).await?;
     if status != 200 {
-        return Ok(Volume::Nothing);
+        return Ok((Owned::Nothing, inspect));
     }
     let ours = inspect.get("Labels").and_then(|l| l.get(LABEL)).and_then(Value::as_str) == Some(fence.workspace.as_str());
-    Ok(if ours { Volume::Ours } else { Volume::Another })
+    Ok((if ours { Owned::Ours } else { Owned::Another }, inspect))
+}
+
+async fn owned_network(fence: &Fence, id: &str) -> Result<(Owned, Value), Error> {
+    owned(fence, &format!("/networks/{}", encoded(id))).await
+}
+
+async fn held_volume(fence: &Fence, name: &str) -> Result<Owned, Error> {
+    Ok(owned(fence, &format!("/volumes/{}", encoded(name))).await?.0)
+}
+
+/// The bridge the engine was told to make, proven to be on the box and carrying its rule. Where it is not, the
+/// network goes again rather than standing outside every rule that keeps a workspace off the box.
+async fn bridge_stands(fence: &Fence, answer: &Value, bridge: &str) -> Result<(), String> {
+    if fence.bridges.made(&fence.workspace, bridge) {
+        return Ok(());
+    }
+    if let Some(id) = answer.get("Id").and_then(Value::as_str) {
+        let _ = ask(&fence.engine, "DELETE", &format!("/networks/{}", encoded(id)), None).await;
+    }
+    Err("the engine did not make the bridge this workspace's network needs".into())
+}
+
+/// The workspace's own default network, made the first time a container of it asks for no network of its own.
+async fn make_default_network(fence: &Fence, name: &str) -> Result<(), Error> {
+    let mut body = json!({ "Name": name });
+    let bridge = fence_network_create(&mut body, &fence.workspace).map_err(Error)?;
+    label_create(&mut body, &fence.workspace).map_err(Error)?;
+    let (status, answer) = ask(&fence.engine, "POST", "/networks/create", Some(&body)).await?;
+    if status != 201 {
+        return Err(Error(format!("this workspace's own network was not made: {status} {answer}")));
+    }
+    bridge_stands(fence, &answer, &bridge).await.map_err(Error)
 }
 
 /// A named volume a create asked for that the engine holds nothing under, made here wearing the workspace's
@@ -987,24 +1135,34 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
                     Err(e) => return failed(e),
                 }
             }
+            // The workspace's own network, which a container that asked for no network of its own joins: the
+            // engine's default bridge is the box's, and a container on it is outside every rule.
+            let own_default = default_network(&fence.workspace);
+            let mut make_default = false;
             for name in &fenced.networks {
                 match owned_network(fence, name).await {
-                    Ok(true) => {}
-                    Ok(false) => return Verdict::Answer(no_such("network", name)),
+                    Ok((Owned::Ours, _)) => {}
+                    Ok((Owned::Nothing, _)) if *name == own_default => make_default = true,
+                    Ok(_) => return Verdict::Answer(no_such("network", name)),
                     Err(e) => return failed(e),
                 }
             }
             let mut missing = Vec::new();
             for name in &fenced.volumes {
                 match held_volume(fence, name).await {
-                    Ok(Volume::Ours) => {}
-                    Ok(Volume::Nothing) => missing.push(name.clone()),
-                    Ok(Volume::Another) => return Verdict::Answer(no_such("volume", name)),
+                    Ok(Owned::Ours) => {}
+                    Ok(Owned::Nothing) => missing.push(name.clone()),
+                    Ok(Owned::Another) => return Verdict::Answer(no_such("volume", name)),
                     Err(e) => return failed(e),
                 }
             }
-            // Every name read before any volume is made, so a create this fence refuses leaves the engine as it
-            // found it.
+            // Every name this create carries is read before anything is made for it, so a create this fence
+            // refuses leaves the engine as it found it.
+            if make_default {
+                if let Err(e) = make_default_network(fence, &own_default).await {
+                    return failed(e);
+                }
+            }
             for name in missing {
                 if let Err(e) = make_volume(fence, &name).await {
                     return failed(e);
@@ -1013,22 +1171,45 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
             let text = body.to_string().into_bytes();
             Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
         }
-        kind @ (Route::NetworkCreate | Route::VolumeCreate) => {
+        Route::VolumeCreate => {
             let body = match read_body(stream, head, rest).await.and_then(|b| json_body(&b)) {
                 Ok(body) => body,
                 Err(e) => return Verdict::Answer(json_message(400, &e)),
             };
             let mut body = body;
-            if kind == Route::VolumeCreate {
-                if let Err(sentence) = plain_volume(word(body.get("Driver")), body.get("DriverOpts")) {
-                    return refused(sentence);
-                }
+            if let Err(sentence) = plain_volume(word(body.get("Driver")), body.get("DriverOpts")) {
+                return refused(sentence);
             }
             if let Err(e) = label_create(&mut body, &fence.workspace) {
                 return Verdict::Answer(json_message(400, &e));
             }
             let text = body.to_string().into_bytes();
             Verdict::Forward { head: request_head(head, &head.path, Some(text.len()), hijacks), body: Body::Whole(text), started: None }
+        }
+        // Run here rather than forwarded: what the engine answers decides two things the client must not see
+        // first, whether the bridge was made under the name the table's rules match and, where it was not, that
+        // the network goes again.
+        Route::NetworkCreate => {
+            let body = match read_body(stream, head, rest).await.and_then(|b| json_body(&b)) {
+                Ok(body) => body,
+                Err(e) => return Verdict::Answer(json_message(400, &e)),
+            };
+            let mut body = body;
+            let bridge = match fence_network_create(&mut body, &fence.workspace) {
+                Ok(bridge) => bridge,
+                Err(sentence) => return refused(sentence),
+            };
+            if let Err(e) = label_create(&mut body, &fence.workspace) {
+                return Verdict::Answer(json_message(400, &e));
+            }
+            match ask(&fence.engine, "POST", &head.path, Some(&body)).await {
+                Ok((201, answer)) => match bridge_stands(fence, &answer, &bridge).await {
+                    Ok(()) => Verdict::Answer(json_answer(201, &answer)),
+                    Err(sentence) => Verdict::Answer(json_message(502, &sentence)),
+                },
+                Ok((status, answer)) => Verdict::Answer(json_answer(status, &answer)),
+                Err(e) => failed(e),
+            }
         }
         Route::Container { id, verb } => {
             match owned_container(fence, &id).await {
@@ -1069,10 +1250,24 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
             }
         }
         Route::Network { id, verb } => {
-            match owned_network(fence, &id).await {
-                Ok(true) => {}
-                Ok(false) => return Verdict::Answer(no_such("network", &id)),
+            let inspect = match owned_network(fence, &id).await {
+                Ok((Owned::Ours, inspect)) => inspect,
+                Ok(_) => return Verdict::Answer(no_such("network", &id)),
                 Err(e) => return failed(e),
+            };
+            // The delete is run here so the bridge's own rule goes with the network the engine took away.
+            if head.method == "DELETE" && verb.is_none() {
+                let bridge = word(inspect.pointer(&format!("/Options/{BRIDGE_NAME}"))).to_owned();
+                return match ask(&fence.engine, "DELETE", &head.path, None).await {
+                    Ok((204, _)) => {
+                        if !bridge.is_empty() {
+                            fence.bridges.gone(&fence.workspace, &bridge);
+                        }
+                        Verdict::Answer(format!("HTTP/1.1 204 {}\r\nConnection: close\r\n\r\n", reason(204)).into_bytes())
+                    }
+                    Ok((status, answer)) => Verdict::Answer(json_answer(status, &answer)),
+                    Err(e) => failed(e),
+                };
             }
             if matches!(verb.as_deref(), Some("connect" | "disconnect")) {
                 let body = match read_body(stream, head, rest).await.and_then(|b| json_body(&b)) {
@@ -1095,7 +1290,7 @@ async fn judge<S: AsyncRead + Unpin>(fence: &Fence, stream: &mut S, head: &Head,
             Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
         }
         Route::Volume { name } => match held_volume(fence, &name).await {
-            Ok(Volume::Ours) => {
+            Ok(Owned::Ours) => {
                 Verdict::Forward { head: request_head(head, &head.path, None, hijacks), body: Body::Framed(rest), started: None }
             }
             Ok(_) => Verdict::Answer(no_such("volume", &name)),
@@ -1348,9 +1543,13 @@ mod tests {
             body["HostConfig"]["PortBindings"],
             json!({ "80/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "" }], "443/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "" }] })
         );
+        // A create that named no network at all still names one: the workspace's own, which the fence makes.
         let mut bare = json!({ "Image": "alpine" });
-        assert_eq!(fence_create(&mut bare, "wsp-b", &no_binds).unwrap(), Fenced::default());
-        assert_eq!(bare, json!({ "Image": "alpine", "HostConfig": {}, "Labels": { LABEL: "wsp-b" } }));
+        assert_eq!(
+            fence_create(&mut bare, "wsp-b", &no_binds).unwrap(),
+            Fenced { networks: vec!["wsp-wsp-b".to_owned()], ..Fenced::default() }
+        );
+        assert_eq!(bare, json!({ "Image": "alpine", "HostConfig": { "NetworkMode": "wsp-wsp-b" }, "Labels": { LABEL: "wsp-b" } }));
     }
 
     #[test]
@@ -1398,12 +1597,68 @@ mod tests {
     fn network_mode_host_is_refused_and_a_named_network_is_checked() {
         let mut body = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": "host" } });
         assert!(fence_create(&mut body, "w", &no_binds).unwrap_err().contains("NetworkMode host is refused"));
-        for plain in PLAIN_NETWORKS {
-            let mut ok = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": plain } });
-            assert!(fence_create(&mut ok, "w", &no_binds).unwrap().networks.is_empty(), "{plain}");
-        }
+        let mut none = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": NO_NETWORK } });
+        assert!(fence_create(&mut none, "w", &no_binds).unwrap().networks.is_empty(), "no network at all is no network to check");
         let mut shared = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": "container:peer" } });
         assert_eq!(fence_create(&mut shared, "w", &no_binds).unwrap().containers, vec!["peer"]);
+    }
+
+    /// The three words the engine reads as its own default bridge, which is the box's: each is read as the
+    /// workspace's own network, in the mode and in the endpoints both, and the name is checked like any other.
+    #[test]
+    fn a_container_that_asked_for_no_network_of_its_own_joins_the_workspaces() {
+        for plain in DEFAULT_NETWORKS {
+            let mut body = json!({
+                "Image": "alpine",
+                "HostConfig": { "NetworkMode": plain },
+                "NetworkingConfig": { "EndpointsConfig": { plain: { "Aliases": ["web"] } } }
+            });
+            let fenced = fence_create(&mut body, "wsp-a", &no_binds).unwrap();
+            assert_eq!(fenced.networks, vec!["wsp-wsp-a"], "{plain}");
+            assert_eq!(body["HostConfig"]["NetworkMode"], "wsp-wsp-a", "{plain}");
+            assert_eq!(body["NetworkingConfig"]["EndpointsConfig"]["wsp-wsp-a"], json!({ "Aliases": ["web"] }), "{plain}");
+            assert!(body["NetworkingConfig"]["EndpointsConfig"].get(plain).is_none() || plain.is_empty(), "{plain}");
+        }
+        assert_eq!(default_network("wsp-a"), "wsp-wsp-a");
+        // A network the workspace named itself is left as it is and checked for the label as it always was.
+        let mut named = json!({ "Image": "alpine", "HostConfig": { "NetworkMode": "demo_default" } });
+        assert_eq!(fence_create(&mut named, "wsp-a", &no_binds).unwrap().networks, vec!["demo_default"]);
+    }
+
+    /// A workspace's network is an IPv4 bridge of its own whose link the fence names, so every rule of the
+    /// workspace table reads a container on it as it reads the workspace.
+    #[test]
+    fn a_network_create_is_a_named_bridge_of_the_workspaces_own() {
+        let made = |body: &mut Value| fence_network_create(body, "wsp-a");
+        let mut plain = json!({ "Name": "demo_default" });
+        let bridge = made(&mut plain).unwrap();
+        assert!(bridge.starts_with("wsp-e") && bridge.len() == 13, "{bridge}");
+        assert!(bridge[5..].chars().all(|c| c.is_ascii_hexdigit()), "{bridge}");
+        assert_eq!(plain["Options"][BRIDGE_NAME], bridge);
+        assert_eq!(made(&mut json!({ "Name": "demo_default" })).unwrap(), bridge, "one network is one bridge");
+        assert_ne!(made(&mut json!({ "Name": "other" })).unwrap(), bridge);
+        assert_ne!(fence_network_create(&mut json!({ "Name": "demo_default" }), "wsp-b").unwrap(), bridge);
+        assert_eq!(
+            made(&mut json!({ "Name": "n", "Driver": "macvlan" })).unwrap_err(),
+            "a workspace's network is a bridge of its own on this computer; the driver macvlan is refused"
+        );
+        assert_eq!(
+            made(&mut json!({ "Name": "n", "EnableIPv6": true })).unwrap_err(),
+            "a workspace's network carries IPv4 alone; EnableIPv6 is refused"
+        );
+        // A subnet inside the workspaces' range, and one that holds the whole of it.
+        for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
+            let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();
+            assert!(refused.contains(&format!("the subnet {subnet} overlaps 10.65.0.0/16")), "{subnet}: {refused}");
+        }
+        assert!(made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": "172.30.0.0/16" }] } })).is_ok());
+        assert!(made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": "nonsense" }] } }))
+            .unwrap_err()
+            .contains("names its subnet as an address and a prefix"));
+        assert_eq!(
+            made(&mut json!({ "Name": "n", "Options": { BRIDGE_NAME: "docker0" } })).unwrap_err(),
+            format!("a workspace's network is named by this computer; {BRIDGE_NAME} is refused")
+        );
     }
 
     #[test]
