@@ -4368,6 +4368,13 @@ export type PlaceAuthRequest = z.infer<typeof PlaceAuthRequest>;
 export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
 export type PlaceAuthReply = z.infer<typeof PlaceAuthReply>;
 
+/** What a host puts on its refusal of that frame when it holds no place by the id it named: its own key and a
+ * signature over the refusal transcript. A place verifies it against the key it pinned at join and takes the long
+ * wait on it, since nothing changes until a person acts; a refusal carrying neither, or one the pinned key did not
+ * make, is a frame anybody who answers at the address can send and costs that computer no wait of its own. */
+export const PlaceAuthRefusal = z.object({ hostPublicKey: PlacePublicKey, signature: PlaceSignature });
+export type PlaceAuthRefusal = z.infer<typeof PlaceAuthRefusal>;
+
 /** The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
  * now. A join's prove carries the code it spends and the window it wants too, which is where they cross now that
  * the host has proved itself and nothing of the person's may travel before it. After this the socket is the place
@@ -4391,6 +4398,13 @@ export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
  * carrier that swapped either of them has signed nothing. */
 export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string, ephemerals: { challenger: string; answerer: string }): Uint8Array {
   return new TextEncoder().encode(`wsp place link v2\n${role}\n${placeId}\n${challenge}\n${answer}\n${ephemerals.challenger}\n${ephemerals.answerer}\n`);
+}
+
+/** What a host signs to refuse a place at its first frame, built by one function so the two sides cannot drift:
+ * the place id it named, the nonce it challenged with and the sentence it is refused by. The nonce is inside, so
+ * one dial's refusal cannot be replayed at the next; the sentence is inside, so it cannot be bent to another. */
+export function placeRefusalTranscript(placeId: string, placeNonce: string, sentence: string): Uint8Array {
+  return new TextEncoder().encode(`wsp place refusal v1\n${placeId}\n${placeNonce}\n${sentence}\n`);
 }
 
 /** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is

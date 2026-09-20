@@ -19,8 +19,8 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_frames::{
-    is_http_url, numbers, place_link_transcript, words, Base64Bytes, LinkEphemerals, LinkRole, PlaceAuthReply, PlaceAuthRequest,
-    PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, RequestId,
+    is_http_url, numbers, place_link_transcript, place_refusal_transcript, words, Base64Bytes, LinkEphemerals, LinkRole, PlaceAuthRefusal,
+    PlaceAuthReply, PlaceAuthRequest, PlaceEphemeral, PlaceFile, PlaceNonce, PlaceProveRequest, RequestId,
 };
 
 use crate::door::{self, Ended};
@@ -89,6 +89,16 @@ pub(crate) fn ws_url_of(url: &str) -> Result<String, &'static str> {
 /// The sentence a refusing frame carries, or this side's word for one that carries none.
 fn refusal_line(frame: &Value) -> &str {
     frame.get("error").and_then(Value::as_str).unwrap_or(words::HOST_REFUSED_PLACE)
+}
+
+/// Whether a refusal of the first frame is the host's own word: the key on it is the one this computer pinned at
+/// join, and the signature stands over this attempt's own refusal transcript, which carries the nonce this dial
+/// challenged with and the sentence itself. Read before any wait is spent on it, so a peer that proved nothing
+/// cannot buy ten minutes with a frame, and a refusal of an earlier dial cannot be played back at this one.
+fn is_the_hosts_word(file: &PlaceFile, nonce: &str, sentence: &str, frame: &Value) -> bool {
+    let Ok(signed) = serde_json::from_value::<PlaceAuthRefusal>(frame.clone()) else { return false };
+    signed.host_public_key.as_str() == file.host_public_key
+        && place::verify_place_bytes(&signed.host_public_key, &place_refusal_transcript(&file.place_id, nonce, sentence), &signed.signature)
 }
 
 /// Whole seconds as node's Math.round gives them for the two sentences that name a wait.
@@ -290,11 +300,16 @@ impl Link {
             let ok = value.get("ok") == Some(&Value::Bool(true));
             match (&step, ok, value.get("id").and_then(Value::as_u64)) {
                 (Step::SentAuth, false, Some(1)) => {
-                    // A no from a peer that has proved nothing, which is a frame anybody who answers at this address
-                    // can send: the sentence is logged, the next address is tried, and no wait of this place's is
-                    // spent on the word of someone who might not be its host at all.
-                    self.log(&words::link_refused(url, refusal_line(&value)));
-                    return self.cut(ws, Outcome::Answered).await;
+                    // A no at the first frame that the pinned key signed is the host's own word, given before it
+                    // knew this place, and the long wait follows it: nothing changes until a person acts. One
+                    // that carries no signature, or one that key did not make, is a frame anybody who answers at
+                    // this address can send, so the sentence is logged, the next address is tried, and no wait of
+                    // this place's is spent on the word of someone who might not be its host at all.
+                    let sentence = refusal_line(&value);
+                    let outcome =
+                        if is_the_hosts_word(file, nonce.as_str(), sentence, &value) { Outcome::Refused } else { Outcome::Answered };
+                    self.log(&words::link_refused(url, sentence));
+                    return self.cut(ws, outcome).await;
                 }
                 (Step::HostProved, false, Some(2)) => {
                     // The host proved the pinned key and then said no: its own word, and the one refusal the long

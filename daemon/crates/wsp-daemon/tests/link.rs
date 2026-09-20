@@ -20,7 +20,10 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use wsp_daemon::seal::{self, Seal};
 use wsp_daemon::{place_backoff_ms, Daemon, Options};
-use wsp_frames::{place_daemon_paths, place_link_transcript, words, DaemonEvent, LinkEphemerals, LinkRole, PlaceProveRequest, PlaceReport};
+use wsp_frames::{
+    place_daemon_paths, place_link_transcript, place_refusal_transcript, words, DaemonEvent, LinkEphemerals, LinkRole, PlaceProveRequest,
+    PlaceReport,
+};
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 const PLACE_UNKNOWN_REFUSAL: &str = "this host holds no place by that id; join it with a code from wsp add";
@@ -62,14 +65,31 @@ struct FakeHost {
 struct HostOpts {
     key: Option<Pair>,
     wrong_transcript: bool,
-    /// Answers the auth frame with this refusal, having proved nothing: what anyone who answers at the address can
-    /// say, which is why it costs this place no wait of its own.
+    /// Answers the auth frame with this refusal, which `sign` says whose word it is given as.
     refuse: Option<&'static str>,
+    /// How that refusal is signed: not at all, which is what anyone who answers at the address can say; with the
+    /// host's own key over this dial's nonce, which is its own word; or with a key nobody pinned or over another
+    /// dial's nonce, neither of which the place may take as one.
+    sign: SignRefusal,
     /// Proves its key and then refuses the prove: the host's own word, and the one refusal a long wait follows.
     refuse_prove: Option<&'static str>,
     /// Answers with no key of its own to agree with, which is what a host older than the seal does.
     unsealed: bool,
     answer: Answer,
+}
+
+/// Whose word a refusal of the first frame is given as, and over which bytes.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum SignRefusal {
+    /// Nothing signed, which is every host before this and every peer that answers at the address.
+    #[default]
+    Not,
+    /// The host's own key over this dial's place id, nonce and sentence.
+    Own,
+    /// A key this computer never pinned, over the same bytes.
+    OtherKey,
+    /// The host's own key, over a nonce this dial never sent: an earlier refusal played back.
+    OtherNonce,
 }
 
 /// What the fake host answers `place.auth` with in place of its challenge, which is how a peer that holds neither
@@ -132,11 +152,20 @@ async fn fake_place_host(opts: HostOpts) -> FakeHost {
                         Some("place.auth") => {
                             a.lock().unwrap().push(frame.clone());
                             if let Some(refusal) = opts.refuse {
-                                let _ = ws
-                                    .send(Message::text(
-                                        json!({"id": frame["id"], "ok": false, "error": refusal, "kind": "auth"}).to_string(),
-                                    ))
-                                    .await;
+                                let mut said = json!({"id": frame["id"], "ok": false, "error": refusal, "kind": "auth"});
+                                if opts.sign != SignRefusal::Not {
+                                    let stranger = place_pair();
+                                    let signer = if opts.sign == SignRefusal::OtherKey { &stranger.key } else { key.as_ref() };
+                                    let shown = if opts.sign == SignRefusal::OtherKey { &stranger.public_key } else { &pk };
+                                    let nonce = match opts.sign {
+                                        SignRefusal::OtherNonce => B64.encode([5u8; 32]),
+                                        _ => frame["nonce"].as_str().unwrap().to_owned(),
+                                    };
+                                    let bytes = place_refusal_transcript(frame["placeId"].as_str().unwrap(), &nonce, refusal);
+                                    said["hostPublicKey"] = json!(shown);
+                                    said["signature"] = json!(B64.encode(signer.sign(&bytes).to_bytes()));
+                                }
+                                let _ = ws.send(Message::text(said.to_string())).await;
                                 let _ = ws.close(None).await;
                                 return;
                             }
@@ -491,6 +520,71 @@ async fn a_refusal_from_a_peer_that_proved_nothing_costs_the_backoff_and_not_the
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while stranger.dials() < 3 {
         assert!(tokio::time::Instant::now() < deadline, "a stranger's refusal held this computer off its host; {} dials", stranger.dials());
+        settled(10).await;
+    }
+}
+
+#[tokio::test]
+async fn a_refusal_the_pinned_key_signed_costs_the_long_wait_and_one_dial() {
+    let key = place_pair();
+    let host =
+        fake_place_host(HostOpts { key: Some(key), refuse: Some(PLACE_UNKNOWN_REFUSAL), sign: SignRefusal::Own, ..HostOpts::default() })
+            .await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+    })
+    .await;
+    d.until_logged(|l| l.contains("holds no place by that id")).await;
+    // The host gave its word before it knew this place, so the wait is the long one and no second dial lands in
+    // the milliseconds a backoff would have taken.
+    settled(300).await;
+    assert_eq!(host.dials(), 1);
+}
+
+#[tokio::test]
+async fn a_refusal_signed_by_a_key_this_computer_never_pinned_costs_the_backoff() {
+    let key = place_pair();
+    let host = fake_place_host(HostOpts {
+        key: Some(key),
+        refuse: Some(PLACE_UNKNOWN_REFUSAL),
+        sign: SignRefusal::OtherKey,
+        ..HostOpts::default()
+    })
+    .await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let _d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+    })
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while host.dials() < 3 {
+        assert!(tokio::time::Instant::now() < deadline, "a stranger's signature bought the long wait; {} dials", host.dials());
+        settled(10).await;
+    }
+}
+
+#[tokio::test]
+async fn a_refusal_signed_over_another_dials_nonce_costs_the_backoff() {
+    let key = place_pair();
+    let host = fake_place_host(HostOpts {
+        key: Some(key),
+        refuse: Some(PLACE_UNKNOWN_REFUSAL),
+        sign: SignRefusal::OtherNonce,
+        ..HostOpts::default()
+    })
+    .await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let _d = place_daemon(&place, |o| {
+        o.link_refused_retry_ms = Some(600_000);
+        o.link_backoff_ms = Some(20);
+    })
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while host.dials() < 3 {
+        assert!(tokio::time::Instant::now() < deadline, "a refusal of another dial held this one off; {} dials", host.dials());
         settled(10).await;
     }
 }

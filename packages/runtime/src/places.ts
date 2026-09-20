@@ -17,11 +17,13 @@ import {
   NO_PLACE_INSTALLER,
   PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
+  PLACE_UNKNOWN_REFUSAL,
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
   forkRoom,
   placeLinkTranscript,
+  placeRefusalTranscript,
   isPlainPath,
   joinToken,
   absentComputer,
@@ -51,6 +53,7 @@ import {
   type MachineSizeOffer,
   type PlaceAddStep,
   type PlaceStageEvent,
+  type PlaceAuthRefusal,
   type PlaceAuthReply,
   type PlaceAuthRequest,
   type PlaceJoinReply,
@@ -332,8 +335,11 @@ export interface PlaceDoor {
   /** The first frame of a joining computer. Answers the reply and the bytes its prove must sign, or nothing when
    * the code is not one this host is holding. Throws with its own sentence for a key or a report it cannot take. */
   join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; seal: Seal; notice?: string } | undefined>;
-  /** The first frame of a place that already joined; nothing when this host holds no place by that id. */
-  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array; seal: Seal } | undefined>;
+  /** The first frame of a place that already joined. A place this host holds no record of is refused with this
+   * host's own key and a signature over the refusal transcript, which that computer verifies against the key it
+   * pinned at join: a refusal it can prove is one it waits ten minutes on rather than dialling every half minute
+   * for good. Throws with its own sentence for a computer this host cannot agree a key with. */
+  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array; seal: Seal } | { refusal: string; signed: PlaceAuthRefusal }>;
   /** The fingerprint of the key this door proves at every join, for the token a join line carries. Read off the
    * pair the handshake signs with, so a line can never name a key this door will not answer with. */
   hostKey(): string;
@@ -831,6 +837,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     };
   };
 
+  /** This host's word on a refusal it sends before it has proved anything else: its key, and its signature over
+   * the place id, the nonce that dial challenged with and the sentence. */
+  const signedRefusal = (placeId: string, placeNonce: string, sentence: string): PlaceAuthRefusal => ({
+    hostPublicKey: wiring.hostKey.publicKey,
+    signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeRefusalTranscript(placeId, placeNonce, sentence)),
+  });
+
   const writeSeen = async (placeId: string, at: number): Promise<void> => {
     const held = await recordOf(placeId);
     if (held === undefined) return;
@@ -1272,7 +1285,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async auth(req) {
       const held = await recordOf(req.placeId);
-      if (held === undefined) return undefined;
+      // The sentence signed before it is sent: the key is this host's own and the place pinned it at join, so
+      // this host can give its word on a place it holds nothing of, which is the whole of what the refusal says.
+      if (held === undefined) {
+        return { refusal: PLACE_UNKNOWN_REFUSAL, signed: signedRefusal(req.placeId, req.nonce, PLACE_UNKNOWN_REFUSAL) };
+      }
       const opened = challenge(req.placeId, req.nonce, req.ephemeral);
       // A daemon older than the seal agrees no key: the row already says it is behind and why, and that is the
       // sentence its link is refused with rather than one about a field.
