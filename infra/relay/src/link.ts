@@ -3,7 +3,7 @@
 // relay account. A box asks for a code, a person opens the page and approves
 // it as themselves, and the box collects a token of its own once. The code is
 // spent by the approval and the token by the first poll that takes it.
-import { jsonBody } from "./body.js";
+import { bodyText, jsonBody } from "./body.js";
 import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
@@ -118,7 +118,7 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
 
 /** The person says yes. The code is spent here, once, whichever browser gets there first. */
 export async function linkApprove(ctx: Ctx): Promise<Response> {
-  const form = new URLSearchParams(await ctx.req.text());
+  const form = new URLSearchParams(await bodyText(ctx));
   const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
   const who = account === undefined ? undefined : await accountOf(ctx.env, account);
   if (who === undefined) throw refuse(401, "sign in first: open the page the command line printed");

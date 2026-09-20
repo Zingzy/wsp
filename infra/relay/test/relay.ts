@@ -50,7 +50,7 @@ export interface RelayHarness {
   calls: OutboundCall[];
   /** Answers the next call whose "<METHOD> <url>" holds this text; armed answers are spent in order. */
   answer(holds: string, body: unknown, status?: number): void;
-  fetch(path: string, init?: { method?: string; body?: string; headers?: Record<string, string> }): Promise<Response>;
+  fetch(path: string, init?: { method?: string; body?: string | ReadableStream<Uint8Array>; headers?: Record<string, string> }): Promise<Response>;
   /** Moves the clock the Worker reads. */
   tick(ms: number): void;
 }
@@ -197,11 +197,12 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
     answer: (holds, body, status = 200) => armed.push({ holds, body, status }),
     fetch: (path, init = {}) =>
       handle(
+        // duplex names a body that arrives as a stream, which is how a case reads what the routes pulled off one.
         new Request(`${RELAY_ORIGIN}${path}`, {
           method: init.method ?? "GET",
-          ...(init.body !== undefined ? { body: init.body } : {}),
+          ...(init.body !== undefined ? { body: init.body, duplex: "half" } : {}),
           headers: init.headers ?? {},
-        }),
+        } as RequestInit),
         env,
         deps,
       ),

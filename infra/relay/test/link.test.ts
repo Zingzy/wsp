@@ -337,3 +337,52 @@ describe("what one caller can grow here", () => {
     expect(bareRow["source"]).toBe("");
   });
 });
+
+describe("a body this relay will not hold", () => {
+  /** A body that says how much of itself was ever pulled off the wire. */
+  function counted(bytes: number): { body: ReadableStream<Uint8Array>; pulled: () => number } {
+    let sent = 0;
+    // Nothing is queued ahead of a read, so the count is what the reading asked for and not what a buffer took.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (sent >= bytes) return controller.close();
+          sent += 1024;
+          controller.enqueue(new Uint8Array(1024).fill(0x20));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    return { body, pulled: () => sent };
+  }
+
+  it("refuses a body past the cap while it reads, rather than after it is all in memory", async () => {
+    const relay = await relayHarness();
+    const { body, pulled } = counted(1024 * 1024);
+    const res = await relay.fetch("/link/start", { method: "POST", body });
+    expect(res.status).toBe(413);
+    expect(pulled()).toBeLessThan(8192);
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 0 });
+  });
+
+  it("refuses a declared length past the cap before a byte of it is asked for", async () => {
+    const relay = await relayHarness();
+    const { body, pulled } = counted(1024 * 1024);
+    const res = await relay.fetch("/link/start", { method: "POST", body, headers: { "content-length": String(1024 * 1024) } });
+    expect(res.status).toBe(413);
+    expect(pulled()).toBe(0);
+  });
+
+  it("holds the approve form to the same cap", async () => {
+    const relay = await relayHarness();
+    const { code } = await started(relay, "host", "box");
+    const cookie = await signIn(relay, "maya", "4242", code);
+    const page = await relay.fetch(`/link/verify?code=${code}`, { headers: { cookie } });
+    const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
+
+    const padded = new URLSearchParams({ code, stamp, pad: "x".repeat(8192) }).toString();
+    const refused = await relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: padded });
+    expect(refused.status).toBe(413);
+    expect((await relay.db.prepare("SELECT state FROM link_codes WHERE code = ?").bind(code).first()) as Record<string, string>).toMatchObject({ state: "pending" });
+  });
+});
