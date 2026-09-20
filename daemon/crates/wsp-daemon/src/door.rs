@@ -37,8 +37,8 @@ const HEAD_MAX_BYTES: usize = 16 * 1024;
 /// else on a machine answers it, as node's ws server answered it before.
 const UPGRADE_REQUIRED: &[u8] = b"HTTP/1.1 426 Upgrade Required\r\nUpgrade: websocket\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 
-/// Bytes read since the handshake and whether they crossed the cap, shared by the stream that counts inside its
-/// read and the task that acts on the trip.
+/// The bytes a peer sends before its auth frame, the upgrade request excluded, and whether they crossed the cap,
+/// shared by the stream that counts inside its read and the task that acts on the trip.
 #[derive(Default)]
 struct PreAuth {
     read: AtomicU64,
@@ -124,17 +124,24 @@ fn text(value: &impl serde::Serialize) -> Message {
 }
 
 /// The request head up to its blank line, or as much of it as the cap allows; nothing when the peer went first.
-async fn read_head(tcp: &mut TcpStream) -> io::Result<Vec<u8>> {
+/// Beside it, where the request ends inside it, which is the head's own length when no blank line came.
+async fn read_head(tcp: &mut TcpStream) -> io::Result<(Vec<u8>, usize)> {
     let mut head = Vec::new();
     let mut chunk = [0u8; 1024];
-    while !head.ends_with(b"\r\n\r\n") && !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < HEAD_MAX_BYTES {
+    loop {
+        if let Some(at) = head.windows(4).position(|w| w == b"\r\n\r\n") {
+            return Ok((head, at + 4));
+        }
+        if head.len() >= HEAD_MAX_BYTES {
+            let end = head.len();
+            return Ok((head, end));
+        }
         let n = tcp.read(&mut chunk).await?;
         if n == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         head.extend_from_slice(&chunk[..n]);
     }
-    Ok(head)
 }
 
 /// Whether a request head asks for the WebSocket upgrade: the one header the framing insists on, read the way it
@@ -151,7 +158,7 @@ fn asks_for_upgrade(head: &[u8]) -> bool {
 /// daemon from an edge speaking for a machine that has none.
 pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
     let deadline = Instant::now() + ctx.auth_deadline;
-    let Ok(Ok(head)) = timeout_at(deadline, read_head(&mut tcp)).await else {
+    let Ok(Ok((head, uncounted))) = timeout_at(deadline, read_head(&mut tcp)).await else {
         return;
     };
     if !asks_for_upgrade(&head) {
@@ -160,7 +167,6 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let pre = Arc::new(PreAuth::default());
-    let uncounted = head.windows(4).position(|w| w == b"\r\n\r\n").map_or(head.len(), |at| at + 4);
     let stream = Counted { inner: tcp, pre: Arc::clone(&pre), ahead: head, ahead_at: 0, uncounted };
     let config = WebSocketConfig::default().max_message_size(Some(MESSAGE_MAX_BYTES)).max_frame_size(Some(MESSAGE_MAX_BYTES));
     pre.arm();
