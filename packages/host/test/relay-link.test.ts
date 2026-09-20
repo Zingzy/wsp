@@ -100,7 +100,7 @@ async function fakeRelay(): Promise<FakeRelay> {
       };
       if (state.refuse !== undefined && !line.includes("/link/")) return send(state.refuse.status, { error: state.refuse.error });
       if (line === "POST /link/start") {
-        return send(200, { code: "ABCD2345", verifyUrl: `${state.url}/link/verify?code=ABCD2345`, pollToken: "poll-token", expiresAt: new Date(Date.now() + 900_000).toISOString(), pollAfterMs: 1 });
+        return send(200, { code: "ABCD2345", verifyUrl: `${state.url}/link/verify`, pollToken: "poll-token", expiresAt: new Date(Date.now() + 900_000).toISOString(), pollAfterMs: 1 });
       }
       if (line === "POST /link/poll") {
         if (state.pending > 0) {
@@ -201,14 +201,16 @@ function box(): { statePath: string; dir: string; home: string } {
 }
 
 describe("wsp host link", () => {
-  it("prints the code and the page, waits for the approval and keeps the token where only this user reads it", async () => {
+  it("prints the code, the page and what to type there, waits for the approval and keeps the token where only this user reads it", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
     const log: string[] = [];
     expect(await relayCommand(io(log), { statePath, home }, ["link", relay.url], {}, deps(dir))).toBe(0);
 
-    expect(log.join("\n")).toContain("ABCD2345");
-    expect(log.join("\n")).toContain(`${relay.url}/link/verify?code=ABCD2345`);
+    expect(log).toContain("code        ABCD2345");
+    expect(log).toContain(`open        ${relay.url}/link/verify`);
+    // The page asks for the code rather than reading it out of the address, so the line says what to type.
+    expect(log).toContain("type        ABCD2345 on that page");
     expect(log.join("\n")).not.toContain("host-token");
     expect(relay.calls.map(c => c.line)).toEqual(["POST /link/start", "POST /link/poll", "POST /link/poll"]);
     expect(relay.calls[0]!.body).toMatchObject({ kind: "host", name: "the box" });

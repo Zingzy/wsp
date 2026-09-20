@@ -7,7 +7,7 @@
 import { clientDelete, clientList } from "./clients.js";
 import type { Env } from "./env.js";
 import { hostDelete, hostHeartbeat, hostList, hostTunnel } from "./hosts.js";
-import { linkApprove, linkCallback, linkPoll, linkStart, linkVerify } from "./link.js";
+import { linkApprove, linkCallback, linkPoll, linkStart, linkTyped, linkVerify } from "./link.js";
 import { Refusal } from "./refusal.js";
 
 /** Everything the Worker reaches outside itself: one road out, one clock, one source of secrets. Tests hand in their own. */
@@ -41,6 +41,7 @@ interface Route {
 const ROUTES: readonly Route[] = [
   { method: "POST", path: "/link/start", handle: linkStart },
   { method: "GET", path: "/link/verify", handle: linkVerify },
+  { method: "POST", path: "/link/verify", handle: linkTyped },
   { method: "GET", path: "/link/callback", handle: linkCallback },
   { method: "POST", path: "/link/approve", handle: linkApprove },
   { method: "POST", path: "/link/poll", handle: linkPoll },
@@ -76,10 +77,12 @@ export async function handle(req: Request, env: Env, deps: Deps = systemDeps): P
   try {
     for (const route of ROUTES) {
       const params = match(path, route.path);
-      if (params === undefined) continue;
-      if (route.method !== req.method) return Response.json({ error: `${req.method} is not what ${path} answers` }, { status: 405 });
+      if (params === undefined || route.method !== req.method) continue;
       return await route.handle({ req, env, deps, url, params });
     }
+    // A path more than one method answers on is matched by each of them, so the method is what is wrong here only
+    // when no route on this path took it.
+    if (ROUTES.some(route => match(path, route.path) !== undefined)) return Response.json({ error: `${req.method} is not what ${path} answers` }, { status: 405 });
   } catch (e) {
     if (e instanceof Refusal) return Response.json({ error: e.message }, { status: e.status });
     if (e instanceof URIError) return Response.json({ error: `that path is not one this relay can read: ${path}` }, { status: 400 });

@@ -397,18 +397,18 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   });
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
-  // `here` is false on the door a computer you own dials: that page carries no token and pairs for one, whatever
-  // the address this host bound says about the loopback port beside it.
+  // `here` is false on the door a computer you own dials: that page is the pairing screen and carries nothing of
+  // this computer, neither the token nor the state file's path nor the runtime's own port, whatever the address
+  // this host bound says. The loopback page writes the port first, where the desktop shell's probe reads it.
   const page = (here: boolean): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
     return loadPage(webDir, {
-      wsPort: rtServer.port,
-      ...(here ? { token: authToken } : {}),
+      ...(here ? { wsPort: rtServer.port, token: authToken } : {}),
       wsPath: WS_PATH,
       paired: here,
       version: VERSION,
       ...(terminalFont !== undefined ? { terminalFont } : {}),
-      ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
+      ...(here && opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
     });
   };
 

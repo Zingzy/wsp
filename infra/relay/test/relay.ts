@@ -50,7 +50,7 @@ export interface RelayHarness {
   calls: OutboundCall[];
   /** Answers the next call whose "<METHOD> <url>" holds this text; armed answers are spent in order. */
   answer(holds: string, body: unknown, status?: number): void;
-  fetch(path: string, init?: { method?: string; body?: string; headers?: Record<string, string> }): Promise<Response>;
+  fetch(path: string, init?: { method?: string; body?: string | ReadableStream<Uint8Array>; headers?: Record<string, string> }): Promise<Response>;
   /** Moves the clock the Worker reads. */
   tick(ms: number): void;
 }
@@ -197,11 +197,12 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
     answer: (holds, body, status = 200) => armed.push({ holds, body, status }),
     fetch: (path, init = {}) =>
       handle(
+        // duplex names a body that arrives as a stream, which is how a case reads what the routes pulled off one.
         new Request(`${RELAY_ORIGIN}${path}`, {
           method: init.method ?? "GET",
-          ...(init.body !== undefined ? { body: init.body } : {}),
+          ...(init.body !== undefined ? { body: init.body, duplex: "half" } : {}),
           headers: init.headers ?? {},
-        }),
+        } as RequestInit),
         env,
         deps,
       ),
@@ -215,16 +216,19 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
 export const cfOk = (result: unknown): unknown => ({ success: true, errors: [], messages: [], result });
 
 /** The whole device code flow for one host or one client, as the tests that start from a linked host need it:
- * the code, the sign in, the approval and the poll that hands the token over. */
+ * the code, the sign in, the approval and the poll that hands the token over. `who.from` is the address the start
+ * is made from, which the relay counts its caps under: a case that starts several links gives each its own. */
 export async function linkedVia(
   relay: RelayHarness,
   kind: "host" | "client",
   name: string,
-  who: { login: string; githubId: string; cookie?: string },
+  who: { login: string; githubId: string; cookie?: string; from?: string },
 ): Promise<{ token: string; hostId?: string; cookie: string }> {
-  const start = (await (await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }) })).json()) as { code: string; pollToken: string };
-  const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId, start.code));
-  const page = await relay.fetch(`/link/verify?code=${start.code}`, { headers: { cookie } });
+  const start = (await (
+    await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }), ...(who.from !== undefined ? { headers: { "cf-connecting-ip": who.from } } : {}) })
+  ).json()) as { code: string; pollToken: string };
+  const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId));
+  const page = await typeCode(relay, start.code, cookie);
   const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
   await relay.fetch("/link/approve", {
     method: "POST",
@@ -235,10 +239,14 @@ export async function linkedVia(
   return { token: answer.token, ...(answer.hostId !== undefined ? { hostId: answer.hostId } : {}), cookie };
 }
 
-/** Signs a person in the way the verify page does, and answers with the session cookie a later request carries.
- * `code` is a code some host is already waiting on, since the verify page is only ever opened for one. */
-export async function signIn(relay: RelayHarness, login: string, githubId: string, code: string): Promise<string> {
-  const start = await relay.fetch(`/link/verify?code=${code}`);
+/** The code typed on the verify page, which is what the relay renders the approve form for: the page's address
+ * carries none, so this is the one road to that form. */
+export const typeCode = (relay: RelayHarness, code: string, cookie: string): Promise<Response> =>
+  relay.fetch("/link/verify", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code }).toString() });
+
+/** Signs a person in the way the verify page does, and answers with the session cookie a later request carries. */
+export async function signIn(relay: RelayHarness, login: string, githubId: string): Promise<string> {
+  const start = await relay.fetch("/link/verify");
   const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
   // The sign-in is bound to this browser, so the callback carries back the nonce the redirect set.
   const nonce = firstCookie(start);

@@ -103,6 +103,15 @@ describe("probeHost", () => {
       await handle.close();
     }
   });
+
+  it("recognises a host listening beyond this computer, whose page says nothing of this computer", async () => {
+    const handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(mkdtempSync(join(tmpdir(), "wsp-desktop-state-")), "state.json") });
+    try {
+      expect(await probeHost(handle.port)).toBe("wsp");
+    } finally {
+      await handle.close();
+    }
+  });
 });
 
 describe("openHost", () => {
