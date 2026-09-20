@@ -1212,8 +1212,8 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
  * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
  * their own work, where one of them warns with the whole error and its stack behind a line of its own. Read here and
  * the refusal is this start's, thrown once and printed once, and the store is handed on so the file is not read
- * twice over. */
-async function readOnce(statePath: string): Promise<Store> {
+ * twice over. One reading, taken by wsp up and by the app's first launch before either makes a runtime. */
+export async function readOnce(statePath: string): Promise<Store> {
   const store = jsonFileStore(statePath, stateWriterHere());
   await store.keys("workspaces");
   return store;

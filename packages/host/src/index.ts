@@ -17,6 +17,7 @@ export {
   localWiring,
   localWorkFolder,
   makeRuntime,
+  readOnce,
   serve,
   servesNothing,
   stopOnSignals,
