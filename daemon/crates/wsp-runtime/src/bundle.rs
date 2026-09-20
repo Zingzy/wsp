@@ -592,9 +592,9 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     // first boot, kept by a stop as the uppers are, and goes with the workspace.
     bind_over(&place, &layout.wsp_home(id), GUEST_WSP_HOME, BoxLink::FollowedOnce)?;
     // And over every path of the box's own that nothing inside may read, the workspace's own empty file or
-    // directory: one per path, so what a workspace writes at one of them is not what it writes at another. Read
-    // off the rootfs here rather than listed here, and read last: the person's home and the box's /etc are both
-    // among the trees being covered, and both are only there to read once the mounts above are up.
+    // directory: one per path, so what a workspace writes at one of them is not what it writes at another. Last,
+    // after the mounts above: the person's home and the box's /etc are both among the trees being covered, and a
+    // cover of either lands on a path that is not there until those are up.
     for cover in hardening::covered() {
         let source = if cover.own { layout.own_at(id, &cover.at) } else { layout.empty_at(id, &cover.at) };
         // Every cover refuses a link on its path, the box root's own as much as the workspace's: what is bound

@@ -220,8 +220,8 @@ pub const ETC_ALLOWED: &[&str] = &[
 /// What that costs, said plainly: a folder above one of these names counts too, so a box whose root keeps
 /// `.config` as a link into a dotfiles checkout, which is the common layout, refuses every boot until `.config`
 /// is a folder of its own with the checkout's files in it. That is a bigger ask than moving one file, and it is
-/// the price of the name itself being the thing a login reads. A share's path is the other road and is followed
-/// once, so a linked `.config` a workspace is given as a share still boots.
+/// the price of the name itself being the thing a login reads. What still boots is a link below `.config` at a
+/// folder no cover's path runs through, a linked `.config/codex` say, which a share follows once.
 ///
 /// What this does not close, said plainly: the box root's own `.bashrc` and `.profile` source files in the shared
 /// home beyond these names, an nvm or a cargo environment line, a completion file under `.local/share`, and they
