@@ -14,7 +14,7 @@ use wsp_frames::{numbers, words, DaemonErrorCode, DaemonEvent, GuestOpen};
 
 use crate::ops::Conn;
 use crate::paths::OpError;
-use crate::Outbound;
+use crate::{Outbound, Outgoing};
 
 /// One open session: the guest socket it belongs to, and the frames it holds while no watcher is attached.
 struct Session {
@@ -29,7 +29,9 @@ struct Session {
     /// The frame this session opened with, kept rather than queued: every watcher that arrives is told the sessions
     /// this machine holds, and a host that restarted holds no row for one its machine still carries.
     opened: DaemonEvent,
-    queued: Vec<DaemonEvent>,
+    /// The frames held for the watcher that arrives next, each carrying the bytes it holds against its workspace:
+    /// a session dropped with frames still in it gives those bytes back with them.
+    queued: Vec<Outgoing>,
     /// The guest's end is gone and its close is the last thing queued: the row stands only until a watcher has been
     /// handed that frame, so a host arriving after the fact still hears the session end rather than holding its own
     /// row and its socket for the life of the machine.
@@ -52,6 +54,8 @@ struct State {
 
 pub(crate) struct Guests {
     state: Mutex<State>,
+    /// What every session on this daemon has waiting, by the workspace it belongs to.
+    in_flight: Arc<InFlight>,
     ids: AtomicU64,
     /// What every session this run of the daemon opens is named by, beside its own name. Session names count from
     /// the start on every run, so a machine rebuilt under a host hands it names that host may still hold; the
@@ -70,8 +74,9 @@ fn fresh_life() -> String {
     format!("{:016x}", u64::from_le_bytes(bytes))
 }
 
-fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
-    state.lock().unwrap_or_else(|e| e.into_inner())
+/// A holder that panicked leaves its state behind, which the next caller reads rather than panicking on in turn.
+fn lock<T>(held: &Mutex<T>) -> MutexGuard<'_, T> {
+    held.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn no_such_session(session: &str) -> OpError {
@@ -90,9 +95,9 @@ impl State {
 
     /// Up to whoever is watching, or into the session's own queue; a queue past its cap ends the session, which is
     /// what a guest reads when the host has been away too long.
-    fn upward(&mut self, session: &str, event: DaemonEvent) -> Option<Outbound> {
+    fn upward(&mut self, session: &str, frame: Outgoing) -> Option<Outbound> {
         if let Some(out) = self.watching() {
-            out.send_event(&event);
+            out.send(frame);
             return None;
         }
         let held = self.sessions.get_mut(session)?;
@@ -100,14 +105,14 @@ impl State {
             let gone = self.sessions.remove(session)?;
             return Some(gone.out);
         }
-        held.queued.push(event);
+        held.queued.push(frame);
         None
     }
 }
 
 impl Guests {
     pub(crate) fn new(unwatched: Duration) -> Guests {
-        Guests { state: Mutex::default(), ids: AtomicU64::new(0), life: fresh_life(), unwatched }
+        Guests { state: Mutex::default(), in_flight: Arc::default(), ids: AtomicU64::new(0), life: fresh_life(), unwatched }
     }
 
     /// One session per socket: a second open on the same socket is the client's own mistake, not a second session.
@@ -147,6 +152,8 @@ impl Guests {
         Ok(session)
     }
 
+    /// One message up, where the session stands, the message is under the frame cap and its workspace has room
+    /// under the bytes cap; every one of the three is read before a byte is taken or queued.
     pub(crate) fn send(&self, conn: &Conn, message: Value) -> Result<(), OpError> {
         let session = conn.guest_session().ok_or_else(|| OpError::coded(DaemonErrorCode::BadRequest, NO_SESSION))?;
         if message.to_string().len() > numbers::GUEST_MESSAGE_CAP_BYTES {
@@ -157,7 +164,11 @@ impl Guests {
             return Err(no_such_session(&session));
         }
         let machine = state.machine_of(&session);
-        let full = state.upward(&session, DaemonEvent::GuestMessage { session: session.clone(), message, machine_id: machine.clone() });
+        let text = crate::frame_text(&DaemonEvent::GuestMessage { session: session.clone(), message, machine_id: machine.clone() });
+        let Some(held) = self.in_flight.take(&machine, text.len()) else {
+            return Err(OpError::coded(DaemonErrorCode::BadRequest, words::GUEST_IN_FLIGHT_FULL));
+        };
+        let full = state.upward(&session, Outgoing::Guest(text, held));
         drop(state);
         if let Some(out) = full {
             out.send_event(&DaemonEvent::GuestClosed { session, error: Some(words::GUEST_QUEUE_FULL.to_owned()), machine_id: machine });
@@ -175,19 +186,19 @@ impl Guests {
         let mut state = lock(&self.state);
         state.watchers.retain(|(key, _)| *key != conn.key);
         state.watchers.push((conn.key, conn.out.clone()));
-        let mut held: Vec<(u64, Vec<DaemonEvent>)> = state
+        let mut held: Vec<(u64, Vec<Outgoing>)> = state
             .sessions
             .values_mut()
             .map(|s| {
                 s.unwatched_since = None;
-                let mut frames = vec![s.opened.clone()];
+                let mut frames = vec![Outgoing::Text(crate::frame_text(&s.opened))];
                 frames.append(&mut std::mem::take(&mut s.queued));
                 (s.at, frames)
             })
             .collect();
         held.sort_by_key(|(at, _)| *at);
-        for event in held.iter().flat_map(|(_, events)| events) {
-            conn.out.send_event(event);
+        for frame in held.into_iter().flat_map(|(_, frames)| frames) {
+            conn.out.send(frame);
         }
         state.sessions.retain(|_, s| !s.ended);
     }
@@ -232,7 +243,7 @@ impl Guests {
                 None => {
                     if let Some(held) = state.sessions.get_mut(&session) {
                         held.ended = true;
-                        held.queued.push(closed);
+                        held.queued.push(Outgoing::Text(crate::frame_text(&closed)));
                     }
                 }
             }
@@ -305,9 +316,103 @@ impl Guests {
     }
 }
 
+/// The guest bytes a workspace has waiting: frames queued in its sessions and frames written onto a watcher's
+/// channel that its socket has not carried out yet. One count per workspace on a computer that runs them, and one
+/// for the daemon itself inside a machine, where a session names no workspace, so no road of the two is left
+/// growing without a bound.
+#[derive(Default)]
+pub(crate) struct InFlight(Mutex<HashMap<Option<String>, usize>>);
+
+impl InFlight {
+    /// One frame's bytes, taken where the cap leaves room for them; none past it, where nothing is taken.
+    fn take(self: &Arc<Self>, at: &Option<String>, bytes: usize) -> Option<GuestBytes> {
+        let mut held = lock(&self.0);
+        let waiting = held.get(at).copied().unwrap_or(0);
+        if waiting + bytes > numbers::GUEST_IN_FLIGHT_CAP_BYTES {
+            return None;
+        }
+        held.insert(at.clone(), waiting + bytes);
+        Some(GuestBytes { of: Arc::clone(self), at: at.clone(), bytes })
+    }
+
+    fn give_back(&self, at: &Option<String>, bytes: usize) {
+        let mut held = lock(&self.0);
+        let Some(waiting) = held.get_mut(at) else { return };
+        *waiting = waiting.saturating_sub(bytes);
+        if *waiting == 0 {
+            held.remove(at);
+        }
+    }
+}
+
+/// What one guest frame holds against its workspace while it waits. The bytes go back when the frame is written,
+/// and when it is dropped instead: a watcher's socket that goes with frames still on its channel drops them, and
+/// a session that ends drops whatever it had queued.
+pub(crate) struct GuestBytes {
+    of: Arc<InFlight>,
+    at: Option<String>,
+    bytes: usize,
+}
+
+impl Drop for GuestBytes {
+    fn drop(&mut self) {
+        self.of.give_back(&self.at, self.bytes);
+    }
+}
+
 pub(crate) const NO_SESSION: &str = "this socket has opened no guest session";
 pub(crate) const SESSION_TAKEN: &str = "this socket already holds a guest session";
 
 fn over_the_cap() -> String {
     format!("a guest message is at most {} bytes of JSON", numbers::GUEST_MESSAGE_CAP_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::Road;
+    use tokio::sync::mpsc;
+    use wsp_frames::GuestKind;
+
+    /// A socket opened inside one workspace, and the channel its frames would leave on.
+    fn inside(workspace: &str, key: u64) -> (Conn, mpsc::UnboundedReceiver<Outgoing>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Conn::new(key, None, Outbound(tx), Road::Workspace(workspace.to_owned()), None), rx)
+    }
+
+    fn opening() -> GuestOpen {
+        GuestOpen {
+            kind: GuestKind::Cli,
+            token: "dev-1.tok".to_owned(),
+            turn_token: None,
+            argv: vec!["threads".to_owned()],
+            cwd: "/root".to_owned(),
+        }
+    }
+
+    /// A message big enough that a handful of them fill the cap, and small enough to ride one frame.
+    fn fat() -> Value {
+        Value::from("x".repeat(1024 * 1024))
+    }
+
+    /// The cap is one workspace's own: a computer runs many, and a process flooding inside one must not stop the
+    /// guest road of the workspace beside it.
+    #[tokio::test]
+    async fn the_bytes_one_workspace_holds_leave_the_workspace_beside_it_sending() {
+        let guests = Arc::new(Guests::new(Duration::from_secs(600)));
+        let (a, _a_rx) = inside("wsp-a", 1);
+        let (b, _b_rx) = inside("wsp-b", 2);
+        guests.open(&a, opening()).unwrap();
+        guests.open(&b, opening()).unwrap();
+
+        let mut refusal = None;
+        for _ in 0..64 {
+            if let Err(e) = guests.send(&a, fat()) {
+                refusal = Some(e.message);
+                break;
+            }
+        }
+        assert_eq!(refusal.as_deref(), Some(words::GUEST_IN_FLIGHT_FULL), "wsp-a filled its own cap");
+        assert!(guests.send(&b, fat()).is_ok(), "wsp-b has its own count");
+    }
 }

@@ -1,8 +1,9 @@
 {
-  "daemonVersion": 60,
+  "daemonVersion": 61,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
+  "guestInFlightCapBytes": 16777216,
   "guestUnwatchedMs": 600000,
   "guestTokenMax": 512,
   "guestArgvMax": 256,

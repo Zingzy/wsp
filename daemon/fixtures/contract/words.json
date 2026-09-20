@@ -13,6 +13,7 @@
   "noImagesHere": "this computer keeps no images: a workspace here is a copy of the computer itself",
   "guestNotWatcher": "only the socket that sent guest.watch may answer or close a guest session",
   "guestQueueFull": "the host has not read this session for too long",
+  "guestInFlightFull": "too many guest bytes are waiting to be read here; send this one again",
   "guestUnwatched": "the host stopped watching; run it again",
   "guestNoDaemon": "this machine's wsp daemon is not answering on 127.0.0.1:{port}",
   "onBase": "this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again",
