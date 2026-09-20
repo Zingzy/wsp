@@ -13,10 +13,10 @@ import {
   agentInstallsFor,
   imageCommands,
   mcpPlanFor,
+  neverCopied,
   planFiles,
   recipeDigest,
   recipeHash,
-  refusedPath,
   shellInstallFor,
   TOOLS_PATH,
   toolInstallsFor,
@@ -32,6 +32,7 @@ import {
   type PathInfo,
   type PlannedFile,
   type PlannedSecret,
+  type RecipeEntry,
   type SkippedPath,
   secretKey,
   secretPath,
@@ -297,11 +298,17 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       const keep = (src: string, dest: string): boolean => {
         if (f.excludes.some(x => src === x || src.startsWith(`${x}/`))) return false;
         if (rcReal.has(resolved(src) ?? "")) twins.add(dest);
+        const shown = `~/${relative(opts.home, src)}`;
         if (!lstatSync(src).isSymbolicLink()) {
-          if (statSync(src).isDirectory()) entered.add(resolved(src) ?? src);
+          const isDir = statSync(src).isDirectory();
+          const never = neverCopied(f, relative(opts.home, src), isDir);
+          if (never !== undefined) {
+            skipped.push({ id: f.id, path: shown, note: never });
+            return false;
+          }
+          if (isDir) entered.add(resolved(src) ?? src);
           return true;
         }
-        const shown = `~/${relative(opts.home, src)}`;
         const real = resolved(src);
         if (real === undefined) skipped.push({ id: f.id, path: shown, note: "a link whose target is gone" });
         else if (!(real === opts.home || real.startsWith(`${opts.home}/`))) skipped.push({ id: f.id, path: shown, note: `a link to ${real}, outside your home directory` });
@@ -309,12 +316,14 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         else if (entered.has(real)) skipped.push({ id: f.id, path: shown, note: "a link into a directory already copied" });
         else {
           const dir = statSync(real).isDirectory();
-          const why = refusedPath(relative(opts.home, real), dir);
+          // A link is judged by its own name and by the file it lands on, the reading the row's own path got.
+          const own = neverCopied(f, relative(opts.home, src), dir);
+          const why = own ?? neverCopied(f, relative(opts.home, real), dir);
           if (why === undefined) {
             if (dir) entered.add(real);
             return true;
           }
-          skipped.push({ id: f.id, path: shown, note: `a link to ~/${relative(opts.home, real)}: ${why}` });
+          skipped.push({ id: f.id, path: shown, note: own !== undefined ? own : `a link to ~/${relative(opts.home, real)}: ${why}` });
         }
         return false;
       };
@@ -418,12 +427,13 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       if (found === undefined || !existsSync(found.staged)) continue;
       const { owner, staged } = found;
       const text = readFileSync(staged, "utf8");
-      const carried = a.hooks.carry(text, opts.home, abs => hookDest(abs, opts.home));
+      const carried = a.hooks.carry(text, opts.home, abs => hookDest(abs, opts.home, owner));
       for (const c of carried.carried) {
         const target = join(stage, c.to.slice(GUEST_HOME.length + 1));
         if (existsSync(target)) continue;
         mkdirSync(dirname(target), { recursive: true });
-        cpSync(c.from, target, { dereference: true });
+        // A link's bytes land at the hook's path: cpSync refuses a link as its source unless it may recurse, whatever dereference says (node 22).
+        cpSync(c.from, target, { dereference: true, recursive: true });
         chmodSync(target, statSync(c.from).mode & 0o7777);
       }
       for (const path of carried.left) left.push({ id: owner.id, path: a.hooks.file, note: leftBehind("hook", path) });
@@ -472,11 +482,15 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
 }
 
 /** Where a script a hook names lands on the guest: a plain file under home, resolving there, that the pack would
- * copy, at the rewrite the plan applies to its directory; nothing otherwise. */
-function hookDest(abs: string, home: string): string | undefined {
-  if (!under(abs, home) || !under(resolved(abs) ?? "", home) || !isFile(abs)) return undefined;
+ * copy, at the rewrite the plan applies to its directory; nothing otherwise. The file it points at is judged by
+ * the settings row's own rule, as every other file under that row is, so a hook naming a link to a refused file
+ * comes out of the copy. */
+function hookDest(abs: string, home: string, row: Pick<RecipeEntry, "id" | "rung" | "consent">): string | undefined {
+  const real = resolved(abs);
+  if (!under(abs, home) || real === undefined || !under(real, home) || !isFile(abs)) return undefined;
   const rel = relative(home, abs);
-  return refusedPath(rel, false) === undefined ? guestPath(`~/${rel}`) : undefined;
+  const refused = neverCopied(row, rel, false) ?? neverCopied(row, relative(home, real), false);
+  return refused === undefined ? guestPath(`~/${rel}`) : undefined;
 }
 
 export interface ImportOptions {
@@ -527,19 +541,22 @@ export const refusedIsDir = (home: string) => (rel: string): boolean | undefined
 
 export const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
 
-/** sha256 of what a planned path ships: every entry under it by relative path,
- * mode and bytes, excludes left out, links followed only into home and never
- * into a refused path or a directory already walked, as the pack follows them.
- * Stat times never enter, so a file rewritten with the same bytes digests the
- * same. An entry that cannot be read digests by its error; the pack is what
- * fails on it, with the person watching. */
-export function digestOf(source: string, excludes: readonly string[], home: string): string {
+/** sha256 of what a planned file ships: every entry under it by relative path,
+ * mode and bytes, excludes left out, a file its row never copies left out by
+ * that rule, links followed only into home and never into a refused path or a
+ * directory already walked, as the pack follows them. Stat times never enter,
+ * so a file rewritten with the same bytes digests the same. An entry that
+ * cannot be read digests by its error; the pack is what fails on it, with the
+ * person watching. */
+export function digestOf(file: PlannedFile, home: string): string {
+  const { excludes } = file;
   const hash = createHash("sha256");
   const entered = new Set<string>();
   const walk = (abs: string, rel: string): void => {
     if (excludes.some(x => abs === x || abs.startsWith(`${x}/`))) return;
     try {
       let real = abs;
+      let link = false;
       if (lstatSync(abs).isSymbolicLink()) {
         const target = resolved(abs);
         if (target === undefined) {
@@ -547,17 +564,28 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
           return;
         }
         // The pack's rules for a link, in its order: never out of home, never back into the directory being
-        // walked or one already walked, never into a refused path.
+        // walked or one already walked, never a name the row refuses and never into a refused path.
         const parent = resolved(dirname(abs)) ?? dirname(abs);
         const own = parent === target || parent.startsWith(`${target}/`);
-        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refusedPath(relative(home, target), statSync(target).isDirectory());
+        const refused = (): string | undefined => {
+          const dir = statSync(target).isDirectory();
+          return neverCopied(file, relative(home, abs), dir) ?? neverCopied(file, relative(home, target), dir);
+        };
+        const why = !under(target, home) ? "outside home" : own ? "own directory" : entered.has(target) ? "already walked" : refused();
         if (why !== undefined) {
           hash.update(`L ${rel} ${relative(home, target)} ${why}\n`);
           return;
         }
         real = target;
+        link = true;
       }
       const st = statSync(real);
+      // A file the pack leaves home never enters the hash: the bytes it would carry are not this golden's.
+      const never = link ? undefined : neverCopied(file, relative(home, abs), st.isDirectory());
+      if (never !== undefined) {
+        hash.update(`N ${rel} ${never}\n`);
+        return;
+      }
       const mode = (st.mode & 0o7777).toString(8);
       if (st.isDirectory()) {
         entered.add(real);
@@ -571,7 +599,7 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
       hash.update(`X ${rel} ${(e as { code?: string }).code ?? "error"}\n`);
     }
   };
-  walk(source, "");
+  walk(file.source, "");
   return hash.digest("hex");
 }
 
@@ -631,7 +659,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   // fresher token, so the file is volatile too and the pair re-renders on attach.
   const withSecret = new Set(plan.secrets.map(s => s.id));
   const files = plan.files.map(f => (withSecret.has(f.id) && !f.volatile ? { ...f, volatile: true } : f));
-  const digested = files.map(f => ({ id: f.id, path: tilde(f), dest: f.dest, digest: digestOf(f.source, f.excludes, home), volatile: f.volatile }));
+  const digested = files.map(f => ({ id: f.id, path: tilde(f), dest: f.dest, digest: digestOf(f, home), volatile: f.volatile }));
   const lands = files.map(f => ({ id: f.id, label: label(f.id), dest: f.dest }));
   // The values are read after the earlier-builder check, so they are digested when the recipe is read, not here.
   const secretDigests = () =>

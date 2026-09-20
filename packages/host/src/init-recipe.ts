@@ -3,8 +3,8 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { writeOwn } from "@wsp/own-file";
 import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginSignIn, loginStatePaths, mintsToken } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
@@ -29,7 +29,7 @@ export const RUNG_TITLE: Record<Rung, string> = {
  * same answer about what is on disk (`isDir`: true, false, or undefined when the path is not there). */
 export function refusedNote(e: ManifestEntry, isDir: (rel: string) => boolean | undefined): string | undefined {
   if (e.rung === "tools" || e.paths.length === 0 || !e.paths.every(p => p.startsWith("~/"))) return undefined;
-  const notes = e.paths.map(p => neverCopied({ ...e, bring: true, choice: "copy" }, p.slice(2), isDir(p.slice(2))));
+  const notes = e.paths.map(p => neverCopied(e, p.slice(2), isDir(p.slice(2))));
   return notes.every(n => n !== undefined) ? notes[0] : undefined;
 }
 
@@ -284,9 +284,11 @@ export function answeredRows(manifest: Manifest, ticks: ReadonlySet<string>, cho
   });
 }
 
+/** The rows as the screens left them, beside the state. The file holds every login answer and the detail of every
+ * definition the collector read, so it goes through the one writer for the owner's files, as every other file
+ * beside the state does. */
 export function saveRecipe(path: string, manifest: Manifest, ticks: ReadonlySet<string>, choices: ReadonlyMap<string, string> = new Map()): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ entries: answeredRows(manifest, ticks, choices) }, null, 2)}\n`);
+  writeOwn(dirname(path), basename(path), `${JSON.stringify({ entries: answeredRows(manifest, ticks, choices) }, null, 2)}\n`);
 }
 
 export function agentName(e: ManifestEntry): string {
