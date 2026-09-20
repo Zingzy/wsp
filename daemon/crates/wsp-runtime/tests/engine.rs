@@ -187,6 +187,10 @@ enum Answered {
     KeepsAlive(Vec<u8>),
     /// One answer and the connection closed.
     Closes(Vec<u8>),
+    /// The answer of a route whose handler works on the request's own context: where the client half closes its
+    /// write side first, the engine's server takes the client as gone, cancels that context under the handler
+    /// and writes a bodiless 499 in place of the answer.
+    CancelsOnAHalfClose(Vec<u8>),
 }
 
 fn answered(seen: &Seen) -> Answered {
@@ -198,6 +202,7 @@ fn answered(seen: &Seen) -> Answered {
     let bare = seen.path.split('?').next().unwrap();
     let segments: Vec<&str> = bare.trim_start_matches("/v1.55").split('/').filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
+        ["version"] => Answered::CancelsOnAHalfClose(answer(&seen.method, &seen.path)),
         ["exec", _, "start"] if seen.body.contains("\"Detach\":true") => Answered::KeepsAlive(json_response(200, &json!({ "ok": true }))),
         ["exec", _, "start"] => Answered::HandsOver(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.multiplexed-stream\r\n\r\n"),
         _ => Answered::Closes(answer(&seen.method, &seen.path)),
@@ -237,6 +242,20 @@ fn fake_engine(dir: &Path) -> (PathBuf, Record) {
                         Answered::KeepsAlive(head) => stream.write_all(&head).await.unwrap(),
                         Answered::Closes(head) => {
                             stream.write_all(&head).await.unwrap();
+                            let _ = stream.shutdown().await;
+                            return;
+                        }
+                        Answered::CancelsOnAHalfClose(head) => {
+                            let mut probe = [0u8; 1024];
+                            let waited = tokio::time::timeout(std::time::Duration::from_millis(200), stream.read(&mut probe)).await;
+                            if let Ok(Ok(0)) = waited {
+                                stream.write_all(b"HTTP/1.1 499 status code 499\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+                            } else {
+                                if let Ok(Ok(n)) = waited {
+                                    held.extend_from_slice(&probe[..n]);
+                                }
+                                stream.write_all(&head).await.unwrap();
+                            }
                             let _ = stream.shutdown().await;
                             return;
                         }
@@ -358,6 +377,21 @@ async fn ping_and_version_pass_and_the_answer_closes_the_connection() {
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["path"], "/v1.55/version");
     assert_eq!(w.engine_saw("GET", "/v1.55/version").unwrap().path, "/v1.55/version");
+}
+
+/// A route the engine answers off the request's own context: nothing is closed toward it before it has answered,
+/// so the handler runs to its end and the client reads the engine's own answer rather than the bodiless 499 a
+/// cancelled handler leaves. What ends the engine's answer instead is the close forced on the forwarded head.
+#[tokio::test]
+async fn a_route_the_engine_cancels_under_a_half_close_answers_its_own_words() {
+    let w = world();
+    let (status, head, body) = w.call("GET", "/v1.55/version", None).await;
+    assert_eq!(status, 200, "{head}");
+    assert!(head.starts_with("HTTP/1.1 200 X\r\n"), "the engine's own status words ride back: {head}");
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["path"], "/v1.55/version");
+    let reached = w.reached();
+    assert_eq!(reached.len(), 1, "one request reached the engine: {reached:?}");
+    assert_eq!(reached[0].header("connection"), Some("close"));
 }
 
 #[tokio::test]

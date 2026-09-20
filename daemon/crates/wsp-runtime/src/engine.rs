@@ -14,10 +14,12 @@
 //! One engine connection per client request, both sides told to close: the Docker client pools connections and
 //! sends its next request on an idle one, and the head of every request has to be read here, so keep-alive is
 //! turned off rather than framed. What the client sends after the head is copied on within the request's own
-//! framing, its Content-Length or its chunks, and the connection to the engine is closed there: a second request
-//! pipelined behind the body reaches nothing. The two routes the engine may hand a connection over on, an attach
-//! and an exec start, keep their connection headers and are copied raw once the engine has taken them; an upgrade
-//! asked for on any other route is dropped from the head before it goes.
+//! framing, its Content-Length or its chunks, and not one byte past it: a second request pipelined behind the
+//! body reaches nothing. Nothing on this side is closed toward the engine before the engine has answered, since
+//! its server reads a half closed request as the client gone and cancels the handler under it; the close forced
+//! on the forwarded head is what ends the answer and the connection. The two routes the engine may hand a
+//! connection over on, an attach and an exec start, keep their connection headers and are copied raw once the
+//! engine has taken them; an upgrade asked for on any other route is dropped from the head before it goes.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -1391,11 +1393,6 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
                 return Ok(());
             }
         }
-    }
-    // The request ends here for every route but the two the engine hands a connection over on, so what the client
-    // sent behind the body reaches nothing.
-    if !hijacks {
-        let _ = engine.shutdown().await;
     }
     let (answer_head, answer_rest) = read_head(&mut engine).await?;
     let answer = match response_head(&answer_head) {
