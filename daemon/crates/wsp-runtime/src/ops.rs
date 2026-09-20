@@ -385,6 +385,7 @@ impl Ops {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
+        let _ = clear_binds(&self.layout.binds(id));
     }
 
     /// The daemon takes the workspaces over from here: every boot and every stop after this is told as it

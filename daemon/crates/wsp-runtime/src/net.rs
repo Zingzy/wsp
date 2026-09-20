@@ -466,12 +466,8 @@ fn guarded_interface(comment: &str) -> Option<&str> {
 /// wildcard address on a fork and which a workspace holds no token for, and the engine's two, which a box that
 /// exposes either exposes to every workspace on it. A daemon that bound no port names none.
 pub fn gateway_drops(daemon_port: u16) -> Vec<u16> {
-    let mut ports: Vec<u16> = std::iter::once(daemon_port).filter(|port| *port != 0).collect();
-    for port in ENGINE_PORTS {
-        if !ports.contains(&port) {
-            ports.push(port);
-        }
-    }
+    let mut ports: Vec<u16> = std::iter::once(daemon_port).filter(|port| *port != 0).chain(ENGINE_PORTS).collect();
+    ports.dedup();
     ports
 }
 

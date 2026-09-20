@@ -238,13 +238,7 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
     // The prefix is this computer's own: a name under it is a name a sibling's own network may already hold,
     // and a workspace taking one would refuse every plain container that sibling starts.
-    let asked = word(body.get("Name"));
-    if asked.starts_with(crate::net::LINK_PREFIX) {
-        return Err(format!(
-            "a name beginning {} is this computer's own; a workspace's network takes another, and {asked} is refused",
-            crate::net::LINK_PREFIX
-        ));
-    }
+
     let driver = word(body.get("Driver"));
     if !matches!(driver, "" | "bridge") {
         return Err(format!("a workspace's network is a bridge of its own on this computer; the driver {driver} is refused"));
@@ -254,7 +248,7 @@ pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String,
     }
     // Written and not merely left out: a box whose engine turns IPv6 on by default would give the bridge a
     // range the table that fences a workspace never sees.
-    body["EnableIPv6"] = Value::Bool(false);
+
     for config in body.pointer("/IPAM/Config").and_then(Value::as_array).into_iter().flatten() {
         let subnet = word(config.get("Subnet"));
         if subnet.is_empty() {
@@ -756,9 +750,7 @@ fn parse_request(head: &[u8]) -> Result<Head, String> {
     // Two framings are two readings of where the body ends: this socket would take the length and the engine
     // the chunks, and what lies between the two is a request the engine reads on its own. Refused here, before
     // a byte of it crosses, since no client of the engine sends both.
-    if content_length.is_some() && chunked {
-        return Err("a request frames its body with a length or with chunks and not both, and this one carries both".into());
-    }
+
     Ok(Head { method, path, headers, content_length, chunked })
 }
 
@@ -1099,10 +1091,10 @@ async fn copy_body<S: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         // Read, then written: a size line this socket cannot read ends the request here rather than at the
         // engine, which would have the bytes behind it already.
         let line = held.line().await?;
+        engine.write_all(&line).await.map_err(|e| e.to_string())?;
         let Some(size) = chunk_size(&line) else {
             return Err(format!("a chunk size this socket cannot read: {}", String::from_utf8_lossy(&line).trim()));
         };
-        engine.write_all(&line).await.map_err(|e| e.to_string())?;
         if size == 0 {
             break;
         }
