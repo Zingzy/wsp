@@ -3515,6 +3515,12 @@ export const placeNotAWorkspaceFix = (place: string): string => `Fork one there:
 export const placeServesDaemonLine = (workspace: string, computer: string): string =>
   `${workspace} has no daemon of its own: ${computer} answers its files and git through this host`;
 
+/** What a watch of the ports or of the load is refused with on a workspace whose computer answers its daemon
+ * frames: both readings are that whole computer's, and one workspace reading them would read another workspace's
+ * listeners and load as its own. A pane asks for both on every link it opens and takes a refusal of either. */
+export const placeWatchesItselfLine = (computer: string): string =>
+  `${computer} watches its own ports and load, which are that computer's rather than one workspace's`;
+
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */
 export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;

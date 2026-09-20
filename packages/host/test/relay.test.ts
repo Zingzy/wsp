@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH, type ForwardEvent } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, type DaemonResponse, type ForwardEvent } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
@@ -396,6 +396,58 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => second.ops.some(x => x.op === "guest.reply"));
     expect(second.ops.find(x => x.op === "guest.reply")!.extra).toEqual({ session: "g0", message: { n: 1 } });
     expect(runs).toBe(1);
+  });
+
+  it("holds a workspace whose computer answers for it over the runtime's own channel: the guest watch alone, no dial, and its own sessions", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
+    const frames: Record<string, unknown>[] = [];
+    let push: (event: Record<string, unknown>) => void = () => {};
+    // The runtime says which road a workspace is on; here it is the channel over the computer's own link, which
+    // dials nothing and keeps no ports of its own.
+    const served: Runtime = {
+      ...rt,
+      workspaces: {
+        ...rt.workspaces,
+        servedByItsComputer: async () => true,
+        daemonChannel: async (_id, onEvent) => {
+          push = onEvent;
+          let end: (gone: { code: number; reason: string }) => void = () => {};
+          return {
+            send: async frame => {
+              frames.push(frame);
+              return { id: null, ok: true } as DaemonResponse;
+            },
+            close: () => end({ code: 1000, reason: "closed here" }),
+            closed: new Promise<{ code: number; reason: string }>(r => (end = r)),
+          };
+        },
+      },
+    };
+    const heard: { workspaceId: string; type: string }[] = [];
+    const guest = {
+      event: (link: { workspaceId: string; request(op: string, params: Record<string, unknown>): Promise<unknown> }, e: { type: string; session?: string }) => {
+        heard.push({ workspaceId: link.workspaceId, type: e.type });
+        if (e.type === "guest.opened") void link.request("guest.reply", { session: e.session, message: { exit: 0 } });
+      },
+      closeAll: () => {},
+    };
+    relay = startCallbackRelay({ runtime: served, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
+
+    await until(() => frames.length > 0);
+    expect(frames.map(f => f["op"])).toEqual(["guest.watch"]);
+    expect(fake.targets).toEqual([]);
+
+    // The computer stamps the workspace a session was opened inside on every frame it relays; another workspace's
+    // is that workspace's link to answer and never reaches this door.
+    const session = { type: "guest.opened", life: "life-1", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root" };
+    push({ ...session, session: "g0", machineId: "another-workspace" });
+    push({ ...session, session: "g1", machineId: ws.machineId });
+    await until(() => heard.length > 0);
+    expect(heard).toEqual([{ workspaceId: ws.id, type: "guest.opened" }]);
+    await until(() => frames.some(f => f["op"] === "guest.reply"));
+    expect(frames.find(f => f["op"] === "guest.reply")).toMatchObject({ session: "g1", message: { exit: 0 } });
   });
 
   it("drops the sessions of a workspace deleted while it napped, which holds no link for their end to ride", async () => {

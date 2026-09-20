@@ -33,6 +33,7 @@ import {
   placeCurrentLine,
   placeDaemonBehind,
   placeServesDaemonLine,
+  placeWatchesItselfLine,
   placeNoChipLine,
   placeUpdateLine,
   placeAddSheetWord,
@@ -359,6 +360,10 @@ describe("the one word a row says about the daemon a place runs", () => {
 
   it("says which computer answers a workspace that runs no daemon of its own, rather than a route to a port nothing listens on", () => {
     expect(placeServesDaemonLine("landing-a", "spoo")).toBe("landing-a has no daemon of its own: spoo answers its files and git through this host");
+  });
+
+  it("says whose the ports and the load are where a pane asks a workspace for readings its computer takes for itself", () => {
+    expect(placeWatchesItselfLine("spoo")).toBe("spoo watches its own ports and load, which are that computer's rather than one workspace's");
   });
 
   it("refuses a place already on this daemon and one whose chip this wsp builds none for, each naming what it read", () => {
