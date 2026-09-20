@@ -3751,6 +3751,7 @@ const DAEMON_CONTENTS = [
   "5b5db8f843457bfac71002bb4741d98f0f98bfe11579e7891c1a0955c39eed0f",
   "e10ddc035c5a0fb57b8b591da1fa220023e836e7c7598022c19d852e747bab46",
   "e6eb64e2466dfa2eca9448ea2aabfe82223c2897276663698a1184a16774145d",
+  "361aa8997cc132755f0835ada745b05c7eee7faf20e67d14fa606971c5157441",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3941,7 +3942,9 @@ const DAEMON_CONTENTS = [
  * Version 65 fences the engine socket byte by byte: the client-to-engine copy is bounded to the framed body, a volume
  * names no box path, a volume attaches only to the workspace that made it, the bind allowlist lives where a workspace
  * cannot write and every source resolves beneath the rootfs, an engine container joins a per-workspace network, and
- * the daemon's and the engine's ports are closed at the gateway. */
+ * the daemon's and the engine's ports are closed at the gateway.
+ * Version 66 makes every bind under a workspace's rootfs receive-only through a descriptor reopened after the bind,
+ * so a workspace on a box boots again: versions 64 and 65 refused every create with EINVAL at the shared home's bind. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
