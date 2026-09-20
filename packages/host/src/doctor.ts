@@ -457,6 +457,23 @@ export function profileSourceStep(place: DaemonPlace): string[] {
   return [unsourceStep(place, file), `printf '%s\\n' ${shellQuote(profileSourceLine(place.profileFile))} >> ${sh(place, file)}`];
 }
 
+/** The login files this wsp puts on a machine: its own profile file, holding the browser shim and the display
+ * every guest tool reads, and the one line of wsp's in the person's own login file that loads it. Every road that
+ * puts this wsp on a computer runs these lines, the deploy at the join and the update after it, so a computer
+ * joined under an older spelling takes this one without being joined again. Every line exits 0, so the same text
+ * holds under the deploy's `set -e`, under the update's script, which sets none, and under the daemon's own
+ * `bash -c`. */
+export function loginFilesStep(place: DaemonPlace): string[] {
+  return [
+    // BROWSER is set by the daemon for its ptys, by this file for login shells, and in a fork's envs only when its
+    // golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
+    `mkdir -p ${sh(place, posix.dirname(place.profileFile))} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
+    // A place whose profile file is under the person's own folder is read only if their login file says so, and
+    // their login file is theirs: one line of wsp's is in it however many deploys have run.
+    ...profileSourceStep(place),
+  ];
+}
+
 /** The same for a unit file's Environment=, which systemd splits on whitespace into one assignment per word, so
  * a value holding a space is double quoted there. Not every setting wants that: WorkingDirectory= takes the rest
  * of its line as the path and reads a quote as part of it ("path is not absolute", measured on systemd 255,
@@ -770,14 +787,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
-    // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
-    // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
-    `mkdir -p ${sh(place, profileDir)} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
-    // A place whose profile file is under the person's own folder is read only if their login file says so, and
-    // their login file is theirs: one line of wsp's is in it however many deploys have run.
-    ...profileSourceStep(place),
+    ...loginFilesStep(place),
     // Login shells read it from the profile file; the daemon's ptys inherit it from the daemon, exported before it starts.
     ...(previewHostSuffix !== undefined
       ? [

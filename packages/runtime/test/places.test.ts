@@ -3459,30 +3459,54 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(await provisionOf(placeId)).toBeUndefined();
   });
 
-  it("runs on an update alone where the computer already runs this wsp's daemon, and after the daemon where it is behind", async () => {
+  it("asks the updater on every update, with a binary only where the computer is behind", async () => {
     const current = provisioner();
-    const { placeId } = await joined({ provision: current.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    const asked: PlaceUpdateRequest[] = [];
+    const { placeId } = await joined({
+      provision: current.wired,
+      report: report("spoo", { daemonVersion: DAEMON_VERSION }),
+      // A computer already on this daemon takes no binary, so the updater answers no landing; what it does run
+      // there is wsp's own login files, whose text moves with this host and not with the daemon.
+      update: async req => {
+        asked.push(req);
+        return undefined;
+      },
+    });
     await until(async () => (await provisionOf(placeId))?.state === "done");
     const answer = await runtime!.places!.update(placeId);
-    // No updater is wired at all, and nothing refused the update: a computer that is current takes the recipe alone.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ name: "spoo", daemon: false });
+    // Nothing landed, so no dial-back was waited for and the row carries no daemon: the recipe is what the
+    // person asked for and it is all this answers.
     expect(answer.daemon).toBeUndefined();
     expect(answer.name).toBe("spoo");
     expect(answer.provision).toMatchObject({ state: "running", recipeAt: RECIPE_AT });
     await until(async () => current.calls.run === 2);
 
+    // And a runtime that wired no updater at all, which is every runtime outside the app: the recipe alone, and
+    // nothing refused.
+    const bare = provisioner();
+    const alone = await joined({ provision: bare.wired, report: report("mini", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(alone.placeId))?.state === "done");
+    const said = await runtime!.places!.update(alone.placeId);
+    expect(said.daemon).toBeUndefined();
+    expect(said.provision).toMatchObject({ state: "running" });
+    await until(async () => bare.calls.run === 2);
+
     const behind = provisioner();
-    const asked: PlaceUpdateRequest[] = [];
+    const behindAsked: PlaceUpdateRequest[] = [];
     const later = await joined({
       provision: behind.wired,
       report: report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 }),
       update: async req => {
-        asked.push(req);
+        behindAsked.push(req);
         return { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" };
       },
     });
     await until(async () => (await provisionOf(later.placeId))?.state === "done");
     const moved = await runtime!.places!.update(later.placeId);
-    expect(asked).toHaveLength(1);
+    expect(behindAsked).toHaveLength(1);
+    expect(behindAsked[0]).toMatchObject({ name: "old-macbook", daemon: true });
     expect(moved.daemon).toMatchObject({ from: DAEMON_VERSION - 1, road: "ssh" });
     expect(moved.provision?.state).toBe("running");
     await until(async () => behind.calls.run === 2);
