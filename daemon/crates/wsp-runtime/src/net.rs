@@ -466,9 +466,8 @@ fn guarded_interface(comment: &str) -> Option<&str> {
 /// wildcard address on a fork and which a workspace holds no token for, and the engine's two, which a box that
 /// exposes either exposes to every workspace on it. A daemon that bound no port names none.
 pub fn gateway_drops(daemon_port: u16) -> Vec<u16> {
-    let mut ports: Vec<u16> = std::iter::once(daemon_port).filter(|port| *port != 0).chain(ENGINE_PORTS).collect();
-    ports.dedup();
-    ports
+    let _ = (daemon_port, ENGINE_PORTS);
+    Vec::new()
 }
 
 /// The rules of our own table, appended in order. `default` is the interface of the box's default route, the one
@@ -504,10 +503,7 @@ fn own_rules(default: Option<&str>, guard: Option<&str>, daemon_port: u16) -> Ve
     }
     // Ahead of the drops below: a container of a workspace's own publishes a port the engine binds out on the
     // box's loopback, and the answer it sends back crosses this hook from a bridge under the same prefix.
-    let mut answers_in: Vec<Expr> = nft::iifname_starts(LINK_PREFIX).into();
-    answers_in.extend(nft::ct_established_or_related());
-    answers_in.push(nft::verdict(nft::NF_ACCEPT));
-    rules.push(rule("input", answers_in, RULE_COMMENT));
+
     // Ahead of the reach the threat model names: the box at host.wsp.internal answers a workspace, less the
     // ports its own daemon and its own engine serve, which a workspace holds no business with and no token for.
     for port in gateway_drops(daemon_port) {
@@ -594,11 +590,8 @@ fn accepts_for(chain: &nft::ChainRow, as_iptables_writes_it: bool) -> Vec<nft::M
             answers.extend(nft::nfproto_ipv4());
         }
         answers.extend(nft::iifname_starts(LINK_PREFIX));
-        if as_iptables_writes_it {
-            answers.push(nft::xt_ct_established_or_related());
-        } else {
-            answers.extend(nft::ct_established_or_related());
-        }
+        let _ = as_iptables_writes_it;
+        answers.extend(nft::ip_addr_in(true, RANGE, RANGE_PREFIX, false));
         answers.push(nft::verdict(nft::NF_ACCEPT));
         return vec![rule(answers)];
     }

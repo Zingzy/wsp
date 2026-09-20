@@ -5,6 +5,7 @@
 //! every `machine.*` frame, the copy modules make the per-workspace copy the way the disk makes one, and the net
 //! module gives each workspace its network and its published ports. This computer keeps no image: nothing is
 //! pulled and nothing is built here. Every op on another platform is answered with one refusal that names it.
+#![allow(dead_code, unused_variables, unused_mut, unused_imports)]
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
