@@ -416,13 +416,46 @@ export function joinedPlace(login: { home: string; path: string }, join: Omit<Da
 export const DAEMON_UNIT_PATH = CLOUD_PLACE.unitPath;
 
 /** The one line wsp adds to the person's own login file, and takes back out: their file is theirs, so what wsp
- * wrote is named once and matched by that name. Read by the deploy that writes it, by the removal that runs on a
- * machine this host reaches, and by the sweep a place runs on itself. */
-export const profileSourceLine = (profileFile: string): string => `. ${profileFile}`;
+ * wrote is named once and found again by the file it names. Read by the deploy that writes it, by the removal that
+ * runs on a machine this host reaches, and by the sweep a place runs on itself. The line reads the file before it
+ * sources it: inside a workspace on a computer somebody owns that computer's /root is bound in while the wsp
+ * folder under it is the workspace's own, so the file this names is not there and an unguarded line printed an
+ * error on the first line of every login shell opened in one. */
+export const profileSourceLine = (profileFile: string): string => `[ -f ${profileFile} ] && . ${profileFile}`;
 
 /** A path as this place's shell scripts write it: quoted where it came from the machine, since a home with a
  * space in it would otherwise make `rm -rf /Users/Jane Doe/.wsp` two words and take /Users/Jane with it. */
 const sh = (place: DaemonPlace, path: string): string => (place.quotePaths ? shellQuote(path) : path);
+
+/** Every line naming wsp's profile file taken out of the person's own login file, and nothing done at all where
+ * they have no such file or it names none: read by the deploy before it appends the line this version spells and
+ * by the removal, so a computer joined under an older spelling is left with one line of wsp's and with none once
+ * wsp is off it. Their file, so the line is written back through the same path rather than moved over: a .profile
+ * symlinked into a dotfiles checkout stays a symlink (measured 2026-09-11, where a move turned one into a plain
+ * file). grep says by its exit code whether it selected nothing or could not read the file at all, and only the
+ * first of those writes, so a read that failed leaves them neither an empty login file nor a file of wsp's beside
+ * their own. Every line of it exits 0, since the deploy runs under set -e. */
+function unsourceStep(place: DaemonPlace, file: string): string {
+  const copy = `${file}.wsp-out`;
+  const named = shellQuote(place.profileFile);
+  return [
+    `if [ -f ${sh(place, file)} ] && grep -qF ${named} ${sh(place, file)}; then`,
+    "  kept=0",
+    `  grep -vF ${named} ${sh(place, file)} > ${sh(place, copy)} || kept=$?`,
+    `  if [ "$kept" -le 1 ]; then cat ${sh(place, copy)} > ${sh(place, file)}; fi`,
+    `  rm -f ${sh(place, copy)}`,
+    "fi",
+  ].join("\n");
+}
+
+/** wsp's line in the person's own login file as this version spells it: the lines naming wsp's profile file taken
+ * out first, so a second deploy replaces the line rather than sitting beside it, then this one appended, which
+ * makes the file where the login has none. Nothing at all for a place whose profile file is wsp's own to load. */
+export function profileSourceStep(place: DaemonPlace): string[] {
+  const file = place.profileSource;
+  if (file === undefined) return [];
+  return [unsourceStep(place, file), `printf '%s\\n' ${shellQuote(profileSourceLine(place.profileFile))} >> ${sh(place, file)}`];
+}
 
 /** The same for a unit file's Environment=, which systemd splits on whitespace into one assignment per word, so
  * a value holding a space is double quoted there. Not every setting wants that: WorkingDirectory= takes the rest
@@ -742,11 +775,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
     `mkdir -p ${sh(place, profileDir)} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
-    // A place whose profile file is the person's own folder is read only if their login file says so, and their
-    // login file is theirs: the line goes in once, behind its own name, so a second deploy adds nothing.
-    ...(place.profileSource === undefined
-      ? []
-      : [`grep -q ${shellQuote(place.profileFile)} ${sh(place, place.profileSource)} 2>/dev/null || printf '%s\\n' ${shellQuote(profileSourceLine(place.profileFile))} >> ${sh(place, place.profileSource)}`]),
+    // A place whose profile file is under the person's own folder is read only if their login file says so, and
+    // their login file is theirs: one line of wsp's is in it however many deploys have run.
+    ...profileSourceStep(place),
     // Login shells read it from the profile file; the daemon's ptys inherit it from the daemon, exported before it starts.
     ...(previewHostSuffix !== undefined
       ? [
@@ -780,18 +811,9 @@ export function removeDaemonScript(place: DaemonPlace): string {
     // path nothing is at is something of wsp's still on a computer the remove said it left as it found it. Only on
     // the scope that could write it, and unloaded before the file goes, since the kernel holds it by name.
     ...(place.scope === "system" ? apparmorOffStep() : []),
-    ...(place.profileSource === undefined
-      ? []
-      : [
-          // Their own login file, so it is opened only when wsp's own line is in it: this sweep runs on every
-          // machine recorded over ssh, and a machine whose deploy never landed has a login file wsp never wrote
-          // to. The line is taken out by writing back through the same path rather than moving a copy over it, so
-          // the file keeps its inode and a .profile symlinked into a dotfiles checkout stays a symlink (measured
-          // 2026-09-11: a move turned one into a plain file). The working copy goes either way, and the write only
-          // follows a read that worked, so a grep that could not read the file leaves them neither an empty one
-          // nor a file of wsp's beside their own.
-          `if [ -f ${sh(place, place.profileSource)} ] && grep -qF ${shellQuote(profileSourceLine(place.profileFile))} ${sh(place, place.profileSource)}; then grep -vF ${shellQuote(profileSourceLine(place.profileFile))} ${sh(place, place.profileSource)} > ${sh(place, `${place.profileSource}.wsp-out`)} && cat ${sh(place, `${place.profileSource}.wsp-out`)} > ${sh(place, place.profileSource)}; rm -f ${sh(place, `${place.profileSource}.wsp-out`)}; fi`,
-        ]),
+    // This sweep runs on every machine recorded over ssh, and a machine whose deploy never landed has a login
+    // file wsp never wrote to, so the step reads their file before it opens it.
+    ...(place.profileSource === undefined ? [] : [unsourceStep(place, place.profileSource)]),
     `echo ${DAEMON_GONE_LINE}`,
   ].join("\n");
 }
@@ -1401,10 +1423,12 @@ const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
  * is the rows behind it. A command answering from outside its own road's directories is a note and not a failure;
  * a row that did not answer fails the step, and where the computer's own record read that row present the line
  * that reads the computer again is said with it. */
-export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
+export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps" | "prefix">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
   const asked = plan.steps.filter(step => presenceTests(step).length > 0);
   if (asked.length === 0) return "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside";
-  const present = await presentSteps(machine as Machine, asked);
+  // On the tools PATH, which is what a workspace boots with, and under the same managers' knobs the job ran: a
+  // row's version read is its manager's own command and answers about the folder that manager was told to use.
+  const present = await presentSteps(machine as Machine, asked, TOOLS_PATH, plan.prefix);
   const notes = asked.flatMap(step => {
     const note = presentElsewhere(step, present.get(step.id));
     return note === undefined ? [] : [note];

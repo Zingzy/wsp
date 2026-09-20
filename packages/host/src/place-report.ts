@@ -13,7 +13,7 @@ import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname, join } from "node:path";
-import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
+import { sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
@@ -366,22 +366,24 @@ function there(path: string): boolean {
   }
 }
 
-/** Takes wsp's one line back out of the person's own login file, which would otherwise print an error at every
- * login for a file that is gone. Their file, so it is opened only when wsp's own line is in it and written back
- * through the same path rather than moved over: a .profile symlinked into a dotfiles checkout stays a symlink.
- * Answers what it says it took, or nothing when the file never held it. */
+/** Takes wsp's own line back out of the person's own login file, which would otherwise print an error at every
+ * login for a file that is gone. Every line naming wsp's profile file goes, whatever spelling it was written in,
+ * since a computer joined before the line was guarded on that file carries the older one. Their file, so it is
+ * opened only when wsp's file is named in it and written back through the same path rather than moved over: a
+ * .profile symlinked into a dotfiles checkout stays a symlink. Answers the lines it took, or nothing when the
+ * file named none. */
 function unsourced(place: DaemonPlace): string | undefined {
   const file = place.profileSource;
   if (file === undefined || !there(file)) return undefined;
-  const line = profileSourceLine(place.profileFile);
   let held: string;
   try {
     held = readFileSync(file, "utf8");
   } catch {
     return undefined;
   }
-  const kept = held.split("\n").filter(row => row.trim() !== line);
-  if (kept.length === held.split("\n").length) return undefined;
-  writeFileSync(file, kept.join("\n"));
-  return `${line} (out of ${file})`;
+  const rows = held.split("\n");
+  const gone = rows.filter(row => row.includes(place.profileFile));
+  if (gone.length === 0) return undefined;
+  writeFileSync(file, rows.filter(row => !row.includes(place.profileFile)).join("\n"));
+  return `${gone.map(row => row.trim()).join("; ")} (out of ${file})`;
 }

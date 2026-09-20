@@ -4,14 +4,15 @@
 // run under bash here rather than matched as text: what it is for is deciding
 // whether a command answers and at which version, which only a shell decides.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_FLOOR } from "@wsp/catalog";
+import { BASE_FLOOR, TOOL_PREFIX } from "@wsp/catalog";
 import {
   probePath,
   HOMEBREW_PREFIX,
+  PNPM_HOME,
   MCP_ID_PREFIX,
   placeProvisionPaths,
   provisionCountWord,
@@ -24,8 +25,8 @@ import {
   provisionWord,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { baseVersionsCmd } from "../src/golden-base.js";
-import { PROFILE_PATH_FILE, TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
+import { baseInstalls, baseVersionsCmd } from "../src/golden-base.js";
+import { PROFILE_PATH_FILE, TOOLS_PATH, agentInstallsFor, pathLine, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { presentByWhatWaits, presentElsewhere, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
@@ -604,5 +605,87 @@ describe("the PATH every script of the job exports", () => {
     // The same row on a list that does name that home runs it, which is what the probe list is here to stop.
     spawnSync("sh", ["-c", uvRow(tools)], { encoding: "utf8" });
     expect(existsSync(marker)).toBe(true);
+  });
+  /** The floor's read with one row's version left out, so that row's own step runs and its script is in what the
+   * job sent: a computer that answers every floor row installs none of them. */
+  const floorWithout = (bin: string): string =>
+    FLOOR_READ.split("\n")
+      .filter(l => !l.startsWith(`VERSION ${bin}:`))
+      .join("\n");
+
+  it("carries every manager's knob under the prefix on a joined computer's job, the floor's own rows among them", async () => {
+    const tools = toolInstallsFor([row("tools/uv/ruff", "tools"), row("tools/cargo/tokei", "tools")], new Map(), [], PROBE, TOOL_PREFIX).installs;
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools }, "2026-09-17T10:00:00.000Z", PROBE, TOOL_PREFIX);
+    expect(plan.prefix).toBe(TOOL_PREFIX);
+    expect(plan.steps.map(t => t.id)).toEqual(expect.arrayContaining(["tools/uv/ruff", "tools/cargo/tokei"]));
+    const { machine, calls } = boxMachine(cmd => (cmd === baseVersionsCmd(PROBE) ? { exitCode: 0, stdout: `${floorWithout("python3")}\n`, stderr: "" } : undefined), PROBE);
+    await provisionBox(machine, plan, () => {}, ON);
+    const scripts = [...calls, ...plan.steps.map(s => s.cmd)];
+    // Every line that puts this job's own PATH on a script carries the managers' knobs with it: the presence read,
+    // the checks, the version reads and every step's own line, the floor's among them.
+    const exported = scripts.flatMap(s => s.split("\n").filter(l => l.startsWith("export PATH=") && l.includes(PROBE)));
+    expect(exported.length).toBeGreaterThan(8);
+    // The floor's version read puts the list ahead of the machine's own PATH and asks each floor command for its
+    // version; every other script runs a row's own lines and carries the managers' knobs beside the list.
+    for (const value of exported) expect(value === pathLine(PROBE, TOOL_PREFIX) || value === `export PATH=${PROBE}:$PATH`, value).toBe(true);
+    expect(exported.filter(l => l === pathLine(PROBE, TOOL_PREFIX)).length).toBeGreaterThan(5);
+    // The floor's python row is in that read, and the interpreter python3 is linked to is uv's under the prefix.
+    const python = scripts.filter(s => s.includes("uv python install 3.12"));
+    expect(python).toHaveLength(1);
+    expect(python[0]).toContain(`UV_PYTHON_INSTALL_DIR=${TOOL_PREFIX}/uv/python`);
+    expect(python[0]).toContain('ln -sfn "$(uv python find --managed-python 3.12)" /usr/local/bin/python3');
+  });
+
+  it("carries no knob but pnpm's own on the image build's plan, whose scripts read as they did", () => {
+    const tools = toolInstallsFor([row("tools/uv/ruff", "tools"), row("tools/cargo/tokei", "tools")], new Map(), [], TOOLS_PATH).installs;
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: agentInstallsFor([row("agents/claude")]).installs, tools }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
+    expect(plan.prefix).toBeUndefined();
+    expect(plan.steps.map(t => t.id)).toEqual(expect.arrayContaining(["tools/uv/ruff", "tools/cargo/tokei"]));
+    // An image takes no prefix, so every script of its job exports the one line it always did and no step of it
+    // names the prefix at all.
+    for (const step of [...plan.steps, ...baseInstalls()]) {
+      expect(step.cmd.split("\n").filter(l => l.startsWith("export PATH=") && l.includes(TOOLS_PATH)), step.id).toEqual([`export PATH=${TOOLS_PATH} PNPM_HOME=${PNPM_HOME}`]);
+      expect(step.cmd, step.id).not.toContain(TOOL_PREFIX);
+    }
+  });
+
+  it("links what a manager with no folder knob left in its own folder, under a real shell", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-link-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    // The folder the daemon's fixed PATH holds, which is /usr/local/bin on a box and this one under a test.
+    const local = join(dir, "local-bin");
+    mkdirSync(local);
+    // A cargo that writes its command where cargo does, into the bin folder of the home the job told it to keep.
+    const system = join(dir, "system");
+    mkdirSync(system);
+    writeFileSync(join(system, "cargo"), '#!/bin/sh\n[ -n "$CARGO_HOME" ] || { echo "the job told cargo no home" >&2; exit 1; }\nmkdir -p "$CARGO_HOME/bin"\nprintf \'#!/bin/sh\\necho tokei\\n\' > "$CARGO_HOME/bin/tokei"\nchmod +x "$CARGO_HOME/bin/tokei"\n');
+    chmodSync(join(system, "cargo"), 0o755);
+    const step = toolInstallsFor([row("tools/cargo/tokei", "tools")], new Map(), [], `${system}:/usr/bin:/bin`, dir).installs.find(t => t.cmd.includes("cargo install"));
+    const res = spawnSync("sh", ["-c", step!.cmd.replaceAll("/usr/local/bin", local)], { encoding: "utf8" });
+    expect(res.status, res.stderr).toBe(0);
+    // cargo takes no knob for where its commands go, so what it left under the prefix answers from that folder.
+    expect(lstatSync(join(local, "tokei")).isSymbolicLink()).toBe(true);
+    expect(realpathSync(join(local, "tokei"))).toBe(realpathSync(join(dir, "cargo/bin/tokei")));
+  });
+
+  it("reaches uv itself with the prefix under a real shell, and never the uv planted under that home", () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-knobs-"));
+    onTestFinished(() => rmSync(home, { recursive: true, force: true }));
+    const planted = join(home, ".local/bin");
+    mkdirSync(planted, { recursive: true });
+    const ran = join(home, "planted-ran");
+    writeFileSync(join(planted, "uv"), `#!/bin/sh\ntouch ${ran}\n`);
+    chmodSync(join(planted, "uv"), 0o755);
+    // A uv where the job's own list looks, which writes down what the job told it.
+    const system = join(home, "system");
+    mkdirSync(system);
+    const said = join(home, "said");
+    writeFileSync(join(system, "uv"), `#!/bin/sh\nprintf '%s %s %s\\n' "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$UV_PYTHON_INSTALL_DIR" > ${said}\n`);
+    chmodSync(join(system, "uv"), 0o755);
+    const step = toolInstallsFor([row("tools/uv/ruff", "tools")], new Map(), [], `${system}:/usr/bin:/bin`, TOOL_PREFIX).installs.find(t => t.cmd.includes("uv tool install"));
+    const res = spawnSync("sh", ["-c", step!.cmd], { encoding: "utf8" });
+    expect(res.status, res.stderr).toBe(0);
+    expect(readFileSync(said, "utf8").trim()).toBe(`${TOOL_PREFIX}/uv/tools /usr/local/bin ${TOOL_PREFIX}/uv/python`);
+    expect(existsSync(ran), "a row of the job ran the binary planted under the home").toBe(false);
   });
 });

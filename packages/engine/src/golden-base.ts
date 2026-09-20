@@ -25,18 +25,18 @@ export { ALREADY_ON_MACHINE };
 /** The floor as the tools loop runs it: one guarded step per row in catalog order through the row's road, each after
  * the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. A
  * row `carried` names is left out, and a row that waited on one of those waits on nothing: what it needed is there. */
-export function baseInstalls(carried: ReadonlySet<string> = new Set(), path: string = TOOLS_PATH): ToolInstall[] {
+export function baseInstalls(carried: ReadonlySet<string> = new Set(), path: string = TOOLS_PATH, prefix?: string): ToolInstall[] {
   // A thread's terminal is a login shell and the stages export their PATH per step, so without this file the
   // terminal finds only what the image ships. Every golden gets it, whether or not Homebrew ever bootstraps.
   // The step runs on the job's own list; what it writes into the file is the login shell's PATH on that machine,
   // which is the tools PATH wherever a person's shell there looks for what the recipe installed.
-  const out: ToolInstall[] = [{ id: stepId("login-path"), label: "login shell PATH", manager: "script", cmd: withEnv(`${pathLine(path)}\n${PROFILE_PATH_LINE}`), shown: `the tools PATH in ${PROFILE_PATH_FILE}` }];
+  const out: ToolInstall[] = [{ id: stepId("login-path"), label: "login shell PATH", manager: "script", cmd: withEnv(`${pathLine(path, prefix)}\n${PROFILE_PATH_LINE}`), shown: `the tools PATH in ${PROFILE_PATH_FILE}` }];
   for (const e of BASE_FLOOR) {
     if (carried.has(e.id)) continue;
     const dep = installAfter(e);
     const waits = dep !== undefined && !carried.has(dep) ? dep : undefined;
-    if (waits === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push(aptIndexStep(APT_STEP, withEnv(`${pathLine(path)}\n${APT_UPDATE}`)));
-    const step = viaRoad(e.installRoad, e.bin, path);
+    if (waits === APT_INDEX && !out.some(t => t.id === APT_STEP)) out.push(aptIndexStep(APT_STEP, withEnv(`${pathLine(path, prefix)}\n${APT_UPDATE}`)));
+    const step = viaRoad(e.installRoad, e.bin, path, prefix);
     if (!("cmd" in step)) throw new Error(`${e.id}: ${step.note}`);
     out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, ...step, cmd: withEnv(step.cmd), ...(waits !== undefined ? { after: stepId(waits) } : {}), bin: e.bin });
   }
@@ -122,11 +122,11 @@ export interface BaseOutcome {
  * it. The same read runs first, against the image as the provider ships it: a row it already satisfies is recorded
  * as on the machine, in catalog order beside the rows that ran, and nothing is installed over it. `caches` is the
  * loop's own: a builder becomes an image and sweeps, a computer somebody owns keeps the caches that are theirs. */
-export async function installBase(machine: Machine, stage: (stage: GoldenStage, detail?: string) => void, opts: Pick<InstallToolsOptions, "caches" | "path"> = {}): Promise<BaseOutcome> {
+export async function installBase(machine: Machine, stage: (stage: GoldenStage, detail?: string) => void, opts: Pick<InstallToolsOptions, "caches" | "path" | "prefix"> = {}): Promise<BaseOutcome> {
   const path = opts.path ?? TOOLS_PATH;
   const onImage = await machine.exec(baseVersionsCmd(path), { timeoutMs: INLINE_EXEC_MS });
   const carried = carriedByImage(parseVersions(onImage.stdout));
-  const { tools } = await installTools(machine, baseInstalls(carried, path), stage, BASE_STAGE, opts);
+  const { tools } = await installTools(machine, baseInstalls(carried, path, opts.prefix), stage, BASE_STAGE, opts);
   const ran = new Map(tools.map(t => [t.id, t]));
   const floor = new Set(BASE_FLOOR.map(e => stepId(e.id)));
   // The floor's rows read in catalog order whether they ran or the image already had them; the loop's other steps
