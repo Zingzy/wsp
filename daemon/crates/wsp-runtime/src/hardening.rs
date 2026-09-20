@@ -23,9 +23,9 @@ use std::path::Path;
 pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS_BOOT", "CAP_MKNOD"];
 
 /// Every path inside a workspace the box's own directory may not show through, covered with the workspace's own
-/// empty one where the box keeps something there. Two rows, because what a workspace reads under the box's own
-/// system directories is `TREES` and `ETC_ALLOWED` below and no longer a list of what to hide: the password
-/// hashes, the host keys and the engine's own folders are not inside to cover.
+/// empty one where the box keeps something there. Two rows: what a workspace reads under the box's own system
+/// directories is `TREES` and `ETC_ALLOWED` below, so the password hashes, the host keys and the engine's own
+/// folders are not inside to cover.
 ///
 /// /home covers every other home on the box: the trees are /usr, /etc, /opt, /var and /srv, so a workspace's
 /// /home is the skeleton's own empty directory, and the row is what keeps it empty the day a build binds the box's
@@ -95,10 +95,12 @@ pub const TREES: [(&str, Built); 5] = [
 /// for every name in its folder that begins with the rest of it, since a box names those by version.
 ///
 /// Not on it, and so not inside: `apt/auth.conf` and `apt/auth.conf.d`, which are the box's repository
-/// credentials; `shadow` and `gshadow`, its password hashes; `ssh/ssh_host_*` and `ssh/sshd_config`, the keys it
-/// answers ssh on; `ssl/private` and `letsencrypt`, its certificates' keys; `krb5.keytab`; its cron, systemd,
-/// docker, containerd, netplan, NetworkManager, wireguard, openvpn and ipsec configuration. A workspace holding
-/// any of them could answer as the box.
+/// credentials; `shadow` and `gshadow`, its password hashes, and `security/opasswd`, the old ones pam keeps
+/// beside them, which is why the security rows are named one by one rather than the tree taken whole;
+/// `ssh/ssh_host_*` and `ssh/sshd_config`, the keys it answers ssh on; `ssl/private`, `pki/tls/private` and
+/// `letsencrypt`, its certificates' keys, which is why the pki rows are its trust and certificate folders rather
+/// than the tree; `krb5.keytab`; its cron, systemd, docker, containerd, netplan, NetworkManager, wireguard,
+/// openvpn and ipsec configuration. A workspace holding any of them could answer as the box.
 pub const ETC_ALLOWED: &[&str] = &[
     "alternatives",
     "apt/apt.conf.d",
@@ -152,14 +154,28 @@ pub const ETC_ALLOWED: &[&str] = &[
     "papersize",
     "passwd",
     "pip.conf",
-    "pki",
+    "pki/ca-trust",
+    "pki/tls/certs",
     "profile",
     "profile.d",
     "protocols",
     "python3",
     "python3.*",
     "rpc",
-    "security",
+    "security/access.conf",
+    "security/capability.conf",
+    "security/faillock.conf",
+    "security/group.conf",
+    "security/limits.conf",
+    "security/limits.d",
+    "security/namespace.conf",
+    "security/namespace.d",
+    "security/namespace.init",
+    "security/pam_env.conf",
+    "security/pwquality.conf",
+    "security/pwquality.conf.d",
+    "security/sepermit.conf",
+    "security/time.conf",
     "services",
     "shells",
     "skel",
@@ -189,12 +205,18 @@ pub const ETC_ALLOWED: &[&str] = &[
 /// workspace: each is the workspace's own copy of the box's file, or its own folder, bound over the box's. A
 /// path the box keeps nothing at is covered all the same, so a workspace cannot make it.
 ///
+/// A link met on one of these paths refuses the boot rather than being followed, which a link met on a share's
+/// path is not: what is bound over a link's target leaves the name itself a link in a directory the workspace is
+/// uid 0 in, which it may unlink and write in its place, and that is the road this list is here to close. A box
+/// whose root keeps one of these inside a dotfiles checkout keeps the checkout and puts the file itself at the
+/// name, which the refusal says.
+///
 /// What this does not close, said plainly: the box root's own `.bashrc` and `.profile` source files in the shared
 /// home beyond these names, an nvm or a cargo environment line, a completion file under `.local/share`, and they
 /// put `.local/bin` and `bin` on the PATH. A plant in one of those still runs at the box root's next login. What
-/// is closed is what the distribution's own skeleton reads by name; the rest is the shared home the map rules as
-/// the design of this place.
-pub const ROOT_RUN_COVERS: [(&str, bool); 18] = [
+/// is closed is what the distribution's own skeleton and the tools it ships read by name; the rest is the shared
+/// home the map rules as the design of this place.
+pub const ROOT_RUN_COVERS: [(&str, bool); 22] = [
     ("/root/.profile", true),
     ("/root/.bash_profile", true),
     ("/root/.bash_login", true),
@@ -208,7 +230,11 @@ pub const ROOT_RUN_COVERS: [(&str, bool); 18] = [
     ("/root/.zlogout", true),
     ("/root/.pam_environment", true),
     ("/root/.gitconfig", true),
+    ("/root/.config/git/config", true),
+    ("/root/.bash_completion", true),
+    ("/root/.config/bash_completion", true),
     ("/root/.config/fish/config.fish", true),
+    ("/root/.config/fish/conf.d", false),
     ("/root/.config/systemd", false),
     ("/root/.local/share/systemd", false),
     ("/root/.config/environment.d", false),
@@ -353,7 +379,20 @@ mod tests {
         assert_eq!(once.len(), ETC_ALLOWED.len());
         // What a tool inside reads is on it: the package sources, the mounts df and mount read, the certificates
         // and the accounts a shell resolves a name through.
-        for named in ["apt/sources.list", "mtab", "passwd", "group", "ssl/certs", "ca-certificates.conf", "terminfo", "nsswitch.conf"] {
+        for named in [
+            "apt/sources.list",
+            "mtab",
+            "passwd",
+            "group",
+            "ssl/certs",
+            "ca-certificates.conf",
+            "terminfo",
+            "nsswitch.conf",
+            "security/limits.conf",
+            "security/pam_env.conf",
+            "pki/tls/certs",
+            "pki/ca-trust",
+        ] {
             assert!(ETC_ALLOWED.contains(&named), "{named} is not on the list");
         }
         // What a service of the box's own reads is not, whole trees and single files alike: the repository
@@ -380,8 +419,20 @@ mod tests {
             "wireguard",
             "openvpn",
             "ipsec.secrets",
+            "security",
+            "security/opasswd",
+            "pki",
+            "pki/tls",
+            "pki/tls/private",
         ] {
             assert!(!ETC_ALLOWED.contains(&kept), "{kept} is on the list");
+        }
+        // The two trees whose children are named one by one carry no row that is a folder above a credential in
+        // them: a row of the tree itself, or of a folder holding a key, would take the key with it.
+        for tree in ["security", "pki"] {
+            let rows: Vec<&&str> = ETC_ALLOWED.iter().filter(|row| row.starts_with(&format!("{tree}/"))).collect();
+            assert!(!rows.is_empty(), "{tree} has no row");
+            assert!(rows.iter().all(|row| !row.ends_with('/')), "{rows:?}");
         }
         // And the covers left are the two the trees do not answer for.
         assert_eq!(EMPTY_BINDS, ["/home", "/root/.ssh"]);
@@ -409,11 +460,20 @@ mod tests {
         // The folder a root systemd manager reads units from: the workspace's own, and the folder under it that
         // the box keeps a unit in is not reachable through it.
         assert_eq!(cover("/root/.config/systemd"), Cover { at: "/root/.config/systemd".to_owned(), file: false, own: true });
-        // And every rc path the box keeps nothing at, covered all the same.
-        for at in ["/root/.zshrc", "/root/.bash_login", "/root/.gitconfig", "/root/.config/fish/config.fish"] {
+        // And every rc path the box keeps nothing at, covered all the same: what git reads beside .gitconfig,
+        // what the completion script sources at an interactive login, and what fish reads beside its own rc.
+        for at in [
+            "/root/.zshrc",
+            "/root/.bash_login",
+            "/root/.gitconfig",
+            "/root/.config/git/config",
+            "/root/.bash_completion",
+            "/root/.config/bash_completion",
+            "/root/.config/fish/config.fish",
+        ] {
             assert_eq!(cover(at), Cover { at: at.to_owned(), file: true, own: true });
         }
-        for at in ["/root/.local/share/systemd", "/root/.config/environment.d", "/root/.config/autostart"] {
+        for at in ["/root/.local/share/systemd", "/root/.config/environment.d", "/root/.config/autostart", "/root/.config/fish/conf.d"] {
             assert_eq!(cover(at), Cover { at: at.to_owned(), file: false, own: true });
         }
         // Every row of the list is one cover and no row is under another, since a bind of one would hide the

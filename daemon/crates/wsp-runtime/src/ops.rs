@@ -1383,7 +1383,7 @@ fn make_points(
         if !Path::new(&share.source).is_file() {
             continue;
         }
-        let opened = bundle::open_inside(place, &share.target, bundle::Want::File)?;
+        let opened = bundle::open_inside(place, &share.target, bundle::Want::File, bundle::BoxLink::FollowedOnce)?;
         if point_is_ours(&opened.landed, !opened.made, held) {
             made_points.push(opened.landed.clone());
             bundle::write_json(&layout.points(id), &made_points)?;

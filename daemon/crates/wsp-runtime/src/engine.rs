@@ -878,7 +878,7 @@ pub fn bind(dir: &Path) -> io::Result<UnixListener> {
 /// in so no link of the workspace's leads the make anywhere else; one already there stands.
 pub fn link_client_path(place: &crate::bundle::Inside) -> Result<(), crate::bundle::Error> {
     let (folder, name) = CLIENT_PATH.rsplit_once('/').expect("the client path names a folder");
-    let dir = crate::bundle::open_inside(place, folder, crate::bundle::Want::Dir)?;
+    let dir = crate::bundle::open_inside(place, folder, crate::bundle::Want::Dir, crate::bundle::BoxLink::FollowedOnce)?;
     match nix::unistd::symlinkat(format!("{INSIDE_DIR}/{SOCKET_NAME}").as_str(), dir.fd(), name) {
         Ok(()) | Err(nix::errno::Errno::EEXIST) => Ok(()),
         Err(e) => Err(crate::bundle::Error { path: dir.named(place).join(name), source: io::Error::from(e) }),

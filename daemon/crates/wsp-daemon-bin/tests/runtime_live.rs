@@ -3189,8 +3189,8 @@ async fn a_link_planted_in_a_workspaces_own_upper_refuses_its_wake_and_lands_not
 
 /// A link the box root keeps under the home every workspace here shares, which is a dotfiles checkout on a box
 /// somebody works on: the boot follows it once, the share lands where it leads beneath the rootfs, and the box's
-/// own disk carries nothing of it. The one case here that writes under the box's home; it writes a link of this
-/// checkout's own name and takes it off at its end.
+/// own disk carries nothing of it. The one case here that writes under the box's home, and it writes inside one
+/// folder of this checkout's own that it removes at its end, never a bare name beside the person's own files.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_the_workspace() {
@@ -3201,10 +3201,14 @@ async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_th
     fs::create_dir_all(&logins).unwrap();
     let source = logins.join("auth.json");
     fs::write(&source, b"{\"live\":\"a login\"}\n").unwrap();
-    // The box root's own link, at a name of this checkout's own, leading to a path the workspace's own /var holds.
-    let link = PathBuf::from(format!("/root/.wsp-live-link-{key}"));
+    // The box root's own link, inside one folder of this checkout's own under that home, leading to a path the
+    // workspace's own /var holds. The folder is what this case removes at its end, so the person's own home reads
+    // as it did before the run.
+    let proof = PathBuf::from(format!("/root/.wsp-live-follow-{key}"));
+    let link = proof.join("dotfiles");
     let led = format!("/var/tmp/wsp-landed-{key}");
-    let _ = fs::remove_file(&link);
+    let _ = fs::remove_dir_all(&proof);
+    fs::create_dir_all(&proof).unwrap();
     std::os::unix::fs::symlink(&led, &link).unwrap();
     let id = w
         .create(spec(json!({
@@ -3226,7 +3230,7 @@ async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_th
 
     w.ok("machine.kill", json!({ "machineId": &id })).await;
     assert!(!Path::new(&led).exists(), "the kill left the link's target on the box");
-    fs::remove_file(&link).unwrap();
+    fs::remove_dir_all(&proof).unwrap();
     let _ = fs::remove_dir_all(&logins);
     w.close().await;
 }
@@ -3296,10 +3300,20 @@ async fn a_workspace_reads_the_etc_the_list_allows_and_none_of_the_boxs_own_cred
     assert_eq!(out.lines().last(), Some("read"), "{out}");
     assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 0, "no certificate reads inside: {out}");
 
-    // The package database the box lends, written to a cache of the workspace's own.
-    let (code, out, err) = w.exec(&id, "dpkg -l | wc -l; apt-get update -qq > /dev/null 2>&1; echo apt-$?").await;
+    // The package database the box lends, and a download written to a cache of the workspace's own: apt's own
+    // exit is what says the cache took it, and the box's cache is not the one it wrote.
+    let (code, out, err) = w.exec(&id, "dpkg -l | wc -l").await;
     assert_eq!(code, 0, "{err}");
     assert!(out.lines().next().unwrap().parse::<u32>().unwrap_or(0) > 10, "the package database does not read inside: {out}");
+    let boxs_cache = fs::read_dir("/var/cache/apt/archives").map(|d| d.count()).unwrap_or(0);
+    let (code, out, err) = w.exec(&id, "apt-get update -qq > /dev/null 2>&1; apt-get install -y --download-only hello; echo apt-$?").await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.lines().last(), Some("apt-0"), "apt could not write its own cache: {out}");
+    assert_eq!(
+        fs::read_dir("/var/cache/apt/archives").map(|d| d.count()).unwrap_or(0),
+        boxs_cache,
+        "the download landed in the box's cache"
+    );
 
     // And the box's own service credentials are not inside, whether the list left them out or the tree they sat
     // in is the workspace's own now.
