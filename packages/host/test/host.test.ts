@@ -4,8 +4,8 @@ import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AdapterEvent, TurnResult } from "@wsp/protocol";
-import { CATALOG } from "@wsp/catalog";
+import { probePath, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { CATALOG, GUEST_HOME } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { HERE } from "./recipe-fixture.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
@@ -1066,7 +1066,7 @@ describe("the doctor's computer road on the host that holds the link", () => {
 
   it("runs the road here and says each of its lines as an event, out for what it printed and err for what it failed with", async () => {
     const asked: string[] = [];
-    const up = await serving({ vault: () => ({}), plan: async () => (asked.push("plan"), { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] }) });
+    const up = await serving({ vault: () => ({}), plan: async () => (asked.push("plan"), { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] }) });
     const c = await wsClient(up.wsPort, up.authToken);
     await c.request("events.subscribe");
     const reply = await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" });
@@ -1083,7 +1083,7 @@ describe("the doctor's computer road on the host that holds the link", () => {
   });
 
   it("reads the recipe through the planner the places wiring already holds, and no second one", async () => {
-    const plan = { recipeAt: "2026-09-18T09:00:00.000Z", skipped: [], steps: [] };
+    const plan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] };
     let asked = 0;
     const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"), {});
     links.provision = { plan: async () => (asked++, plan), run: async () => [] };

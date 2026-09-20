@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, words, BackendFacts, CopyReport, DaemonAuthRequest,
+    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
     MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
     MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
@@ -257,6 +257,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("firstFrameNotAuth", words::AUTH_FIRST_FRAME.to_owned());
     m.insert("preAuthBytesExceeded", words::AUTH_TOO_MANY_BYTES.to_owned());
     m.insert("authDeadlinePassed", words::AUTH_NO_FRAME_IN_TIME.to_owned());
+    m.insert("tokenRotated", words::AUTH_TOKEN_ROTATED.to_owned());
     m.insert("invalidJson", words::INVALID_JSON.to_owned());
     m.insert("noToken", words::NO_TOKEN_AT_START.to_owned());
     m.insert("unknownOp", words::unknown_op("{op}"));
@@ -290,6 +291,8 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("notAFrame", words::link_not_a_frame("{url}"));
     m.insert("authUnreadable", words::link_unreadable_auth_reply("{url}", "{error}"));
     m.insert("hostRefused", words::link_refused("{url}", "{refusal}"));
+    m.insert("linkOutOfOrder", words::link_out_of_order("{url}"));
+    m.insert("linkHostUnsealed", words::link_host_unsealed("{url}"));
     m
 }
 
@@ -388,6 +391,21 @@ fn the_leaves_own_list_matches_the_committed_fixture() {
     let theirs: Vec<String> = committed_value("place-paths.json");
     let ours: Vec<String> = place_owned_paths(Path::new(FIXTURE_HOME)).iter().map(|p| p.to_string_lossy().into_owned()).collect();
     assert_eq!(ours, theirs, "place-paths.json and place_owned_paths name the same paths in the same order");
+}
+
+/// The home the probe path's fixture is rendered for, as the protocol's own test renders it: root's, since every
+/// directory the tools PATH names under a home is under that one.
+const PROBE_HOME: &str = "/root";
+
+#[test]
+fn the_probe_path_matches_the_committed_fixture_byte_for_byte() {
+    let path = fixtures().join("probe-path.txt");
+    let theirs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(
+        format!("{}\n", probe_path(Path::new(PROBE_HOME))),
+        theirs,
+        "probe-path.txt and probe_path are one list: what this daemon resolves a command through and what the recipe job exports"
+    );
 }
 
 #[test]

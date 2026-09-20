@@ -25,7 +25,9 @@ import {
   PlaceAddStep,
   PlaceAuthRequest,
   PlaceJoinReply,
+  PlaceJoinDevice,
   PlaceJoinRequest,
+  PlaceProveRequest,
   PlaceReport,
   DAEMON_VERSION,
   joinAddressOf,
@@ -57,6 +59,7 @@ import {
 
 const nonce = Buffer.alloc(PLACE_LINK_NONCE_BYTES, 7).toString("base64");
 const publicKey = Buffer.alloc(44, 3).toString("base64");
+const signature = Buffer.alloc(64, 5).toString("base64");
 
 const report = {
   name: "old-macbook",
@@ -74,58 +77,77 @@ const report = {
 };
 
 describe("what a joining computer may send", () => {
-  it("takes a whole join frame", () => {
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "7QK3M2VD", publicKey, nonce, report }).success).toBe(true);
+  const ephemeral = Buffer.alloc(32, 8).toString("base64");
+
+  it("takes a whole join frame: the key it will prove and the two public values, and nothing of the person's", () => {
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", publicKey, nonce, ephemeral }).success).toBe(true);
+    // The code and the report ride the prove, inside the seal: the first frame carries neither.
+    const first = PlaceJoinRequest.parse({ id: 1, op: "place.join", publicKey, nonce, ephemeral, code: "7QK3M2VD", report });
+    expect(Object.keys(first).sort()).toEqual(["ephemeral", "id", "nonce", "op", "publicKey"]);
+  });
+
+  it("refuses a half of the key agreement that is not the length one is, and takes a frame with none from a computer whose wsp seals nothing", () => {
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", publicKey, nonce, ephemeral: Buffer.alloc(16, 8).toString("base64") }).success).toBe(false);
+    // Absent reads, so the host can refuse it in its own sentence rather than with a word about a field.
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", publicKey, nonce }).success).toBe(true);
   });
 
   it("refuses a nonce that is not the length a challenge is: a short one is a nonce somebody could have seen before", () => {
     const short = Buffer.alloc(16, 7).toString("base64");
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "X", publicKey, nonce: short, report }).success).toBe(false);
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", publicKey, nonce: short, ephemeral }).success).toBe(false);
   });
 
   it("refuses a key that is not an ed25519 public key's length", () => {
     const wrong = Buffer.alloc(32, 3).toString("base64");
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "X", publicKey: wrong, nonce, report }).success).toBe(false);
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", publicKey: wrong, nonce, ephemeral }).success).toBe(false);
   });
 
-  it("refuses a code longer than any this host mints", () => {
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "x".repeat(65), publicKey, nonce, report }).success).toBe(false);
+  it("refuses a code longer than any this host mints, on the prove that carries it", () => {
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report, code: "x".repeat(65) }).success).toBe(false);
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report, code: "7QK3M2VD" }).success).toBe(true);
   });
 
   it("refuses a report whose login is not string to string: every value there lands in a path a turn runs under", () => {
     const bad = { ...report, login: { HOME: 3 } };
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "X", publicKey, nonce, report: bad }).success).toBe(false);
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report: bad }).success).toBe(false);
   });
 
   it("refuses a report that dialed something other than an http address", () => {
     const bad = { ...report, dialed: "ftp://192.168.1.20" };
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "X", publicKey, nonce, report: bad }).success).toBe(false);
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report: bad }).success).toBe(false);
   });
 
   it("takes an auth frame from a place that already joined", () => {
-    expect(PlaceAuthRequest.safeParse({ id: 1, op: "place.auth", placeId: "p_ab12cd34", nonce }).success).toBe(true);
+    expect(PlaceAuthRequest.safeParse({ id: 1, op: "place.auth", placeId: "p_ab12cd34", nonce, ephemeral }).success).toBe(true);
   });
 });
 
 describe("the bytes both sides of a link sign", () => {
   const a = Buffer.alloc(PLACE_LINK_NONCE_BYTES, 1).toString("base64");
   const b = Buffer.alloc(PLACE_LINK_NONCE_BYTES, 2).toString("base64");
+  const keys = { challenger: Buffer.alloc(32, 3).toString("base64"), answerer: Buffer.alloc(32, 4).toString("base64") };
   const bytes = (v: Uint8Array): string => Buffer.from(v).toString("hex");
 
   it("differs by the role, so neither side's signature can be replayed back at it as the other's", () => {
-    expect(bytes(placeLinkTranscript("host", "p_1", a, b))).not.toBe(bytes(placeLinkTranscript("place", "p_1", a, b)));
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).not.toBe(bytes(placeLinkTranscript("place", "p_1", a, b, keys)));
   });
 
   it("differs by the order of the two nonces, so a transcript is one direction of one link", () => {
-    expect(bytes(placeLinkTranscript("host", "p_1", a, b))).not.toBe(bytes(placeLinkTranscript("host", "p_1", b, a)));
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).not.toBe(bytes(placeLinkTranscript("host", "p_1", b, a, keys)));
   });
 
   it("differs by the place, so a signature for one place proves nothing about another", () => {
-    expect(bytes(placeLinkTranscript("host", "p_1", a, b))).not.toBe(bytes(placeLinkTranscript("host", "p_2", a, b)));
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).not.toBe(bytes(placeLinkTranscript("host", "p_2", a, b, keys)));
+  });
+
+  it("covers both halves of the key agreement, so a carrier that swapped either of them has signed nothing", () => {
+    const swapped = { challenger: keys.challenger, answerer: Buffer.alloc(32, 5).toString("base64") };
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).not.toBe(bytes(placeLinkTranscript("host", "p_1", a, b, swapped)));
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).not.toBe(bytes(placeLinkTranscript("host", "p_1", a, b, { challenger: keys.answerer, answerer: keys.challenger })));
   });
 
   it("is the same bytes for the same reading, so the two sides cannot drift", () => {
-    expect(bytes(placeLinkTranscript("host", "p_1", a, b))).toBe(bytes(placeLinkTranscript("host", "p_1", a, b)));
+    expect(bytes(placeLinkTranscript("host", "p_1", a, b, keys))).toBe(bytes(placeLinkTranscript("host", "p_1", a, b, keys)));
   });
 });
 
@@ -219,18 +241,20 @@ describe("the port the door for computers you own answers on", () => {
 });
 
 describe("what a join carrying the app's own ask may send", () => {
-  it("takes a client the window's token is minted for, and refuses one with no name", () => {
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "7QK3M2VD", publicKey, nonce, report, client: { name: "old-macbook" } }).success).toBe(true);
-    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "7QK3M2VD", publicKey, nonce, report, client: { name: "" } }).success).toBe(false);
+  it("takes a client the window's token is minted for, and refuses one with no name, on the prove that carries it", () => {
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report, code: "7QK3M2VD", client: { name: "old-macbook" } }).success).toBe(true);
+    expect(PlaceProveRequest.safeParse({ id: 2, op: "place.prove", signature, report, code: "7QK3M2VD", client: { name: "" } }).success).toBe(false);
   });
 
-  it("answers the primary computer's name, and a device only with both halves of it", () => {
-    const signature = Buffer.alloc(64, 5).toString("base64");
-    const base = { placeId: "p_1", hostPublicKey: publicKey, nonce, signature, hostName: "zingzy-mbp" };
+  it("answers the primary computer's name and its half of the key agreement, and the window's token only with both halves of it", () => {
+    const ephemeral = Buffer.alloc(32, 8).toString("base64");
+    const base = { placeId: "p_1", hostPublicKey: publicKey, nonce, signature, ephemeral, hostName: "zingzy-mbp" };
     expect(PlaceJoinReply.safeParse(base).success).toBe(true);
     expect(PlaceJoinReply.safeParse({ ...base, hostName: "" }).success).toBe(false);
-    expect(PlaceJoinReply.safeParse({ ...base, device: { deviceId: "d_1", deviceToken: "" } }).success).toBe(false);
-    expect(PlaceJoinReply.safeParse({ ...base, device: { deviceId: "d_1", deviceToken: "t" } }).success).toBe(true);
+    // The reply to frame one is the last that travels in the clear, so nothing of the person's is on it.
+    expect(PlaceJoinReply.safeParse({ ...base, ephemeral: undefined }).success).toBe(false);
+    expect(PlaceJoinDevice.safeParse({ deviceId: "d_1", deviceToken: "" }).success).toBe(false);
+    expect(PlaceJoinDevice.safeParse({ deviceId: "d_1", deviceToken: "t" }).success).toBe(true);
   });
 
   it("takes the word for how a computer copies a project, and a report from one that says none", () => {

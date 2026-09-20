@@ -16,6 +16,7 @@ import { ZodLiteral, type ZodObject, type ZodRawShape, type ZodTypeAny } from "z
 import {
   AUTH_DEADLINE_MS,
   DAEMON_AUTH_DEADLINE_PASSED,
+  DAEMON_TOKEN_ROTATED,
   DAEMON_DEFAULT_HOST,
   DAEMON_DEFAULT_PORT,
   DAEMON_FIRST_FRAME_NOT_AUTH,
@@ -116,11 +117,14 @@ import {
   hostKeyRefusal,
   hostQuietLine,
   hostRefusedLine,
+  linkHostUnsealedLine,
+  linkOutOfOrderLine,
   linkedLine,
   notAFrameLine,
   placeDaemonPaths,
   placeOwnedPaths,
   portScopeRefusal,
+  probePath,
   unknownOpLine,
   workScoreLine,
 } from "../src/index.js";
@@ -208,6 +212,7 @@ const words = (): Record<string, string> => ({
   firstFrameNotAuth: DAEMON_FIRST_FRAME_NOT_AUTH,
   preAuthBytesExceeded: DAEMON_PRE_AUTH_BYTES_EXCEEDED,
   authDeadlinePassed: DAEMON_AUTH_DEADLINE_PASSED,
+  tokenRotated: DAEMON_TOKEN_ROTATED,
   invalidJson: DAEMON_INVALID_JSON,
   noToken: DAEMON_NO_TOKEN,
   unknownOp: unknownOpLine("{op}"),
@@ -241,6 +246,8 @@ const words = (): Record<string, string> => ({
   notAFrame: notAFrameLine("{url}"),
   authUnreadable: authUnreadableLine("{url}", "{error}"),
   hostRefused: hostRefusedLine("{url}", "{refusal}"),
+  linkOutOfOrder: linkOutOfOrderLine("{url}"),
+  linkHostUnsealed: linkHostUnsealedLine("{url}"),
 });
 
 /** The home the owned-paths fixture is rendered for: one letter, so the list reads as the shape of the paths
@@ -250,6 +257,10 @@ const FIXTURE_HOME = "/h";
 /** The binary the wsp shim's fixture is rendered onto: the shim's one hole, kept as its template the way a
  * sentence with a value in it is, since the path differs on each road that writes the shim. */
 const SHIM_BINARY = "{binary}";
+
+/** The home the probe path's fixture is rendered for: root's, since every directory the tools PATH names under a
+ * home is under that one and a made-up home would take nothing off the list. */
+const PROBE_HOME = "/root";
 
 const numbers = (): Record<string, number | string | readonly string[]> => ({
   daemonVersion: DAEMON_VERSION,
@@ -540,6 +551,15 @@ describe("the words and numbers are what this package exports", () => {
       expect(readFileSync(join(CONTRACT, name), "utf8")).toBe(text);
     });
   }
+
+  it("probe-path.txt equals its regeneration, so what the daemon runs a command through and what the job exports is one list", () => {
+    const text = `${probePath(PROBE_HOME)}\n`;
+    const regenerated = join(tmpdir(), "wsp-contract-probe-path.txt");
+    writeFileSync(regenerated, text);
+    const path = join(CONTRACT, "probe-path.txt");
+    expect(existsSync(path), `daemon/fixtures/contract/probe-path.txt is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
+    expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/probe-path.txt is behind the protocol. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+  });
 
   it("guest-wsp-shim.sh equals its regeneration, so the word inside a fork and inside a workspace is one text", () => {
     const text = guestWspShim(SHIM_BINARY);

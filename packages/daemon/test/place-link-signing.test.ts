@@ -6,6 +6,9 @@
 // protocol puts on the wire fails on both sides rather than agreeing with
 // itself. This is the whole of what node does for a place link.
 import { createPublicKey, createPrivateKey, sign as signBytes, verify as verifyBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { placeLinkTranscript } from "@wsp/protocol";
 import { fixture } from "./fixtures.js";
@@ -27,6 +30,9 @@ interface SigningVectors {
   placeId: string;
   placeNonce: string;
   hostNonce: string;
+  /** The two X25519 public values the transcript covers, so a carrier that swapped either has signed nothing. */
+  placeEphemeral: string;
+  hostEphemeral: string;
   hostTranscript: string;
   placeTranscript: string;
   hostSignature: string;
@@ -38,13 +44,22 @@ const FILE = "place-link-signing.json";
 describe("the place link signing vectors", () => {
   it("regenerates every field of the fixture the Rust link is proven against", () => {
     const v = JSON.parse(fixture(FILE)) as SigningVectors;
-    const host = placeLinkTranscript("host", v.placeId, v.placeNonce, v.hostNonce);
-    const place = placeLinkTranscript("place", v.placeId, v.hostNonce, v.placeNonce);
-    expect(Buffer.from(host).toString("base64")).toBe(v.hostTranscript);
-    expect(Buffer.from(place).toString("base64")).toBe(v.placeTranscript);
-    expect(signPlaceBytes(v.privateKeyPem, host)).toBe(v.hostSignature);
-    expect(signPlaceBytes(v.privateKeyPem, place)).toBe(v.placeSignature);
-    expect(verifyPlaceBytes(v.publicKey, place, v.placeSignature)).toBe(true);
-    expect(verifyPlaceBytes(v.publicKey, host, v.placeSignature)).toBe(false);
+    // The place challenges the host, so the place's nonce and its ephemeral come first in the host's transcript,
+    // and the host's come first in the place's.
+    const host = placeLinkTranscript("host", v.placeId, v.placeNonce, v.hostNonce, { challenger: v.placeEphemeral, answerer: v.hostEphemeral });
+    const place = placeLinkTranscript("place", v.placeId, v.hostNonce, v.placeNonce, { challenger: v.hostEphemeral, answerer: v.placeEphemeral });
+    const fresh: SigningVectors = {
+      ...v,
+      hostTranscript: Buffer.from(host).toString("base64"),
+      placeTranscript: Buffer.from(place).toString("base64"),
+      hostSignature: signPlaceBytes(v.privateKeyPem, host),
+      placeSignature: signPlaceBytes(v.privateKeyPem, place),
+    };
+    const text = `${JSON.stringify(fresh, null, 2)}\n`;
+    const regenerated = join(tmpdir(), `wsp-${FILE}`);
+    writeFileSync(regenerated, text);
+    expect(fixture(FILE), `daemon/fixtures/${FILE} is behind. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+    expect(verifyPlaceBytes(v.publicKey, place, fresh.placeSignature)).toBe(true);
+    expect(verifyPlaceBytes(v.publicKey, host, fresh.placeSignature)).toBe(false);
   });
 });

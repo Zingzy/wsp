@@ -65,6 +65,12 @@ import {
   type PlaceUpdateReply,
   type PlaceView,
   type WorkspaceSize,
+  PLACE_CODE_REFUSAL,
+  PLACE_UNSEALED_JOIN_REFUSAL,
+  twoPlacesRefusal,
+  placeBehindLine,
+  placeDaemonBehind,
+  type PlaceProveRequest,
 } from "@wsp/protocol";
 import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedLoginOf } from "@wsp/catalog";
@@ -74,6 +80,7 @@ import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import type { PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "./seal.js";
 import type { Store } from "./store.js";
 
 /** One document per joined computer, keyed by the id this host knows it by. */
@@ -179,7 +186,9 @@ export interface PlaceWiring {
  * which is that computer itself over the link its daemon holds. The host wires it because the recipe and the
  * reading of this computer are the host's, as the installer and the daemon binary are. */
 export interface PlaceProvisioner {
-  plan(): Promise<ProvisionPlan | { noRecipe: string }>;
+  /** `on` is the computer the plan is for: its home is what every path of the job hangs off and what the PATH the
+   * job's scripts export is read from, since a directory under it is one the workspaces there write. */
+  plan(on: { home: string }): Promise<ProvisionPlan | { noRecipe: string }>;
   run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
 }
 
@@ -322,18 +331,20 @@ export interface PlaceDoorOptions {
 export interface PlaceDoor {
   /** The first frame of a joining computer. Answers the reply and the bytes its prove must sign, or nothing when
    * the code is not one this host is holding. Throws with its own sentence for a key or a report it cannot take. */
-  join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; notice?: string } | undefined>;
+  join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; seal: Seal; notice?: string } | undefined>;
   /** The first frame of a place that already joined; nothing when this host holds no place by that id. */
-  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array } | undefined>;
+  auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array; seal: Seal } | undefined>;
   /** The fingerprint of the key this door proves at every join, for the token a join line carries. Read off the
    * pair the handshake signs with, so a line can never name a key this door will not answer with. */
   hostKey(): string;
   /** Checks the place's signature over `expect` with the key on record and reads the report it sent by the one rule
    * every report is read by. Answers the report `attach` is to take, or the sentence to refuse the socket with:
-   * the key's or the report's own. Attaches nothing yet. */
-  prove(placeId: string, signature: string, expect: Uint8Array, report: PlaceReport): Promise<{ report: PlaceReport } | { refusal: string }>;
-  /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
-  attach(placeId: string, socket: WebSocket, report: PlaceReport, from: string, now: number): Promise<void>;
+   * the key's or the report's own. A join's prove is where its code is spent and its record written, and where
+   * the token its own window asked for is answered. Attaches nothing yet. */
+  prove(placeId: string, req: PlaceProveRequest, expect: Uint8Array, from: string, now: number): Promise<{ report: PlaceReport; device?: { deviceId: string; deviceToken: string } } | { refusal: string }>;
+  /** Takes the proved socket as this place's link, with the report `prove` answered and the seal its frames ride
+   * inside; the previous link is cut. */
+  attach(placeId: string, socket: WebSocket, report: PlaceReport, from: string, now: number, seal?: Seal): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
   /** A channel to the daemon on one computer this host holds, over the link that computer is holding: frames go
    * up that link and the events it pushes come back to `onEvent`, so a road on this host drives that computer's
@@ -533,6 +544,10 @@ function readsAsEd25519(publicKeyBase64: string): boolean {
     return false;
   }
 }
+
+/** How long a join that has been answered has to send its prove before this host forgets it was asked. Longer
+ * than any handshake and shorter than a code's own life, so nothing a person is still typing is swept. */
+const JOIN_PROVE_MS = 2 * 60_000;
 
 /** The one sentence a join whose key this host cannot verify against is refused with. */
 export const PLACE_BAD_KEY_REFUSAL = "that join sent a key this host cannot verify a signature against; a place's key is ed25519, as SPKI DER in base64";
@@ -792,14 +807,27 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   };
   const markDefault = (placeId: string): Promise<void> => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
 
-  /** The host's half of the handshake, the one place it is built: a fresh nonce, the signature over the transcript
-   * the place challenged with, and the bytes the place's own signature must cover. */
-  const challenge = (placeId: string, placeNonce: string): { nonce: string; signature: string; expect: Uint8Array } => {
+  /** The host's half of the handshake, the one place it is built: a fresh nonce and a fresh key agreement, the
+   * signature over the transcript the place challenged with, the bytes the place's own signature must cover, and
+   * the seal every frame after this reply rides inside. The ephemerals are inside both transcripts, so the key
+   * the two ends agree is one both signatures cover and a carrier that swapped either has signed nothing.
+   * Nothing where the place sent no key of its own to agree with. */
+  const challenge = (placeId: string, placeNonce: string, placeEphemeral: string | undefined): { nonce: string; signature: string; ephemeral: string; expect: Uint8Array; seal: Seal } | undefined => {
+    if (placeEphemeral === undefined) return undefined;
     const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+    const mine = freshEphemeral();
+    let secret: Buffer;
+    try {
+      secret = sharedSecret(mine.privateKey, placeEphemeral);
+    } catch {
+      return undefined;
+    }
     return {
       nonce,
-      signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeLinkTranscript("host", placeId, placeNonce, nonce)),
-      expect: placeLinkTranscript("place", placeId, nonce, placeNonce),
+      ephemeral: mine.publicKey,
+      signature: signPlaceBytes(wiring.hostKey.privateKeyPem, placeLinkTranscript("host", placeId, placeNonce, nonce, { challenger: placeEphemeral, answerer: mine.publicKey })),
+      expect: placeLinkTranscript("place", placeId, nonce, placeNonce, { challenger: mine.publicKey, answerer: placeEphemeral }),
+      seal: makeSeal(sealKeys(secret, placeId), "host"),
     };
   };
 
@@ -973,7 +1001,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     // inside it would both have passed the check above and installed over each other on that box.
     provisioning.add(placeId);
     try {
-      const planned = await provisioner.plan();
+      const planned = await provisioner.plan({ home });
       if ("noRecipe" in planned) {
         provisioning.delete(placeId);
         return { said: placeNoRecipeLine(record.name, planned.noRecipe) };
@@ -1178,59 +1206,90 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const cannotBoot = (report: PlaceReport): string | undefined =>
     report.runsWorkspaces ? undefined : placeCannotBootLine(report.name, report.workspacesBlocked);
 
+  /** What a join has told this host before its prove: the key it will sign with and when it opened. The record is
+   * written on the prove, so a join whose prove never arrives leaves nothing behind but this, and the next join
+   * sweeps whatever stood past the wait. */
+  const joining = new Map<string, { publicKey: string; at: number }>();
+
+  /** The join's own half of the prove: the code is spent here, inside the seal and after this host has proved the
+   * key the join line named, and the record is written only once all of it stood. */
+  const joined = async (
+    placeId: string,
+    pending: { publicKey: string },
+    req: PlaceProveRequest,
+    expect: Uint8Array,
+    from: string,
+    at: number,
+  ): Promise<{ report: PlaceReport; device?: { deviceId: string; deviceToken: string } } | { refusal: string }> => {
+    joining.delete(placeId);
+    if (!verifyPlaceBytes(pending.publicKey, expect, req.signature)) return { refusal: PLACE_KEY_REFUSAL };
+    let taken: PlaceReport;
+    try {
+      taken = takenReport(req.report);
+    } catch (e) {
+      return { refusal: e instanceof Error ? e.message : String(e) };
+    }
+    // A computer that cannot boot the image is not a place: the daemon's own doctor says why in one sentence and
+    // the join stops on it, before the code is spent and before a record exists.
+    const blocked = cannotBoot(taken);
+    if (blocked !== undefined) return { refusal: blocked };
+    if (req.code === undefined || !(await devices.spend(req.code, at))) return { refusal: PLACE_CODE_REFUSAL };
+    const stamp = new Date(at).toISOString();
+    // An install that handed this computer the code is waiting on the link it will open next; which place the
+    // code became is noted before the first write of the record, so that write carries the road it came in over.
+    const waiting = awaiting.get(req.code);
+    if (waiting !== undefined) waiting.placeId = placeId;
+    const record = await keep({ id: placeId, name: taken.name, publicKey: pending.publicKey, joinedAt: stamp, lastSeenAt: stamp, reportedAt: stamp, report: taken });
+    // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
+    await markDefault(placeId);
+    // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
+    // person's intent was one act. The socket stays the place link and is bound to no device.
+    const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
+    emit({ type: "place.joined", place: viewOf(record, placeId), from });
+    return { report: taken, ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }) };
+  };
+
   const door: PlaceDoor = {
-    async join(req, from, at) {
-      // The key and the report are read before the code is spent, so a join that was never going to stand does not
-      // cost the person their code.
+    async join(req, _from, at) {
+      // The key is read before anything else: a frame that names no key this host can hold is a join that was
+      // never going to stand, and nothing of the person's has crossed yet either way.
       if (!readsAsEd25519(req.publicKey)) throw new Error(PLACE_BAD_KEY_REFUSAL);
-      const taken = takenReport(req.report);
-      // A computer that cannot boot the image is not a place: the daemon's own doctor says why in one sentence and
-      // the join stops on it, before the code is spent and before a record exists.
-      const blocked = cannotBoot(taken);
-      if (blocked !== undefined) throw new Error(blocked);
-      if (!(await devices.spend(req.code, at))) return undefined;
       // Eight bytes: the id keys the store, so two places that drew the same one would be one record and the older
       // computer's link would replace the newer's on every dial.
       const id = `p_${randomBytes(8).toString("hex")}`;
-      const stamp = new Date(at).toISOString();
-      // An install that handed this computer the code is waiting on the link it will open next; which place the
-      // code became is noted before the first write of the record, so that write carries the road it came in over.
-      const waiting = awaiting.get(req.code);
-      if (waiting !== undefined) waiting.placeId = id;
-      const record = await keep({ id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, reportedAt: stamp, report: taken });
-      // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
-      await markDefault(id);
-      // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
-      // person's intent was one act. The socket stays the place link and is bound to no device.
-      const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
-      const { nonce, signature, expect } = challenge(id, req.nonce);
-      emit({ type: "place.joined", place: viewOf(record, id), from });
+      const opened = challenge(id, req.nonce, req.ephemeral);
+      if (opened === undefined) throw new Error(PLACE_UNSEALED_JOIN_REFUSAL);
+      // Nothing is written and no code is spent until the prove: the code, the report and the window this
+      // computer wants ride inside the seal, after this host has proved the key the join line named.
+      for (const [waiting, held] of joining) if (at - held.at > JOIN_PROVE_MS) joining.delete(waiting);
+      joining.set(id, { publicKey: req.publicKey, at });
       return {
-        reply: {
-          placeId: id,
-          hostPublicKey: wiring.hostKey.publicKey,
-          nonce,
-          signature,
-          hostName: wiring.hostName(),
-          ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }),
-        },
-        expect,
+        reply: { placeId: id, hostPublicKey: wiring.hostKey.publicKey, nonce: opened.nonce, signature: opened.signature, ephemeral: opened.ephemeral, hostName: wiring.hostName() },
+        expect: opened.expect,
+        seal: opened.seal,
       };
     },
 
     async auth(req) {
-      if ((await recordOf(req.placeId)) === undefined) return undefined;
-      const { nonce, signature, expect } = challenge(req.placeId, req.nonce);
-      return { reply: { nonce, hostPublicKey: wiring.hostKey.publicKey, signature }, expect };
+      const held = await recordOf(req.placeId);
+      if (held === undefined) return undefined;
+      const opened = challenge(req.placeId, req.nonce, req.ephemeral);
+      // A daemon older than the seal agrees no key: the row already says it is behind and why, and that is the
+      // sentence its link is refused with rather than one about a field.
+      if (opened === undefined) throw new Error(placeBehindLine(held.name, placeDaemonBehind(held.report) ?? ""));
+      return { reply: { nonce: opened.nonce, hostPublicKey: wiring.hostKey.publicKey, signature: opened.signature, ephemeral: opened.ephemeral }, expect: opened.expect, seal: opened.seal };
     },
 
     hostKey() {
       return keyFingerprint(wiring.hostKey.publicKey);
     },
 
-    async prove(placeId, signature, expect, report) {
+    async prove(placeId, req, expect, from, at) {
+      const pending = joining.get(placeId);
+      if (pending !== undefined) return joined(placeId, pending, req, expect, from, at);
       const held = await recordOf(placeId);
-      if (held === undefined || !verifyPlaceBytes(held.publicKey, expect, signature)) return { refusal: PLACE_KEY_REFUSAL };
+      if (held === undefined || !verifyPlaceBytes(held.publicKey, expect, req.signature)) return { refusal: PLACE_KEY_REFUSAL };
+      const report = req.report;
       // The report on this frame is the one the record takes, on a join's second frame and on every relink alike,
       // so it is read by the same rule the join's own frame was.
       let taken: PlaceReport;
@@ -1249,7 +1308,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { refusal: blocked };
     },
 
-    async attach(placeId, socket, report, from, at) {
+    async attach(placeId, socket, report, from, at, seal) {
       // A second link replaces the first: a laptop that slept and came back dials before the host has noticed the
       // old socket is a connection to nothing.
       cut(placeId, REPLACED);
@@ -1261,7 +1320,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // Where the link dialled in from is the only address this host has for a computer that joined with a code,
       // so it is kept rather than only announced on the event. What the last dial of this computer said goes with
       // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
-      const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
+      // The name is the one this computer joined under and is never taken off a report again: a box whose own
+      // place file a hostile process edited would otherwise answer to another computer's name and take its
+      // creates, its checkout and the keys of the turns that run there.
+      const moved: PlaceRecord = { ...held, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       // What a computer forks with belongs to the daemon that said it: one that dialled back on another version
       // is asked again rather than read off an answer the version before it gave, since a newer daemon can carry
       // a field the older one never did and an older one can have lost it. The read is the attach's own, below.
@@ -1274,6 +1336,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await keep(moved);
       const reach = connectDaemon({
         socket,
+        ...(seal === undefined ? {} : { seal }),
         onEvent: e => {
           // A tunnel's bytes belong to the connection riding the forward that opened it and to nothing else on
           // this host: the road a fork's daemon is reached by reads its own frames, the pane's road reads the
@@ -1475,8 +1538,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async placeFor(word) {
       const all = await records();
-      const found = all.find(r => namesPlace(r, word));
-      if (found !== undefined) return { placeId: found.id };
+      const found = all.filter(r => namesPlace(r, word));
+      // Two computers by one word is two a person joined under one name: a relink cannot take another's, so this
+      // is theirs to tell apart, and every create and image build that names the word reads the ids rather than
+      // landing on whichever record joined first.
+      if (found.length > 1) throw new Error(twoPlacesRefusal(word, found.map(r => r.id)));
+      if (found[0] !== undefined) return { placeId: found[0].id };
       const here = wiring.here().name;
       const providers = providerIds();
       // The wired provider is where a record with no place word already stands, so naming it is that same road and

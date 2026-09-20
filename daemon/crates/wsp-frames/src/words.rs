@@ -6,6 +6,10 @@ pub const AUTH_TOKEN_REFUSED: &str = "daemon token refused; the host holds the c
 pub const AUTH_FIRST_FRAME: &str = "the first frame must be auth";
 pub const AUTH_TOO_MANY_BYTES: &str = "too many bytes before the auth frame";
 pub const AUTH_NO_FRAME_IN_TIME: &str = "no auth frame arrived in time";
+/// What a socket already through the door is cut with once the token it authed with is no longer the file's: a
+/// rotation takes the sockets the old token opened with it, rather than leaving them answering for the life of
+/// the connection. Under the same close code the four above travel with.
+pub const AUTH_TOKEN_ROTATED: &str = "the daemon token was rotated; dial again with the current one";
 /// The WebSocket close code every one of them travels under.
 pub const AUTH_CLOSE_CODE: u16 = 4401;
 
@@ -107,6 +111,19 @@ pub fn link_unreadable_auth_reply(url: &str, reason: &str) -> String {
 
 pub fn link_no_answer_to_dial(url: &str) -> String {
     format!("{url} did not answer the dial")
+}
+
+/// What an address that answered something the handshake's order does not allow is passed over with. The id a
+/// frame carries says nothing about who sent it, so the order is the only thing a place holds a host to before the
+/// key is proved.
+pub fn link_out_of_order(url: &str) -> String {
+    format!("{url} answered out of order; nothing was sent to it and the next address is tried")
+}
+
+/// What a host that answered the handshake with no key agreement of its own is passed over with: it runs a wsp
+/// older than this one, and a link neither end can seal is one this computer does not hold.
+pub fn link_host_unsealed(url: &str) -> String {
+    format!("the host at {url} agreed no key for this link; it runs an older wsp")
 }
 
 pub fn link_linked(url: &str) -> String {

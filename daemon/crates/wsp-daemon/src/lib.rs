@@ -25,6 +25,9 @@ mod proc_local;
 mod pty;
 mod readings;
 mod relay;
+/// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
+/// stand on the host's side of it, which in the product is node's own.
+pub mod seal;
 mod sys;
 mod sys_local;
 mod tunnel;
@@ -77,7 +80,13 @@ pub struct Options {
     pub auth_deadline_ms: Option<u64>,
     /// How long a guest session stands with nobody watching it before it ends to its guest.
     pub guest_unwatched_ms: Option<u64>,
+    /// How often the token watcher reads the file; the rule's own second unless a case shortens it.
+    pub token_watch_ms: Option<u64>,
     pub place_file: Option<PathBuf>,
+    /// The PATH this daemon's unit handed it, read once at start before the probe list took its place. A place
+    /// daemon runs nothing on it; the report carries it as what the person's login shell gives, and the presence
+    /// read looks along it, since reading that a tool stands somewhere runs nothing.
+    pub unit_path: Option<String>,
     pub home: Option<PathBuf>,
     pub wsp_argv: Vec<String>,
     pub agents: Vec<String>,
@@ -120,7 +129,9 @@ impl Options {
             mode_interval_ms: None,
             auth_deadline_ms: None,
             guest_unwatched_ms: None,
+            token_watch_ms: None,
             place_file: None,
+            unit_path: None,
             home: None,
             wsp_argv: Vec::new(),
             agents: Vec::new(),
@@ -146,6 +157,9 @@ pub(crate) enum Outgoing {
     Text(String),
     Leave(String),
     Restart(String),
+    /// The token this socket authed with is no longer the file's: it is closed 4401 with one sentence and nothing
+    /// else of this daemon's ends.
+    Rotated,
 }
 
 impl Outgoing {
@@ -153,6 +167,7 @@ impl Outgoing {
     pub(crate) fn text(&self) -> &str {
         match self {
             Outgoing::Text(t) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
+            Outgoing::Rotated => wsp_frames::words::AUTH_TOKEN_ROTATED,
         }
     }
 }
@@ -219,6 +234,10 @@ pub(crate) struct Ctx {
     #[cfg(target_os = "linux")]
     pub(crate) runtime_refusal: Option<String>,
     authed: Mutex<HashMap<u64, Outbound>>,
+    /// Every socket that came through the door on a token, by its key: what it authed with and how to reach it.
+    /// The broadcast list above is not this one, since a port-scoped socket hears no events and still holds a
+    /// token a rotation has to take away.
+    tokened: Mutex<HashMap<u64, (String, Outbound)>>,
     /// The door this daemon holds inside each workspace it runs, by workspace: the accept loop and the socket
     /// file it binds, which sits in that workspace's own wsp folder and so inside that workspace alone.
     workspace_doors: Mutex<HashMap<String, WorkspaceDoor>>,
@@ -266,6 +285,7 @@ impl Ctx {
             #[cfg(target_os = "linux")]
             runtime_refusal,
             authed: Mutex::new(HashMap::new()),
+            tokened: Mutex::new(HashMap::new()),
             workspace_doors: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
         })
@@ -386,6 +406,25 @@ impl Ctx {
 
     pub(crate) fn remove_authed(&self, key: u64) {
         self.authed.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+        self.tokened.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    }
+
+    /// Remembers what one socket came through the door with, so a rotation can find it again.
+    pub(crate) fn add_tokened(&self, key: u64, token: String, out: Outbound) {
+        self.tokened.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (token, out));
+    }
+
+    /// Cuts every socket whose token is not the bytes the file holds now, compared in constant time. A socket
+    /// that authed on the new token in the same breath as the rotation, which is how the host rotates and dials,
+    /// holds those bytes and stays; the link and the sockets inside a workspace hold no token and are not here.
+    pub(crate) fn cut_stale_tokens(&self, held: &str) {
+        self.tokened.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, (token, out)| {
+            if auth::same(token, held) {
+                return true;
+            }
+            out.send(Outgoing::Rotated);
+            false
+        });
     }
 
     /// Pushed to every authed unscoped socket, not to subscribers: the host's link reconnects through the edge and
@@ -412,7 +451,16 @@ impl Daemon {
     }
 
     /// The same, with the log going where the caller says.
-    pub async fn bind_with(options: Options, log: Log) -> io::Result<Daemon> {
+    pub async fn bind_with(mut options: Options, log: Log) -> io::Result<Daemon> {
+        // Before the listener, before any task and before a single child of this process could exist: a daemon on
+        // a computer that runs workspaces resolves every command it runs through the probe list and no other, since
+        // the home it shares with its workspaces is written from inside them. Every child inherits it from here:
+        // the exec handler's bash, the git and gh reads, each pty, the leave's sh, and every script the recipe job
+        // sends. The unit's own PATH is kept for the report and the presence read, which run nothing.
+        if options.place_file.is_some() {
+            options.unit_path = Some(std::env::var("PATH").unwrap_or_default());
+            std::env::set_var("PATH", wsp_frames::probe_path(&place::place_home(options.home.as_deref())));
+        }
         if auth::current_token(&options.token_path).is_none() {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
@@ -450,6 +498,7 @@ impl Daemon {
         if let Some(open_socket) = self.open_socket {
             tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
+        tokio::spawn(auth::watch(Arc::clone(&self.ctx)));
         loop {
             let accepted = tokio::select! {
                 accepted = self.listener.accept() => accepted,

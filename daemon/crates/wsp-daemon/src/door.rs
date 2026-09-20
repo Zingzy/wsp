@@ -22,6 +22,7 @@ use tokio_tungstenite::WebSocketStream;
 use wsp_frames::{numbers, words, DaemonAuthRequest, DaemonEvent, Empty, Reply};
 
 use crate::ops::{self, Conn, Road};
+use crate::seal::Seal;
 use crate::{auth, Ctx, Outbound, Outgoing};
 
 /// The most one message may be; node's ws holds the same ceiling, and the pre-auth cap sits far under it.
@@ -183,8 +184,10 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound));
-    serve_authed(ws, &ctx, conn, rx, None).await;
+    // The token this socket came in on is held: a rotation takes the sockets the old one opened, and one let in
+    // on the new token in the same breath as the write stays.
+    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound, Some(auth.token)));
+    serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
 /// The door inside one workspace: every socket accepted on that workspace's own unix socket, each served with no
@@ -209,8 +212,8 @@ async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: 
         return;
     };
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace)));
-    serve_authed(ws, &ctx, conn, rx, None).await;
+    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace), None));
+    serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
 /// How a served socket ended: the peer went, the link carried nothing for the quiet span, or a leave was answered.
@@ -220,6 +223,8 @@ pub(crate) enum Ended {
     Quiet,
     Leave,
     Restart,
+    /// The token this socket authed with is no longer the file's.
+    Rotated,
 }
 
 /// The one loop every authed socket runs, inbound or the link a place opened: the hello first, then each frame
@@ -232,6 +237,7 @@ pub(crate) async fn serve_authed<S>(
     conn: Arc<Conn>,
     mut rx: mpsc::UnboundedReceiver<Outgoing>,
     quiet: Option<Duration>,
+    mut seal: Option<Seal>,
 ) -> Ended
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -240,17 +246,29 @@ where
     if conn.scope.is_none() && !matches!(conn.road, Road::Workspace(_)) {
         ctx.add_authed(key, conn.out.clone());
     }
+    if let Some(token) = conn.token.clone() {
+        ctx.add_tokened(key, token, conn.out.clone());
+    }
     let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
     let mut ended = Ended::Peer;
-    if ws.send(text(&hello)).await.is_ok() {
+    if emit(&mut ws, &mut seal, crate::frame_text(&hello)).await {
         let idle = tokio::time::sleep(quiet.unwrap_or(FOREVER));
         tokio::pin!(idle);
         ended = loop {
             tokio::select! {
                 incoming = ws.next() => {
                     let raw = match incoming {
-                        Some(Ok(Message::Text(t))) => t.to_string(),
-                        Some(Ok(Message::Binary(b))) => String::from_utf8_lossy(&b).into_owned(),
+                        // On a sealed link nothing arrives in the clear: a text frame after the prove is a
+                        // carrier writing into the link, and the socket ends rather than reading it.
+                        Some(Ok(Message::Text(t))) if seal.is_none() => t.to_string(),
+                        Some(Ok(Message::Binary(b))) => match seal.as_mut() {
+                            Some(seal) => match seal.unseal(&b) {
+                                Some(text) => text,
+                                None => break Ended::Peer,
+                            },
+                            None => String::from_utf8_lossy(&b).into_owned(),
+                        },
+                        Some(Ok(Message::Text(_))) => break Ended::Peer,
                         Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break Ended::Peer,
                         Some(Ok(_)) => continue,
                     };
@@ -267,22 +285,25 @@ where
                     match outgoing {
                         None => break Ended::Peer,
                         Some(Outgoing::Text(t)) => {
-                            if ws.send(Message::text(t)).await.is_err() {
+                            if !emit(&mut ws, &mut seal, t).await {
                                 break Ended::Peer;
                             }
                         }
                         // The reply goes out whole before the daemon stops: the host reads what was swept, or where
                         // the binary it sent landed.
                         Some(Outgoing::Leave(t)) => {
-                            let _ = ws.send(Message::text(t)).await;
+                            emit(&mut ws, &mut seal, t).await;
                             let _ = ws.flush().await;
                             break Ended::Leave;
                         }
                         Some(Outgoing::Restart(t)) => {
-                            let _ = ws.send(Message::text(t)).await;
+                            emit(&mut ws, &mut seal, t).await;
                             let _ = ws.flush().await;
                             break Ended::Restart;
                         }
+                        // Nothing is written to a socket whose token the file no longer holds: it is closed with
+                        // the sentence and no frame, as every socket the door itself turns away is.
+                        Some(Outgoing::Rotated) => break Ended::Rotated,
                     }
                 }
                 _ = &mut idle, if quiet.is_some() => break Ended::Quiet,
@@ -294,13 +315,16 @@ where
     ctx.remove_authed(key);
     ctx.guests.socket_closed(key);
     conn.close();
-    let reason = match ended {
+    let closing = match ended {
         Ended::Peer => None,
-        Ended::Quiet => Some(words::LINK_CLOSE_QUIET),
-        Ended::Leave => Some(words::LINK_CLOSE_STOPPING),
-        Ended::Restart => Some(words::LINK_CLOSE_UPDATING),
+        Ended::Quiet => Some((CloseCode::Normal, words::LINK_CLOSE_QUIET)),
+        Ended::Leave => Some((CloseCode::Normal, words::LINK_CLOSE_STOPPING)),
+        Ended::Restart => Some((CloseCode::Normal, words::LINK_CLOSE_UPDATING)),
+        // Under the code every socket this daemon turns away for its token travels with, so a client reads a
+        // rotation the way it reads a token refused at the door.
+        Ended::Rotated => Some((CloseCode::from(words::AUTH_CLOSE_CODE), words::AUTH_TOKEN_ROTATED)),
     };
-    let frame = reason.map(|reason| CloseFrame { code: CloseCode::Normal, reason: reason.into() });
+    let frame = closing.map(|(code, reason)| CloseFrame { code, reason: reason.into() });
     let _ = timeout(CLOSE_WAIT, ws.close(frame)).await;
     // Both endings stop this process. What differs is what happens next on that computer: after a leave nothing
     // brings it back, and after an update its supervisor starts the binary that landed.
@@ -308,6 +332,20 @@ where
         ctx.stop.notify_one();
     }
     ended
+}
+
+/// Every frame this socket sends leaves through here: sealed where the link agreed a key, text where it did not.
+/// One door for the hello, the replies off the sink and the leave and the restart alike, so no frame of this
+/// daemon's ever leaves a sealed link in the clear. False once the peer is gone.
+async fn emit<S>(ws: &mut WebSocketStream<S>, seal: &mut Option<Seal>, text: String) -> bool
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let message = match seal.as_mut() {
+        Some(seal) => Message::Binary(seal.seal(&text).into()),
+        None => Message::text(text),
+    };
+    ws.send(message).await.is_ok()
 }
 
 /// Closes 4401 with one sentence, then waits for the peer's close as node's ws does. A peer cut for streaming past

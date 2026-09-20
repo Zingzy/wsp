@@ -58,6 +58,7 @@ import {
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
+import { openFrame, type Seal } from "./seal.js";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -309,6 +310,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
      * anything else besides: it is the one place a mistake would let a runtime frame from a place be read as a
      * client's, so the door both stops listening and refuses to read. */
     let handedOver = false;
+    /** Set once a place's first frame has been answered: every frame this socket sends from then on is sealed
+     * under the key both ends agreed, and every frame it reads is opened with it. A carrier holding the bytes
+     * reads nothing and writes nothing into what follows. */
+    let seal: Seal | undefined;
 
     const detaches: (() => void)[] = [];
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
@@ -335,7 +340,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     };
 
     const send = (payload: Record<string, unknown>): void => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
+      if (ws.readyState !== ws.OPEN) return;
+      const text = JSON.stringify(payload);
+      ws.send(seal === undefined ? text : seal.seal(text));
     };
 
     const onMessage = (raw: unknown): void => {
@@ -343,7 +350,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       void (async () => {
         let parsed: unknown;
         try {
-          parsed = JSON.parse(String(raw));
+          // A frame that does not open under the key both ends agreed, and a frame sent in the clear after the
+          // seal began, are both a carrier writing into this link rather than the computer on the other end.
+          parsed = JSON.parse(openFrame(seal, raw));
         } catch {
           send({ id: null, ok: false, error: "invalid json" });
           if (!authed) ws.close(4401, UNAUTHORIZED);
@@ -380,15 +389,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             // The door reads the signature and the report this frame carries, and answers the report it will take
             // or the one sentence to refuse with: this door holds neither rule of its own.
             const proved = await places()
-              .prove(placeId, msg.signature, expect, msg.report)
+              .prove(placeId, msg, expect, from, now())
               .catch((e: unknown) => ({ refusal: e instanceof Error ? e.message : String(e) }));
             if ("refusal" in proved) return refuse(proved.refusal);
-            // From here no frame from this socket is read as a client's request: the listener goes before the reply,
-            // and the reply goes before the place door sends anything, so the place has its own serve on by then.
+            // From here no frame from this socket is read as a client's request: the listener goes before the
+            // reply, and the reply goes before the place door sends anything, so the place has its own serve on
+            // by then. The socket stops being read first and is read again once the link's own listener stands:
+            // the computer sends its hello the moment the reply lands, and a frame that arrived between the two
+            // listeners would be a frame nobody unsealed, leaving the counters a frame apart and the next one
+            // closing the link.
             handedOver = true;
+            ws.pause();
             ws.off("message", onMessage);
-            send({ id: msg.id, ok: true });
-            await places().attach(placeId, ws, proved.report, from, now());
+            // The token a join asked for its own window rides this reply, inside the seal: it is the person's and
+            // crosses only once the host has proved its key.
+            send({ id: msg.id, ok: true, ...(proved.device === undefined ? {} : { device: proved.device }) });
+            await places().attach(placeId, ws, proved.report, from, now(), seal);
             return;
           }
           if (deciding) return refuse(UNAUTHORIZED);
@@ -396,7 +412,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           if (msg.op === "place.join" || msg.op === "place.auth") {
             // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
             // frame must sign; a key or a report this host cannot work with refuses in the door's own words.
-            let opened: { reply: Record<string, unknown>; expect: Uint8Array; notice?: string } | undefined;
+            let opened: { reply: Record<string, unknown>; expect: Uint8Array; seal: Seal; notice?: string } | undefined;
             try {
               opened = msg.op === "place.join" ? await places().join(msg, from, now()) : await places().auth(msg, now());
             } catch (e) {
@@ -408,6 +424,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             // The gate opens for exactly one more frame, which the branch above holds to place.prove.
             deciding = false;
             send({ id: msg.id, ok: true, ...opened.reply, ...(opened.notice !== undefined ? { notice: opened.notice } : {}) });
+            // The reply carries the host's own half of the agreement, so it is the last frame of this socket that
+            // travels in the clear; from here the prove and everything after it are sealed.
+            seal = opened.seal;
             return;
           }
           if (msg.op === "place.prove") return refuse(UNAUTHORIZED);

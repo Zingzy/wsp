@@ -27,7 +27,7 @@ import {
   type SshWiring,
   type Store,
 } from "@wsp/runtime";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
@@ -1743,7 +1743,7 @@ export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbe
  * this road read this computer through one planner and no road can grow a second. */
 export function hostDoctorReaders(links: PlaceWiring, providerEnv: ProviderEnv): HostDoctorReaders {
   const provision = links.provision;
-  return { vault: () => vaultNow(providerEnv), ...(provision !== undefined ? { plan: () => provision.plan() } : {}) };
+  return { vault: () => vaultNow(providerEnv), ...(provision !== undefined ? { plan: () => provision.plan({ home: GUEST_HOME }) } : {}) };
 }
 
 /** The doctor's own usage line, read by its row and by every refusal that prints it. */
@@ -2051,7 +2051,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
             ...project,
             ...(hereDaemon !== undefined ? { hereDaemon } : {}),
             vault: () => vaultNow(opts.providerEnv),
-            ...(provision !== undefined ? { plan: () => provision.plan() } : {}),
+            ...(provision !== undefined ? { plan: () => provision.plan({ home: GUEST_HOME }) } : {}),
             statePath: opts.statePath,
           });
         } finally {

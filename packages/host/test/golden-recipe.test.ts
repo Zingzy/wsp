@@ -8,7 +8,7 @@ import type { ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, ROAD_STEPS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
-import { BASE_VERSIONS_CMD } from "@wsp/engine";
+import { TOOLS_PATH, baseVersionsCmd } from "@wsp/engine";
 import { stubBackend } from "./stub-backend.js";
 
 
@@ -51,7 +51,7 @@ describe("host golden recipe", () => {
     // The base stage closes with a df reading, then the setup runs.
     // The floor's versions are read against the image before anything installs, so a row it already satisfies runs
     // nothing; the base floor's steps come next, and the df that closes the base stage and the setup are the last two.
-    expect(builder.execLog[0]).toBe(BASE_VERSIONS_CMD);
+    expect(builder.execLog[0]).toBe(baseVersionsCmd(TOOLS_PATH));
     expect(builder.execLog[1]).toBe("rm -f /tmp/wsp-vault-*.tgz");
     expect(builder.runLog.some(s => s.includes("astral-sh/uv/releases"))).toBe(true);
     expect(builder.execLog.at(-2)).toBe("df -Pk /root | awk 'NR==2{print $4}'");

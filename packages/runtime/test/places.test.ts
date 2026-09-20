@@ -47,6 +47,8 @@ import {
   workFolderIn,
   copyStoppedLine,
   NO_IMAGES_HERE,
+  probePath,
+  twoPlacesRefusal,
   type GoldenStageEvent,
   type PlaceProvision,
   type PlaceProvisionRow,
@@ -60,6 +62,7 @@ import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdap
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "../src/seal.js";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -134,6 +137,19 @@ async function code(): Promise<string> {
 const nonce = (): string => randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
 const signWith = (pem: string, bytes: Uint8Array): string => sign(null, bytes, createPrivateKey(pem)).toString("base64");
 
+/** The computer's half of the key agreement, the one helper both the join and the relink speak it through: the
+ * ephemeral that rides frame one, and the seal every frame from the prove on travels inside once the host has
+ * answered with its own. */
+function agreeing(): { ephemeral: string; sealFrom: (client: WsClient, placeId: string, reply: Record<string, unknown>) => void } {
+  const mine = freshEphemeral();
+  return {
+    ephemeral: mine.publicKey,
+    sealFrom: (client, placeId, reply) => {
+      client.seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, String(reply["ephemeral"])), placeId), "place");
+    },
+  };
+}
+
 /** One join, as a computer would make it: the frame, the check of the host's own signature, and the prove. */
 async function join(
   hostKey: PlaceKeyPair,
@@ -146,14 +162,19 @@ async function join(
   const pair = newPlaceKeyPair();
   const mine = nonce();
   const sent = opts.report ?? report(opts.name);
-  const reply = await client.request("place.join", { code: opts.code, publicKey: pair.publicKey, nonce: mine, report: sent, ...(opts.client === undefined ? {} : { client: opts.client }) });
+  const agreed = agreeing();
+  const reply = await client.request("place.join", { publicKey: pair.publicKey, nonce: mine, ephemeral: agreed.ephemeral });
   if (reply.ok !== true) return { client, placeId: "", reply, proved: {}, pair };
   const placeId = String(reply["placeId"]);
   expect(reply["hostPublicKey"]).toBe(hostKey.publicKey);
+  agreed.sealFrom(client, placeId, reply);
   const proved = await client.request("place.prove", {
-    signature: signWith(pair.privateKeyPem, placeLinkTranscript("place", placeId, String(reply["nonce"]), mine)),
-    // The second frame carries a report of its own, which a computer may send with anything in it.
+    signature: signWith(pair.privateKeyPem, placeLinkTranscript("place", placeId, String(reply["nonce"]), mine, { challenger: String(reply["ephemeral"]), answerer: agreed.ephemeral })),
+    // The second frame carries a report of its own, which a computer may send with anything in it, and the code
+    // this join spends: both ride inside the seal, after the host proved the key the join line named.
     report: opts.proveReport ?? sent,
+    code: opts.code,
+    ...(opts.client === undefined ? {} : { client: opts.client }),
   });
   if (opts.expectProved !== false) expect(proved.ok, String(proved["error"])).toBe(true);
   return { client, placeId, reply, proved, pair };
@@ -170,14 +191,33 @@ async function relink(
   const client = await WsClient.connect(srv!.port);
   answers?.(client);
   const mine = nonce();
-  const challenged = await client.request("place.auth", { placeId, nonce: mine });
+  const agreed = agreeing();
+  const challenged = await client.request("place.auth", { placeId, nonce: mine, ephemeral: agreed.ephemeral });
   expect(challenged.ok, String(challenged["error"])).toBe(true);
   expect(challenged["hostPublicKey"]).toBe(hostKey.publicKey);
+  agreed.sealFrom(client, placeId, challenged);
   const proved = await client.request("place.prove", {
-    signature: signWith(pair.privateKeyPem, placeLinkTranscript("place", placeId, String(challenged["nonce"]), mine)),
+    signature: signWith(pair.privateKeyPem, placeLinkTranscript("place", placeId, String(challenged["nonce"]), mine, { challenger: String(challenged["ephemeral"]), answerer: agreed.ephemeral })),
     report: sent,
   });
   return { client, proved };
+}
+
+/** The same store with a timer in front of every read and write, as a store on a disk or behind a network has:
+ * the loop turns inside each of them, which is where a handover that is not order-safe drops a frame. */
+function yielding(inner: Store): Store {
+  const soon = (): Promise<void> => new Promise(done => setTimeout(done, 30));
+  return {
+    get: async (c, id) => (await soon(), inner.get(c, id)),
+    put: async (c, id, v) => (await soon(), inner.put(c, id, v)),
+    list: async c => (await soon(), inner.list(c)),
+    keys: async c => (await soon(), inner.keys(c)),
+    delete: async (c, id) => (await soon(), inner.delete(c, id)),
+    getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
+    putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
+    deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
+    shape: async () => (await soon(), inner.shape()),
+  };
 }
 
 const placesOf = async (): Promise<PlaceView[]> => {
@@ -254,9 +294,11 @@ describe("a computer joining", () => {
   it("refuses a computer whose kernel cannot boot the image, in the doctor's own sentence, and writes no record for it", async () => {
     const { hostKey, store } = await serving();
     const blocked = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
-    const { client, reply } = await join(hostKey, { code: await code(), report: report("laptop", { runsWorkspaces: false, workspacesBlocked: blocked }) });
+    // The report crosses on the prove, inside the seal, so that is where a computer that cannot boot is turned
+    // down: nothing of it was read before this host had proved the key the join line named.
+    const { client, proved } = await join(hostKey, { code: await code(), report: report("laptop", { runsWorkspaces: false, workspacesBlocked: blocked }), expectProved: false });
     sockets.push(client.ws);
-    expect(String(reply["error"])).toBe(placeCannotBootLine("laptop", blocked));
+    expect(String(proved["error"])).toBe(placeCannotBootLine("laptop", blocked));
     expect((await placesOf()).filter(p => p.id !== "here")).toEqual([]);
     expect(await store.list("places")).toEqual([]);
   });
@@ -272,9 +314,9 @@ describe("a computer joining", () => {
 
   it("refuses a code this host is not holding, in the one sentence every reason reads as", async () => {
     const { hostKey } = await serving();
-    const { client, reply } = await join(hostKey, { code: "NOTACODE" });
-    expect(String(reply["error"])).toContain("wsp add");
-    expect(reply).toMatchObject({ ok: false, error: PLACE_CODE_REFUSAL, kind: "auth" });
+    const { client, proved } = await join(hostKey, { code: "NOTACODE", expectProved: false });
+    expect(String(proved["error"])).toContain("wsp add");
+    expect(proved).toMatchObject({ ok: false, error: PLACE_CODE_REFUSAL, kind: "auth" });
     expect(await client.closed()).toBe(4401);
   });
 
@@ -283,37 +325,41 @@ describe("a computer joining", () => {
     const spent = await code();
     const first = await join(hostKey, { code: spent });
     sockets.push(first.client.ws);
-    const second = await join(hostKey, { code: spent });
-    expect(second.reply).toMatchObject({ ok: false, error: PLACE_CODE_REFUSAL });
+    const second = await join(hostKey, { code: spent, expectProved: false });
+    expect(second.proved).toMatchObject({ ok: false, error: PLACE_CODE_REFUSAL });
     expect(await placesOf()).toHaveLength(2); // this computer and the one place that did join
   });
 
   it("refuses a report whose home is not a plain path, before the code is spent", async () => {
     const { hostKey } = await serving();
     const fresh = await code();
-    const bad = await join(hostKey, { code: fresh, report: report("old-macbook", { login: { HOME: "/home/maya; rm -rf /" } }) });
-    expect(bad.reply.ok).toBe(false);
-    expect(String(bad.reply["error"])).toContain("not a plain path");
+    const bad = await join(hostKey, { code: fresh, report: report("old-macbook", { login: { HOME: "/home/maya; rm -rf /" } }), expectProved: false });
+    expect(bad.proved.ok).toBe(false);
+    expect(String(bad.proved["error"])).toContain("not a plain path");
     // The code was not spent by a join that was never going to stand.
     const good = await join(hostKey, { code: fresh });
     sockets.push(good.client.ws);
     expect(good.placeId).not.toBe("");
   });
 
-  it("refuses the report on the second frame by the same rule, so a join cannot slip a path past the first one", async () => {
-    const { hostKey } = await serving();
-    // The join frame's report is one wsp can build paths from and the prove frame's is not: one rule reads both.
+  it("writes no record and spends no code for a join whose prove this host refused, so nothing of it is left behind", async () => {
+    const { hostKey, store } = await serving();
+    const fresh = await code();
     const slipped = await join(hostKey, {
-      code: await code(),
-      proveReport: report("old-macbook", { login: { HOME: "/home/m; rm -rf /", USER: "maya", PATH: "/usr/bin" } }),
+      code: fresh,
+      report: report("old-macbook", { login: { HOME: "/home/m; rm -rf /", USER: "maya", PATH: "/usr/bin" } }),
       expectProved: false,
     });
     expect(slipped.proved).toMatchObject({ ok: false });
     expect(String(slipped.proved["error"])).toContain("not a plain path");
     expect(await slipped.client.closed()).toBe(4401);
-    // Nothing was attached and the record kept the home the join proved, not the one the slipped report carried.
-    expect((await placesOf()).find(p => p.id === slipped.placeId)!.present).toBe(false);
-    expect((await runtime!.places!.reportOf(slipped.placeId))!.login["HOME"]).toBe("/home/maya");
+    // The record is written on the prove and on nothing before it, so a join answered and never proved leaves no
+    // place standing and no code spent.
+    expect(await store.list("places")).toEqual([]);
+    expect((await placesOf()).filter(p => p.id !== "here")).toEqual([]);
+    const good = await join(hostKey, { code: fresh });
+    sockets.push(good.client.ws);
+    expect(good.placeId).not.toBe("");
   });
 
   it("refuses the same report on a relink, and the workspace keeps the login it had", async () => {
@@ -327,6 +373,36 @@ describe("a computer joining", () => {
     expect(await again.client.closed()).toBe(4401);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(false);
     expect((await runtime!.places!.reportOf(joined.placeId))!.login["HOME"]).toBe("/home/maya");
+  });
+
+  it("keeps the name this computer joined under, whatever a later report calls itself", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), name: "old-macbook" });
+    joined.client.close();
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === false);
+    // A box whose own place file a hostile process edited: it relinks under the name of another computer on this
+    // host, and everything that names that word would follow it.
+    const again = await relink(hostKey, joined.placeId, joined.pair, report("attic-server"));
+    expect(again.proved.ok, String(again.proved["error"])).toBe(true);
+    sockets.push(again.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    expect((await placesOf()).find(p => p.id === joined.placeId)!.name).toBe("old-macbook");
+    // The rest of the report is the newest one all the same: the name is the one field a relink cannot move.
+    expect((await runtime!.places!.reportOf(joined.placeId))!.name).toBe("attic-server");
+    await expect(runtime!.places!.placeFor("attic-server")).rejects.toThrow(/no place named attic-server/);
+    expect(await runtime!.places!.placeFor("old-macbook")).toEqual({ placeId: joined.placeId });
+  });
+
+  it("refuses a word two computers on this host answer to, with both ids, and lands nothing on either", async () => {
+    const { hostKey } = await serving();
+    const first = await join(hostKey, { code: await code(), name: "old-macbook" });
+    sockets.push(first.client.ws);
+    const second = await join(hostKey, { code: await code(), name: "old-macbook" });
+    sockets.push(second.client.ws);
+    // Both joined under the word, which is the person's own doing and not a name one of them took; ids tell them
+    // apart, so every road that resolves the word says so rather than taking whichever joined first.
+    await expect(runtime!.places!.placeFor("old-macbook")).rejects.toThrow(twoPlacesRefusal("old-macbook", [first.placeId, second.placeId]));
+    expect(await runtime!.places!.placeFor(second.placeId)).toEqual({ placeId: second.placeId });
   });
 
   it("turns a linked box down the moment it says its kernel no longer boots the image, and keeps the sentence on the row", async () => {
@@ -384,13 +460,14 @@ describe("a place dialling back in", () => {
     const again = await WsClient.connect(srv!.port);
     sockets.push(again.ws);
     const mine = nonce();
-    const answer = await again.request("place.auth", { placeId, nonce: mine });
+    const agreed = agreeing();
+    const answer = await again.request("place.auth", { placeId, nonce: mine, ephemeral: agreed.ephemeral });
     expect(answer.ok, String(answer["error"])).toBe(true);
     expect(answer["hostPublicKey"]).toBe(hostKey.publicKey);
     const { verify } = await import("node:crypto");
     const ok = verify(
       null,
-      placeLinkTranscript("host", placeId, mine, String(answer["nonce"])),
+      placeLinkTranscript("host", placeId, mine, String(answer["nonce"]), { challenger: agreed.ephemeral, answerer: String(answer["ephemeral"]) }),
       { key: Buffer.from(hostKey.publicKey, "base64"), format: "der", type: "spki" },
       Buffer.from(String(answer["signature"]), "base64"),
     );
@@ -412,14 +489,66 @@ describe("a place dialling back in", () => {
     const other = newPlaceKeyPair();
     const c = await WsClient.connect(srv!.port);
     const mine = nonce();
-    const challenged = await c.request("place.auth", { placeId: first.placeId, nonce: mine });
+    const agreed = agreeing();
+    const challenged = await c.request("place.auth", { placeId: first.placeId, nonce: mine, ephemeral: agreed.ephemeral });
+    agreed.sealFrom(c, first.placeId, challenged);
     const bad = await c.request("place.prove", {
       // Signed with a key this host never learned, which is what a place file copied off a computer would carry.
-      signature: signWith(other.privateKeyPem, placeLinkTranscript("place", first.placeId, String(challenged["nonce"]), mine)),
+      signature: signWith(other.privateKeyPem, placeLinkTranscript("place", first.placeId, String(challenged["nonce"]), mine, { challenger: String(challenged["ephemeral"]), answerer: agreed.ephemeral })),
       report: report(),
     });
     expect(bad).toMatchObject({ ok: false, error: PLACE_KEY_REFUSAL });
     expect(await c.closed()).toBe(4401);
+  });
+
+  it("refuses a computer whose wsp agrees no key for the link, in the sentence its row already carries, and attaches nothing", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code() });
+    sockets.push(joined.client.ws);
+    const behind = await WsClient.connect(srv!.port);
+    // A daemon older than the seal sends no half of the key agreement: every frame after the handshake would
+    // travel where whoever carries the bytes reads it.
+    const answer = await behind.request("place.auth", { placeId: joined.placeId, nonce: nonce() });
+    expect(answer.ok).toBe(false);
+    expect(String(answer["error"])).toContain("is behind");
+    expect(await behind.closed()).toBe(4401);
+    // The link the join opened is the one this host still holds: nothing of the older dial replaced it.
+    expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(true);
+  });
+
+  it("takes every frame the computer sends the moment its prove is answered, over a store whose reads and writes yield", async () => {
+    // A store on a disk or behind a network turns the loop inside every read and write. The daemon sends its
+    // hello the moment its prove is answered, so a handover that let the loop turn between the door's listener
+    // and the link's own would lose that frame, leave the two counters a frame apart and close the link on the
+    // next one. A memory store hides it by answering inside its own async method.
+    const { hostKey } = await serving({ store: yielding(memoryStore()) });
+    const joined = await join(hostKey, { code: await code() });
+    sockets.push(joined.client.ws);
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    // One more once the record writes are done and the link's own listener certainly stands: a frame lost in the
+    // gap leaves this one sealed at a counter the host is not at, which is what ends the link.
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    // Nothing closed the link: every frame opened under the key, in the order they were sent.
+    const ended = await Promise.race([joined.client.closed(), new Promise<number>(done => setTimeout(() => done(-1), 400))]);
+    expect(ended).toBe(-1);
+  });
+
+  it("seals every frame after the handshake both ways, and ends a socket that sends one in the clear", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code() });
+    sockets.push(joined.client.ws);
+    // The reply to the prove was binary and opened under the key both ends agreed: the client read it, which is
+    // what the prove standing means. A frame in the clear after it is a carrier writing into the link.
+    const straight = await WsClient.connect(srv!.port);
+    const agreed = agreeing();
+    const challenged = await straight.request("place.auth", { placeId: joined.placeId, nonce: nonce(), ephemeral: agreed.ephemeral });
+    expect(challenged.ok).toBe(true);
+    agreed.sealFrom(straight, joined.placeId, challenged);
+    // Sent past the seal, as a carrier on the path of the bytes would send it.
+    straight.ws.send(JSON.stringify({ id: 9, op: "place.prove", signature: Buffer.alloc(64, 1).toString("base64"), report: report() }));
+    expect(await straight.closed()).toBe(4401);
   });
 
   it("refuses a second frame that is not the prove, and a prove on a socket that challenged nothing", async () => {
@@ -427,7 +556,10 @@ describe("a place dialling back in", () => {
     const joined = await join(hostKey, { code: await code() });
     joined.client.close();
     const wrongOrder = await WsClient.connect(srv!.port);
-    await wrongOrder.request("place.auth", { placeId: joined.placeId, nonce: nonce() });
+    const agreed = agreeing();
+    const challenged = await wrongOrder.request("place.auth", { placeId: joined.placeId, nonce: nonce(), ephemeral: agreed.ephemeral });
+    // Everything after the host's reply is sealed, the refusal of a frame that is not the prove among it.
+    agreed.sealFrom(wrongOrder, joined.placeId, challenged);
     const answer = await wrongOrder.request("status.list");
     expect(answer.ok).toBe(false);
     expect(await wrongOrder.closed()).toBe(4401);
@@ -475,9 +607,11 @@ describe("the socket a place proved", () => {
     const again = await WsClient.connect(srv!.port);
     sockets.push(again.ws);
     const mine = nonce();
-    const challenged = await again.request("place.auth", { placeId: joined.placeId, nonce: mine });
+    const agreed = agreeing();
+    const challenged = await again.request("place.auth", { placeId: joined.placeId, nonce: mine, ephemeral: agreed.ephemeral });
+    agreed.sealFrom(again, joined.placeId, challenged);
     const proved = await again.request("place.prove", {
-      signature: signWith(joined.pair.privateKeyPem, placeLinkTranscript("place", joined.placeId, String(challenged["nonce"]), mine)),
+      signature: signWith(joined.pair.privateKeyPem, placeLinkTranscript("place", joined.placeId, String(challenged["nonce"]), mine, { challenger: String(challenged["ephemeral"]), answerer: agreed.ephemeral })),
       report: moved,
     });
     expect(proved.ok, String(proved["error"])).toBe(true);
@@ -501,18 +635,18 @@ describe("the socket a place proved", () => {
  * the daemon that answered, so a test can move the answer between dials the way an update does. Its capacity is
  * answered too, since a computer whose facts are on the record is asked for that at every listing. */
 const saysItsFacts = (facts: () => Record<string, unknown>, asks: { count: number }, afterMs = 0) => (c: WsClient): void => {
-  c.ws.on("message", raw => {
-    const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
+  c.onFrame(raw => {
+    const frame = raw as unknown as { id?: number; op?: string };
     if (frame.op === "machine.capacity") {
       const room = { cores: 4, memMb: 8192, memRoomMb: 4096, machineMemMb: 4096, diskFreeBytes: 10 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } };
-      c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...room }));
+      c.say({ id: frame.id, ok: true, ...room });
       return;
     }
     if (frame.op !== "machine.backend") return;
     asks.count += 1;
     // `afterMs` is a computer that takes a moment to answer, which is what makes a road that reads the row
     // without waiting for it read a row that has not got it yet.
-    const answer = (): void => c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...facts() }));
+    const answer = (): void => c.say({ id: frame.id, ok: true, ...facts() });
     if (afterMs === 0) answer();
     else setTimeout(answer, afterMs).unref?.();
   });
@@ -590,13 +724,13 @@ describe("a channel to the daemon on a computer you own", () => {
     const asked: Record<string, unknown>[] = [];
     // The computer answers the pty frames the host sends it, as its own daemon would, and pushes one chunk back.
     const answers = (c: WsClient): void => {
-      c.ws.on("message", raw => {
-        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+      c.onFrame(raw => {
+        const frame = raw as unknown as Record<string, unknown>;
         const op = frame["op"];
         if (typeof op !== "string" || !op.startsWith("pty.")) return;
         asked.push(frame);
-        c.ws.send(JSON.stringify({ id: frame["id"], ok: true, ptyId: "pty_7" }));
-        c.ws.send(JSON.stringify({ type: "pty.data", ptyId: "pty_7", data: "Open https://auth.openai.com/device" }));
+        c.say({ id: frame["id"], ok: true, ptyId: "pty_7" });
+        c.say({ type: "pty.data", ptyId: "pty_7", data: "Open https://auth.openai.com/device" });
       });
     };
     const { client, placeId } = await join(hostKey, { code: await code(), answers });
@@ -723,12 +857,12 @@ describe("the list of every place", () => {
  * there, which on a computer with no list beside its job come back with nothing to take, and the sweep with what
  * its own leave took. */
 function answersLeave(client: WsClient, swept: readonly string[], asked?: string[]): void {
-  client.ws.on("message", raw => {
-    const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
-    if (frame.op === "exec") return void client.ws.send(JSON.stringify({ id: frame.id, ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false }));
+  client.onFrame(raw => {
+    const frame = raw as unknown as { id?: number; op?: string };
+    if (frame.op === "exec") return void client.say({ id: frame.id, ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false });
     if (frame.op !== "place.leave") return;
     asked?.push("place.leave");
-    client.ws.send(JSON.stringify({ id: frame.id, ok: true, swept: [...swept] }));
+    client.say({ id: frame.id, ok: true, swept: [...swept] });
   });
 }
 
@@ -757,13 +891,13 @@ describe("moving a place onto the daemon this host deploys", () => {
   /** A place that takes the parts as the daemon does: appended in order, and the last one answered with where the
    * binary landed. What it was sent is kept so the test can read the whole of it back. */
   const takesParts = (landed: Buffer[], sent: { sha256: string[]; uploads: string[] }) => (c: WsClient): void => {
-    c.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { id?: number; op?: string; data?: string; sha256?: string; uploadId?: string; last?: boolean };
+    c.onFrame(raw => {
+      const frame = raw as unknown as { id?: number; op?: string; data?: string; sha256?: string; uploadId?: string; last?: boolean };
       if (frame.op !== "place.update") return;
       landed.push(Buffer.from(String(frame.data), "base64"));
       sent.sha256.push(String(frame.sha256));
       sent.uploads.push(String(frame.uploadId));
-      c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...(frame.last === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {}) }));
+      c.say({ id: frame.id, ok: true, ...(frame.last === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {}) });
     });
   };
 
@@ -917,9 +1051,9 @@ describe("taking a place back out", () => {
     /** One poll of a detached run, as a guest answers it: the exit code, the output so far, and the run gone. */
     const polled = (out: string): string => ["WSP_POLL", "0", Buffer.from(`${out}\n`).toString("base64"), "", "down", "WSP_POLL_END"].join("\n");
     const order: string[] = [];
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { id?: number; op?: string; cmd?: string };
-      const say = (body: Record<string, unknown>): void => client.ws.send(JSON.stringify({ id: frame.id, ok: true, ...body }));
+    client.onFrame(raw => {
+      const frame = raw as unknown as { id?: number; op?: string; cmd?: string };
+      const say = (body: Record<string, unknown>): void => client.say({ id: frame.id, ok: true, ...body });
       if (frame.op === "exec") {
         const cmd = String(frame.cmd);
         order.push(cmd);
@@ -1210,9 +1344,9 @@ describe("dialling a computer that stopped answering", () => {
     const { client, placeId } = await join(hostKey, {
       code: await code(),
       answers: c =>
-        c.ws.on("message", raw => {
-          const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
-          if (frame.op === "ping") c.ws.send(JSON.stringify({ id: frame.id, ok: true }));
+        c.onFrame(raw => {
+          const frame = raw as unknown as { id?: number; op?: string };
+          if (frame.op === "ping") c.say({ id: frame.id, ok: true });
         }),
     });
     sockets.push(client.ws);
@@ -1644,12 +1778,14 @@ describe("the device a join buys beside the place", () => {
     const { hostKey } = await serving();
     const first = await join(hostKey, { code: await code(), client: { name: "old-macbook" } });
     sockets.push(first.client.ws);
-    const device = first.reply["device"] as { deviceId: string; deviceToken: string };
+    // The token rides the sealed reply to the prove, since the code that bought it crossed on that frame.
+    const device = first.proved["device"] as { deviceId: string; deviceToken: string };
     expect(device.deviceToken).toBeTruthy();
     expect(await runtime!.devices.match(device.deviceToken)).toMatchObject({ id: device.deviceId, name: "old-macbook" });
+    expect(first.reply["device"]).toBeUndefined();
     const second = await join(hostKey, { code: await code(), name: "attic" });
     sockets.push(second.client.ws);
-    expect(second.reply["device"]).toBeUndefined();
+    expect(second.proved["device"]).toBeUndefined();
   });
 
   it("leaves the link bound to no device, so revoking that device closes nothing", async () => {
@@ -1834,7 +1970,7 @@ function forks(
     asked: {},
     daemonAnswersAfter: 1,
     swallow: new Set<string>(),
-    push: event => client.ws.send(JSON.stringify(event)),
+    push: event => client.say(event),
     holdResumes: () => {
       held = [];
       return () => {
@@ -1847,17 +1983,17 @@ function forks(
   let ptys = 0;
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
-  client.ws.on("message", raw => {
-    const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+  client.onFrame(raw => {
+    const frame = raw as unknown as Record<string, unknown>;
     const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
     if (op === undefined) return;
     const id = frame["id"];
-    const say = (payload: Record<string, unknown>): void => client.ws.send(JSON.stringify({ id, ok: true, ...payload }));
+    const say = (payload: Record<string, unknown>): void => client.say({ id, ok: true, ...payload });
     const machine = (machineId: string): Record<string, unknown> => ({ machine: { id: machineId, kind: "sandbox", daemonSupervisor: "entrypoint", roads: PLACE_ROADS } });
     // A machine the host killed is gone from that computer, as the daemon there answers: a get or a state read of
     // it is refused as missing, which is what the kill's own wait for gone reads.
     const gone = (machineId: string): boolean => seen.killed.includes(machineId);
-    const missing = (machineId: string): void => void client.ws.send(JSON.stringify({ id, ok: false, error: `no such machine: ${machineId}`, kind: "missing", status: 404 }));
+    const missing = (machineId: string): void => void client.say({ id, ok: false, error: `no such machine: ${machineId}`, kind: "missing", status: 404 });
     if (op.startsWith("machine.") || op.startsWith("tunnel.")) seen.ops.push(op);
     seen.asked[op] = (seen.asked[op] ?? 0) + 1;
     if (seen.swallow.has(op)) return;
@@ -1870,7 +2006,7 @@ function forks(
         if (seen.refuseCreate !== undefined) {
           const refusal = seen.refuseCreate;
           delete seen.refuseCreate;
-          return void client.ws.send(JSON.stringify({ id, ok: false, ...refusal }));
+          return void client.say({ id, ok: false, ...refusal });
         }
         seen.created.push(frame["spec"] as Record<string, unknown>);
         return say(machine(`k${++made}`));
@@ -1911,7 +2047,7 @@ function forks(
       // vault through one reads the refusal and keeps the vault it had.
       case "machine.downloadUrl":
       case "machine.uploadUrl":
-        return void client.ws.send(JSON.stringify({ id, ok: false, error: "a container serves no signed URL" }));
+        return void client.say({ id, ok: false, error: "a container serves no signed URL" });
       case "tunnel.open":
         seen.tunnels.push({ tunnelId: String(frame["tunnelId"]), port: Number(frame["port"]) });
         return say({});
@@ -1944,7 +2080,7 @@ function forks(
         return say({ branch: "work", base: String(frame["base"] ?? ""), remote: "origin", ahead: 1, uncommitted: 0, stat: [" README.md | 2 +-"] });
       case "git.pr": {
         seen.frames.push(frame);
-        if (seen.refuseGitPr !== undefined) return void client.ws.send(JSON.stringify({ id, ok: false, ...seen.refuseGitPr }));
+        if (seen.refuseGitPr !== undefined) return void client.say({ id, ok: false, ...seen.refuseGitPr });
         return say({ pr: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", host: "github.com" }, created: true });
       }
       default:
@@ -2394,7 +2530,7 @@ describe("a fork on a computer you joined", () => {
 
   it("never holds a computer that forks nowhere: the join turned it down, so no word names one", async () => {
     const { hostKey } = await serving();
-    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c) });
+    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c), expectProved: false });
     sockets.push(client.ws);
     await expect(projectOn(runtime!, "srv")).rejects.toThrow(/no place named srv/);
     expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
@@ -2658,8 +2794,8 @@ describe("a fork on a computer you joined", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
     const swept: string[] = [];
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { op?: string };
+    client.onFrame(raw => {
+      const frame = raw as unknown as { op?: string };
       if (frame.op === "place.leave") swept.push("asked");
     });
     await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
@@ -2674,8 +2810,8 @@ describe("a fork on a computer you joined", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
     const swept: string[] = [];
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { op?: string };
+    client.onFrame(raw => {
+      const frame = raw as unknown as { op?: string };
       if (frame.op === "place.leave") swept.push("asked");
     });
     // A project with no workspace of it: the forks refusal cannot be what answers here, so the projects one is.
@@ -2742,10 +2878,10 @@ describe("the image build and the computer whose doctor said no, or that does no
 
   it("a computer whose doctor said no never becomes a place: the join is refused in the doctor's own sentence and nothing is written", async () => {
     const { hostKey, store } = await serving();
-    const { client, reply } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }), answers: c => forks(c) });
+    const { client, proved } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }), answers: c => forks(c), expectProved: false });
     sockets.push(client.ws);
-    expect(String(reply["error"])).toBe(placeCannotBootLine("srv", BLOCKED));
-    expect(String(reply["error"])).toBe("srv cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup");
+    expect(String(proved["error"])).toBe(placeCannotBootLine("srv", BLOCKED));
+    expect(String(proved["error"])).toBe("srv cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup");
     // Nothing on the store, nothing on the list, and no road names it: the refusal is the whole of what happened.
     expect(await store.list("places")).toEqual([]);
     await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(/no place named srv/);
@@ -2897,7 +3033,7 @@ describe("a computer joining a host that holds a sealed image", () => {
   it("builds nothing for a computer whose doctor said no, since its join never stood, and nothing at all on a host that holds no image", async () => {
     const { hostKey } = await imageHost({ sealed: true });
     let blocked!: ForkingPlace;
-    const laptop = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }), answers: c => (blocked = forks(c)) });
+    const laptop = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }), answers: c => (blocked = forks(c)), expectProved: false });
     sockets.push(laptop.client.ws);
     await settled();
     expect(blocked.asked["machine.create"]).toBeUndefined();
@@ -2965,6 +3101,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
   const RECIPE_AT = "2026-09-17T10:00:00.000Z";
   const PLAN: ProvisionPlan = {
     recipeAt: RECIPE_AT,
+    path: probePath("/root"),
     steps: [
       { id: "agents/node", label: "Node 22.23.2", manager: "script", cmd: "node-step" },
       { id: "agents/codex", label: "Codex", manager: "npm", cmd: "codex-step", after: "agents/node" },
@@ -3029,10 +3166,10 @@ describe("the recipe this host holds, put on a computer you own", () => {
   /** What the computer answers on its link: what it forks with, and every command as its daemon's exec would. */
   function answersFor(cmds: string[]) {
     return (c: WsClient): void => {
-      c.ws.on("message", raw => {
-        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+      c.onFrame(raw => {
+        const frame = raw as unknown as Record<string, unknown>;
         const op = frame["op"];
-        if (op === "machine.backend") return void c.ws.send(JSON.stringify({ id: frame["id"], ok: true, ...KEEPS_NO_IMAGE }));
+        if (op === "machine.backend") return void c.say({ id: frame["id"], ok: true, ...KEEPS_NO_IMAGE });
         // What room it has left, which every read of the row asks for: a computer that does not answer holds every
         // listing for the wait the table gives it.
         if (op === "machine.capacity") {
@@ -3052,7 +3189,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
         }
         if (op !== "exec") return;
         cmds.push(String(frame["cmd"] ?? ""));
-        c.ws.send(JSON.stringify({ id: frame["id"], ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false }));
+        c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false });
       });
     };
   }
@@ -3412,8 +3549,8 @@ describe("a project on a computer you joined", () => {
   /** Every command that computer was asked to run on itself rather than in a workspace on it. */
   const onItself = (client: WsClient): string[] => {
     const ran: string[] = [];
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { op?: string; cmd?: string };
+    client.onFrame(raw => {
+      const frame = raw as unknown as { op?: string; cmd?: string };
       if (frame.op === "exec") ran.push(String(frame.cmd));
     });
     return ran;

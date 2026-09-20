@@ -182,11 +182,11 @@ export function boundedCommand(seconds: number, cmd: string): string {
 /** One short exec that prints the facts between two markers: the kernel, the disk, what is installed, the secret
  * names, the aliases the login shell cannot resolve, each hook the person's file already claims, and the facts a
  * build left on the guest. Every read fails alone. */
-export function probeCommand(roots: GuestRoots = GUEST_ROOTS): string {
+export function probeCommand(roots: GuestRoots = GUEST_ROOTS, path: string = TOOLS_PATH): string {
   const h = roots.home;
   const e = roots.etc;
   return [
-    `export PATH=${TOOLS_PATH}:$PATH`,
+    `export PATH=${path}:$PATH`,
     "echo WSP_CTX",
     'echo "KERNEL $(uname -r 2>/dev/null)"',
     `echo "DISK $(df -Pk ${h} 2>/dev/null | awk 'NR==2{print $2, $4}')"`,
@@ -434,6 +434,9 @@ export interface ApplyContextOptions {
   roots?: GuestRoots;
   /** The upload's transport; tests inject one. */
   fetch?: typeof globalThis.fetch;
+  /** The PATH the probe runs on: the job's, so a computer somebody owns reads itself through the same list its
+   * installs ran on and not through a directory a workspace there writes. */
+  path?: string;
 }
 
 function summarize(results: readonly ContextResult[], agents: readonly string[], bytes: number): string {
@@ -456,7 +459,7 @@ export async function applyMachineContext(machine: Machine, opts: ApplyContextOp
   const roots = opts.roots ?? GUEST_ROOTS;
   let probed;
   try {
-    probed = await machine.exec(probeCommand(roots), { timeoutMs: INLINE_EXEC_MS });
+    probed = await machine.exec(probeCommand(roots, opts.path ?? TOOLS_PATH), { timeoutMs: INLINE_EXEC_MS });
   } catch (e) {
     return failed(`probe failed: ${e instanceof Error ? e.message : String(e)}`);
   }

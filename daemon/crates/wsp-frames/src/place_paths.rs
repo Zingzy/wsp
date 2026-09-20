@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::numbers;
+
 /// Every path the protocol names under a place's home.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaceDaemonPaths {
@@ -75,6 +77,20 @@ pub fn place_provision_paths(home: &Path) -> PlaceProvisionPaths {
     PlaceProvisionPaths { landed: dir.join("landed"), dir }
 }
 
+/// The PATH a daemon on a computer that runs workspaces resolves a command through, and the one every script of
+/// the recipe job on such a computer exports: the tools PATH with every directory under that computer's home taken
+/// out, and nothing of the unit's own PATH, which is the person's login shell's and may name the home too. A
+/// workspace there has the computer's home bound in read-write, so a directory under it is a directory a process
+/// inside a workspace writes, and a command found through one would run as root outside every namespace. What is
+/// left is the computer's own system directories, which a workspace reads through an overlay of its own or a tool
+/// root bound in read-only. The protocol's twin is probePath and the contract fixture holds the two to one text.
+pub fn probe_path(home: &Path) -> String {
+    let at = trimmed(home);
+    let at = at.to_string_lossy();
+    let under = |dir: &str| dir == at || dir.starts_with(&format!("{at}/"));
+    numbers::TOOLS_PATH.split(':').filter(|dir| !dir.is_empty() && !under(dir)).collect::<Vec<_>>().join(":")
+}
+
 /// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them: the parts first,
 /// each for the line it puts in front of a person reading the leave, then wsp's own folder whole, which takes
 /// whatever no part above names. The work folder is not here: what the person's threads wrote there is theirs.
@@ -103,6 +119,19 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_probe_path_is_the_tools_path_with_every_directory_under_the_home_taken_out() {
+        assert_eq!(
+            probe_path(Path::new("/root")),
+            "/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+        );
+        // A trailing slash is the same home, and a home nothing on the list sits under takes nothing off it.
+        assert_eq!(probe_path(Path::new("/root/")), probe_path(Path::new("/root")));
+        assert_eq!(probe_path(Path::new("/home/maya")), numbers::TOOLS_PATH);
+        // A sibling that shares the prefix is not under it.
+        assert_eq!(probe_path(Path::new("/roo")), numbers::TOOLS_PATH);
+    }
 
     #[test]
     fn the_paths_are_the_protocols_under_a_home_with_or_without_a_trailing_slash() {

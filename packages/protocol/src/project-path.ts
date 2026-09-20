@@ -8,6 +8,8 @@
 // joined here rather than through node:path: this package is bundled into the
 // browser and imports nothing outside itself.
 
+import { TOOLS_PATH } from "./daemon-contract.js";
+
 /** Whether path is the folder itself or sits inside it; a sibling that shares the prefix is not. */
 export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
@@ -72,6 +74,19 @@ export const parentFolderName = (path: string): string => {
   const parts = path.replace(/\/+$/, "").split("/");
   return parts.length < 2 ? "" : parts[parts.length - 2]!;
 };
+
+/** The PATH a daemon on a computer that runs workspaces resolves a command through, and the one every script of
+ * the recipe job on such a computer exports: the tools PATH with every directory under that computer's home taken
+ * out, and nothing of the unit's own PATH, which is the person's login shell's and may name the home too. A
+ * workspace there has the computer's home bound in read-write, so a directory under it is a directory a process
+ * inside a workspace writes, and a command found through one would run as root outside every namespace. What is
+ * left is the computer's own system directories, which a workspace reads through an overlay of its own or a tool
+ * root bound in read-only. The daemon's twin is probe_path in the frames crate and the contract fixture holds the
+ * two to one text. */
+export function probePath(home: string): string {
+  const at = home.replace(/\/+$/, "");
+  return TOOLS_PATH.split(":").filter(dir => dir !== "" && !underProject(dir, at)).join(":");
+}
 
 /** The file naming the imported project folders a daemon may browse, one absolute path per line. It sits beside the
  * home of whichever daemon reads it: DAEMON_ROOTS_PATH is this answered for a guest, whose home is /root, and this

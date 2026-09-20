@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PLACE_FILE_MODE, placeFileText, placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 
 export interface PlacePair {
   publicKey: string;
@@ -58,47 +59,62 @@ export interface FakeHost {
   frames: Record<string, unknown>[];
   /** Every place.prove the place sent, report and all. */
   proofs: Record<string, unknown>[];
-  /** The socket the place is holding, once it has proved. */
-  socket: Promise<ServerSocket>;
+  /** The socket the place is holding, once it has proved, with the seal its frames ride inside. */
+  socket: Promise<{ ws: ServerSocket; seal: Seal }>;
   publicKey: string;
 }
 
-export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: boolean; refuse?: string } = {}): Promise<FakeHost> {
+export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: boolean; refuse?: string; unsealed?: boolean } = {}): Promise<FakeHost> {
   const key = opts.key ?? placePair();
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   servers.push(wss);
   const frames: Record<string, unknown>[] = [];
   const proofs: Record<string, unknown>[] = [];
   let dials = 0;
-  let held!: (s: ServerSocket) => void;
-  const socket = new Promise<ServerSocket>(done => (held = done));
+  let held!: (s: { ws: ServerSocket; seal: Seal }) => void;
+  const socket = new Promise<{ ws: ServerSocket; seal: Seal }>(done => (held = done));
   wss.on("connection", ws => {
     dials++;
     ws.on("error", () => {});
-    ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+    /** Set once this host has answered the handshake: from the prove on the link is sealed both ways. */
+    let seal: Seal | undefined;
+    const say = (payload: Record<string, unknown>): void => {
+      const text = JSON.stringify(payload);
+      ws.send(seal === undefined ? text : seal.seal(text));
+    };
+    const read = (raw: unknown): void => {
+      const frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (frame["op"] === "place.auth") {
         if (opts.refuse !== undefined) {
-          ws.send(JSON.stringify({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" }));
+          say({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" });
           ws.close(4401, "unauthorized");
           return;
         }
         const placeId = String(frame["placeId"]);
         const placeNonce = String(frame["nonce"]);
         const nonce = Buffer.alloc(32, 9).toString("base64");
-        const bytes = opts.wrongTranscript === true ? placeLinkTranscript("place", placeId, placeNonce, nonce) : placeLinkTranscript("host", placeId, placeNonce, nonce);
+        // A host that agrees no key of its own is what this stands in for when `unsealed` is set: the computer
+        // passes the address over rather than holding a link neither end can seal.
+        const mine = freshEphemeral();
+        const ephemerals = { challenger: String(frame["ephemeral"]), answerer: mine.publicKey };
+        const bytes = opts.wrongTranscript === true ? placeLinkTranscript("place", placeId, placeNonce, nonce, ephemerals) : placeLinkTranscript("host", placeId, placeNonce, nonce, ephemerals);
         const signature = sign(null, bytes, createPrivateKey(key.privateKeyPem)).toString("base64");
-        ws.send(JSON.stringify({ id: frame["id"], ok: true, nonce, hostPublicKey: key.publicKey, signature }));
+        say({ id: frame["id"], ok: true, nonce, hostPublicKey: key.publicKey, signature, ...(opts.unsealed === true ? {} : { ephemeral: mine.publicKey }) });
+        if (opts.unsealed !== true) seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, String(frame["ephemeral"])), placeId), "host");
         return;
       }
       if (frame["op"] === "place.prove") {
         proofs.push(frame);
-        ws.send(JSON.stringify({ id: frame["id"], ok: true }));
-        held(ws);
+        say({ id: frame["id"], ok: true });
+        // The socket and its seal go to whoever asked for them: a seal counts the frames it opens, so this host
+        // stops reading the moment it hands them over.
+        ws.off("message", read);
+        held({ ws, seal: seal! });
         return;
       }
       frames.push(frame);
-    });
+    };
+    ws.on("message", read);
   });
   const port = await listening(wss);
   return { url: `http://127.0.0.1:${port}`, dials: () => dials, frames, proofs, socket, publicKey: key.publicKey };
