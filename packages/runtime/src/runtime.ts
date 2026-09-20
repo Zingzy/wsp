@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, catalogIdOfRow, guestEnv, sharedLoginOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, guestEnv, installEnv, installHomes, sharedLoginOf } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -211,7 +211,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -271,6 +271,21 @@ export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBO
 /** The guest's login environment: who it runs as, the PATH the golden's login shells get, and the sandbox flag every
  * machine carries. Every fork carries it in its envs at create and every adapter exports it under the harness's own. */
 export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { ...GUEST_USER_ENV, PATH: TOOLS_PATH, ...MACHINE_SANDBOX_ENV };
+
+/** The same for a workspace on a computer somebody joined: the order that reads the folders no process inside can
+ * write before the home every workspace there shares, and beside it the knobs the recipe's job installed under,
+ * off the catalog's one table. A thread, a command and the workspace's own boot carry this, so a tool the recipe
+ * put under wsp's prefix is the one that answers inside wherever it is asked for. A fork keeps GUEST_LOGIN_ENV:
+ * its home is root's alone, and its image was sealed on that order with each manager's own folders. */
+export const PLACE_LOGIN_ENV: Readonly<Record<string, string>> = {
+  ...GUEST_USER_ENV,
+  PATH: PLACE_WORKSPACE_PATH,
+  ...MACHINE_SANDBOX_ENV,
+  ...installEnv(installHomes(TOOL_PREFIX)),
+};
+
+/** Which of the two a workspace runs on: where it stands, and nothing else. */
+export const loginEnvOn = (place: string | undefined): Readonly<Record<string, string>> => (place === undefined ? GUEST_LOGIN_ENV : PLACE_LOGIN_ENV);
 
 export interface HarnessStartOptions {
   prompt: string;
@@ -2158,9 +2173,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The guest's login plus the variable pointing one harness at its store there, the store cloudHome names: a guest
    * exec carries no environment of its own, so the adapter exports this on every launch. */
-  const cloudEnv = (id: string): Readonly<Record<string, string>> => {
+  const cloudEnv = (place: string | undefined, id: string): Readonly<Record<string, string>> => {
+    const login = loginEnvOn(place);
     const agent = CATALOG_AGENTS.find(a => a.id === id);
-    return agent === undefined ? GUEST_LOGIN_ENV : { ...GUEST_LOGIN_ENV, ...guestEnv(agent) };
+    return agent === undefined ? login : { ...login, ...guestEnv(agent) };
   };
   const cloudRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     const reach = await entry.ws.daemonReach();
@@ -2227,7 +2243,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
-      env: (_entry, id) => cloudEnv(id),
+      env: (entry, id) => cloudEnv(entry.record.place, id),
       // A fork at a provider is a copy of an image, and no sign-in is ever sealed into one, so the vault's key is
       // what a turn there runs on. A workspace on a computer somebody joined shares that computer's own logins,
       // and the word for each is the one its row carries.
@@ -3779,7 +3795,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.spec.copy !== undefined ? { copy: r.spec.copy } : {}),
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
-    envs: { ...GUEST_LOGIN_ENV, ...r.spec.envs, ...override?.envs },
+    envs: { ...loginEnvOn(r.place), ...r.spec.envs, ...override?.envs },
     labels: { ...r.spec.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [WORKSPACE_LABEL]: r.id, [NAME_LABEL]: r.name, [GOLDEN_LABEL]: r.golden, [CREATED_AT_LABEL]: new Date().toISOString() },
     onIdle: "pause",
     idleTimeoutMs: backstopMs(idleWindowOf(r)),

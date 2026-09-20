@@ -50,6 +50,13 @@ pub const SHARED_TOOL_ROOTS: [&str; 1] = [HOMEBREW_HOME];
 /// the image writes, every thread and exec carries it, and a workspace on a computer somebody owns boots with it,
 /// so the boot's own children and a person's thread find the same gcc and the same gh.
 pub const TOOLS_PATH: &str = "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+/// The same directories in the order a workspace on a computer somebody owns reads them, which is what its boot,
+/// its execs, its threads and its pane carry: the folders no process inside can write first, then the folders
+/// under the home every workspace there shares, then the computer's own system directories. That home is bound
+/// into every workspace read-write, so a file planted in it under the name of a tool the recipe installed would
+/// otherwise be what a sibling's thread, command and pane run. A machine wsp forked keeps TOOLS_PATH: its home is
+/// root's alone and a sealed image keeps the order it was sealed with. The protocol's twin is PLACE_WORKSPACE_PATH.
+pub const PLACE_WORKSPACE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.local/bin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /// Wire bytes a peer may send before its auth frame passes; an auth frame is under 200.
 pub const PRE_AUTH_MAX_BYTES: u64 = 4096;
@@ -155,5 +162,25 @@ mod tests {
         assert_eq!(at.roots_path, std::path::PathBuf::from(DAEMON_ROOTS_PATH));
         // The binary the host deploys is not one of them: it is the host's to land and lives beside the folder.
         assert!(!GUEST_DAEMON_DIR.starts_with(GUEST_WSP_HOME));
+    }
+
+    /// The PATH a workspace on a computer somebody owns reads holds exactly the directories the tools PATH holds,
+    /// in one other order: the probe path's own folders other than the four the system keeps, then every folder
+    /// under the shared home in the tools PATH's order, then those four. A directory added to one list and not to
+    /// the other is a tool on a fork and not on a box, or the reverse.
+    #[test]
+    fn a_workspace_on_a_computer_reads_the_same_directories_with_the_shared_home_after_the_prefixes() {
+        let system = ["/usr/sbin", "/usr/bin", "/sbin", "/bin"];
+        let tools: Vec<&str> = TOOLS_PATH.split(':').collect();
+        let probe = crate::place_paths::probe_path(std::path::Path::new("/root"));
+        let mut wanted: Vec<&str> = probe.split(':').filter(|dir| !system.contains(dir)).collect();
+        wanted.extend(tools.iter().filter(|dir| dir.starts_with("/root/")));
+        wanted.extend(system);
+        assert_eq!(PLACE_WORKSPACE_PATH.split(':').collect::<Vec<_>>(), wanted);
+        let mut here: Vec<&str> = PLACE_WORKSPACE_PATH.split(':').collect();
+        let mut there = tools.clone();
+        here.sort_unstable();
+        there.sort_unstable();
+        assert_eq!(here, there, "the two lists hold different directories");
     }
 }

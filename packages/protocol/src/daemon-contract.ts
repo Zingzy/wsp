@@ -58,6 +58,15 @@ export const PNPM_HOME = "/root/.local/share/pnpm";
  * with it, so the boot's own children and a person's thread find the same gcc and the same gh. */
 export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 
+/** The same directories in the order a workspace on a computer somebody owns reads them: the folders no process
+ * inside can write first, then the folders under the home every workspace there shares, then the computer's own
+ * system directories. That home is bound into every workspace read-write, so a file planted in it under the name
+ * of a tool the recipe installed would otherwise be what a sibling's thread, command and pane run; under this
+ * order the copy the recipe put under wsp's own prefix or under Homebrew's answers first. A machine wsp forked
+ * keeps TOOLS_PATH: its home is root's alone, nothing there shadows, and a sealed image keeps the order it was
+ * sealed with. */
+export const PLACE_WORKSPACE_PATH = `/usr/local/sbin:/usr/local/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/root/.local/bin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+
 /** Wire bytes a peer may send before its auth frame passes; an auth frame is under 200. */
 export const PRE_AUTH_MAX_BYTES = 4096;
 /** How long a fresh socket has to send its auth frame. */

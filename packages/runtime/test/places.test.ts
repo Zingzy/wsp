@@ -18,6 +18,7 @@ import {
   placeRefusalTranscript,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  PLACE_WORKSPACE_PATH,
   placeBehindLine,
   agentsCell,
   placeDaemonBehind,
@@ -58,8 +59,8 @@ import {
   type PlaceView,
   type TurnResult,
 } from "@wsp/protocol";
-import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
-import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
+import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
@@ -885,9 +886,12 @@ async function remove(placeId: string): Promise<Record<string, unknown>> {
 
 describe("moving a place onto the daemon this host deploys", () => {
   /** What the host's own updater does, in miniature: the binary in parts over the link the place is holding, each
-   * under one upload id with the sha256 of the whole, and the path the place answered with. */
+   * under one upload id with the sha256 of the whole, and the path the place answered with. An update that asks
+   * for no binary answers no landing, as the host's own does: what it runs there instead is wsp's login files,
+   * which is the host's road and not this one's. */
   const overTheLink = (bytes: Uint8Array, asked: { req: PlaceUpdateRequest }[]): PlaceUpdater => async req => {
     asked.push({ req });
+    if (!req.daemon) return undefined;
     const half = Math.ceil(bytes.length / 2);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     let at = "";
@@ -1016,7 +1020,9 @@ describe("moving a place onto the daemon this host deploys", () => {
     expect(answer.ok, String(answer["error"])).toBe(true);
     expect(answer["daemon"]).toBeUndefined();
     expect(answer["provision"]).toBeUndefined();
-    expect(asked).toEqual([]);
+    // The updater is asked all the same, since wsp's login files there are this host's to spell; it is told no
+    // binary goes with this one, and picks up none.
+    expect(asked.map(a => a.req.daemon)).toEqual([false]);
     const nowhere = await update("p_nothing");
     expect(nowhere.ok).toBe(false);
     expect(String(nowhere["error"])).toContain("p_nothing");
@@ -2242,6 +2248,57 @@ describe("a fork on a computer you joined", () => {
     // Codex signed in there wins over any key this host holds; Claude Code keeps no login on a machine, so the
     // vault is the whole of its sign-in and nothing stands against it.
     expect(asked.at(-1)).toEqual({ claude: false, codex: true });
+  });
+
+  it("carries the workspace order and the recipe's knobs into a workspace on that computer, its turns and its commands", async () => {
+    const envs: Readonly<Record<string, string>>[] = [];
+    const factory: HarnessAdapterFactory = ctx => {
+      envs.push(ctx.env);
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = randomUUID();
+          const result: TurnResult = { status: "completed", text: "ok" };
+          onEvent({ type: "session.start", sessionId });
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+        },
+      };
+    };
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: factory },
+      places: wiredPlace("solari", backend),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
+    sockets.push(client.ws);
+    const ws = await createOn(runtime, { name: "x", on: "srv" });
+
+    // The boot: the order that reads the folders no process inside can write before the home every workspace on
+    // that computer shares, and every knob the recipe's job installs under, off the catalog's one table.
+    const created = place.created[0]!["envs"] as Record<string, string>;
+    expect(created["PATH"]).toBe(PLACE_WORKSPACE_PATH);
+    expect(created).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
+    expect(created).toMatchObject({ UV_TOOL_DIR: "/opt/wsp/uv/tools", CARGO_HOME: "/opt/wsp/cargo", RUSTUP_HOME: "/opt/wsp/rustup", GOBIN: "/usr/local/bin" });
+
+    // And a turn on it: the adapter exports the same, so a thread there runs the copy under the prefix and the
+    // rustup proxy finds its own home.
+    await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+    expect(envs.length).toBeGreaterThan(0);
+    for (const env of envs) expect(env).toMatchObject({ PATH: PLACE_WORKSPACE_PATH, ...installEnv(installHomes(TOOL_PREFIX)) });
+
+    // A fork at this host's own provider is a copy of an image sealed on the other order, with each manager's
+    // own folders under a home that is root's alone: it takes neither the order nor a knob.
+    await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
   });
 
   it("still names the image where the computer keeps them: a fork at this host's own provider carries the template its version was promoted to", async () => {

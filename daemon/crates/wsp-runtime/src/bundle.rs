@@ -345,10 +345,10 @@ pub fn config_json(c: &Config) -> Value {
     spec["hostname"] = json!(c.hostname);
     spec["process"]["args"] = json!(c.args);
     spec["process"]["cwd"] = json!("/");
-    // The one PATH the tools on a machine sit on, the same order every thread and exec carries: the boot's first
-    // process and the runtime's own execs would otherwise read one order of directories and a person's thread
-    // another, which is a different gcc and a different gh for the same workspace.
-    let mut env = vec![format!("PATH={}", wsp_frames::numbers::TOOLS_PATH), format!("HOSTNAME={}", c.hostname)];
+    // The order a workspace on this computer reads its directories in, with the home every workspace here shares
+    // after the folders none of them can write. The host sends the same value in the envs below, and the crate
+    // keeps the later entry of a name, so this line is the boot's PATH where a create carries none.
+    let mut env = vec![format!("PATH={}", wsp_frames::numbers::PLACE_WORKSPACE_PATH), format!("HOSTNAME={}", c.hostname)];
     env.extend(c.envs.iter().map(|(k, v)| format!("{k}={v}")));
     // Last of the environment, so it stands whatever else was asked for: two workspaces of one project whose
     // compose names are both the project's own directory name fail at compose's network step, the second one
@@ -590,6 +590,9 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     // The overlays are up, so this lands in the workspace's own upper: a regular resolv.conf where the box has a
     // link into a /run the workspace does not share.
     write_resolv_inside(&rootfs)?;
+    // And the one line that puts the workspace's own order in front of a login shell there, in the same upper:
+    // the box's own /etc/profile sets PATH to the distribution's list for root before it reads this folder.
+    write_workspace_profile_inside(&place)?;
     // The person's own home on the box, shared by every workspace on it: the agents' sign-ins, their memory and
     // their caches are the computer's and last past any one workspace, last writer wins.
     bind_inside(&place, Path::new(BOX_ROOT), BOX_ROOT)?;
@@ -1029,6 +1032,44 @@ pub fn write_wsp_shim_inside(place: &Inside) -> Result<(), Error> {
     file.set_permissions(fs::Permissions::from_mode(0o755)).map_err(at(&landed))
 }
 
+/// Where the login shell inside a workspace reads its PATH from: a file of the workspace's own under the /etc
+/// tree it reads through an overlay, written at every boot so a wake carries this version's line.
+pub const WORKSPACE_PROFILE_INSIDE: &str = "/etc/profile.d/wsp-workspace.sh";
+
+/// That file, written into the workspace's own upper: the box's `/etc/profile` sets PATH to the distribution's
+/// list for root and then reads this folder, so a pane there opens on the order the workspace's threads and
+/// commands already carry. Nothing else is in it: the recipe's knobs ride the boot's environment, which the shell
+/// inherits, and nothing in a login file unsets them.
+///
+/// Written through the descriptor of the folder inside, as the wsp shim beside it is, and a link the computer
+/// keeps at that name is removed rather than written through: an absolute link under a rootfs is resolved by the
+/// kernel against this process's own root, so a write that followed one would land on the computer's own file.
+///
+/// The person's own login file still has the last word, as it would on any machine of theirs: bash reads the
+/// first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` after `/etc/profile`, and each of those is the
+/// workspace's own copy of what the box root keeps.
+pub fn write_workspace_profile_inside(place: &Inside) -> Result<(), Error> {
+    let (folder, name) = WORKSPACE_PROFILE_INSIDE.rsplit_once('/').expect("the profile file's path names a folder");
+    let dir = open_inside(place, folder, Want::Dir, BoxLink::FollowedOnce)?;
+    let line = format!("export PATH={}\n", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
+    let made = |flags: OFlag| {
+        openat(dir.fd(), name, flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC, Mode::from_bits_truncate(0o644))
+    };
+    let file = match made(OFlag::O_CREAT | OFlag::O_TRUNC) {
+        // A link at the name: taken off through the same descriptor and the file written in its place.
+        Err(Errno::ELOOP) => {
+            nix::unistd::unlinkat(dir.fd(), name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&dir.named(place)))?;
+            made(OFlag::O_CREAT | OFlag::O_EXCL)
+        }
+        other => other,
+    }
+    .map_err(nix_at(&dir.named(place).join(name)))?;
+    let landed = dir.named(place).join(name);
+    let mut file = std::fs::File::from(file);
+    file.write_all(line.as_bytes()).map_err(at(&landed))?;
+    file.set_permissions(fs::Permissions::from_mode(0o644)).map_err(at(&landed))
+}
+
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
 /// sentence: read off `/` here, where the rootfs is made, and asked again by the self check so a box that cannot
 /// hold a workspace says so at the dial rather than at the first create.
@@ -1453,8 +1494,12 @@ mod tests {
         assert_eq!(spec["root"]["path"], "rootfs");
         assert_eq!(spec["hostname"], "wsp-a");
         assert_eq!(spec["process"]["args"], json!(args));
-        // The one PATH a machine's tools sit on, which every thread and exec on this workspace carries too.
-        assert_eq!(spec["process"]["env"], json!([format!("PATH={}", wsp_frames::numbers::TOOLS_PATH), "HOSTNAME=wsp-a", "WSP_TOKEN=t"]));
+        // The order a workspace on a computer somebody owns reads, which every thread, exec and pane on it carries
+        // too: the shared home after the folders no process inside can write.
+        assert_eq!(
+            spec["process"]["env"],
+            json!([format!("PATH={}", wsp_frames::numbers::PLACE_WORKSPACE_PATH), "HOSTNAME=wsp-a", "WSP_TOKEN=t"])
+        );
         assert_eq!(spec["linux"]["resources"]["memory"]["limit"], 1024 * 1024 * 1024);
         assert_eq!(spec["linux"]["resources"]["cpu"], json!({ "quota": 200000, "period": 100000 }));
         assert_eq!(spec["linux"]["cgroupsPath"], "/wsp/wsp-a");
@@ -1767,6 +1812,38 @@ mod tests {
         assert!(bare.join("rootfs").join(wsp_frames::numbers::GUEST_WSP_PATH.trim_start_matches('/')).is_file());
     }
 
+    /// What a login shell inside a workspace reads its PATH from, on a rootfs made by hand: one export line of the
+    /// workspace's own in its /etc tree, a link the computer keeps at that name removed first as the wsp shim
+    /// beside it does, and the line written again at every boot.
+    #[test]
+    fn the_login_shell_inside_a_workspace_reads_the_workspaces_own_order_from_its_own_profile_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = dir.path().join("rootfs");
+        let at = rootfs.join(WORKSPACE_PROFILE_INSIDE.trim_start_matches('/'));
+        let elsewhere = dir.path().join("the-computers-own-profile");
+        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        fs::write(&elsewhere, "the computer's own").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &at).unwrap();
+
+        let place = place_at(dir.path(), "wsp-profile");
+        write_workspace_profile_inside(&place).unwrap();
+        let held = fs::symlink_metadata(&at).unwrap();
+        assert!(held.file_type().is_file(), "the workspace's profile file is not a regular file");
+        let line = format!("export PATH={}\n", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
+        assert_eq!(fs::read_to_string(&at).unwrap(), line);
+        // What the link pointed at is untouched: a link in the computer's own /etc cannot point this write out
+        // of the rootfs.
+        assert_eq!(fs::read_to_string(&elsewhere).unwrap(), "the computer's own");
+        // Written again at every boot, as the resolv.conf and the shim are, over what the last boot left.
+        write_workspace_profile_inside(&place).unwrap();
+        assert_eq!(fs::read_to_string(&at).unwrap(), line);
+        // And on a rootfs whose /etc holds no such folder yet, which is a box that keeps none of its own.
+        let bare = dir.path().join("bare");
+        fs::create_dir_all(bare.join("rootfs")).unwrap();
+        write_workspace_profile_inside(&place_at(&bare, "wsp-bare-profile")).unwrap();
+        assert_eq!(fs::read_to_string(bare.join("rootfs").join(WORKSPACE_PROFILE_INSIDE.trim_start_matches('/'))).unwrap(), line);
+    }
+
     /// Every destination under a rootfs is opened beneath it with no link followed: the folders above it made on
     /// the way, the entry itself made as a directory or a 0600 file, and the descriptor answered is the entry a
     /// mount lands on rather than a path the kernel resolves a second time. No mount and no root.
@@ -2065,6 +2142,13 @@ mod tests {
             box_resolv,
             "the computer's own resolv.conf changed"
         );
+
+        // And the one file of the workspace's own the boot puts under /etc/profile.d, which is what a login shell
+        // in a pane there reads its PATH from after the box's own profile has set root's.
+        let inside_profile = rootfs.join(WORKSPACE_PROFILE_INSIDE.trim_start_matches('/'));
+        assert_eq!(fs::read_to_string(&inside_profile).unwrap(), format!("export PATH={}\n", wsp_frames::numbers::PLACE_WORKSPACE_PATH));
+        assert!(layout.upper_of(id, "/etc").join("profile.d/wsp-workspace.sh").is_file(), "the line did not land in the workspace's upper");
+        assert!(!Path::new(WORKSPACE_PROFILE_INSIDE).exists(), "the boot wrote the line on the computer itself");
 
         // A write through the merged view lands in the workspace's own upper, and the box's directory does not
         // have it: a workspace installs a package and the computer does not.
