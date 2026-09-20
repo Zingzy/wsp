@@ -2569,6 +2569,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (line === undefined) return;
     throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
   };
+  /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
+   * sentence for an id this host does not hold and for one outside its tree alike, since telling the two apart is
+   * how a thread walks what else stands here. A caller that is no thread reads what it always did, an id nobody
+   * holds being nobody's to refuse for. */
+  const refuseNamed = (workspaceId: string, caller: Caller | undefined): void => {
+    const record = live.get(workspaceId)?.record;
+    if (record === undefined && scopeOf(caller) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
+    refuseRelayed(record, caller);
+  };
   const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
   /** Every workspace this host holds, as any door serves them: one a create has not finished is not there yet. */
   const held = (): LiveWorkspace[] => [...live.values()].filter(e => !e.creating);
@@ -4631,7 +4640,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // apart is how a thread walks what else stands here.
     if (!entry || entry.creating) {
       if (scopeOf(origin) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
-      throw new Error(`no such workspace: ${id}`);
+      throw new Error(`${noWorkspaceRefusal()}: ${id}`);
     }
     refuseRelayed(entry.record, origin);
     return entry;
@@ -4930,8 +4939,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const workspaces: Runtime["workspaces"] = {
     async landing(o, origin) {
       await ready();
-      // The caller rides it as it rides every other verb that names a project: a thread reads where its own
-      // project's computer is and nothing about another's.
       const project = await projectsDoor.resolve(o.project, origin);
       const computer = project.computer;
       const kind = kindForComputer(computer);
@@ -4944,8 +4951,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async create(opts, origin) {
       await ready();
       const asked = scopeOf(origin);
-      // A thread forks the image its own workspace's project runs and names none. Read before the project is
-      // resolved and before anything is asked of a machine, so a create this refuses reaches neither.
+      // A thread forks the image its own workspace's project runs and names none.
       if (asked !== undefined && opts.golden !== undefined) throw Object.assign(new Error(spawnGoldenRefusal(asked.threadId)), { kind: "invalid" });
       // A create a thread asked for is a child of the workspace that thread runs on and of no other, named or not:
       // a thread's workspaces are its own tree, nothing it makes stands beside it as a sibling of the person's, and
@@ -5066,9 +5072,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async resolve(ref, origin) {
       await ready();
       const scope = scopeOf(origin);
-      // A thread is answered off the reading its own listing is built from rather than off everything this host
-      // holds, so a word naming a workspace outside its tree is absent here exactly as it is there and every miss
-      // is one sentence: an id, a start of one and a name all read the same, and nothing is enumerated.
       const rows = scope === undefined ? held() : listedFor(origin);
       // The whole of an id, then the whole of a name, as a thread's own reference does: a name names one workspace at
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
@@ -6714,7 +6717,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       // A listing that names a workspace refuses like any other verb naming one; a listing of them all leaves out
       // the rows the caller may not drive, as workspaces.list does.
-      if (workspaceId !== undefined) refuseRelayed(live.get(workspaceId)?.record, origin);
+      if (workspaceId !== undefined) refuseNamed(workspaceId, origin);
       const all = [...sessions.values()].filter(s => drivesId(s.view.workspaceId, origin));
       const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
       const rows = held.map(s => s.view);

@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -172,11 +172,12 @@ function throughConnector(req: IncomingMessage): boolean {
 
 /** Whether a request reached this host over the road it serves its own workspaces' guests on: a process on the
  * computer this host runs on, dialling the loopback the guest tool server and the guest command line dial once the
- * guest door has read which workspace the token was minted for. A request the connector forwarded, and one from
- * beyond this computer, are other roads. Written once and read by the socket door and by the JSON routes alike, so
- * neither can stay open while the other closes. */
+ * guest door has read which workspace the token was minted for. A token scoped to a thread is minted into one turn
+ * and comes back by that road alone, so one arriving by any other is a copy carried out of a machine and names
+ * nobody here. The one home of that rule: the socket door and the JSON routes both read this, so neither can stay
+ * open while the other closes. */
 function ownRoad(req: IncomingMessage): boolean {
-  return !throughConnector(req) && isLoopback((req.socket.remoteAddress ?? "").replace(/^::ffff:/, ""));
+  return !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
 }
 
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
@@ -416,8 +417,6 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     if (who === undefined) return here ? {} : undefined;
     const scope = who.kind === "device" ? who.device.scope : undefined;
     if (scope === undefined) return {};
-    // A token scoped to a thread is minted into one turn and comes back over the guest road; one presented from
-    // any other road is a copy carried out of a machine, and it names nobody here.
     return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 

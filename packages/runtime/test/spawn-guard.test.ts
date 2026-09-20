@@ -393,6 +393,28 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("an id this host does not hold reads a thread exactly as one outside its tree, on every verb that takes one", async () => {
+    const rt = runtimeWith({ claude: heldAdapter().factory });
+    const mine = await createOn(rt, { golden: "snap_g", name: "mine", agents: AGENTS_ON });
+    const theirs = await createOn(rt, { project: mine.project.id, golden: "snap_g", name: "theirs" });
+    const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mine.id, rootThreadId: "t_root" };
+    const nobody = "ws_00000000";
+    for (const id of [theirs.id, nobody]) {
+      for (const reach of [
+        () => rt.sessions.list(id, asThread(scope)),
+        () => rt.sessions.history(id, asThread(scope)),
+        () => rt.workspaces.get(id, asThread(scope)),
+      ]) {
+        await expect(reach()).rejects.toThrow(noWorkspaceRefusal());
+        await expect(reach()).rejects.not.toThrow("theirs");
+      }
+    }
+    // Its own workspace still answers, and the person reads an id nobody holds as the empty listing it always was.
+    expect(await rt.sessions.list(mine.id, asThread(scope))).toEqual([]);
+    expect(await rt.sessions.list(nobody)).toEqual([]);
+    await rt.close();
+  });
+
   it("a turn on a spawn enabled workspace carries a scoped device that is taken away at the exit", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });

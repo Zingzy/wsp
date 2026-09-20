@@ -2478,9 +2478,7 @@ export function spawnActRefusal(threadId: string, act: SpawnAct): string {
 }
 
 /** The one sentence a token scoped to a thread is refused with for arriving on a road this host does not serve its
- * own workspaces' guests on. Such a token is minted into one turn and comes back through the guest road, which ends
- * at a process on the computer this host runs on; one presented from anywhere else is a copy carried out of a
- * machine, and the workspace it was minted for is not the one it came from. */
+ * own workspaces' guests on. Which road that is, and why, is on the host's own `ownRoad`. */
 export const SCOPED_TOKEN_ROAD_REFUSAL =
   "a thread's token opens this host over the road its own workspace's guest is served on, and this request came by another";
 
