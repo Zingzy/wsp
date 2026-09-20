@@ -57,6 +57,17 @@ impl PreAuth {
         self.armed.store(false, Ordering::Relaxed);
     }
 
+    /// What the peer's bytes cost it: the count, and the refusal the moment they pass the cap.
+    fn charge(&self, n: u64) -> io::Result<()> {
+        let total = self.read.fetch_add(n, Ordering::Relaxed) + n;
+        if self.armed.load(Ordering::Relaxed) && total - self.baseline.load(Ordering::Relaxed) > numbers::PRE_AUTH_MAX_BYTES {
+            self.tripped.store(true, Ordering::Relaxed);
+            self.disarm();
+            return Err(io::Error::other(words::AUTH_TOO_MANY_BYTES));
+        }
+        Ok(())
+    }
+
     fn tripped(&self) -> bool {
         self.tripped.load(Ordering::Relaxed)
     }
@@ -68,6 +79,9 @@ struct Counted {
     pre: Arc<PreAuth>,
     ahead: Vec<u8>,
     ahead_at: usize,
+    /// How much of `ahead` is the upgrade request itself; whatever the peer wrote behind its blank line is the
+    /// peer's own bytes and costs it the same budget as the bytes the framing reads off the socket.
+    uncounted: usize,
 }
 
 impl AsyncRead for Counted {
@@ -76,19 +90,14 @@ impl AsyncRead for Counted {
         if this.ahead_at < this.ahead.len() {
             let n = buf.remaining().min(this.ahead.len() - this.ahead_at);
             buf.put_slice(&this.ahead[this.ahead_at..this.ahead_at + n]);
+            let charged = (this.ahead_at + n).saturating_sub(this.ahead_at.max(this.uncounted)) as u64;
             this.ahead_at += n;
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(this.pre.charge(charged));
         }
         let before = buf.filled().len();
         let polled = Pin::new(&mut this.inner).poll_read(cx, buf);
         if let Poll::Ready(Ok(())) = &polled {
-            let n = (buf.filled().len() - before) as u64;
-            let total = this.pre.read.fetch_add(n, Ordering::Relaxed) + n;
-            if this.pre.armed.load(Ordering::Relaxed) && total - this.pre.baseline.load(Ordering::Relaxed) > numbers::PRE_AUTH_MAX_BYTES {
-                this.pre.tripped.store(true, Ordering::Relaxed);
-                this.pre.disarm();
-                return Poll::Ready(Err(io::Error::other(words::AUTH_TOO_MANY_BYTES)));
-            }
+            return Poll::Ready(this.pre.charge((buf.filled().len() - before) as u64));
         }
         polled
     }
@@ -151,12 +160,13 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let pre = Arc::new(PreAuth::default());
-    let stream = Counted { inner: tcp, pre: Arc::clone(&pre), ahead: head, ahead_at: 0 };
+    let uncounted = head.windows(4).position(|w| w == b"\r\n\r\n").map_or(head.len(), |at| at + 4);
+    let stream = Counted { inner: tcp, pre: Arc::clone(&pre), ahead: head, ahead_at: 0, uncounted };
     let config = WebSocketConfig::default().max_message_size(Some(MESSAGE_MAX_BYTES)).max_frame_size(Some(MESSAGE_MAX_BYTES));
+    pre.arm();
     let Ok(Ok(mut ws)) = timeout_at(deadline, tokio_tungstenite::accept_async_with_config(stream, Some(config))).await else {
         return;
     };
-    pre.arm();
     let first = loop {
         match timeout_at(deadline, ws.next()).await {
             Err(_) => return refuse(ws, words::AUTH_NO_FRAME_IN_TIME, &pre).await,
@@ -393,6 +403,31 @@ mod tests {
             Ok(Some(Ok(Message::Text(t)))) => serde_json::from_str(&t).ok(),
             _ => None,
         }
+    }
+
+    /// The budget before auth is one: the upgrade request costs the peer nothing, and what it wrote behind the
+    /// blank line is its own bytes, counted as the framing takes them, wherever the door happened to read them.
+    #[tokio::test]
+    async fn the_bytes_read_ahead_behind_the_blank_line_are_counted_and_the_request_head_is_not() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dialer = TcpStream::connect(listener.local_addr().unwrap()).await.unwrap();
+        let (inner, _) = listener.accept().await.unwrap();
+        let request = b"GET / HTTP/1.1\r\nUpgrade: websocket\r\n\r\n";
+        let mut ahead = request.to_vec();
+        ahead.extend(std::iter::repeat_n(b'x', 100));
+        let pre = Arc::new(PreAuth::default());
+        let mut counted = Counted { inner, pre: Arc::clone(&pre), ahead, ahead_at: 0, uncounted: request.len() };
+        pre.arm();
+
+        // Eight bytes at a time, so the read that spans the blank line is one of them.
+        let mut buf = [0u8; 8];
+        let mut read = 0;
+        while read < request.len() + 100 {
+            read += counted.read(&mut buf).await.unwrap();
+        }
+        assert_eq!(pre.read.load(Ordering::Relaxed), 100);
+        assert!(!pre.tripped(), "a hundred bytes are under the cap");
+        drop(dialer);
     }
 
     /// A socket inside a workspace: the door takes it with no auth frame, answers the hello, serves the guest's
