@@ -18,7 +18,7 @@ use std::path::{Component, Path, PathBuf};
 use nix::errno::Errno;
 use nix::fcntl::{open, openat, openat2, readlinkat, OFlag, OpenHow, ResolveFlag};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
-use nix::sys::stat::{mkdirat, Mode};
+use nix::sys::stat::{fstat, mkdirat, stat, Mode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use wsp_frames::numbers::GUEST_WSP_HOME;
@@ -759,7 +759,8 @@ pub struct Opened {
     fd: OwnedFd,
     /// The folder the entry sits in, the name it sits there under and what the walk opened it as: what it takes
     /// to open the entry again with no path resolved. Where the walk had no component at all, which is the
-    /// rootfs itself, the folder is the rootfs and the name is `.`.
+    /// rootfs itself, the folder is the rootfs and the name is `.`, which crosses no mount: a bind asked for at
+    /// the rootfs itself is refused at its propagation step, and nothing in a boot asks for one.
     parent: OwnedFd,
     name: String,
     want: Want,
@@ -776,8 +777,7 @@ impl Opened {
         by_fd(self.fd.as_fd())
     }
     /// The entry opened again from the folder it sits in, under the flags the walk itself took, so no link is
-    /// followed and nothing outside the rootfs is reached. A walk of the name crosses into whatever has been
-    /// mounted on the entry since, which the descriptor the walk answered never does.
+    /// followed and nothing outside the rootfs is reached.
     fn again(&self) -> Result<OwnedFd, Errno> {
         open_step(&self.parent, &self.name, self.want)
     }
@@ -1123,7 +1123,7 @@ pub fn bind_opened(source: &impl AsFd, target: &Path) -> Result<(), Error> {
 /// reads rather than the descriptor the call handed the kernel.
 fn mount_bind(source: &Path, onto: Onto<'_>, named: &Path) -> Result<(), Error> {
     for (from, naming, flags) in bind_steps(source) {
-        let (_held, target) = onto.target(naming, named)?;
+        let (_held, target) = onto.target(naming, source, named)?;
         mount(from, &target, None::<&str>, flags, None::<&str>).map_err(nix_at(named))?;
     }
     Ok(())
@@ -1141,12 +1141,13 @@ impl Onto<'_> {
     /// The path one call names its target by, with the descriptor that path stands for held for as long as the
     /// call. A path of the daemon's own is resolved by the kernel at each call, so the second call lands on the
     /// mount the first made with nothing more asked of it.
-    fn target(&self, naming: Naming, named: &Path) -> Result<(Option<OwnedFd>, PathBuf), Error> {
+    fn target(&self, naming: Naming, source: &Path, named: &Path) -> Result<(Option<OwnedFd>, PathBuf), Error> {
         match (self, naming) {
             (Onto::Path(path), _) => Ok((None, path.to_path_buf())),
             (Onto::Entry(entry), Naming::AsOpened) => Ok((None, entry.at())),
             (Onto::Entry(entry), Naming::Again) => {
                 let fd = entry.again().map_err(nix_at(named))?;
+                the_bind_just_made(&fd, source, named)?;
                 let path = by_fd(fd.as_fd());
                 Ok((Some(fd), path))
             }
@@ -1154,10 +1155,29 @@ impl Onto<'_> {
     }
 }
 
+/// Whether what the reopen answered is the bind the call before it made, which holds the source's own inode: a
+/// workspace beside this one, uid 0 in the home they share, can rename a directory of its own or one of this
+/// boot's earlier mount points onto the name between the two calls, and the propagation would then land on a
+/// mount that is not this one. Refused before that call is made; the bind already landed stays standing for the
+/// sweep that takes an unfinished boot's mounts off.
+fn the_bind_just_made(fd: &OwnedFd, source: &Path, named: &Path) -> Result<(), Error> {
+    let landed = fstat(fd).map_err(nix_at(named))?;
+    let from = stat(source).map_err(nix_at(named))?;
+    if (landed.st_dev, landed.st_ino) == (from.st_dev, from.st_ino) {
+        return Ok(());
+    }
+    let detail = format!(
+        "the bind of {} landed and the name then held something else, so the propagation would land on a mount that is not this boot's; what was bound stays for the sweep",
+        source.display()
+    );
+    Err(Error { path: named.to_owned(), source: io::Error::new(io::ErrorKind::PermissionDenied, detail) })
+}
+
 /// Which descriptor a call of a bind names an entry under a rootfs by: the one the walk answered, or the entry
-/// opened again from the folder it sits in. A descriptor opened before the bind still names the directory the
-/// mount now covers, and a propagation change of anything but a mount's own root is refused by the kernel
-/// (EINVAL, measured on a box, 6.8.0-139), so the propagation takes the entry opened again.
+/// opened again from the folder it sits in, which a fresh walk of the name crosses into the mount for. A
+/// descriptor opened before the bind still names the directory that mount now covers, and a propagation change
+/// of anything but a mount's own root is refused by the kernel (EINVAL, measured on a box, 6.8.0-139), so the
+/// propagation takes the entry opened again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Naming {
     AsOpened,
@@ -1754,19 +1774,31 @@ mod tests {
 
         // What each call hands the kernel, on an entry under a rootfs. The bind takes the descriptor the walk
         // answered; the propagation takes another descriptor of the same entry, opened from the folder it sits
-        // in, which is the walk a mount is crossed by.
+        // in, which is the walk a mount is crossed by. Nothing is mounted here, so the entry stands in for the
+        // bind: what the reopen has to answer is the source's own inode, which is what a landed bind holds.
         let dir = tempfile::tempdir().unwrap();
         let place = place_at(dir.path(), "wsp-bind");
-        fs::create_dir_all(place.rootfs.join("root")).unwrap();
+        let from = place.rootfs.join("root");
+        fs::create_dir_all(&from).unwrap();
         let opened = open_inside(&place, "/root", Want::Dir, BoxLink::FollowedOnce).unwrap();
         let named = opened.named(&place);
-        let (held, bound) = Onto::Entry(&opened).target(steps[0].1, &named).unwrap();
+        let (held, bound) = Onto::Entry(&opened).target(steps[0].1, &from, &named).unwrap();
         assert!(held.is_none() && bound == opened.at());
-        let (held, slaved) = Onto::Entry(&opened).target(steps[1].1, &named).unwrap();
+        let (held, slaved) = Onto::Entry(&opened).target(steps[1].1, &from, &named).unwrap();
         let held = held.expect("the propagation names a descriptor opened again");
         assert_eq!(slaved, by_fd(held.as_fd()));
         assert_ne!(slaved, bound);
         assert_eq!(fs::read_link(&slaved).unwrap(), fs::read_link(&bound).unwrap());
+
+        // And an entry that is not the bind, which is what a workspace beside this one leaves by renaming
+        // another directory onto the name between the two calls: refused before the propagation is asked for,
+        // naming the path inside and what was bound there.
+        let elsewhere = place.rootfs.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let refused = Onto::Entry(&opened).target(steps[1].1, &elsewhere, &named).unwrap_err().to_string();
+        assert!(refused.starts_with(&format!("{}: ", named.display())), "{refused}");
+        assert!(refused.contains(&format!("the bind of {} landed", elsewhere.display())), "{refused}");
+        assert!(refused.contains("what was bound stays for the sweep"), "{refused}");
     }
 
     /// The socket a process inside a workspace dials its host over, as this computer keeps it: in that
