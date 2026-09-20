@@ -30,8 +30,8 @@ const execFileAsync = promisify(execFile);
 /** Everywhere one machine's daemon keeps something, how it binds and who supervises it. A fork wsp made is root's,
  * so everything sits under /root behind a system unit reachable through the preview edge; a machine the person
  * already owns is reached under their own login, so every path sits under their home, the unit is their own
- * login's, and the daemon binds loopback with the port forwarded from this computer. One value per place, read by
- * the bundle, the unit, the stop and the deploy, so no line below compares a kind. */
+ * login's, and the daemon binds that machine's own loopback. One value per place, read by the bundle, the unit,
+ * the stop and the deploy, so no line below compares a kind. */
 export interface DaemonPlace {
   /** Which machine this daemon's own readings describe, which picks the two modules behind them. */
   kind: DaemonKind;
@@ -345,9 +345,9 @@ export function guestPlace(supervisor: DaemonSupervisor): DaemonPlace {
 }
 
 /** The place a machine reached over ssh keeps its daemon: under the login's own home, behind that login's systemd,
- * bound on loopback and on whatever port the machine had free, which it writes down for the host to forward to.
- * Nothing here needs root, and nothing on the machine listens beyond its own loopback. Where each file sits is
- * the protocol's rule, since the runtime reads the token and the port back off the same layout. */
+ * bound on loopback and on whatever port the machine had free, which it writes down beside itself for whatever on
+ * that machine reads it. Nothing here needs root, and nothing on the machine listens beyond its own loopback.
+ * Where each file sits is the protocol's rule, since the same layout is read back off the machine. */
 export function sshDaemonPlace(login: { home: string; path: string }): DaemonPlace {
   const at = sshDaemonPaths(login.home);
   return {
@@ -380,8 +380,8 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     toolsPath: [at.binDir, login.path].join(":"),
     unitEnv: { HOME: login.home },
     wantedBy: "default.target",
-    // Nothing on a machine somebody else owns may listen past its own loopback: the host reaches this daemon
-    // through an ssh forward, which dials that machine's own loopback from its own side.
+    // Nothing on a machine somebody else owns may listen past its own loopback: what dials this daemon is on that
+    // machine, and this host reaches it only over the link that machine dials out on.
     bind: LOOPBACK,
     port: 0,
     portFile: at.portFile,
