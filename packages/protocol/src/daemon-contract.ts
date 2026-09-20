@@ -88,6 +88,12 @@ export const GUEST_MESSAGE_CAP_BYTES = 4 * 1024 * 1024;
  * frame it opened with rides a field of its own and is named to every watcher that arrives. Past the cap the
  * session is closed to the guest. */
 export const GUEST_QUEUE_CAP_FRAMES = 256;
+/** Guest bytes one workspace may have waiting at once, queued in its sessions and written onto the watcher's
+ * channel but not carried out of the socket yet. One count per workspace on a computer that runs them, and one for
+ * the daemon itself inside a machine, where a session names no workspace and every session shares it. Four of one
+ * message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is refused
+ * and its session stands. */
+export const GUEST_IN_FLIGHT_CAP_BYTES = 4 * GUEST_MESSAGE_CAP_BYTES;
 /** How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions the
  * machine holds, so a host that restarted picks them back up; past this span nobody is coming and the session ends
  * to its guest, rather than leaving the process inside the machine waiting for the life of the workspace. */
@@ -146,6 +152,9 @@ export const linkOutOfOrderLine = (url: string): string => `${url} answered out 
 export const GUEST_NOT_WATCHER = "only the socket that sent guest.watch may answer or close a guest session";
 /** Why a session with nobody reading it is ended: the host has been away past the queue's cap. */
 export const GUEST_QUEUE_FULL = "the host has not read this session for too long";
+/** Why a guest message is refused where its workspace already has the cap's worth of bytes waiting to be read: the
+ * frame is turned away and the session stands, so a sender whose host is reading slowly goes on. */
+export const GUEST_IN_FLIGHT_FULL = "too many guest bytes are waiting to be read here; send this one again";
 /** Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
  * agent that ran the line can run it again against a host that is there. */
 export const GUEST_UNWATCHED = "the host stopped watching; run it again";
