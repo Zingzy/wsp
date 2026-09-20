@@ -1519,6 +1519,14 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
+/** What a landing is refused with when the agents' state a machine answered with holds something that is neither a
+ * folder nor a regular file, or a path that reaches out of the folder it was opened in: the entry as it sits in the
+ * archive and what it is. The bytes are the machine's, the landing is the person's, and one such entry is a road
+ * into the agents' own files on this computer, so nothing of that archive lands. */
+export function stateEntryRefusal(entry: string, what: string): string {
+  return `the agents' state from the machine holds ${entry}, which is ${what}; nothing of it was landed`;
+}
+
 /** The verdict when a nap could not store a fresh backup, said once with whatever the machine answered on the
  * line's title: the machine's own words name folders and commands nobody asked for, and a person reading this
  * needs to know where their files stand. The second clause is what is true of this workspace: an earlier nap's

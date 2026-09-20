@@ -3,12 +3,12 @@
 // and moves into place in one rename, and the agents' state that came with it is keyed to that destination in a
 // scratch copy of their homes, then laid over the real homes here. The homes here only gain files.
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, statSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState, type UnreadStore } from "@wsp/engine";
-import { storeUnreadLine, type ProjectAgentResult } from "@wsp/protocol";
+import { stateEntryRefusal, storeUnreadLine, type ProjectAgentResult } from "@wsp/protocol";
 import type { LandRequest, LandedAgent, LandedProject, ProjectLander } from "@wsp/runtime";
 import { CACHE_RULE, outcomeOf } from "./project-bundle.js";
 
@@ -50,6 +50,36 @@ function extract(archive: string, dir: string): Promise<void> {
   });
 }
 
+/** What an entry of the archive is, for the sentence that refuses it. */
+function entryWord(st: Stats): string {
+  if (st.isSymbolicLink()) return "a link";
+  if (st.isFIFO()) return "a fifo";
+  if (st.isSocket()) return "a socket";
+  if (st.isBlockDevice() || st.isCharacterDevice()) return "a device";
+  return "neither a folder nor a regular file";
+}
+
+/** Whether a real path sits at `root` or under it. Both sides come through realpath, so the answer does not turn on
+ * which name a folder was reached by. */
+const under = (real: string, root: string): boolean => real === root || real.startsWith(`${root}${sep}`);
+
+/** Every entry the state archive put in the scratch folder, refused whole where any of it is neither a folder nor a
+ * regular file. The archive's bytes are a machine's and a link, a fifo or a device in it is a road out of the folder
+ * it was opened in for every resolver that runs after, so nothing of it lands rather than the entry being skipped.
+ * A hard link entry reads as a regular file here and this computer's archiver holds its target under the extraction
+ * folder as it drops a dot-dot segment, so it names nothing outside and needs no rule of its own. */
+function refuseUnlandableEntries(scratch: string): void {
+  const stack = [scratch];
+  while (stack.length > 0) {
+    for (const e of readdirSync(stack.pop()!, { withFileTypes: true })) {
+      const at = join(e.parentPath, e.name);
+      const st = lstatSync(at);
+      if (st.isDirectory()) stack.push(at);
+      else if (!st.isFile()) throw new Error(stateEntryRefusal(relative(scratch, at), entryWord(st)));
+    }
+  }
+}
+
 /** The agents' state, keyed on the machine to `source`, brought into the homes here keyed to `target`, the real path
  * the folder will have: the archive is opened in a scratch directory, each agent's home there is a skeleton holding
  * what its listing named on the machine alone, the move runs in the skeleton, and the files its module then names for
@@ -59,7 +89,18 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
   const scratch = mkdtempSync(join(tmpdir(), "wsp-home-"));
   try {
     await extract(state.archive, scratch);
-    const skeletons = Object.fromEntries(Object.entries(state.homes).flatMap(([agent, home]) => (existsSync(join(scratch, home)) ? [[agent, join(scratch, home)]] : [])));
+    refuseUnlandableEntries(scratch);
+    const root = realpathSync(scratch);
+    // Each expected home is held under the folder the archive was opened in by its real path before a resolver is
+    // pointed at it, and a home that is not fails its own agent's row while the others land.
+    const unheld = new Map<string, string>();
+    const skeletons: Record<string, string> = {};
+    for (const [agent, home] of Object.entries(state.homes)) {
+      const at = join(scratch, home);
+      if (!existsSync(at)) continue;
+      if (under(realpathSync(at), root)) skeletons[agent] = at;
+      else unheld.set(agent, stateEntryRefusal(home, "a path out of the folder it was opened in"));
+    }
     const wanted = CATALOG_AGENTS.filter(a => state.agents === undefined || state.agents.includes(a.id));
     const rows = await countProjectState(source, skeletons, wanted);
     const readable = rows.filter(r => r.error === undefined);
@@ -79,16 +120,37 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
         landed.push(base);
         continue;
       }
+      // Every file the resolver names is read and held under the skeleton before one byte is copied, so a row of a
+      // machine's own index naming a path outside it fails that agent's row rather than landing in the home here.
+      const realSkeleton = realpathSync(skeleton);
+      const copies: { from: string; to: string; bytes: number }[] = [];
+      let refusal: string | undefined;
+      for (const f of await resolver.entries(skeleton, target)) {
+        const st = lstatSync(f);
+        const rel = relative(skeleton, f);
+        if (!st.isFile()) refusal = stateEntryRefusal(rel, entryWord(st));
+        else if (rel === "" || rel.startsWith("..") || isAbsolute(rel) || !under(realpathSync(f), realSkeleton)) refusal = stateEntryRefusal(f, "a path out of the folder it was opened in");
+        if (refusal !== undefined) break;
+        copies.push({ from: f, to: join(home, rel), bytes: st.size });
+      }
+      if (refusal !== undefined) {
+        landed.push({ ...base, outcome: "failed", error: refusal });
+        continue;
+      }
       let bytes = 0;
-      const files = await resolver.entries(skeleton, target);
-      for (const f of files) {
-        const copy = join(home, relative(skeleton, f));
-        mkdirSync(dirname(copy), { recursive: true });
-        copyFileSync(f, copy);
-        bytes += statSync(f).size;
+      for (const c of copies) {
+        mkdirSync(dirname(c.to), { recursive: true });
+        copyFileSync(c.from, c.to);
+        bytes += c.bytes;
       }
       const skipped = report?.outcome === "moved" ? report.moved.reduce((n, m) => n + (m.skipped ?? 0), 0) : 0;
-      landed.push({ ...base, files: files.length, bytes, outcome: outcomeOf(files.length, true, resolver.carry, report), ...(skipped > 0 ? { skipped } : {}) });
+      landed.push({ ...base, files: copies.length, bytes, outcome: outcomeOf(copies.length, true, resolver.carry, report), ...(skipped > 0 ? { skipped } : {}) });
+    }
+    // A home no resolver was pointed at has no row of the count's, so its own row is made here: the person reads
+    // which agent's state did not come home and why, and the rest of the archive still lands.
+    for (const [agent, why] of unheld) {
+      if (!wanted.some(a => a.id === agent)) continue;
+      landed.push({ agent, name: CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent, files: 0, bytes: 0, outcome: "failed", error: why });
     }
     return landed;
   } finally {
