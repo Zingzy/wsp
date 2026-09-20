@@ -1899,7 +1899,9 @@ export interface LocalFontFace {
 
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
-  wsPort: number;
+  /** The runtime's own port, inlined only on the loopback page beside the token; a page served beyond loopback
+   * carries none and dials the origin it came from at wsPath. */
+  wsPort?: number;
   /** The host's own token, inlined only when the page was served on loopback, where reaching it already means being
    * on the computer. A page served beyond loopback carries none and pairs for a device token of its own. */
   token?: string;
@@ -1913,7 +1915,8 @@ export interface BootPayload {
   version: string;
   /** The family the person's terminal draws with, when the saved recipe ticks its row; the terminal pane defaults to it. */
   terminalFont?: string;
-  /** The state file this host serves; the page keeps what it remembers (the workspace open last) under it. */
+  /** The state file this host serves; the page keeps what it remembers (the workspace open last) under it. A page
+   * served beyond loopback carries none, so every stranger's page remembers under one empty slot. */
   statePath?: string;
 }
 
