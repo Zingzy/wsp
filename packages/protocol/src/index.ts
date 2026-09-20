@@ -3728,6 +3728,7 @@ const DAEMON_CONTENTS = [
   "7324cbd1f27eb8983b8ea302c3cd32a629a4eedae7e0d46458acca37440baf88",
   "b83b671323ccc59fe9daa43da46dede2d640451c5b4f0c8e64ae2eef149ba694",
   "5b5db8f843457bfac71002bb4741d98f0f98bfe11579e7891c1a0955c39eed0f",
+  "e10ddc035c5a0fb57b8b591da1fa220023e836e7c7598022c19d852e747bab46",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3911,7 +3912,10 @@ const DAEMON_CONTENTS = [
  * workspace whose init died on its own by watching the init's pidfd and running the stop road, and stops redialling
  * a host that refused its place under a signature over the pinned key.
  * Version 63 counts the bytes a client buffers behind the WebSocket upgrade against the same pre-auth cap as the
- * bytes after it, so nothing rides the upgrade past the door unweighed. */
+ * bytes after it, so nothing rides the upgrade past the door unweighed.
+ * Version 64 opens every path under a workspace's rootfs beneath it by descriptor with no link followed, covers the box
+ * root's startup files with the workspace's own copies, lets a workspace read under /etc, /var and /srv only what an
+ * allowlist names, and skips a linked row at the copy's exclude rather than removing outside the copy. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
