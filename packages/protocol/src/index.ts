@@ -3707,6 +3707,7 @@ const DAEMON_CONTENTS = [
   "376bdbce753a06ef57dfdda1e50f1cb761a728538dd85851db285168e4d1e568",
   "c1d414a8d13ee7070d1df56f82b7230bb53bed51b8b2d43c4bc39a864c5b5489",
   "cec7af13cc254d8325bf77409aedc4daeb072d5dc0413b58aaf45f8428698721",
+  "b1c827b22fbdade28b749f72899b610723d5f312e339e9546552da14840013c1",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3880,7 +3881,10 @@ const DAEMON_CONTENTS = [
  * Version 59 binds a socket in each running workspace's own wsp folder that answers a guest's ping, open and send and no
  * other op, so a process inside a box workspace reaches the host's guest door without a token of the box's, writes the
  * wsp word into the workspace's own upper, and opens a shell inside a workspace's namespaces for the terminal pane, held
- * beside the daemon's own ptys and answered to no other workspace. */
+ * beside the daemon's own ptys and answered to no other workspace.
+ * Version 60 links only to a host it has proven, taking the second frame after the first is verified and its own prove
+ * sent, seals every frame of the link at both ends so whoever carries it reads and writes nothing, resolves no command
+ * through a folder a workspace can write, and holds a token of its own machine's rather than one every machine shares. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
