@@ -1522,13 +1522,15 @@ describe("the sweep a computer runs on itself", () => {
     // The name every tool execs, pointing at the shim: once the shim goes it is a link to nothing, which every
     // read that follows a link calls absent while the person is still left holding it.
     symlinkSync(`${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`);
-    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\nexport EDITOR=vi\n`);
+    // Both spellings: the one a computer joined before the line was guarded carries, and the one a deploy writes
+    // now. The sweep matches wsp's line by the file it names, so it takes out either.
+    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\nexport EDITOR=vi\n[ -f ${at.profileFile} ] && . ${at.profileFile}\n`);
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
     expect(existsSync(`${at.binDir}/xdg-open`)).toBe(false);
     expect(swept.removed).toContain(`${at.binDir}/xdg-open`);
     // Their file keeps everything of theirs and loses the one line wsp put in it.
     expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\nexport EDITOR=vi\n");
-    expect(swept.removed.some(line => line.includes(".profile"))).toBe(true);
+    expect(swept.removed).toContain(`. ${at.profileFile}; [ -f ${at.profileFile} ] && . ${at.profileFile} (out of ${join(home, ".profile")})`);
   });
 
   it("leaves a login file it never wrote to exactly as it was", async () => {
