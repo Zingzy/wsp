@@ -135,11 +135,11 @@ export const dialFailedLine = (url: string, error: string): string => `${url} co
 export const notAFrameLine = (url: string): string => `${url} sent something that is not a frame`;
 export const authUnreadableLine = (url: string, error: string): string => `${url} answered place.auth with something this computer cannot read: ${error}`;
 export const hostRefusedLine = (url: string, refusal: string): string => `${url}: ${refusal}`;
-/** What an address that answered something the handshake's order does not allow is passed over with: the id a frame
- * carries says nothing about who sent it, so the order is the only thing a place holds a host to before the key. */
 /** What a host that answered the handshake with no key agreement of its own is passed over with: it runs a wsp
  * older than this one, and a link neither end can seal is one this computer does not hold. */
 export const linkHostUnsealedLine = (url: string): string => `the host at ${url} agreed no key for this link; it runs an older wsp`;
+/** What an address that answered something the handshake's order does not allow is passed over with: the id a frame
+ * carries says nothing about who sent it, so the order is the only thing a place holds a host to before the key. */
 export const linkOutOfOrderLine = (url: string): string => `${url} answered out of order; nothing was sent to it and the next address is tried`;
 
 /** What a socket that never asked to watch guest sessions is told when it answers or ends one. */

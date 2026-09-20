@@ -68,7 +68,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
 import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { PlaceLoginRefusedError, SEAL_REFUSAL, freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -1334,8 +1334,7 @@ async function handshake(
       ws.on("message", raw => {
         let frame: Record<string, unknown>;
         try {
-          if (seal !== undefined && !(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
-          frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
+          frame = JSON.parse(openFrame(seal, raw)) as Record<string, unknown>;
         } catch {
           end(new JoinRefused("address", `${url} sent something that is not a frame`));
           return;

@@ -6,7 +6,7 @@
 
 import { DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
-import { SEAL_REFUSAL, type Seal } from "./seal.js";
+import { openFrame, SEAL_REFUSAL, type Seal } from "./seal.js";
 
 export interface ReachOptions {
   /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. One of this and socket. */
@@ -139,8 +139,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     try {
       // A frame that does not open under the key both ends agreed is a carrier writing into the link: the socket
       // is cut and the link redials, rather than a frame nobody proved being read as the computer's own.
-      if (opts.seal !== undefined && !(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
-      msg = JSON.parse(opts.seal === undefined ? String(raw) : opts.seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
+      msg = JSON.parse(openFrame(opts.seal, raw)) as Record<string, unknown>;
     } catch {
       if (opts.seal !== undefined) ws?.close(1002, SEAL_REFUSAL);
       return;
@@ -227,10 +226,13 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     });
   }
 
-  /** A socket already open: the same listeners a dial installs, and the ritual as soon as the loop turns. */
+  /** A socket already open: the same listeners a dial installs, and the ritual as soon as the loop turns. A
+   * socket handed over paused is read again here, once this listener stands, so no frame the other end sent in
+   * the gap is lost. */
   function take(sock: WebSocket): void {
     ws = sock;
     sock.addEventListener("message", ev => handleMessage(ev.data));
+    sock.resume();
     sock.addEventListener("error", () => {});
     sock.addEventListener("close", () => {
       if (ws !== sock) return;

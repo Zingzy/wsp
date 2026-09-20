@@ -203,6 +203,23 @@ async function relink(
   return { client, proved };
 }
 
+/** The same store with a timer in front of every read and write, as a store on a disk or behind a network has:
+ * the loop turns inside each of them, which is where a handover that is not order-safe drops a frame. */
+function yielding(inner: Store): Store {
+  const soon = (): Promise<void> => new Promise(done => setTimeout(done, 30));
+  return {
+    get: async (c, id) => (await soon(), inner.get(c, id)),
+    put: async (c, id, v) => (await soon(), inner.put(c, id, v)),
+    list: async c => (await soon(), inner.list(c)),
+    keys: async c => (await soon(), inner.keys(c)),
+    delete: async (c, id) => (await soon(), inner.delete(c, id)),
+    getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
+    putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
+    deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
+    shape: async () => (await soon(), inner.shape()),
+  };
+}
+
 const placesOf = async (): Promise<PlaceView[]> => {
   const c = await WsClient.connect(srv!.port, { token: "host-token" });
   const answer = await c.request("places.list");
@@ -497,6 +514,25 @@ describe("a place dialling back in", () => {
     expect(await behind.closed()).toBe(4401);
     // The link the join opened is the one this host still holds: nothing of the older dial replaced it.
     expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(true);
+  });
+
+  it("takes every frame the computer sends the moment its prove is answered, over a store whose reads and writes yield", async () => {
+    // A store on a disk or behind a network turns the loop inside every read and write. The daemon sends its
+    // hello the moment its prove is answered, so a handover that let the loop turn between the door's listener
+    // and the link's own would lose that frame, leave the two counters a frame apart and close the link on the
+    // next one. A memory store hides it by answering inside its own async method.
+    const { hostKey } = await serving({ store: yielding(memoryStore()) });
+    const joined = await join(hostKey, { code: await code() });
+    sockets.push(joined.client.ws);
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    // One more once the record writes are done and the link's own listener certainly stands: a frame lost in the
+    // gap leaves this one sealed at a counter the host is not at, which is what ends the link.
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    joined.client.say({ type: "daemon.hello", root: "/root", version: 17 });
+    // Nothing closed the link: every frame opened under the key, in the order they were sent.
+    const ended = await Promise.race([joined.client.closed(), new Promise<number>(done => setTimeout(() => done(-1), 400))]);
+    expect(ended).toBe(-1);
   });
 
   it("seals every frame after the handshake both ways, and ends a socket that sends one in the clear", async () => {

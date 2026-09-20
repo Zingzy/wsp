@@ -85,6 +85,16 @@ export interface Seal {
   unseal(bytes: Uint8Array): string;
 }
 
+/** The text of one frame off a socket, whether or not its link agreed a key. Before the seal a frame is its own
+ * text; after it, a frame in the clear and a frame that will not open are the same thing, a carrier writing into
+ * a link neither end would read it on, and both throw the one refusal. Written once and read by every end that
+ * holds a seal, so no reader can be the one that forgets a text frame is a refusal now. */
+export function openFrame(seal: Seal | undefined, raw: unknown): string {
+  if (seal === undefined) return String(raw);
+  if (!(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
+  return seal.unseal(raw);
+}
+
 export function makeSeal(keys: SealKeys, side: "host" | "place"): Seal {
   const outward = side === "host" ? keys.hostToPlace : keys.placeToHost;
   const inward = side === "host" ? keys.placeToHost : keys.hostToPlace;

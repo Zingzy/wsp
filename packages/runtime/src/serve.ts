@@ -58,7 +58,7 @@ import {
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
-import { SEAL_REFUSAL, type Seal } from "./seal.js";
+import { openFrame, type Seal } from "./seal.js";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -352,8 +352,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         try {
           // A frame that does not open under the key both ends agreed, and a frame sent in the clear after the
           // seal began, are both a carrier writing into this link rather than the computer on the other end.
-          if (seal !== undefined && !(raw instanceof Uint8Array)) throw new Error(SEAL_REFUSAL);
-          parsed = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array));
+          parsed = JSON.parse(openFrame(seal, raw));
         } catch {
           send({ id: null, ok: false, error: "invalid json" });
           if (!authed) ws.close(4401, UNAUTHORIZED);
@@ -393,9 +392,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               .prove(placeId, msg, expect, from, now())
               .catch((e: unknown) => ({ refusal: e instanceof Error ? e.message : String(e) }));
             if ("refusal" in proved) return refuse(proved.refusal);
-            // From here no frame from this socket is read as a client's request: the listener goes before the reply,
-            // and the reply goes before the place door sends anything, so the place has its own serve on by then.
+            // From here no frame from this socket is read as a client's request: the listener goes before the
+            // reply, and the reply goes before the place door sends anything, so the place has its own serve on
+            // by then. The socket stops being read first and is read again once the link's own listener stands:
+            // the computer sends its hello the moment the reply lands, and a frame that arrived between the two
+            // listeners would be a frame nobody unsealed, leaving the counters a frame apart and the next one
+            // closing the link.
             handedOver = true;
+            ws.pause();
             ws.off("message", onMessage);
             // The token a join asked for its own window rides this reply, inside the seal: it is the person's and
             // crosses only once the host has proved its key.

@@ -4413,8 +4413,6 @@ export const joinKeyRefusal = (url: string): string => `the host at ${url} prove
  * mints this one, since a person joining a computer never typed wsp host pair. */
 export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
 
-/** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
- * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
 /** The refusal for a word two computers on this host answer to: ids tell them apart, and the person picks one.
  * `typed` is the word that was written, since more than one word names a computer and each says its own back. A
  * relink cannot take another computer's name, so two by one name are two a person joined under one word, and
@@ -4427,6 +4425,8 @@ export const twoPlacesRefusal = (typed: string, ids: readonly string[]): string 
  * report where the carrier reads them. */
 export const PLACE_UNSEALED_JOIN_REFUSAL = "that computer's wsp is older than this host and seals no link; update wsp there and join again";
 
+/** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
+ * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
 export const PLACE_KEY_REFUSAL = "that place's key does not match the one this host learned at join; wsp remove it here and join it again";
 
 /** The refusal a place that names an id this host holds none of gets: removed here, or a state file that is not

@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import type { Seal } from "../src/seal.js";
+import { openFrame, type Seal } from "../src/seal.js";
 
 export interface WireMsg {
   id?: string | number | null;
@@ -22,7 +22,7 @@ export class WsClient {
 
   private constructor(readonly ws: WebSocket) {
     ws.on("message", raw => {
-      const m = JSON.parse(this.seal === undefined ? String(raw) : this.seal.unseal(raw as Uint8Array)) as WireMsg;
+      const m = JSON.parse(openFrame(this.seal, raw)) as WireMsg;
       for (const read of this.readers) read(m);
       // A frame carrying an op is one the host sent this socket, and its id is the host's own numbering: it is
       // never the answer to a request made here, however that number lines up with one still waiting.

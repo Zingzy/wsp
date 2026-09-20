@@ -545,11 +545,11 @@ function readsAsEd25519(publicKeyBase64: string): boolean {
   }
 }
 
-/** The one sentence a join whose key this host cannot verify against is refused with. */
 /** How long a join that has been answered has to send its prove before this host forgets it was asked. Longer
  * than any handshake and shorter than a code's own life, so nothing a person is still typing is swept. */
 const JOIN_PROVE_MS = 2 * 60_000;
 
+/** The one sentence a join whose key this host cannot verify against is refused with. */
 export const PLACE_BAD_KEY_REFUSAL = "that join sent a key this host cannot verify a signature against; a place's key is ed25519, as SPKI DER in base64";
 
 /** The one sentence a report naming a home wsp cannot build a path under is refused with, on a join and on every
