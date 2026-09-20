@@ -221,7 +221,9 @@ mod linux {
         let exe = std::env::current_exe()?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         runtime.block_on(async {
-            let ops = wsp_runtime::ops::Ops::open(root, exe)?;
+            // No door of its own: this process answers one frame and ends, so no port of it is a workspace's
+            // to reach at the gateway.
+            let ops = wsp_runtime::ops::Ops::open(root, exe, 0)?;
             ops.restore().await?;
             let started = std::time::Instant::now();
             let mut reply = ops.answer(Some(wsp_frames::RequestId::from(1)), &frame).await;
