@@ -210,7 +210,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1233,7 +1233,7 @@ export interface Runtime {
     /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
      * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
      * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o: { project: string }): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
+    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
@@ -4918,9 +4918,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const workspaces: Runtime["workspaces"] = {
-    async landing(o) {
+    async landing(o, origin) {
       await ready();
-      const project = await projectsDoor.resolve(o.project);
+      // The caller rides it as it rides every other verb that names a project: a thread reads where its own
+      // project's computer is and nothing about another's.
+      const project = await projectsDoor.resolve(o.project, origin);
       const computer = project.computer;
       const kind = kindForComputer(computer);
       if (worksInPlace(kind)) return { name: placeName(HERE_PLACE_ID), capabilities: backendOfKind(kind).capabilities };
@@ -8210,10 +8212,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return computerRows();
     },
 
-    async resolve(ref: string, _origin?: Caller): Promise<ProjectView> {
+    async resolve(ref: string, origin?: Caller): Promise<ProjectView> {
       await ready();
       const all = [...projectsHeld.values()];
       const found = all.find(p => p.id === ref) ?? all.find(p => p.name === ref);
+      // A thread works on the project its own workspace holds: every other word reads as absent here, so a word
+      // that names another project and one that names nothing are one sentence and neither says what else stands.
+      // A thread whose workspace this host no longer holds works on none, so every word reads the same for it.
+      const scope = scopeOf(origin);
+      if (scope !== undefined) {
+        const mine = projectOfScope(scope);
+        if (found === undefined || mine === undefined || found.id !== mine) throw notFoundRefusal(bareNoSuchProjectLine(ref));
+        return found;
+      }
       if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));
       return found;
     },

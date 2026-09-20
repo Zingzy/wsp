@@ -21,6 +21,8 @@ import { HERE_PLACE_ID,
   spawnCapRefusal,
   spawnGoldenRefusal,
   spawnDepthRefusal,
+  bareNoSuchProjectLine,
+  noSuchProjectLine,
   noWorkspaceRefusal,
   parentProjectRefusal,
   spawnProjectRefusal,
@@ -228,7 +230,8 @@ describe("agents spawning agents", () => {
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
     const line = spawnProjectRefusal(rootThread, mine.name, other.name);
-    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(line);
+    // A project word the thread's own workspace does not hold is absent to it, so the create never reaches the rule.
+    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(bareNoSuchProjectLine(other.id));
     await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(line);
     await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(line);
     await expect(rt.workspaces.bringBack({ workspaceId: theirs.id }, asThread(scope))).rejects.toThrow(line);
@@ -236,6 +239,55 @@ describe("agents spawning agents", () => {
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name)).toEqual(["lead"]);
     held.end(0);
     await rt.close();
+  });
+
+  it("a thread's landing resolves its own project alone, and the refusal names no other", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const mine = await projectOn(rt);
+    const other = await projectOn(rt);
+    const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    // Its own project answers as it does for the person.
+    expect((await rt.workspaces.landing({ project: mine.id }, asThread(scope))).name).toBe((await rt.workspaces.landing({ project: mine.id })).name);
+    for (const word of [other.id, other.name, "nothing-here"]) {
+      const refusal = rt.workspaces.landing({ project: word }, asThread(scope));
+      await expect(refusal).rejects.toThrow(bareNoSuchProjectLine(word));
+      await expect(refusal).rejects.not.toThrow(other.name === word ? "this host holds" : other.name);
+    }
+    // A create naming another project reads the same sentence, and the person still reads every project by name.
+    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(bareNoSuchProjectLine(other.id));
+    await expect(rt.workspaces.landing({ project: "nothing-here" })).rejects.toThrow(noSuchProjectLine("nothing-here", [mine.name, other.name]));
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a thread's landing over the wire reads its own project and no other", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const mine = await projectOn(rt);
+    const other = await projectOn(rt);
+    const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const client = await WsClient.connect(srv.port, { token: held.launches[0]!.env[HOST_TOKEN_ENV]! });
+      expect((await client.request("workspaces.landing", { project: mine.id }))["ok"]).toBe(true);
+      const refused = await client.request("workspaces.landing", { project: other.name });
+      expect(refused["ok"]).toBe(false);
+      expect(refused["error"]).toBe(bareNoSuchProjectLine(other.name));
+      const mine2 = await WsClient.connect(srv.port, { token: "secret" });
+      expect(String((await mine2.request("workspaces.landing", { project: "nothing-here" }))["error"])).toBe(noSuchProjectLine("nothing-here", [mine.name, other.name]));
+      mine2.close();
+      client.close();
+    } finally {
+      await srv.close();
+      held.end(0);
+      await handle.finished;
+      await rt.close();
+    }
   });
 
   it("the machine past the cap is refused with the sentence naming the root and the count", async () => {

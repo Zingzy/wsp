@@ -701,7 +701,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "workspaces.landing":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project })) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project }, origin)) });
               return;
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
