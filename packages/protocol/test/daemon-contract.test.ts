@@ -16,6 +16,7 @@ import { ZodLiteral, type ZodObject, type ZodRawShape, type ZodTypeAny } from "z
 import {
   AUTH_DEADLINE_MS,
   DAEMON_AUTH_DEADLINE_PASSED,
+  DAEMON_TOKEN_ROTATED,
   DAEMON_DEFAULT_HOST,
   DAEMON_DEFAULT_PORT,
   DAEMON_FIRST_FRAME_NOT_AUTH,
@@ -211,6 +212,7 @@ const words = (): Record<string, string> => ({
   firstFrameNotAuth: DAEMON_FIRST_FRAME_NOT_AUTH,
   preAuthBytesExceeded: DAEMON_PRE_AUTH_BYTES_EXCEEDED,
   authDeadlinePassed: DAEMON_AUTH_DEADLINE_PASSED,
+  tokenRotated: DAEMON_TOKEN_ROTATED,
   invalidJson: DAEMON_INVALID_JSON,
   noToken: DAEMON_NO_TOKEN,
   unknownOp: unknownOpLine("{op}"),

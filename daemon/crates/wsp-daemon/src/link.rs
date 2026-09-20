@@ -175,7 +175,9 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
                     match link.hold(*ws, url, *seal).await {
                         Ended::Leave | Ended::Restart => return,
                         Ended::Quiet => link.log(&words::link_quiet(url, seconds(link.quiet.as_millis() as u64))),
-                        Ended::Peer => {}
+                        // The link carries no token, so the watcher never reaches it; a socket that ended any
+                        // other way is one to dial again.
+                        Ended::Peer | Ended::Rotated => {}
                     }
                     // A link that stood a minute was a working link: the next one starts from the bottom of the
                     // backoff rather than from wherever a laptop that slept for an hour left it.
@@ -428,7 +430,7 @@ impl Link {
     async fn hold(&self, ws: Socket, url: &str, seal: Seal) -> Ended {
         self.log(&words::link_linked(url));
         let (tx, rx) = mpsc::unbounded_channel();
-        let conn = Arc::new(Conn::new(self.ctx.next_key(), None, Outbound(tx), Road::Link));
+        let conn = Arc::new(Conn::new(self.ctx.next_key(), None, Outbound(tx), Road::Link, None));
         door::serve_authed(ws, &self.ctx, conn, rx, Some(self.quiet), Some(seal)).await
     }
 }

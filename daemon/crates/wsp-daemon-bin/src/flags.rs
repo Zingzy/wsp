@@ -137,6 +137,8 @@ impl Flags {
             mode_interval_ms: self.mode_interval_ms,
             auth_deadline_ms: self.auth_deadline_ms,
             guest_unwatched_ms: self.guest_unwatched_ms,
+            // The rule's own second: no flag shortens it, since only a case has any use for another number.
+            token_watch_ms: None,
             place_file: self.place_file,
             // Read off the process by the bind, before the probe list takes its place; no flag names it.
             unit_path: None,

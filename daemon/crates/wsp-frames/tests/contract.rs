@@ -257,6 +257,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("firstFrameNotAuth", words::AUTH_FIRST_FRAME.to_owned());
     m.insert("preAuthBytesExceeded", words::AUTH_TOO_MANY_BYTES.to_owned());
     m.insert("authDeadlinePassed", words::AUTH_NO_FRAME_IN_TIME.to_owned());
+    m.insert("tokenRotated", words::AUTH_TOKEN_ROTATED.to_owned());
     m.insert("invalidJson", words::INVALID_JSON.to_owned());
     m.insert("noToken", words::NO_TOKEN_AT_START.to_owned());
     m.insert("unknownOp", words::unknown_op("{op}"));

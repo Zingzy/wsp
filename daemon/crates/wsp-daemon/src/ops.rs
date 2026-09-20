@@ -63,6 +63,9 @@ pub(crate) struct Conn {
     pub(crate) scope: Option<NonZeroU16>,
     pub(crate) out: Outbound,
     pub(crate) road: Road,
+    /// The token this socket came through the door with, held so a rotation can tell the sockets the old one
+    /// opened from the ones the new one did. None on the link and inside a workspace, which take no token.
+    pub(crate) token: Option<String>,
     pub(crate) tunnels: Tunnels,
     /// What the socket's close undoes: every pty, mode and watcher listener an op on it made. None once closed, so an
     /// op still being answered when the socket went undoes itself at once instead of outliving it.
@@ -75,12 +78,13 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
-    pub(crate) fn new(key: u64, scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
+    pub(crate) fn new(key: u64, scope: Option<NonZeroU16>, out: Outbound, road: Road, token: Option<String>) -> Conn {
         Conn {
             key,
             scope,
             out,
             road,
+            token,
             tunnels: Tunnels::default(),
             detaches: Mutex::new(Some(Vec::new())),
             proc_watch: Mutex::new(None),
@@ -870,7 +874,7 @@ mod tests {
 
     fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
+        (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road, None)), rx)
     }
 
     async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {

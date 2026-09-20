@@ -184,7 +184,9 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound));
+    // The token this socket came in on is held: a rotation takes the sockets the old one opened, and one let in
+    // on the new token in the same breath as the write stays.
+    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound, Some(auth.token)));
     serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
@@ -210,7 +212,7 @@ async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: 
         return;
     };
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace)));
+    let conn = Arc::new(Conn::new(ctx.next_key(), None, Outbound(tx), Road::Workspace(workspace), None));
     serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
@@ -221,6 +223,8 @@ pub(crate) enum Ended {
     Quiet,
     Leave,
     Restart,
+    /// The token this socket authed with is no longer the file's.
+    Rotated,
 }
 
 /// The one loop every authed socket runs, inbound or the link a place opened: the hello first, then each frame
@@ -241,6 +245,9 @@ where
     let key = conn.key;
     if conn.scope.is_none() && !matches!(conn.road, Road::Workspace(_)) {
         ctx.add_authed(key, conn.out.clone());
+    }
+    if let Some(token) = conn.token.clone() {
+        ctx.add_tokened(key, token, conn.out.clone());
     }
     let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
     let mut ended = Ended::Peer;
@@ -294,6 +301,9 @@ where
                             let _ = ws.flush().await;
                             break Ended::Restart;
                         }
+                        // Nothing is written to a socket whose token the file no longer holds: it is closed with
+                        // the sentence and no frame, as every socket the door itself turns away is.
+                        Some(Outgoing::Rotated) => break Ended::Rotated,
                     }
                 }
                 _ = &mut idle, if quiet.is_some() => break Ended::Quiet,
@@ -305,13 +315,16 @@ where
     ctx.remove_authed(key);
     ctx.guests.socket_closed(key);
     conn.close();
-    let reason = match ended {
+    let closing = match ended {
         Ended::Peer => None,
-        Ended::Quiet => Some(words::LINK_CLOSE_QUIET),
-        Ended::Leave => Some(words::LINK_CLOSE_STOPPING),
-        Ended::Restart => Some(words::LINK_CLOSE_UPDATING),
+        Ended::Quiet => Some((CloseCode::Normal, words::LINK_CLOSE_QUIET)),
+        Ended::Leave => Some((CloseCode::Normal, words::LINK_CLOSE_STOPPING)),
+        Ended::Restart => Some((CloseCode::Normal, words::LINK_CLOSE_UPDATING)),
+        // Under the code every socket this daemon turns away for its token travels with, so a client reads a
+        // rotation the way it reads a token refused at the door.
+        Ended::Rotated => Some((CloseCode::from(words::AUTH_CLOSE_CODE), words::AUTH_TOKEN_ROTATED)),
     };
-    let frame = reason.map(|reason| CloseFrame { code: CloseCode::Normal, reason: reason.into() });
+    let frame = closing.map(|(code, reason)| CloseFrame { code, reason: reason.into() });
     let _ = timeout(CLOSE_WAIT, ws.close(frame)).await;
     // Both endings stop this process. What differs is what happens next on that computer: after a leave nothing
     // brings it back, and after an update its supervisor starts the binary that landed.

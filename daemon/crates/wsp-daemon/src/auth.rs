@@ -3,8 +3,16 @@
 //! an exported token or a query string never counts.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 use subtle::ConstantTimeEq;
+
+use crate::Ctx;
+
+/// How often the watcher reads the token file. A rotation is answered within this, which is the gap between the
+/// host writing the file and the sockets the old token opened going.
+pub(crate) const WATCH_EVERY: Duration = Duration::from_secs(1);
 
 /// The token as the file holds it now, trimmed; nothing when the file is missing, unreadable or blank.
 pub(crate) fn current_token(path: &Path) -> Option<String> {
@@ -16,8 +24,25 @@ pub(crate) fn current_token(path: &Path) -> Option<String> {
 /// Whether the token a peer sent is the one the file holds now, compared in constant time.
 pub(crate) fn token_matches(given: &str, path: &Path) -> bool {
     match current_token(path) {
-        Some(expected) => expected.as_bytes().ct_eq(given.as_bytes()).into(),
+        Some(expected) => same(given, &expected),
         None => false,
+    }
+}
+
+/// Two tokens compared in constant time, the one rule both the door and the watcher read.
+pub(crate) fn same(given: &str, expected: &str) -> bool {
+    expected.as_bytes().ct_eq(given.as_bytes()).into()
+}
+
+/// The token file, read once a second: every socket that came through the door on a token the file no longer
+/// holds is cut. Reading the file at the auth frame alone let a rotation revoke nothing, so a box that held the
+/// old token kept every socket it had already opened for as long as it cared to. A read that answers nothing cuts
+/// nothing: a file being renamed into place is a moment, not a rotation.
+pub(crate) async fn watch(ctx: Arc<Ctx>) {
+    loop {
+        tokio::time::sleep(ctx.options.token_watch_ms.map_or(WATCH_EVERY, Duration::from_millis)).await;
+        let Some(held) = current_token(&ctx.options.token_path) else { continue };
+        ctx.cut_stale_tokens(&held);
     }
 }
 

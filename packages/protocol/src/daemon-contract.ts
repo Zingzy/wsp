@@ -97,6 +97,10 @@ export const DAEMON_TOKEN_REFUSED = "daemon token refused; the host holds the cu
 export const DAEMON_FIRST_FRAME_NOT_AUTH = "the first frame must be auth";
 export const DAEMON_PRE_AUTH_BYTES_EXCEEDED = "too many bytes before the auth frame";
 export const DAEMON_AUTH_DEADLINE_PASSED = "no auth frame arrived in time";
+/** What a socket already through the door is cut with once the token it authed with is no longer the file's: a
+ * rotation takes the sockets the old token opened with it, rather than leaving them answering for the life of the
+ * connection. Under the same close code the four above travel with. */
+export const DAEMON_TOKEN_ROTATED = "the daemon token was rotated; dial again with the current one";
 /** The reply to a frame that is not JSON, with a null id since none could be read. */
 export const DAEMON_INVALID_JSON = "invalid json";
 /** Why a daemon started with an empty token file refuses to start at all. */

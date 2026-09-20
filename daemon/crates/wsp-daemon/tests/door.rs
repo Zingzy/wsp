@@ -1203,3 +1203,45 @@ async fn a_second_attach_on_one_socket_prints_each_byte_once_and_a_detach_stops_
     a.every_event_parses();
     b.every_event_parses();
 }
+
+/// The token file is the gate on the port, and a rotation only means something if it takes the sockets the old
+/// token opened with it. Reading the file at the auth frame alone left a box that held the old token every socket
+/// it had already opened, for as long as it cared to hold them.
+#[tokio::test]
+async fn a_rotation_cuts_the_sockets_the_old_token_opened_and_leaves_the_ones_the_new_one_did() {
+    let d = start_with(|options| options.token_watch_ms = Some(50)).await;
+    let mut old = authed(&d).await;
+    let mut scoped = Client::connect(d.addr, TOKEN, Some(4000)).await.0;
+    // The host writes the file and dials on the new token in one breath, which is what the second socket here is.
+    std::fs::write(
+        d.token.path(),
+        "second-token
+",
+    )
+    .unwrap();
+    let (mut fresh, closed) = Client::connect(d.addr, "second-token", None).await;
+    assert_eq!(closed, None);
+
+    // Both sockets the old token opened go, the port-scoped one among them: it hears no events and still holds a
+    // token the rotation took away.
+    let cut = Closed { code: words::AUTH_CLOSE_CODE, reason: words::AUTH_TOKEN_ROTATED.to_owned() };
+    assert_eq!(old.wait_closed().await, cut);
+    assert_eq!(scoped.wait_closed().await, cut);
+    // The one let in on the new token stays open through the tick and answers as it did.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(fresh.request("ping", json!({})).await["ok"], true);
+}
+
+/// A socket whose token is still the file's is not cut by a tick, however many go by: the watcher takes the
+/// sockets a rotation left behind and no others.
+#[tokio::test]
+async fn a_socket_on_the_token_the_file_holds_stands_through_every_tick() {
+    let d = start_with(|options| options.token_watch_ms = Some(20)).await;
+    let mut c = authed(&d).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.request("ping", json!({})).await["ok"], true);
+    // The same file written with the same bytes is no rotation: nothing of what it opened goes.
+    std::fs::write(d.token.path(), format!("{TOKEN}\n")).unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(c.request("ping", json!({})).await["ok"], true);
+}

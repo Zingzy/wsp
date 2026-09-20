@@ -254,7 +254,7 @@ struct Running {
     port: u16,
     lines: Arc<Mutex<Vec<String>>>,
     run: tokio::task::JoinHandle<std::io::Result<()>>,
-    _token: tempfile::NamedTempFile,
+    token: tempfile::NamedTempFile,
 }
 
 impl Running {
@@ -300,7 +300,7 @@ async fn place_daemon(place: &Place, tune: impl FnOnce(&mut Options)) -> Running
     let daemon = Daemon::bind_with(options, Box::new(move |line| sink.lock().unwrap().push(line.to_owned()))).await.unwrap();
     let port = daemon.local_addr().port();
     let run = tokio::spawn(daemon.run());
-    Running { port, lines, run, _token: token }
+    Running { port, lines, run, token }
 }
 
 async fn settled(ms: u64) {
@@ -742,4 +742,20 @@ async fn ends_the_socket_on_a_frame_sent_in_the_clear_after_the_seal_began() {
     ws.send(Message::text(json!({"id": 5, "op": "ping"}).to_string())).await.unwrap();
     let ended = tokio::time::timeout(Duration::from_secs(5), async { while ws.next().await.is_some() {} }).await;
     assert!(ended.is_ok(), "the socket stayed open on a frame nobody sealed");
+}
+
+#[tokio::test]
+async fn a_rotation_of_this_computers_own_token_leaves_the_link_alone() {
+    let key = place_pair();
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let d = place_daemon(&place, |o| o.token_watch_ms = Some(20)).await;
+    let mut held = host.held().await;
+    d.until_logged(|l| l == words::link_linked(&host.url)).await;
+    // The link came through no door of this daemon's and carries no token, so a rotation of the file has nothing
+    // of it to take: the host keeps the socket it is holding.
+    std::fs::write(d.token.path(), "rotated-token\n").unwrap();
+    settled(200).await;
+    let mut events = Vec::new();
+    assert_eq!(ask(&mut held, 41, "ping", &mut events).await, json!({"id": 41, "ok": true}));
 }
