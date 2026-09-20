@@ -1432,7 +1432,7 @@ fn life_of(init: &Init) -> String {
 
 /// Every bind the fence staged detached and the directory holding them gone.
 fn clear_binds(binds: &Path) -> Result<(), OpError> {
-    bundle::unmount_under(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
+    bundle::unmount_inside(binds).map_err(|e| OpError::plain(format!("{}: {e}", binds.display())))?;
     match fs::remove_dir_all(binds) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),

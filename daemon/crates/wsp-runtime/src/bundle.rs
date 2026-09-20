@@ -770,16 +770,24 @@ pub fn computer_tree_refusal(at: &str, tree: &str) -> String {
 /// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
 /// the path is ever named, let alone unmounted.
 pub fn unmount_under(target: &Path) -> Result<(), Error> {
+    unmount_inside(target)?;
+    unmount(target)
+}
+
+/// The same, for a directory of this daemon's own that is no mount itself and whose entries are: the fence's
+/// staging directory. Asking the kernel to detach a path that was never mounted is its own refusal to read, so
+/// nothing but what the table names is named here.
+pub fn unmount_inside(target: &Path) -> Result<(), Error> {
     let mut under: Vec<PathBuf> = mount_points(&fs::read_to_string(MOUNTINFO).map_err(at(Path::new(MOUNTINFO)))?)
         .into_iter()
-        .filter(|point| point.starts_with(target))
+        .filter(|point| point.starts_with(target) && point != target)
         .collect();
     // Deepest first: a mount cannot be detached while another sits under it.
     under.sort_by_key(|point| std::cmp::Reverse(point.components().count()));
     for point in under {
         unmount(&point)?;
     }
-    unmount(target)
+    Ok(())
 }
 
 /// The filesystem the mount covering this path is of, for the sentence a plain copy is explained in; nothing
