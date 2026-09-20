@@ -8508,10 +8508,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const shown = new Set(listedFor(origin).map(e => e.record.id));
         return rows.filter(row => shown.has(row.id));
       },
-      // A cost read answers for a workspace this host no longer holds, so the origin rule is read off the record when
-      // there is one rather than through entryOf, which refuses an id it does not know.
+      // A cost read answers for a workspace this host no longer holds, which is why the rule for a named id is read
+      // here rather than through entryOf, which refuses an id it does not know.
       history: async (workspaceId, origin) => {
-        refuseRelayed(live.get(workspaceId)?.record, origin);
+        refuseNamed(workspaceId, origin);
         return status.history(workspaceId);
       },
     },

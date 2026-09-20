@@ -334,13 +334,17 @@ describe("a host that listens beyond this computer", () => {
     expect(theirs.status).toBe(200);
   });
 
-  it("a thread's token is refused over the write route from an address of this computer that is not loopback", async () => {
-    // The half of the road rule the connector's headers cannot prove: the peer's own address. Skipped on a machine
-    // whose only interface is loopback, since there is nowhere else to dial from.
+  it("a thread's token is refused over the write route from an address of this computer that is not loopback", async ctx => {
+    // The half of the road rule the connector's headers cannot prove: the peer's own address. A machine whose only
+    // interface is loopback has nowhere else to dial from, and says so rather than reading as a case that ran.
     const beyond = Object.values(networkInterfaces())
       .flatMap(rows => rows ?? [])
       .find(row => row.family === "IPv4" && !row.internal)?.address;
-    if (beyond === undefined) return;
+    // skip() throws, so the return below is only what tells the compiler the address is one from here on.
+    if (beyond === undefined) {
+      ctx.skip();
+      return;
+    }
     const { handle: h, runtime } = await up(WILDCARD);
     const project = await projectOn(runtime);
     const own = await createOn(runtime, { project: project.id, golden: GOLDEN.versions[0]!.snapshotId, name: "lead", agents: AGENTS_ON });
