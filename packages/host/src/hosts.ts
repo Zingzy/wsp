@@ -5,10 +5,11 @@
 // bought; the default alias is one word in a file beside them. Every reader
 // of "which host" comes through aimedHost, so the command line and the tool
 // server cannot disagree about where a verb goes.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { writeOwn } from "@wsp/runtime";
 import { servingHost } from "./host-lock.js";
 import { defaultHomeIn, homeNamed } from "./serving-home.js";
 
@@ -120,10 +121,9 @@ export function readHost(home: string, alias: string): HostRecord | undefined {
 }
 
 export function writeHost(home: string, alias: string, record: HostRecord): void {
-  const path = hostFile(home, alias);
-  mkdirSync(hostsDir(home), { recursive: true, mode: 0o700 });
-  // The token in here opens the host, so the file is written for this user alone rather than left at the umask's word.
-  writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  // The token in here opens the host, so it goes through the one writer of the owner's files: a record left at
+  // 0644 by an older build is replaced rather than rewritten.
+  writeOwn(home, join("hosts", `${checkedAlias(alias)}.json`), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export function listHosts(home: string): HostEntry[] {
@@ -168,8 +168,7 @@ export function defaultHost(home: string): string | undefined {
 }
 
 export function setDefaultHost(home: string, alias: string): void {
-  mkdirSync(hostsDir(home), { recursive: true, mode: 0o700 });
-  writeFileSync(defaultFile(home), `${checkedAlias(alias)}\n`, { mode: 0o600 });
+  writeOwn(home, join("hosts", "default"), `${checkedAlias(alias)}\n`);
 }
 
 // The rule now lives beside WS_PATH in the protocol, which a place's own agent reads too; the name stays here for

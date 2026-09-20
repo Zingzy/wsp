@@ -5,8 +5,9 @@
 // environment, never named here. The app's setup reads the home's file alone: a
 // key in the process environment or a .env beside a checkout is the terminal's
 // business and never reads as saved on a screen.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { writeOwn } from "@wsp/runtime";
 import { VAULT_VARIABLES } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
@@ -74,8 +75,5 @@ export function writeEnvFile(path: string, set: Record<string, string>): void {
     while (lines.at(-1) === "") lines.pop();
   }
   for (const [k, v] of pending) lines.push(`${k}=${v}`);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
-  // writeFileSync's mode only applies when it creates the file.
-  chmodSync(path, 0o600);
+  writeOwn(dirname(path), basename(path), `${lines.join("\n")}\n`);
 }

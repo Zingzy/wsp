@@ -3,7 +3,7 @@
 // against: a record round trips at mode 0600, a flag beats the environment
 // beats the default alias beats the lock on this computer, and a URL typed
 // where an alias goes is a host nothing is stored for.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,6 +41,20 @@ describe("the hosts file", () => {
     expect(readHost(home, "box")).toEqual(record("http://box.local:4400"));
     expect(statSync(join(hostsDir(home), "box.json")).mode & 0o777).toBe(0o600);
     expect(statSync(hostsDir(home)).mode & 0o777).toBe(0o700);
+  });
+
+  it("a record and a folder an older build left wider are repaired by the write that goes over them", () => {
+    const home = tempDir("hosts-wide");
+    mkdirSync(hostsDir(home), { recursive: true });
+    chmodSync(hostsDir(home), 0o755);
+    writeFileSync(join(hostsDir(home), "box.json"), "{}\n");
+    chmodSync(join(hostsDir(home), "box.json"), 0o644);
+    writeHost(home, "box", record("http://box.local:4400"));
+    setDefaultHost(home, "box");
+    expect(statSync(join(hostsDir(home), "box.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(hostsDir(home), "default")).mode & 0o777).toBe(0o600);
+    expect(statSync(hostsDir(home)).mode & 0o777).toBe(0o700);
+    expect(readHost(home, "box")).toEqual(record("http://box.local:4400"));
   });
 
   it("lists every alias with its url and marks the default, and answers nothing for a home with no hosts folder", () => {
