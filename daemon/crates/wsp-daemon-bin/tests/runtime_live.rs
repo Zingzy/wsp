@@ -3230,3 +3230,45 @@ async fn a_link_the_box_root_keeps_under_the_shared_home_lands_a_share_inside_th
     let _ = fs::remove_dir_all(&logins);
     w.close().await;
 }
+
+/// What the box root's own login runs by name is the workspace's own copy of it: a line a workspace writes into
+/// its `/root/.bashrc` is in that copy, the box's own file is byte for byte as it was, and a wake reads the line
+/// still. The one write under the box's home is into the workspace's own copy, which is the rule this reads.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn the_rc_files_the_box_root_runs_are_the_workspaces_own_copies() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let rc = Path::new("/root/.bashrc");
+    let before = fs::read(rc).ok();
+    let id = w.create(spec(json!({ "idempotencyKey": format!("live-rc-{}", checkout_key()) }))).await;
+
+    // The copy the boot took reads inside as the box's file read out here at the first boot.
+    let (code, out, err) = w.exec(&id, "cat /root/.bashrc").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out.as_bytes(), before.clone().unwrap_or_default().as_slice(), "the copy inside is not the box's file");
+
+    // A line written inside goes into that copy and nowhere else.
+    let line = format!("# wsp-live-{}", checkout_key());
+    let (code, _, err) = w.exec(&id, &format!("echo '{line}' >> /root/.bashrc")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let (_, out, _) = w.exec(&id, "tail -1 /root/.bashrc").await;
+    assert_eq!(out.trim(), line, "the workspace's own copy did not take the line");
+    match &before {
+        Some(held) => assert_eq!(fs::read(rc).ok().as_ref(), Some(held), "the write inside reached the box root's own rc file"),
+        // A box that keeps no such file gains the empty file the cover lands on, and nothing is written into it.
+        None => assert_eq!(fs::metadata(rc).unwrap().len(), 0, "the cover's mount point on the box is not empty"),
+    }
+
+    // And the copy is kept as the uppers are: the wake reads the line back and the box's file is still its own.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let (_, out, _) = w.exec(&id, "tail -1 /root/.bashrc").await;
+    assert_eq!(out.trim(), line, "the wake lost the workspace's own copy");
+    if before.is_some() {
+        assert_eq!(fs::read(rc).ok(), before, "the wake reached the box root's own rc file");
+    }
+
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    w.close().await;
+}

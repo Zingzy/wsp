@@ -91,6 +91,13 @@ impl Layout {
     pub fn empty_at(&self, id: &str, at: &str) -> PathBuf {
         self.workspace(id).join("empty").join(at.trim_start_matches('/'))
     }
+    /// The workspace's own copy of a file the box keeps under the home every workspace here shares, or its own
+    /// folder where the box keeps one: taken at the first boot that finds no copy and kept across wakes as the
+    /// uppers are, so what a login inside writes in its rc files is the workspace's and what the box root's own
+    /// login reads is the box's. One directory per path, as the empty ones are.
+    pub fn own_at(&self, id: &str, at: &str) -> PathBuf {
+        self.workspace(id).join("own").join(at.trim_start_matches('/'))
+    }
     /// The three files bound over the container's /etc.
     pub fn etc(&self, id: &str) -> PathBuf {
         self.workspace(id).join("etc")
@@ -546,11 +553,11 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     // off the rootfs here rather than listed here, and read last: the person's home and the box's /etc are both
     // among the trees being covered, and both are only there to read once the mounts above are up.
     for cover in hardening::covered(&rootfs) {
-        let empty = layout.empty_at(id, &cover.at);
+        let source = if cover.own { layout.own_at(id, &cover.at) } else { layout.empty_at(id, &cover.at) };
         if cover.file {
-            bind_file_over(&place, &empty, &cover.at)?;
+            bind_file_over(&place, &source, &cover.at, cover.own)?;
         } else {
-            bind_over(&place, &empty, &cover.at)?;
+            bind_over(&place, &source, &cover.at)?;
         }
     }
     // Last, and after the covers: the Homebrew prefix sits under /home, which a cover has just emptied, so a bind
@@ -779,14 +786,22 @@ fn bind_over(place: &Inside, source: &Path, at_path: &str) -> Result<(), Error> 
     bind_inside(place, source, at_path).map(drop)
 }
 
-/// The same for a path the box keeps a file at: a file bind wants a file at both ends, so the workspace's own
-/// empty one is made here and the one inside is made by the walk where the box keeps none.
-fn bind_file_over(place: &Inside, source: &Path, at_path: &str) -> Result<(), Error> {
+/// The same for a path the box keeps a file at: a file bind wants a file at both ends, so the workspace's own one
+/// is made here and the one inside is made by the walk where the box keeps none. Where the cover is the
+/// workspace's own copy, the first boot that finds no copy takes the bytes the box keeps there, read through the
+/// same descriptor the bind lands on and never through the path a second time.
+fn bind_file_over(place: &Inside, source: &Path, at_path: &str, own: bool) -> Result<(), Error> {
+    let opened = open_inside(place, at_path, Want::File)?;
     if let Some(dir) = source.parent() {
         fs::create_dir_all(dir).map_err(at(dir))?;
     }
-    empty_file(source)?;
-    let opened = open_inside(place, at_path, Want::File)?;
+    if own && !source.exists() {
+        let held = fs::read(opened.at()).map_err(at(&opened.named(place)))?;
+        fs::write(source, held).map_err(at(source))?;
+        fs::set_permissions(source, fs::Permissions::from_mode(0o600)).map_err(at(source))?;
+    } else {
+        empty_file(source)?;
+    }
     mount_bind(source, &opened.at(), &opened.named(place))
 }
 
@@ -1168,6 +1183,12 @@ mod tests {
         // is not what it writes at another.
         let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
         assert_eq!(empties.len(), hardening::EMPTY_BINDS.len());
+        // The workspace's own copies of what the box root's shell runs by name sit apart from the empty ones, one
+        // directory per path and all of them under the workspace's own folder, so a stop keeps them.
+        assert_eq!(l.own_at("wsp-a", "/root/.bashrc"), PathBuf::from("/wsp/run/wsp-a/own/root/.bashrc"));
+        let owned: std::collections::BTreeSet<PathBuf> = hardening::ROOT_RUN_COVERS.iter().map(|(at, _)| l.own_at("wsp-a", at)).collect();
+        assert_eq!(owned.len(), hardening::ROOT_RUN_COVERS.len());
+        assert!(owned.iter().all(|made| made.starts_with(l.workspace("wsp-a")) && !made.starts_with(l.empty_at("wsp-a", "/"))));
         // Every one of them under the workspace's own folder, so a stop keeps them and a remove takes them all.
         for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", hardening::EMPTY_BINDS[0]), l.upper("wsp-a")] {
             assert!(made.starts_with(l.workspace("wsp-a")), "{}", made.display());
@@ -1675,6 +1696,8 @@ mod tests {
         // neither of which is a thing this reads the content of.
         let box_ssh = fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0);
         let box_shadow = fs::metadata("/etc/shadow").map(|m| m.len()).ok();
+        // And what the box root's own login reads by name, so the case can say the workspace's write stayed off it.
+        let box_rc = fs::read("/root/.bashrc").ok();
         // What this computer has of the install roots outside the overlaid trees: /home/linuxbrew on a box the
         // recipe's Homebrew rows ran on, nothing on one with no Homebrew, and the case reads both.
         let roots = tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
@@ -1737,8 +1760,14 @@ mod tests {
         for cover in &covers {
             let at_path = inside(&rootfs, &cover.at).unwrap();
             assert!(mounted(&at_path), "{} is not covered", cover.at);
+            let source = if cover.own { layout.own_at(id, &cover.at) } else { layout.empty_at(id, &cover.at) };
             if cover.file {
-                assert_eq!(fs::metadata(&at_path).unwrap().len(), 0, "{} reads bytes inside", cover.at);
+                // What reads inside is the workspace's own file, empty where the cover is an empty one and the
+                // box's bytes as they were at the first boot where it is the workspace's own copy.
+                assert_eq!(fs::read(&at_path).unwrap(), fs::read(&source).unwrap(), "{} is not the workspace's own", cover.at);
+                if !cover.own {
+                    assert_eq!(fs::metadata(&at_path).unwrap().len(), 0, "{} reads bytes inside", cover.at);
+                }
                 continue;
             }
             // Empty, but for the install roots the boot binds in after the covers: the only thing under /home a
@@ -1756,7 +1785,7 @@ mod tests {
             expected.dedup();
             assert_eq!(held, expected, "{} holds more than the install roots brought in", cover.at);
             fs::write(at_path.join("probe"), b"w").unwrap();
-            assert!(layout.empty_at(id, &cover.at).join("probe").is_file(), "{} wrote somewhere else", cover.at);
+            assert!(source.join("probe").is_file(), "{} wrote somewhere else", cover.at);
             // And the write went to the workspace's own empty directory, never to the bound root inside it.
             assert_eq!(fs::read_dir(&at_path).unwrap().count(), expected.len() + 1, "{}", cover.at);
         }
@@ -1771,6 +1800,17 @@ mod tests {
             inside_names.sort();
             own.sort();
             assert_eq!(inside_names, own, "{root} reads differently inside");
+        }
+        // What the box root's own login runs by name is the workspace's own copy of it: a line written inside is
+        // in that copy and the box's own file is as it was. A box that keeps no such file gains the empty file
+        // the cover lands on, and nothing is ever written into it.
+        let rc = Path::new("/root/.bashrc");
+        let inside_rc = inside(&rootfs, "/root/.bashrc").unwrap();
+        assert_eq!(fs::read(&inside_rc).unwrap(), box_rc.clone().unwrap_or_default(), "the workspace's own rc is not the box's");
+        fs::write(&inside_rc, b"# the workspace wrote this\n").unwrap();
+        match &box_rc {
+            Some(held) => assert_eq!(fs::read(rc).ok().as_ref(), Some(held), "a write inside reached the box root's own rc file"),
+            None => assert_eq!(fs::metadata(rc).unwrap().len(), 0, "the cover's mount point on the box is not empty"),
         }
         assert_eq!(fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0), box_ssh, "the computer's own keys changed");
         assert_eq!(fs::metadata("/etc/shadow").map(|m| m.len()).ok(), box_shadow, "the computer's own logins changed");

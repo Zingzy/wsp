@@ -39,6 +39,38 @@ pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS
 /// types for no credential kept back.
 pub const EMPTY_BINDS: [&str; 6] = ["/etc/shadow", "/etc/gshadow", "/home", "/root/.ssh", "/var/lib/docker", "/var/lib/containerd"];
 
+/// Every path under the box root's own home that a login shell or a root systemd manager of the box's runs by
+/// name, with whether the box keeps a file or a directory there. A workspace is root in a home the box root
+/// shares with it, so a line it writes into one of these is a line the box root's next login runs outside every
+/// workspace: each is the workspace's own copy of the box's file, or its own folder, bound over the box's. A
+/// path the box keeps nothing at is covered all the same, so a workspace cannot make it.
+///
+/// What this does not close, said plainly: the box root's own `.bashrc` and `.profile` source files in the shared
+/// home beyond these names, an nvm or a cargo environment line, a completion file under `.local/share`, and they
+/// put `.local/bin` and `bin` on the PATH. A plant in one of those still runs at the box root's next login. What
+/// is closed is what the distribution's own skeleton reads by name; the rest is the shared home the map rules as
+/// the design of this place.
+pub const ROOT_RUN_COVERS: [(&str, bool); 18] = [
+    ("/root/.profile", true),
+    ("/root/.bash_profile", true),
+    ("/root/.bash_login", true),
+    ("/root/.bash_logout", true),
+    ("/root/.bashrc", true),
+    ("/root/.bash_aliases", true),
+    ("/root/.zshenv", true),
+    ("/root/.zprofile", true),
+    ("/root/.zshrc", true),
+    ("/root/.zlogin", true),
+    ("/root/.zlogout", true),
+    ("/root/.pam_environment", true),
+    ("/root/.gitconfig", true),
+    ("/root/.config/fish/config.fish", true),
+    ("/root/.config/systemd", false),
+    ("/root/.local/share/systemd", false),
+    ("/root/.config/environment.d", false),
+    ("/root/.config/autostart", false),
+];
+
 /// Where a box keeps the keys it answers ssh on, and the name every one of them starts with: they are named by
 /// algorithm, so the directory is read rather than the names written down. A workspace holding the private ones
 /// could answer as the box to anything that trusts it.
@@ -46,11 +78,15 @@ pub const SSH_DIR: &str = "/etc/ssh";
 pub const HOST_KEY_PREFIX: &str = "ssh_host_";
 
 /// One path inside a workspace and what goes over it: the workspace's own empty file where the box keeps a file
-/// there, its own empty directory where it keeps a directory.
+/// there, its own empty directory where it keeps a directory, or its own copy of the box's file where a shell of
+/// the box's runs what that file holds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cover {
     pub at: String,
     pub file: bool,
+    /// The workspace's own copy of what the box keeps there, taken at the first boot that finds no copy and kept
+    /// across wakes as the uppers are, rather than an empty file or folder made at every boot.
+    pub own: bool,
 }
 
 /// Every cover this rootfs asks for, read off the rootfs itself rather than assumed: a path the box keeps nothing
@@ -76,6 +112,11 @@ pub fn covered(rootfs: &Path) -> Vec<Cover> {
             out.push(cover);
         }
     }
+    // Read off the list and not off the rootfs: a path the box keeps nothing at is covered too, since a workspace
+    // that could make it there would have the box root's next login run it.
+    for (at, file) in ROOT_RUN_COVERS {
+        out.push(Cover { at: at.to_owned(), file, own: true });
+    }
     // One cover per path, in one order: what the boot mounts is read by a person in a log line and by a test.
     out.sort();
     out.dedup_by(|a, b| a.at == b.at);
@@ -88,7 +129,7 @@ fn cover_of(rootfs: &Path, at: &str) -> Option<Cover> {
     if held.file_type().is_symlink() {
         return None;
     }
-    Some(Cover { at: at.to_owned(), file: held.is_file() })
+    Some(Cover { at: at.to_owned(), file: held.is_file(), own: false })
 }
 
 /// The names under the rootfs's own /etc/ssh that are the box's host keys, public and private alike: a workspace
@@ -134,7 +175,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = a_rootfs(dir.path());
         let covers = covered(&rootfs);
-        let at: Vec<&str> = covers.iter().map(|c| c.at.as_str()).collect();
+        // The covers read off the rootfs itself; the ones read off `ROOT_RUN_COVERS` are the case below.
+        let at: Vec<&str> = covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect();
         assert_eq!(
             at,
             [
@@ -160,8 +202,9 @@ mod tests {
         // configuration, which says nothing a key says.
         assert!(!at.iter().any(|path| path.ends_with("sshd_config")), "{at:?}");
         // No path twice, whatever the lists hold.
-        let once: std::collections::BTreeSet<&str> = at.iter().copied().collect();
-        assert_eq!(once.len(), at.len());
+        let every: Vec<&str> = covers.iter().map(|c| c.at.as_str()).collect();
+        let once: std::collections::BTreeSet<&str> = every.iter().copied().collect();
+        assert_eq!(once.len(), every.len());
     }
 
     #[test]
@@ -169,17 +212,55 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = dir.path().join("bare");
         fs::create_dir_all(rootfs.join("etc")).unwrap();
-        // Nothing of the list is there: no cover at all, and the boot mounts nothing.
-        assert_eq!(covered(&rootfs), Vec::new());
+        // Nothing of the denylist is there: no cover read off the rootfs, and the boot mounts none of them.
+        assert!(covered(&rootfs).iter().all(|c| c.own));
         // A path the box keeps as a link: the cover would follow it out of the rootfs, since the kernel resolves
         // an absolute link against this process's own root, and land on the box's own file.
         fs::create_dir_all(rootfs.join("run/nothing")).unwrap();
         std::os::unix::fs::symlink("/run/nothing", rootfs.join("home")).unwrap();
         fs::write(rootfs.join("etc/shadow"), "root:x:20000:0:99999:7:::\n").unwrap();
         let covers = covered(&rootfs);
-        assert_eq!(covers.iter().map(|c| c.at.as_str()).collect::<Vec<_>>(), ["/etc/shadow"]);
+        assert_eq!(covers.iter().filter(|c| !c.own).map(|c| c.at.as_str()).collect::<Vec<_>>(), ["/etc/shadow"]);
         // And the link itself is still a link: nothing here writes through one.
         assert!(fs::symlink_metadata(rootfs.join("home")).unwrap().file_type().is_symlink());
+    }
+
+    /// What the box root's own login and its systemd run by name is the workspace's own copy or its own folder,
+    /// whether the box keeps something there or not: a path the box has nothing at is covered all the same, since
+    /// a workspace that could make it there would have the box root run it.
+    #[test]
+    fn what_the_box_roots_shell_runs_by_name_is_covered_with_the_workspaces_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = a_rootfs(dir.path());
+        for (file, text) in [("root/.bashrc", "# the box's own\n"), ("root/.bash_aliases", "alias x=y\n"), ("root/.profile", "# box\n")] {
+            fs::write(rootfs.join(file), text).unwrap();
+        }
+        fs::create_dir_all(rootfs.join("root/.config/systemd/user")).unwrap();
+        fs::write(rootfs.join("root/.config/systemd/user/x.service"), "[Service]\n").unwrap();
+        let covers = covered(&rootfs);
+        let cover = |at: &str| covers.iter().find(|c| c.at == at).unwrap_or_else(|| panic!("{at} is not covered: {covers:?}")).clone();
+
+        // The files the box keeps: the workspace's own copy of each, which the boot seeds and keeps.
+        for at in ["/root/.bashrc", "/root/.bash_aliases", "/root/.profile"] {
+            assert_eq!(cover(at), Cover { at: at.to_owned(), file: true, own: true });
+        }
+        // The folder a root systemd manager reads units from: the workspace's own, and the folder under it that
+        // the box keeps a unit in is not reachable through it.
+        assert_eq!(cover("/root/.config/systemd"), Cover { at: "/root/.config/systemd".to_owned(), file: false, own: true });
+        // And every rc path the box keeps nothing at, covered all the same.
+        for at in ["/root/.zshrc", "/root/.bash_login", "/root/.gitconfig", "/root/.config/fish/config.fish"] {
+            assert_eq!(cover(at), Cover { at: at.to_owned(), file: true, own: true });
+        }
+        for at in ["/root/.local/share/systemd", "/root/.config/environment.d", "/root/.config/autostart"] {
+            assert_eq!(cover(at), Cover { at: at.to_owned(), file: false, own: true });
+        }
+        // Every row of the list is one cover and no row is under another, since a bind of one would hide the
+        // other and which of the two won would be the order they were made in.
+        assert_eq!(covers.iter().filter(|c| c.own).count(), ROOT_RUN_COVERS.len());
+        for (at, _) in ROOT_RUN_COVERS {
+            let under = ROOT_RUN_COVERS.iter().filter(|(other, _)| *other != at && at.starts_with(&format!("{other}/"))).count();
+            assert_eq!(under, 0, "{at} sits under another row of the list");
+        }
     }
 
     /// The capabilities are the profile's to carry and this list's to name: a profile copied again from a live
