@@ -74,8 +74,7 @@ fn fresh_life() -> String {
     format!("{:016x}", u64::from_le_bytes(bytes))
 }
 
-/// The one way this module takes a lock: a holder that panicked leaves a routing table behind, which the next
-/// caller reads rather than panicking on in its turn.
+/// A holder that panicked leaves its state behind, which the next caller reads rather than panicking on in turn.
 fn lock<T>(held: &Mutex<T>) -> MutexGuard<'_, T> {
     held.lock().unwrap_or_else(|e| e.into_inner())
 }
