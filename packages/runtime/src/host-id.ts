@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
-import { writeOwn } from "./own-file.js";
+import { writeOwn } from "@wsp/own-file";
 
 /** Where this install keeps what must never travel with a WSP_HOME: the OS-local config dir. XDG_CONFIG_HOME wins on
  * every platform when set, which is also how the test suite keeps its runs out of the developer's real dir. */

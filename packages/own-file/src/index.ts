@@ -3,7 +3,9 @@
 // code, a device record or a login file is this user's alone, so every one of
 // them is written through a 0600 temporary file and a rename under folders that
 // stand at 0700, and a folder an older build left wider is repaired rather than
-// trusted.
+// trusted. Node fs and nothing else, in a package of its own with no
+// dependencies, because the host record and the host lock are written by the
+// tool server's own graph, which may not load the runtime.
 import { chmodSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 

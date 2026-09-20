@@ -228,10 +228,21 @@ describe("the member rule the seal and the copy both read", () => {
     expect(() => refuseForeignMembers(pointed, HELD)).toThrow(/points at \/etc\/shadow/);
   });
 
-  it("a GNU long name is honoured for the header behind it", () => {
+  it("a GNU long name is honoured for the header behind it, and a long name beside a long link target is one member", () => {
     const long = `etc/${"d".repeat(120)}/x`;
     const tar = archive(header({ name: "././@LongLink", type: "L", size: long.length + 1 }), filled(`${long}\0`), header({ name: "root/.codex/auth.json" }));
     expect(() => refuseForeignMembers(tar, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
+    const target = `/etc/${"e".repeat(120)}/secret`;
+    const both = archive(
+      header({ name: "././@LongLink", type: "K", size: target.length + 1 }),
+      filled(`${target}\0`),
+      header({ name: "././@LongLink", type: "L", size: long.length + 1 }),
+      filled(`${long}\0`),
+      header({ name: "root/.config/gh/link", type: "2", target: "hosts.yml" }),
+    );
+    expect(() => refuseForeignMembers(both, HELD)).toThrow(new RegExp(long.replace(/\//g, "\\/")));
+    const twice = archive(header({ name: "x", type: "L", size: 6 }), filled("etc/x\0"), header({ name: "x", type: "L", size: 6 }), filled("etc/y\0"), header({ name: "root/.codex/auth.json" }));
+    expect(() => vaultMembers(twice)).toThrow(/two long name entries of the same kind/);
   });
 
   it("a header that fails its own checksum is refused, and the members behind it are never read", () => {

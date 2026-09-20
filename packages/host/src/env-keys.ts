@@ -7,7 +7,7 @@
 // business and never reads as saved on a screen.
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { writeOwn } from "@wsp/runtime";
+import { writeOwn } from "@wsp/own-file";
 import { VAULT_VARIABLES } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";

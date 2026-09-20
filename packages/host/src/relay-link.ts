@@ -9,7 +9,7 @@
 import { readFileSync, rmSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { writeOwn } from "@wsp/runtime";
+import { writeOwn } from "@wsp/own-file";
 import { fmtDuration, relayUrlOf, runForTheList, unknownWordLine, usageRefusal, type AccountView } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";

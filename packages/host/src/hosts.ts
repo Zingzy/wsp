@@ -7,9 +7,9 @@
 // server cannot disagree about where a verb goes.
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { authRefusal, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
-import { writeOwn } from "@wsp/runtime";
+import { writeOwn } from "@wsp/own-file";
 import { servingHost } from "./host-lock.js";
 import { defaultHomeIn, homeNamed } from "./serving-home.js";
 
@@ -126,7 +126,7 @@ export function readHost(home: string, alias: string): HostRecord | undefined {
 export function writeHost(home: string, alias: string, record: HostRecord): void {
   // The token in here opens the host, so it goes through the one writer of the owner's files: a record left at
   // 0644 by an older build is replaced rather than rewritten.
-  writeOwn(home, join("hosts", `${checkedAlias(alias)}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  writeOwn(home, relative(home, hostFile(home, alias)), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export function listHosts(home: string): HostEntry[] {
@@ -171,7 +171,7 @@ export function defaultHost(home: string): string | undefined {
 }
 
 export function setDefaultHost(home: string, alias: string): void {
-  writeOwn(home, join("hosts", "default"), `${checkedAlias(alias)}\n`);
+  writeOwn(home, relative(home, defaultFile(home)), `${checkedAlias(alias)}\n`);
 }
 
 // The rule now lives beside WS_PATH in the protocol, which a place's own agent reads too; the name stays here for

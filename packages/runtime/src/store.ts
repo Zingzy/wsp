@@ -1,7 +1,7 @@
 import { readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
-import { writeOwn } from "./own-file.js";
+import { writeOwn } from "@wsp/own-file";
 
 /** Persistence port. Hosted Postgres impl is Plan 2's problem. Blobs are
  * bytes too large for the JSON document (vault archives); one per id. */

@@ -17,7 +17,8 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { connectDaemon, ownFolder, type DaemonReach } from "@wsp/runtime";
+import { connectDaemon, type DaemonReach } from "@wsp/runtime";
+import { ownFolder } from "@wsp/own-file";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
 import { LOOPBACK, daemonListeningLine, daemonVersionOf, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";

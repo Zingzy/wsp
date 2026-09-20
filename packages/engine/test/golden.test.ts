@@ -14,6 +14,7 @@ import { MIB, USED_KB_CMD, installTools } from "../src/golden-tools.js";
 import { READS_PER_EXEC } from "../src/exec-detached.js";
 import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
 import { goldenName } from "../src/snapshot-names.js";
+import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
@@ -144,7 +145,12 @@ const refusedSnapshot = (requestId: string): Error => Object.assign(new Error("F
 
 /** What the recording backend's guest tar leaves behind, and the signed-URL road that brings it down: the backend
  * answers every download with these bytes, since only one archive is ever asked for in a seal. */
-const VAULT_TGZ = Buffer.from("sealed-vault-bytes");
+/** The archive a builder hands back at the seal, over the two paths the vault case asks for: a real one, since
+ * the seal reads its members against those paths before it records anything. */
+const VAULT_TGZ = tarOf([
+  { path: "root/.config/gh/hosts.yml", mode: 0o600, content: "github.com:\n" },
+  { path: "etc/profile.d/wsp-secrets.sh", mode: 0o600, content: "export A=1\n" },
+]);
 const vaultFetch = (): typeof globalThis.fetch => (async () => new Response(new Uint8Array(VAULT_TGZ), { status: 200 })) as typeof globalThis.fetch;
 
 const FAST_KILL = { graceMs: 20, pollMs: 1 };

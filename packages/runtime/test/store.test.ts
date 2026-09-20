@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
-import { writeOwn } from "../src/own-file.js";
+import { writeOwn } from "@wsp/own-file";
 import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));

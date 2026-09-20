@@ -167,8 +167,10 @@ export function vaultMembers(tar: Buffer): VaultMember[] {
     const data = raw.subarray(dataAt, dataAt + size);
     at += dataBlocks * TAR_BLOCK;
     if (type === "x" || type === "L" || type === "K") {
-      // A member described twice is a member two readers describe differently.
-      if (pax !== undefined || longName !== undefined || longLink !== undefined) throw refusal(where, "one member carries both a pax record and a long name entry");
+      // A member named twice over is a member two readers name differently. GNU writes a long name and a long link
+      // target for one member, which is one description in two entries and is read as one.
+      if (pax !== undefined || (type === "x" && (longName !== undefined || longLink !== undefined))) throw refusal(where, "one member carries both a pax record and a long name entry");
+      if (type === "L" ? longName !== undefined : type === "K" && longLink !== undefined) throw refusal(where, "one member carries two long name entries of the same kind");
       if (type === "x") pax = paxOf(data, where);
       else if (type === "L") longName = fieldText(data, 0, data.length);
       else longLink = fieldText(data, 0, data.length);

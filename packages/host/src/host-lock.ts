@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf } from "@wsp/protocol";
-import { ownFolder } from "@wsp/runtime";
+import { ownFolder } from "@wsp/own-file";
 
 export interface HostLock {
   pid: number;
