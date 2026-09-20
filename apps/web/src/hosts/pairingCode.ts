@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one rule for a pairing code in a field: what it looks like as a person
-// types it, and what it looks like on the wire. It sits apart from the sheet
-// that draws the field because two other places read it: the shell's first-run
-// join screen, which is one html file with no build step and carries a copy of
-// these lines with this file named beside them, and the test that holds that
-// copy to this one.
+// The one rule for what a person pastes into a pairing field: what it looks
+// like as they type it, whether it holds a whole code, and what it looks like
+// on the wire. It sits apart from the sheet that draws the field because the
+// sheet reads it three times, once per field, keycap and ask, and a test reads
+// it with no window at all.
 import { JOIN_TOKEN_MARK, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, readJoinToken } from "@wsp/protocol";
 
 const NOT_CODE = new RegExp(`[^${PAIR_CODE_ALPHABET}-]`, "g");
