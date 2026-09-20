@@ -1087,12 +1087,12 @@ describe("the doctor's computer road on the host that holds the link", () => {
     let asked = 0;
     const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"), {});
     links.provision = { plan: async () => (asked++, plan), run: async () => [] };
-    const readers = hostDoctorReaders(links, {});
+    const readers = hostDoctorReaders(links, join(tmpdir(), "wsp-doctor-planner", "state.json"));
     expect(await readers.plan!()).toBe(plan);
     expect(asked).toBe(1);
     // A wiring that plans no recipe hands the road no reader at all, and the tools step says so in its own words.
     const bare = placeWiring(join(tmpdir(), `wsp-doctor-bare-${Date.now()}`, "state.json"), {});
     delete bare.provision;
-    expect(hostDoctorReaders(bare, {}).plan).toBeUndefined();
+    expect(hostDoctorReaders(bare, join(tmpdir(), "wsp-doctor-bare", "state.json")).plan).toBeUndefined();
   });
 });

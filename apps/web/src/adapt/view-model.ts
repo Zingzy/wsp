@@ -47,7 +47,7 @@ export type ProviderRequestKind = "command" | "file-read" | "file-change" | "mcp
 export type WorkLogTone = "thinking" | "tool" | "notice" | "error";
 
 /** Which wire event produced a work row; the copied rows key chrome on it. */
-export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume";
+export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "harness.note";
 
 export interface WorkLogEntry {
   readonly id: string;

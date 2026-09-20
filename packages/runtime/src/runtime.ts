@@ -211,7 +211,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -827,23 +827,15 @@ export interface HereDaemon {
   fix: string;
 }
 
-/** What a host wires for the machines it reaches over ssh: the backend that dials them and the road to a daemon
- * already on one. A machine somebody owns is a computer this host joins, and the projects on it are cloned into
+/** What a host wires for the machines it reaches over ssh: the backend that dials them, and nothing that reaches
+ * a daemon on one. A machine somebody owns is a computer this host joins, and the projects on it are cloned into
  * copies of its own image, so nothing here records a workspace: this is the ssh variant's registration beside the
  * cloud default and nothing more. */
 export interface SshWiring {
   backend: MachineBackend;
-  /** A port on this computer's own loopback carried to a port on the machine's, one connection per machine and
-   * reused by every dial after the first. Nothing on the machine listens past its own loopback, so this is the
-   * whole road to its daemon. */
-  forward?: (machine: Machine, remotePort: number) => Promise<{ localPort: number }>;
-  /** Drops the forward to one machine: the workspace it served is gone. */
-  dropForward?: (machine: Machine) => Promise<void>;
   /** Takes the daemon and everything wsp kept beside it off the machine. wsp put it there when the workspace was
    * recorded, so it goes when that record does: the machine is the person's own and is left as wsp found it. */
   removeDaemon?: (machine: Machine, login: { home: string; path: string }) => Promise<void>;
-  /** Frees every forward this wiring holds open when the runtime closes. */
-  close?: () => Promise<void>;
 }
 
 /** What the host wires for the seed half of an add: the menu for a folder on this computer, and the archive of
@@ -1985,16 +1977,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     hasDaemon: (entry: LiveWorkspace) => boolean;
     /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
      * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
-     * with the token it holds in memory; a machine over ssh through a forward off its own loopback. Throws with
-     * the backend's own words when the machine has no road. */
+     * with the token it holds in memory. Throws with the backend's own words when the machine has no road, which
+     * is every time on a kind whose daemon this host cannot prove it is the one dialled. */
     daemonRoad: (entry: LiveWorkspace) => Promise<DaemonReachView>;
     /** The folder on the machine wsp writes its own working files in: a run's script and log, an import's parts.
      * A machine wsp made is wsp's whole, so its shared temporary folder is fine; on a machine somebody owns that
      * folder belongs to every account on it, and one of them could sit on a name wsp is about to write. */
     scratch: (entry: LiveWorkspace) => string;
-    /** What this kind frees on this computer when a workspace of it is dropped: the child holding the road to a
-     * machine over ssh, nothing for a kind whose road is the provider's. The machine itself is the delete's own
-     * business; this is only what the host was keeping open about it. */
+    /** What comes off the machine when a workspace of this kind is dropped: on a machine the person owns, the
+     * daemon and everything wsp kept beside it; nothing on a kind whose machine goes with the delete. The machine
+     * itself is the delete's own business; this is only what wsp put on it. */
     dropped: (entry: LiveWorkspace) => Promise<void>;
     /** Which daemon this machine is running, or null where nothing can say: a fork announces it in its hello, a
      * machine the person owns carries what this host put there on its record, and this computer runs its daemon
@@ -2195,29 +2187,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Where a harness keeps its sessions on a machine reached over ssh: the folder that machine's own login names
    * for it, else the catalog's default under the home it answered with. */
   const sshHome = (entry: LiveWorkspace, agentId: string): string => agentHome(sshHomeDir(entry), agentId, loginOf(entry.record));
-  /** A road that never expires, in the field a cloud fork's preview route puts its expiry in, so the panes and the
-   * status probe read one view whichever kind answered. */
-  const NEVER = Number.MAX_SAFE_INTEGER;
-  /** The port the daemon on a machine over ssh bound, which only that machine knows: it writes it down when it
-   * starts, and this is the one read of that file. A machine whose daemon has not written one yet is a machine
-   * whose deploy has not finished, and the refusal says so rather than dialling nothing. */
-  const sshDaemonPort = async (entry: LiveWorkspace, home: string): Promise<number> => {
-    const at = sshDaemonPaths(home);
-    const read = await entry.machine.exec(`cat ${shellQuote(at.portFile)}`, { timeoutMs: INLINE_EXEC_MS });
-    const port = Number(read.stdout.trim());
-    if (read.exitCode !== 0 || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error(noSshDaemonLine(entry.record.name));
-    return port;
-  };
-  /** The road to the daemon on a machine reached over ssh: a port on this computer's own loopback, forwarded over
-   * the connection to the port the daemon bound on the machine's. Nothing on that machine listens past its own
-   * loopback, so the forward is the whole road and the host is the only thing on the other end of it. */
-  const sshRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
-    if (ssh?.forward === undefined || entry.record.daemon === undefined) throw new Error(noSshDaemonLine(entry.record.name));
-    const home = sshHomeDir(entry);
-    const { localPort } = await ssh.forward(entry.machine, await sshDaemonPort(entry, home));
-    const token = await daemonTokenOf(entry.machine, sshDaemonPaths(home).tokenPath);
-    return { url: `http://${LOOPBACK}:${localPort}`, expiresAt: NEVER, ...(token !== undefined ? { daemonToken: token } : {}) };
-  };
   /** Puts this runtime's daemon on a fork and hands it this runtime's token: the deploy writes one of its own,
    * so the guest's file is replaced the moment the deploy is done rather than at the next dial. */
   const cloudDeploy = async (entry: LiveWorkspace): Promise<void> => {
@@ -2380,34 +2349,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // node runs it there is the place's to say and no turn on this kind is handed a token yet: the tools
             // wait for the round that answers both.
             wspMcp: () => undefined,
-            // A machine wsp only reaches is dialled through a forward this host opens, and nothing opens one the
-            // other way yet; the round that gives this kind's turns the wsp command answers the address with it.
+            // Nothing on this computer answers for a machine wsp only reaches yet; the round that gives this kind's
+            // turns the wsp command answers the address with it.
             hostUrl: () => undefined,
-            // The record says it: the deploy that put a daemon there wrote it down, so nothing dials a machine to
-            // find out whether one is on it, and a machine recorded before the deploy landed says no.
-            hasDaemon: entry => entry.record.daemon !== undefined,
-            daemonRoad: sshRoad,
+            // No road to a daemon on such a machine, here or in anything a host wires: the road that carried one
+            // dialled a port on this computer that any other process here could have bound first, and handed it
+            // the daemon's token. A road comes back when the peer on it proves it is the daemon before one goes out.
+            hasDaemon: () => false,
+            daemonRoad: entry => Promise.reject(new Error(noSshDaemonLine(entry.record.name))),
             scratch: entry => sshDaemonPaths(sshHomeDir(entry)).wsp,
-            // The record says which daemon this host put there. Reading it off the machine would be a dial
-            // through the forward for a fact this host wrote down when it deployed. A record naming none is
-            // behind every version rather than unknown, which is what makes the sync put one on a machine whose
-            // first deploy failed: nothing a person types does that, so the host has to.
+            // The record says which daemon this host put there, a fact it wrote down when it deployed. A record
+            // naming none is behind every version rather than unknown, which is what makes the sync put one on a
+            // machine whose first deploy failed: nothing a person types does that, so the host has to.
             daemonVersion: async entry => entry.record.daemon?.version ?? 0,
-            // The daemon comes off before the road to it does: taking it off rides the connection that carries
-            // every command, not the forward, and the forward is this host's own to close either way. Whether the
-            // record says a daemon landed decides nothing here: a deploy that failed partway left the bundle and
-            // the token there and wrote no record, and the promise is that what wsp put on somebody's machine
-            // goes with the record that put it there. The removal is every path named and nothing else, so on a
-            // machine that took nothing it removes nothing.
+            // Taking the daemon off rides the connection that carries every command. Whether the record says a
+            // daemon landed decides nothing here: a deploy that failed partway left the bundle and the token
+            // there and wrote no record, and the promise is that what wsp put on somebody's machine goes with the
+            // record that put it there. The removal is every path named and nothing else, so on a machine that
+            // took nothing it removes nothing.
             dropped: async entry => {
               const login = loginOf(entry.record);
-              try {
-                await ssh.removeDaemon?.(entry.machine, { home: sshHomeDir(entry), path: login["PATH"] ?? "" });
-              } finally {
-                // The child holding the road is this host's own whatever the machine did: a machine that will not
-                // answer must not leave a port held for a workspace nobody can name until the host exits.
-                await ssh.dropForward?.(entry.machine);
-              }
+              await ssh.removeDaemon?.(entry.machine, { home: sshHomeDir(entry), path: login["PATH"] ?? "" });
             },
             // The machine is the person's own and the folder is theirs to land on, so the bytes travel the way a
             // fork's do; the road that carries them reads the machine for how, and over ssh that is the connection.
@@ -6165,6 +6127,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             line: ++deltas,
             kind: event.kind,
             text: event.text,
+            ...(event.messageId !== undefined ? { messageId: event.messageId } : {}),
             ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
             ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
             ...(event.isError !== undefined ? { isError: event.isError } : {}),
@@ -8652,7 +8615,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const stop of [...machineReading]) stop();
       machineReading.clear();
       await local?.close?.();
-      await ssh?.close?.();
       await placeDoor?.close();
       closed = true;
       beat?.();

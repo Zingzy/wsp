@@ -339,6 +339,18 @@ describe("a provider as a place", () => {
     expect(good.lines.join("\n") + good.errors.join("\n")).not.toContain("sk-ant-x");
   });
 
+  it("writes the pick beside the state file it was run against, which is what the host serving it reads", async () => {
+    const home = tmp("add-provider-beside");
+    const folder = join(home, "elsewhere");
+    mkdirSync(folder, { recursive: true });
+    const beside = { ...opts(home, { BOX_API_KEY: "sk-ant-x" }), statePath: join(folder, "state.json") };
+    const io = captured();
+    expect(await addCommand(io, beside, ["box"], {}, systemPlaceDeps)).toBe(0);
+    expect(readFileSync(join(folder, ".env"), "utf8")).toBe("WSP_PROVIDER=box\n");
+    // The wsp home's own file is another host's, and this add never touched it.
+    expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
   it("refuses the ssh road's own flags when no computer was named beside them", async () => {
     const home = tmp("add-name");
     const io = captured();
@@ -1522,13 +1534,15 @@ describe("the sweep a computer runs on itself", () => {
     // The name every tool execs, pointing at the shim: once the shim goes it is a link to nothing, which every
     // read that follows a link calls absent while the person is still left holding it.
     symlinkSync(`${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`);
-    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\nexport EDITOR=vi\n`);
+    // Both spellings: the one a computer joined before the line was guarded carries, and the one a deploy writes
+    // now. The sweep matches wsp's line by the file it names, so it takes out either.
+    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\nexport EDITOR=vi\n[ -f ${at.profileFile} ] && . ${at.profileFile}\n`);
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
     expect(existsSync(`${at.binDir}/xdg-open`)).toBe(false);
     expect(swept.removed).toContain(`${at.binDir}/xdg-open`);
     // Their file keeps everything of theirs and loses the one line wsp put in it.
     expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\nexport EDITOR=vi\n");
-    expect(swept.removed.some(line => line.includes(".profile"))).toBe(true);
+    expect(swept.removed).toContain(`. ${at.profileFile}; [ -f ${at.profileFile} ] && . ${at.profileFile} (out of ${join(home, ".profile")})`);
   });
 
   it("leaves a login file it never wrote to exactly as it was", async () => {

@@ -52,6 +52,7 @@ import {
   type SealedImage,
   type SealedImageExport,
   type ForwardEvent,
+  type PlaceAuthRefusal,
   type PlaceDoorView,
   type PortForward,
   type Caller,
@@ -399,8 +400,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         const msg = req2.data;
 
         if (!authed) {
-          const refuse = (error: string): void => {
-            send({ id: msg.id, ok: false, error, kind: "auth" });
+          const refuse = (error: string, signed?: PlaceAuthRefusal): void => {
+            send({ id: msg.id, ok: false, error, kind: "auth", ...signed });
             ws.close(4401, UNAUTHORIZED);
           };
           // The second frame of a place's handshake, and the only frame this socket may send once its first one was
@@ -452,13 +453,19 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             // frame must sign; a key or a report this host cannot work with refuses in the door's own words. One
             // key per socket holds here too: a link's own agreement would replace the one a client already has.
             if (seal !== undefined) return refuse(UNAUTHORIZED);
-            let opened: { reply: Record<string, unknown>; expect: Uint8Array; seal: Seal; notice?: string } | undefined;
+            let opened:
+              | { reply: Record<string, unknown>; expect: Uint8Array; seal: Seal; notice?: string }
+              | { refusal: string; signed: PlaceAuthRefusal }
+              | undefined;
             try {
               opened = msg.op === "place.join" ? await places().join(msg, from, now()) : await places().auth(msg, now());
             } catch (e) {
               return refuse(e instanceof Error ? e.message : String(e));
             }
-            if (opened === undefined) return refuse(msg.op === "place.join" ? PLACE_CODE_REFUSAL : PLACE_UNKNOWN_REFUSAL);
+            // A join's code that is not one this host is holding; the door says nothing more about it.
+            if (opened === undefined) return refuse(PLACE_CODE_REFUSAL);
+            // A place this host holds no record of: the door's sentence with the door's own signature over it.
+            if ("refusal" in opened) return refuse(opened.refusal, opened.signed);
             const placeId = msg.op === "place.join" ? String(opened.reply["placeId"]) : msg.placeId;
             proving = { placeId, expect: opened.expect };
             // The gate opens for exactly one more frame, which the branch above holds to place.prove.

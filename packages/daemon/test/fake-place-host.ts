@@ -7,7 +7,7 @@ import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { PLACE_FILE_MODE, placeFileText, placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
+import { PLACE_FILE_MODE, placeFileText, placeLinkTranscript, placeRefusalTranscript, type PlaceFile } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 
@@ -64,7 +64,7 @@ export interface FakeHost {
   publicKey: string;
 }
 
-export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: boolean; refuse?: string; unsealed?: boolean } = {}): Promise<FakeHost> {
+export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: boolean; refuse?: string; signRefusal?: boolean; unsealed?: boolean } = {}): Promise<FakeHost> {
   const key = opts.key ?? placePair();
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   servers.push(wss);
@@ -86,7 +86,14 @@ export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: b
       const frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (frame["op"] === "place.auth") {
         if (opts.refuse !== undefined) {
-          say({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" });
+          // A host that signs its refusal gives its own word before it has proved anything else, over the place
+          // it was asked for, the nonce this dial challenged with and the sentence; one that does not is every
+          // host before this and anybody else who answers at the address.
+          const signed = opts.signRefusal !== true ? {} : {
+            hostPublicKey: key.publicKey,
+            signature: sign(null, placeRefusalTranscript(String(frame["placeId"]), String(frame["nonce"]), opts.refuse), createPrivateKey(key.privateKeyPem)).toString("base64"),
+          };
+          say({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth", ...signed });
           ws.close(4401, "unauthorized");
           return;
         }

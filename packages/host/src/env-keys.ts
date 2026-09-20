@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The variables the wsp home's .env holds a key under, the record read out of
+// The variables a host's own .env holds a key under, the record read out of
 // that one file, and the agents' keys the terminal's commands take out of such
 // a record. A provider's key is its row's own and is read through the pick's
-// environment, never named here. The app's setup reads the home's file alone: a
+// environment, never named here. The app's setup reads that one file alone: a
 // key in the process environment or a .env beside a checkout is the terminal's
 // business and never reads as saved on a screen.
 import { existsSync, readFileSync } from "node:fs";
@@ -15,7 +15,7 @@ export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 /** Where a key is read from, as a line says it: one wording for the screen that asks for one, for the refusal that
  * says there was nobody to ask, and for the doctor's line on a key that is not here. It lives beside the reader of
  * those files so every sentence about them reads off one spelling. */
-export const KEY_LAYER_WORDS = "the environment, ./.env, or ~/.wsp/.env";
+export const KEY_LAYER_WORDS = "the environment, ./.env, or the .env beside your state file (~/.wsp/.env unless you named a state)";
 
 export interface Keys {
   /** The agents' key. The provider's is not here: which variable holds it is the provider row's own declaration,
@@ -33,9 +33,14 @@ export function parseEnvFile(path: string): Record<string, string> {
   return out;
 }
 
-/** The wsp home's .env as it stands. */
-export function savedEnv(home: string): Record<string, string> {
-  return parseEnvFile(join(home, ".env"));
+/** The one file a host reads its own keys and its provider pick out of, and writes them to: the .env beside the
+ * state file it serves, as everything else a host writes for itself sits there. A host on another state file
+ * reads no key of the wsp home's, and on the home's own state file this is the home's own .env. */
+export const envFileFor = (statePath: string): string => join(dirname(statePath), ".env");
+
+/** That file as it stands. */
+export function savedEnv(statePath: string): Record<string, string> {
+  return parseEnvFile(envFileFor(statePath));
 }
 
 /** The key a record holds under a variable, or nothing: an empty value is no key. The one place that rule is

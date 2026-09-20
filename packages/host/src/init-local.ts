@@ -13,6 +13,7 @@ import { appUrl, askAlsoLocal, runLocal } from "./init-first.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
+import { KEY_LAYER_WORDS } from "./env-keys.js";
 import type { InitIO, InitResult } from "./init.js";
 
 /** What this run does and does not do, said before it does any of it: no key, so no image and no machine, and the
@@ -21,7 +22,7 @@ export function noKeyLines(upCommand: string): string[] {
   return [
     NO_PROVIDER_LINE,
     `So this run seals nothing and boots nothing. It makes ${THIS_COMPUTER} a workspace: threads run here, under your own sign-ins, with the agents already on your PATH.`,
-    `Put a Solari API key in the environment or ~/.wsp/.env and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
+    `Put a Solari API key in ${KEY_LAYER_WORDS} and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
     `${upCommand} starts the app again after this terminal is closed.`,
   ];
 }

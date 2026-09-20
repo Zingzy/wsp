@@ -276,6 +276,16 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(session.claudeSessionId).toBe(FIXTURE_SESSION_ID);
   });
 
+  it("carries the CLI's own id for each message its text came out of, so two replies of one turn read as two", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "write a hello world server", onEvent }).finished;
+
+    const deltas = events.filter(e => e.type === "turn.delta");
+    expect(deltas.filter(d => d.kind === "text").map(d => d.messageId)).toEqual(["msg_01WspFixA1", "msg_01WspFixA4"]);
+  });
+
   it("stamps every line a subagent wrote with the call that launched it, and leaves the thread's own unstamped", async () => {
     const exec = scriptedExec(subagentFixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
