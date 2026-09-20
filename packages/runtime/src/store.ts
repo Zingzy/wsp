@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
+import { writeOwn } from "@wsp/own-file";
 
 /** Persistence port. Hosted Postgres impl is Plan 2's problem. Blobs are
  * bytes too large for the JSON document (vault archives); one per id. */
@@ -128,12 +129,10 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     if (wrote !== undefined && wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
     return data;
   };
-  // Write-through with rename so a crash mid-write never truncates the store.
+  // The file holds every running turn's token and every unspent pairing code, so it is the owner's: writeOwn says
+  // what that means, and its rename is also what keeps a crash mid-write from truncating the store.
   const save = (data: Data): void => {
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`);
-    writeFileSync(tmp, JSON.stringify({ ...data, [STATE_SHAPE_KEY]: shapeNow(writer) }, null, 2));
-    renameSync(tmp, path);
+    writeOwn(dirname(path), basename(path), JSON.stringify({ ...data, [STATE_SHAPE_KEY]: shapeNow(writer) }, null, 2));
   };
   const blobPath = (collection: string, id: string): string => join(dirname(path), "blobs", collection, id);
   return {
@@ -166,11 +165,8 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     },
     async putBlob(collection, id, bytes) {
       load();
-      const target = blobPath(collection, id);
-      mkdirSync(dirname(target), { recursive: true });
-      const tmp = `${target}.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-      writeFileSync(tmp, bytes);
-      renameSync(tmp, target);
+      // The image's blob is the person's sign-ins in the clear, so it and the two folders over it are the owner's.
+      writeOwn(dirname(path), join("blobs", collection, id), bytes);
     },
     async deleteBlob(collection, id) {
       load();

@@ -44,6 +44,7 @@ import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
 import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
 /** What each turn's launch was handed, so a test reads the environment and the servers the runtime built rather
@@ -911,6 +912,48 @@ describe("agents spawning agents", () => {
     // A notify naming no thread is refused before a token exists at all.
     await expect(rt.sessions.start(ws.id, { prompt: "hi", notify: ["nothing-here"] })).rejects.toThrow("no thread nothing-here to notify");
     expect(await rt.devices.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a thread's notify target is a thread of its own tree, and one outside it reads as no thread at all", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: lead.id, rootThreadId: rootThread };
+    // The person's own thread on another workspace: another tree on the same host, which is what a guest that
+    // knows an id would name today.
+    const mine = await createOn(rt, { golden: "snap_g", name: "mine" });
+    const own = await rt.sessions.start(mine.id, { prompt: "mine" });
+    const ownThread = own.view().threadId!;
+
+    const opened = async (): Promise<number> => (await rt.sessions.history(lead.id)).filter(e => e.type === "session.start").length;
+    const before = await opened();
+    await expect(rt.sessions.start(lead.id, { prompt: "out", notify: [ownThread] }, asThread(scope))).rejects.toThrow(`no thread ${ownThread} to notify`);
+    expect(await opened()).toBe(before);
+    // A caller whose own rows this host no longer holds still reads its root off the scope its token carries.
+    const ghost: ThreadScope = { kind: "thread", threadId: "t_gone", workspaceId: lead.id, rootThreadId: rootThread };
+    await expect(rt.sessions.start(lead.id, { prompt: "out", notify: [ownThread] }, asThread(ghost))).rejects.toThrow(`no thread ${ownThread} to notify`);
+    // A person names any thread, as today.
+    const anyone = await rt.sessions.start(lead.id, { prompt: "the person's own", notify: [ownThread] });
+    expect(anyone.view().threadId).toBeDefined();
+
+    const forked = await createOn(rt, { name: "builder" }, asThread(scope));
+    const child = await rt.sessions.start(forked.id, { prompt: "child" }, asThread(scope));
+    const childThread = child.view().threadId!;
+    const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: forked.id, rootThreadId: rootThread };
+    const cousin = await rt.sessions.start(forked.id, { prompt: "cousin" }, asThread(childScope));
+    const cousinThread = cousin.view().threadId!;
+    // The lead, a thread the caller opened and a thread further down the same tree all pass, and the finished line
+    // reaches each of them.
+    const kid = await rt.sessions.start(forked.id, { prompt: "kid", notify: [rootThread, childThread, cousinThread] }, asThread(scope));
+    const kidThread = kid.view().threadId!;
+    held.end(held.launches.length - 1);
+    await until(async () => (await rt.sessions.history(forked.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).length === 3);
+    const told = (await rt.sessions.history(forked.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).map(e => (e as { notify: string }).notify);
+    expect(told.sort()).toEqual([rootThread, childThread, cousinThread].sort());
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
     await rt.close();
   });
 

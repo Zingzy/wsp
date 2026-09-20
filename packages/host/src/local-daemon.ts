@@ -18,6 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
+import { ownFolder } from "@wsp/own-file";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
 import { LOOPBACK, daemonListeningLine, daemonVersionOf, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
@@ -165,7 +166,7 @@ export class LocalDaemon {
     const bin = opts.binary ?? daemonBinaryHere();
     const token = randomBytes(24).toString("hex");
     // The inbox dir must exist before the watcher reads it; a cloud guest ships one, this computer makes its own.
-    mkdirSync(opts.inboxDir, { recursive: true });
+    ownFolder(opts.inboxDir);
     // The daemon reads its token off a file at every auth frame and takes none on its command line, so the file is
     // made in a folder of this daemon's own, never beside the host's files under the person's home. The manifest
     // of what a person started sits beside it: every file the daemon reads or writes is named, and nothing is left

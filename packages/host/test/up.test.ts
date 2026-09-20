@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
@@ -155,6 +155,16 @@ describe("wsp up", () => {
       `state       ${statePath}`,
       noClaudeKeyNote(false),
     ]);
+    expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
+  });
+
+  it("the token file is this user's alone, and one an older build left at 0644 is replaced rather than rewritten", async () => {
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    const tokenPath = join(home, "state", "host-token");
+    writeFileSync(tokenPath, "an older build's token\n");
+    chmodSync(tokenPath, 0o644);
+    const handle = await started([]);
+    expect(statSync(tokenPath).mode & 0o777).toBe(0o600);
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
 

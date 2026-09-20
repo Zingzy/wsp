@@ -29,6 +29,7 @@ import {
   goldenHead,
   imageHash,
   importImageVault,
+  refuseForeignMembers,
   importInto,
   isMissing,
   installScript,
@@ -209,7 +210,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
-import { branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { vaultUnlistedRefusal, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -6443,9 +6444,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         o.notify === undefined
           ? undefined
           : [...new Set(o.notify.map(target => (target === NOTIFY_ME && o.turnToken !== undefined ? threadOfToken(o.turnToken) : target)))];
+      // The tree a thread may tell: the root on the scope its own token carries, which is where every other reach
+      // reads it from, so a caller whose rows this host no longer holds cannot read itself as its own root. A
+      // thread of another tree reads as no thread at all, so a guest cannot tell a foreign thread from none. The
+      // one crossing this keeps is the shim's own `--notify me`, the lead of the same tree.
+      const callersRoot = scopeOf(origin)?.rootThreadId;
       for (const target of asked ?? []) {
         if (target === NOTIFY_ME) continue;
-        if (latestOn(target) === undefined) throw new Error(`no thread ${target} to notify`);
+        if (latestOn(target) === undefined || (callersRoot !== undefined && rootOf(target) !== callersRoot)) throw new Error(`no thread ${target} to notify`);
         if (target === threadId) throw new Error("a thread cannot notify itself");
         // Each end would start the next turn on the other thread with no one sending anything, so the chain is
         // walked whole; it is a lead and its builders, so it is short.
@@ -7113,7 +7119,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (copy === undefined) {
       const digest = entry.builder.import?.recipeHash ?? "";
       const vault: SealedVault | undefined =
-        result.vault === undefined ? undefined : { sha256: result.vault.sha256, bytes: result.vault.tar.length, paths: result.vault.paths, takenAt: result.version.createdAt };
+        result.vault === undefined
+          ? undefined
+          : { sha256: result.vault.sha256, bytes: result.vault.tar.length, paths: result.vault.paths, held: result.vault.held, takenAt: result.version.createdAt };
       const pins = recipePins(entry.builder.import?.recipe ?? { ticks: [] }, id => catalogIdOfRow({ id }) ?? id);
       hash = imageHash(digest, vault?.sha256, pins);
       const image: SealedImage = {
@@ -7130,8 +7138,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(result.version.usedBytes !== undefined ? { usedBytes: result.version.usedBytes } : {}),
         place,
       };
+      const replaced = (await store.get(IMAGES, name)) as SealedImage | undefined;
       if (result.vault !== undefined) await store.putBlob(IMAGE_VAULTS, vaultKey(name, result.version.version), result.vault.tar);
       await store.put(IMAGES, name, image);
+      // No version's sign-ins in the clear outlive the record that named that version, whatever the cut did with
+      // its snapshot: the record names one version, and the blob of the one it replaced goes with it.
+      if (replaced !== undefined && replaced.version !== result.version.version) await store.deleteBlob(IMAGE_VAULTS, vaultKey(name, replaced.version));
     }
     if (hash === undefined) return result;
     const version: GoldenVersion = { ...result.version, imageHash: hash };
@@ -7199,7 +7211,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** Deletes what a version's forks boot from. The template goes first: the provider refuses to delete a snapshot
-   * while a template stands on it, and a template already gone is no failure. */
+   * while a template stands on it, and a template already gone is no failure. The sealed vault is not this
+   * function's: a manifest counts its own place's versions, and the record's blob is keyed by the record's, so
+   * only the seal that replaces a version may take that version's blob. */
   const dropImage = async (v: GoldenVersion, at: MachineBackend = backend): Promise<void> => {
     if (v.templateId !== undefined) {
       await templatesOf(at)?.delete(v.templateId).catch((e: unknown) => {
@@ -7840,8 +7854,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * hash. Called once every refusal has passed and only while no build for the same place and name is in flight. */
   const buildCopy = async (o: { place: string; where: string; at: MachineBackend; name: string; record: SealedImage; signal?: AbortSignal }): Promise<SealedImageBuilt> => {
     const { place, where, at, name, record } = o;
+    // Read before the blob and before a builder is asked for: a record with no path list cannot have its archive
+    // judged anywhere, and an archive carrying a member the seal never asked for boots nothing here.
+    if (record.vault !== undefined && record.vault.held === undefined) throw conflict(vaultUnlistedRefusal(name, record.version));
     const tar = record.vault === undefined ? undefined : await store.getBlob(IMAGE_VAULTS, vaultKey(name, record.version));
     if (record.vault !== undefined && tar === undefined) throw conflict(`the vault of ${name} v${record.version} is not on this computer any more; cut the next version to take it again`);
+    if (tar !== undefined && record.vault?.held !== undefined) {
+      try {
+        refuseForeignMembers("import", tar, record.vault.held);
+      } catch (e) {
+        throw conflict(e instanceof Error ? e.message : String(e));
+      }
+    }
     const recipe = await copyRecipeOrThrow()(record);
     const view = await golden.prepare({ name, place, copy: true, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
     const entry = builders.get(view.id);
