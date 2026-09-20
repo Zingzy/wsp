@@ -9,7 +9,7 @@
 import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
 import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS, markersOf, pagedReads } from "./exec-detached.js";
-import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
+import { TOOLS_PATH, brewHousekeeping as brewHousekeepingCmds, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
 export interface ToolResult {
@@ -121,7 +121,7 @@ const VERSION_READ = "wsp-version";
  * and sum, so that stands; every other row with a read gets what its line printed, or nothing when it printed
  * nothing or the run could not be made, which the stage says. Then one line names what was pinned and, once, the
  * rows whose road installs latest on every place. */
-async function readPins(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void): Promise<void> {
+async function readPins(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void, path: string): Promise<void> {
   const rows = results.flatMap(r => {
     const tool = r.outcome === "installed" ? tools.find(t => t.id === r.id) : undefined;
     return tool?.pin === undefined ? [] : [{ result: r, tool, pin: tool.pin }];
@@ -132,7 +132,7 @@ async function readPins(machine: Machine, tools: readonly ToolInstall[], results
   const reads = rows.filter(row => row.result.pin === undefined && row.pin.read !== undefined);
   // Paged as the checks are: a version line on a manager's own store is as slow as any other read, and a page that
   // could not be made costs its own rows their pin rather than every row's.
-  for (const { rows: page, res } of await pagedReads(machine, reads, (row, at) => `printf '${VERSION_READ} %s %s\\n' ${at} "$( ( ${row.pin.read} ) 2>/dev/null | head -n 1 )"`, `export PATH=${TOOLS_PATH}`)) {
+  for (const { rows: page, res } of await pagedReads(machine, reads, (row, at) => `printf '${VERSION_READ} %s %s\\n' ${at} "$( ( ${row.pin.read} ) 2>/dev/null | head -n 1 )"`, `export PATH=${path}`)) {
     if (res.exitCode !== 0) {
       stage(`the versions could not be read back (${reasonOf(res, INLINE_EXEC_MS / 1000)}): ${nameList(page.map(r => r.result.label))} record no pin`);
       continue;
@@ -196,18 +196,18 @@ const SWEEP_TIMEOUT_S = 300;
 /** The caches the installs leave on the root disk: npm's tarballs, uv's wheels, go's module and build caches,
  * apt's debs, node-gyp's headers from the daemon's native build. Each is rebuilt on use; together they held about
  * 2 GB of the 20 GB builder after one recipe. */
-const SWEEP_CACHES_CMD = [
+const sweepCachesCmd = (path: string): string => [
   "set -euo pipefail",
-  `export PATH=${TOOLS_PATH}`,
+  `export PATH=${path}`,
   "if command -v go >/dev/null 2>&1; then go clean -cache -modcache; fi",
   "rm -rf /root/.npm /root/.cache/uv /root/.cache/go-build /root/.cache/node-gyp",
   "if command -v apt-get >/dev/null 2>&1; then apt-get clean; fi",
 ].join("\n");
 
 /** After an install stage the caches go, under the guard; the phrase says what came back, or why nothing did. */
-export async function sweepCaches(machine: Machine): Promise<string> {
+export async function sweepCaches(machine: Machine, path: string = TOOLS_PATH): Promise<string> {
   const before = await freeBytes(machine);
-  const res = await machine.run(guarded(SWEEP_CACHES_CMD, SWEEP_TIMEOUT_S), { deadlineMs: guardDeadlineMs(SWEEP_TIMEOUT_S) });
+  const res = await machine.run(guarded(sweepCachesCmd(path), SWEEP_TIMEOUT_S), { deadlineMs: guardDeadlineMs(SWEEP_TIMEOUT_S) });
   if (res.exitCode !== 0) return `cache sweep failed (${reasonOf(res, SWEEP_TIMEOUT_S)})`;
   const after = await freeBytes(machine);
   return before.kind === "free" && after.kind === "free" && after.bytes > before.bytes ? `caches swept, ${fmtBytes(after.bytes - before.bytes)} back` : "caches swept";
@@ -274,10 +274,10 @@ function skippedByReason(skipped: readonly ToolResult[]): string {
 type Run = (cmd: string, label: string, road: RoadName, step?: GoldenStep) => Promise<ExecResult>;
 
 /** Homebrew's autoremove then cleanup, each under the guard; the phrase says what came back or what failed, nothing when neither. */
-async function brewHousekeeping(machine: Machine, run: Run): Promise<string | undefined> {
+async function brewHousekeeping(machine: Machine, run: Run, path: string): Promise<string | undefined> {
   const before = await freeBytes(machine);
   const failed: string[] = [];
-  for (const cmd of BREW_HOUSEKEEPING) {
+  for (const cmd of brewHousekeepingCmds(path)) {
     const res = await run(cmd, "Homebrew cleanup", "brew");
     if (res.exitCode !== 0) failed.push(reasonOf(res, roadLimitS("brew")));
   }
@@ -306,8 +306,8 @@ function summarize(tools: ToolResult[], housekeeping: string | undefined): strin
 }
 
 /** Which of the commands are not on the machine's tools PATH; `failed` says why the check itself could not run. */
-export async function missingCommands(machine: Machine, bins: readonly string[]): Promise<{ missing: Set<string>; failed?: string }> {
-  const cmd = `export PATH=${TOOLS_PATH}\nfor b in ${bins.map(shellQuote).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
+export async function missingCommands(machine: Machine, bins: readonly string[], path: string = TOOLS_PATH): Promise<{ missing: Set<string>; failed?: string }> {
+  const cmd = `export PATH=${path}\nfor b in ${bins.map(shellQuote).join(" ")}; do command -v "$b" >/dev/null 2>&1 || echo "missing $b"; done`;
   const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
   const failed = res.exitCode === 0 ? undefined : reasonOf(res, INLINE_EXEC_MS / 1000);
   const missing = new Set(res.stdout.split("\n").flatMap(l => (l.startsWith("missing ") ? [l.slice("missing ".length).trim()] : [])));
@@ -316,10 +316,10 @@ export async function missingCommands(machine: Machine, bins: readonly string[])
 
 /** The installs that name their command, checked by name on the tools PATH: an install that exited 0 without
  * putting the command there is a failure, not an install, and so is one the check could not reach. */
-async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: (detail: string) => void): Promise<void> {
+async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], results: ToolResult[], stage: (detail: string) => void, path: string): Promise<void> {
   const named = results.filter(r => r.outcome === "installed").map(r => ({ result: r, bin: tools.find(t => t.id === r.id)?.bin })).filter((x): x is { result: ToolResult; bin: string } => x.bin !== undefined);
   if (named.length === 0) return;
-  const { missing, failed } = await missingCommands(machine, named.map(x => x.bin));
+  const { missing, failed } = await missingCommands(machine, named.map(x => x.bin), path);
   if (failed !== undefined) stage(`the PATH check failed (${failed}): ${named.map(x => x.bin).join(", ")} count as failed`);
   for (const x of named) {
     if (failed === undefined && !missing.has(x.bin)) continue;
@@ -340,7 +340,7 @@ const CHECK_FAILED = "wsp-check";
  * is every row of a page that could not be run at all, which is said in the stage detail rather than passing
  * quietly. Paged because a check can be a `brew list` of about a second and a recipe can carry a dozen: one read
  * of all of them reaches the inline bound and would fail every row on the machine, agents included. */
-async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void): Promise<void> {
+async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void, path: string): Promise<void> {
   const checked = results.flatMap(r => {
     const check = r.outcome === "installed" ? tools.find(t => t.id === r.id)?.check : undefined;
     return check === undefined ? [] : [{ result: r, check }];
@@ -350,7 +350,7 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
     machine,
     checked,
     (c, at) => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${at} "$(printf '%s' "$out" | tail -1)"; fi`,
-    `export PATH=${TOOLS_PATH}`,
+    `export PATH=${path}`,
   );
   for (const { rows, res } of pages) {
     if (res.exitCode !== 0) {
@@ -382,6 +382,9 @@ export interface InstallToolsOptions {
   caches?: "sweep" | "keep";
   /** Each row the moment its outcome exists, for a caller that reports as it goes rather than at the end. */
   onTool?: (result: ToolResult) => void;
+  /** The PATH every script of this job exports. The tools PATH on a machine wsp forked, and the probe list on a
+   * computer somebody owns, whose home every workspace there writes. */
+  path?: string;
 }
 
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
@@ -392,8 +395,9 @@ export interface InstallToolsOptions {
 export async function installTools(machine: Machine, tools: readonly ToolInstall[], onStage: Stage, at: GoldenStage = "installing-tools", opts: InstallToolsOptions = {}): Promise<ToolsOutcome> {
   const stage = (detail: string, step?: GoldenStep): void => onStage(at, detail, step);
   const present = opts.present ?? new Set<string>();
+  const path = opts.path ?? TOOLS_PATH;
   /** Nothing on a machine whose caches are the person's own; the phrase where they are this run's to sweep. */
-  const sweep = async (): Promise<string | undefined> => (opts.caches === "keep" ? undefined : await sweepCaches(machine));
+  const sweep = async (): Promise<string | undefined> => (opts.caches === "keep" ? undefined : await sweepCaches(machine, path));
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
   /** One row's outcome: kept for the answer and handed to the caller watching, in the order the loop reaches them. */
@@ -414,7 +418,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     if (cleanedAtFloor) return undefined;
     cleanedAtFloor = true;
     stage(`${fmtBytes(low)} free, under the ${fmtBytes(TOOLS_DISK_FLOOR)} floor; cleaning up before skipping`);
-    const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
+    const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path) : undefined;
     const swept = await sweep();
     const after = await freeBytes(machine);
     stage(closing(brew, swept, after.kind === "free" ? `${fmtBytes(after.bytes)} free` : after.reason));
@@ -481,10 +485,10 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       landed({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
     }
   }
-  await verifyCommands(machine, tools, out.tools, stage);
-  await verifyChecks(machine, tools, out.tools, stage);
-  await readPins(machine, tools, out.tools, stage);
-  const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
+  await verifyCommands(machine, tools, out.tools, stage, path);
+  await verifyChecks(machine, tools, out.tools, stage, path);
+  await readPins(machine, tools, out.tools, stage, path);
+  const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path) : undefined;
   stage(closing(summarize(out.tools, housekeeping), await sweep(), await freeNote(machine)));
   return out;
 }

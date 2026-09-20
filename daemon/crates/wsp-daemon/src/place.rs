@@ -74,22 +74,28 @@ fn found_at(name: &str, path: &str) -> Option<PathBuf> {
 }
 
 /// Where the agents on this computer are looked for: the one tools PATH every process inside a workspace here
-/// starts with, which is the list the recipe's presence read runs on, and the PATH this daemon's own unit was
-/// given after it. A unit's PATH is the distribution's default, which names neither Homebrew's bins nor the
-/// directory an agent's own installer writes into, so an agent the recipe installed sits on no line of it and a
-/// report read on it alone leaves that agent and its version out. One list, so what the recipe puts on a computer
-/// and what the report says about it cannot disagree.
-pub(crate) fn agents_path() -> String {
-    agents_path_over(numbers::TOOLS_PATH, &std::env::var("PATH").unwrap_or_default())
+/// starts with, and the PATH this daemon's own unit was given after it. A unit's PATH is the distribution's
+/// default, which names neither Homebrew's bins nor the directory an agent's own installer writes into, so an
+/// agent the recipe installed sits on no line of it and a report read on it alone leaves that agent and its
+/// version out. Finding that a file stands somewhere runs nothing, which is why this list may name directories
+/// under the home the workspaces share while the list the version read runs on may not.
+pub(crate) fn presence_path(unit: Option<&str>) -> String {
+    presence_path_over(numbers::TOOLS_PATH, unit.unwrap_or_default())
 }
 
 /// The two lists as one, the tools first: a command on both is read from where a workspace here would run it.
-/// Written apart from the reading above so a case can hand it a unit PATH of its own.
-fn agents_path_over(tools: &str, unit: &str) -> String {
+/// Written apart from the reading above so a case can hand it a tools list and a unit PATH of its own.
+fn presence_path_over(tools: &str, unit: &str) -> String {
     if unit.is_empty() {
         return tools.to_owned();
     }
     format!("{tools}:{unit}")
+}
+
+/// The PATH this daemon runs a command through, which on a computer that runs workspaces the start set to the
+/// probe list: no directory under the home a workspace writes, so a file planted there is never run as root.
+pub(crate) fn run_path() -> String {
+    std::env::var("PATH").unwrap_or_default()
 }
 
 /// Which of the agents asked for stand on this computer, by catalog id. The one reading behind the report's list
@@ -280,6 +286,8 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) agent_versions: &'a BTreeMap<String, String>,
     pub(crate) daemon_port: u16,
     pub(crate) dialed: &'a str,
+    /// The PATH this daemon's unit gave it, which the login row carries and the presence read looks along.
+    pub(crate) unit_path: Option<&'a str>,
     /// Where this daemon keeps the workspaces it runs; the copy word is probed under it.
     pub(crate) runtime_root: &'a Path,
 }
@@ -294,7 +302,7 @@ fn workspaces_blocked_by(its_own: Option<String>, runtime_root: &Path) -> Option
 
 /// What this computer says about itself on this link, in the shape the host parses.
 pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
-    let path = std::env::var("PATH").unwrap_or_default();
+    let path = input.unit_path.unwrap_or_default().to_owned();
     let work = input.home.join("wsp-work");
     let free = disk_free(if work.exists() { &work } else { input.home });
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
@@ -331,7 +339,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         dialed: input.dialed.to_owned(),
         // Read on the tools PATH before the unit's own, while the login above carries the unit's PATH as it
         // stands: what this daemon was started with is a fact about the unit, and where its agents are is not.
-        agents: agents_on(input.agents, &agents_path()),
+        agents: agents_on(input.agents, &presence_path(input.unit_path)),
         agent_versions: input.agent_versions.clone(),
         // Read at every dial, since a sign-in on this computer changes it between one link and the next.
         logins: Some(logins_present(input.runtime_root)),
@@ -532,7 +540,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    use wsp_frames::{place_link_transcript, LinkRole};
+    use wsp_frames::{place_link_transcript, LinkEphemerals, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];
@@ -547,11 +555,15 @@ mod tests {
     fn a_signature_verifies_under_its_own_key_and_no_other_over_no_other_bytes() {
         let (pem, public) = pair();
         let (_, other) = pair();
-        let bytes = place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=");
+        let pair_of = LinkEphemerals { challenger: "CCC=", answerer: "DDD=" };
+        let bytes = place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=", pair_of);
         let sig = sign_place_bytes(&pem, &bytes).unwrap();
         assert!(verify_place_bytes(&public, &bytes, &sig));
         assert!(!verify_place_bytes(&other, &bytes, &sig));
-        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB="), &sig));
+        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB=", pair_of), &sig));
+        // The ephemerals are inside the bytes, so a carrier that swapped one has a signature over nothing.
+        let swapped = LinkEphemerals { challenger: "CCC=", answerer: "EEE=" };
+        assert!(!verify_place_bytes(&public, &place_link_transcript(LinkRole::Place, "p_1", "AAA=", "BBB=", swapped), &sig));
         assert!(sign_place_bytes("not a key", &bytes).is_err());
     }
 
@@ -561,8 +573,21 @@ mod tests {
         let fixture: serde_json::Value = serde_json::from_str(&text).unwrap();
         let s = |k: &str| fixture[k].as_str().unwrap().to_owned();
         let b64 = |k: &str| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s(k)).unwrap();
-        let host_bytes = place_link_transcript(LinkRole::Host, &s("placeId"), &s("placeNonce"), &s("hostNonce"));
-        let place_bytes = place_link_transcript(LinkRole::Place, &s("placeId"), &s("hostNonce"), &s("placeNonce"));
+        let (place_ephemeral, host_ephemeral) = (s("placeEphemeral"), s("hostEphemeral"));
+        let host_bytes = place_link_transcript(
+            LinkRole::Host,
+            &s("placeId"),
+            &s("placeNonce"),
+            &s("hostNonce"),
+            LinkEphemerals { challenger: &place_ephemeral, answerer: &host_ephemeral },
+        );
+        let place_bytes = place_link_transcript(
+            LinkRole::Place,
+            &s("placeId"),
+            &s("hostNonce"),
+            &s("placeNonce"),
+            LinkEphemerals { challenger: &host_ephemeral, answerer: &place_ephemeral },
+        );
         assert_eq!(host_bytes, b64("hostTranscript"));
         assert_eq!(place_bytes, b64("placeTranscript"));
         let public = Base64Bytes::parse(&s("publicKey")).unwrap();
@@ -652,38 +677,60 @@ mod tests {
 
     /// The agents are looked for where the recipe puts the tools, not where this daemon's unit looks: a place
     /// daemon runs under a service unit whose PATH is the distribution's default, and an agent installed by
-    /// Homebrew or by its own installer under /root/.local/bin is on no line of it. Both readers take the one
-    /// list, so an agent on the report always has its version beside it.
+    /// Homebrew or by its own installer under /root/.local/bin is on no line of it.
     #[test]
     fn the_agents_are_read_on_the_tools_path_before_the_units_own() {
         let tools = tempfile::tempdir().unwrap();
         let counter = tools.path().join("runs");
         fake_bin(tools.path(), "claude", "2.1.270 (Claude Code)", &counter);
         let agents = parse_agents(&["claude=claude".to_owned()]);
-        // The unit's PATH on its own, which is the hole: the agent is on no report and has no version line.
+        // The unit's PATH on its own, which is the hole: the agent is on no report at all.
         assert!(agents_on(&agents, "/nonexistent").is_empty());
-        let mut unit_only = AgentVersions::default();
-        unit_only.refresh(&agents, "/nonexistent", VERSION_DEADLINE);
-        assert!(unit_only.lines().is_empty());
 
-        // The list both readers take: the agent stands, and its binary answered the version flag.
-        let path = agents_path_over(&tools.path().to_string_lossy(), "/nonexistent");
+        // The list the presence read takes: the agent stands on the row.
+        let path = presence_path_over(&tools.path().to_string_lossy(), "/nonexistent");
         assert_eq!(agents_on(&agents, &path), vec!["claude".to_owned()]);
-        let mut held = AgentVersions::default();
-        held.refresh(&agents, &path, VERSION_DEADLINE);
-        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.270 (Claude Code)"));
 
         // The tools first: a command on both lists is read from where a thread inside a workspace would run it.
         let unit = tempfile::tempdir().unwrap();
         fake_bin(unit.path(), "claude", "0.0.1 (the unit's own)", &counter);
-        let both = agents_path_over(&tools.path().to_string_lossy(), &unit.path().to_string_lossy());
+        let both = presence_path_over(&tools.path().to_string_lossy(), &unit.path().to_string_lossy());
         assert_eq!(found_at("claude", &both), Some(tools.path().join("claude")));
 
-        // And what this daemon hands them is that one list over the PATH its unit gave it, in that order.
-        let live = agents_path();
+        // And what this daemon hands that read is that one list over the PATH its unit gave it, in that order.
+        let live = presence_path(Some("/nonexistent"));
         assert!(live.starts_with(numbers::TOOLS_PATH), "{live}");
-        assert!(live.ends_with(&std::env::var("PATH").unwrap_or_default()), "{live}");
-        assert_eq!(agents_path_over(numbers::TOOLS_PATH, ""), numbers::TOOLS_PATH);
+        assert!(live.ends_with("/nonexistent"), "{live}");
+        assert_eq!(presence_path(None), numbers::TOOLS_PATH);
+        assert_eq!(presence_path(Some("")), numbers::TOOLS_PATH);
+    }
+
+    /// The one rule this daemon holds to on a computer that runs workspaces: a command it runs is never resolved
+    /// through a directory under the home those workspaces write. A binary planted there still stands on the row,
+    /// since reading that a file is there runs nothing, and the version beside it comes from the copy outside.
+    #[test]
+    fn a_binary_planted_under_the_home_stands_on_the_row_and_is_never_run() {
+        let home = tempfile::tempdir().unwrap();
+        let planted_dir = home.path().join(".local/bin");
+        std::fs::create_dir_all(&planted_dir).unwrap();
+        let planted_ran = home.path().join("planted-ran");
+        fake_bin(&planted_dir, "claude", "9.9.9 (planted)", &planted_ran);
+        let system = tempfile::tempdir().unwrap();
+        let system_ran = system.path().join("runs");
+        fake_bin(system.path(), "claude", "2.1.270 (Claude Code)", &system_ran);
+        let agents = parse_agents(&["claude=claude".to_owned()]);
+        // The tools list as it reads on a box: the home's own directory first, the system's behind it.
+        let tools = format!("{}:{}", planted_dir.display(), system.path().display());
+        assert_eq!(agents_on(&agents, &presence_path_over(&tools, "")), vec!["claude".to_owned()]);
+        // The probe list is that list with every directory under the home taken out, which for this home leaves
+        // the system's alone; the rule that builds it from the tools PATH is held to the protocol's by the
+        // contract fixture, and what is read here is what the version read does with it.
+        let probe = system.path().to_string_lossy().into_owned();
+        let mut held = AgentVersions::default();
+        held.refresh(&agents, &probe, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.270 (Claude Code)"));
+        assert!(!planted_ran.exists(), "the binary under the home was run");
+        assert!(system_ran.exists());
     }
 
     #[test]
@@ -760,6 +807,7 @@ mod tests {
             agent_versions: &versions,
             daemon_port: 4321,
             dialed: "http://h:1",
+            unit_path: Some("/units/own/bin:/usr/bin"),
             runtime_root: &home.path().join("runtime"),
         });
         assert_eq!(report.name, "old-macbook");
@@ -770,9 +818,10 @@ mod tests {
         assert_eq!(report.agent_versions, versions);
         assert_eq!(report.logins, Some(logins_present(&home.path().join("runtime"))));
         assert_eq!(report.login["HOME"], home.path().to_string_lossy());
-        // The PATH the row carries is the one this daemon was started with, as it stands: where its agents are
-        // looked for is a reading of its own and not something to write into the login the host reads.
-        assert_eq!(report.login["PATH"], std::env::var("PATH").unwrap_or_default());
+        // The PATH the row carries is the one this daemon's unit gave it, read at start before the probe list
+        // took its place: what the person's login shell gives is a fact about that computer, and the list this
+        // daemon runs a command through is not.
+        assert_eq!(report.login["PATH"], "/units/own/bin:/usr/bin");
         assert_eq!(report.daemon_port.map(|p| p.get()), Some(4321));
         assert_eq!(report.dialed, "http://h:1");
         assert!(report.shape.cpu > 0.0 && report.shape.mem_mb > 0);
@@ -791,6 +840,7 @@ mod tests {
             agent_versions: &BTreeMap::new(),
             daemon_port: 1,
             dialed: "http://h:1",
+            unit_path: None,
             runtime_root: home.path(),
         });
         assert_eq!(bare.wsp, vec!["wsp"]);
@@ -806,6 +856,7 @@ mod tests {
             agent_versions: &BTreeMap::new(),
             daemon_port: 1,
             dialed: "http://h:1",
+            unit_path: None,
             runtime_root: under,
         });
         assert!(!bad.runs_workspaces);

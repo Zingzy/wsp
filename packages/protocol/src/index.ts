@@ -3707,6 +3707,7 @@ const DAEMON_CONTENTS = [
   "376bdbce753a06ef57dfdda1e50f1cb761a728538dd85851db285168e4d1e568",
   "c1d414a8d13ee7070d1df56f82b7230bb53bed51b8b2d43c4bc39a864c5b5489",
   "cec7af13cc254d8325bf77409aedc4daeb072d5dc0413b58aaf45f8428698721",
+  "b1c827b22fbdade28b749f72899b610723d5f312e339e9546552da14840013c1",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3880,7 +3881,10 @@ const DAEMON_CONTENTS = [
  * Version 59 binds a socket in each running workspace's own wsp folder that answers a guest's ping, open and send and no
  * other op, so a process inside a box workspace reaches the host's guest door without a token of the box's, writes the
  * wsp word into the workspace's own upper, and opens a shell inside a workspace's namespaces for the terminal pane, held
- * beside the daemon's own ptys and answered to no other workspace. */
+ * beside the daemon's own ptys and answered to no other workspace.
+ * Version 60 links only to a host it has proven, taking the second frame after the first is verified and its own prove
+ * sent, seals every frame of the link at both ends so whoever carries it reads and writes nothing, resolves no command
+ * through a folder a workspace can write, and holds a token of its own machine's rather than one every machine shares. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4265,6 +4269,9 @@ export const PlaceNonce = base64(PLACE_LINK_NONCE_BYTES);
 export const PlacePublicKey = base64(44);
 /** An ed25519 signature, base64: 64 bytes. */
 export const PlaceSignature = base64(64);
+/** An X25519 public key as its raw 32 bytes, base64: what each end of a link sends to agree the key every frame
+ * after the handshake is sealed under. Fresh per attempt and never held past the socket. */
+export const PlaceEphemeral = base64(32);
 
 /** The engine a project's own containers would run on: Docker first, then podman, else none. The one rule both
  * the host's own-machine report and the node agent's read off their own PATH check. */
@@ -4322,18 +4329,18 @@ export const PlaceReport = z.object({
 });
 export type PlaceReport = z.infer<typeof PlaceReport>;
 
-/** The first frame of a joining place: spends a join code (the pairing code road) for a place record that holds
- * this key. Answered with PlaceJoinReply; the socket then continues with place.prove as an auth would. */
+/** The first frame of a joining place: the key it will prove and the two public values that agree the seal.
+ * Nothing of the person's rides it, since nothing has proved who is on the other end yet: the code it spends and
+ * the report it carries go in the prove, inside the seal. Answered with PlaceJoinReply; the socket then continues
+ * with place.prove as an auth would. */
 export const PlaceJoinRequest = z.object({
   id: reqId,
   op: z.literal("place.join"),
-  code: z.string().max(64),
   publicKey: PlacePublicKey,
   nonce: PlaceNonce,
-  report: PlaceReport,
-  /** The joining computer also wants a device token for its own window. One code buys both, since the person's
-   * intent was one act; absent on a join typed in a terminal, which wants no window. */
-  client: z.object({ name: z.string().min(1).max(200) }).optional(),
+  /** Absent from a computer running a wsp older than the seal, which the host refuses in its own sentence rather
+   * than reading a frame it cannot answer. */
+  ephemeral: PlaceEphemeral.optional(),
 });
 export type PlaceJoinRequest = z.infer<typeof PlaceJoinRequest>;
 export const PlaceJoinReply = z.object({
@@ -4341,29 +4348,46 @@ export const PlaceJoinReply = z.object({
   hostPublicKey: PlacePublicKey,
   nonce: PlaceNonce,
   signature: PlaceSignature,
+  ephemeral: PlaceEphemeral,
   /** What the primary computer calls itself, which is what the joined computer shows a person from then on. */
   hostName: z.string().min(1).max(200),
-  /** Handed back only to a join that asked for one: the token this computer's own window holds. */
-  device: z.object({ deviceId: z.string(), deviceToken: z.string().min(1) }).optional(),
 });
 export type PlaceJoinReply = z.infer<typeof PlaceJoinReply>;
 
+/** The token a join's own window was given, on the reply to its prove: the one thing of the person's a join
+ * takes back, and it rides inside the seal now that the reply to frame one no longer carries it. */
+export const PlaceJoinDevice = z.object({ deviceId: z.string(), deviceToken: z.string().min(1) });
+export type PlaceJoinDevice = z.infer<typeof PlaceJoinDevice>;
+
 /** The first frame of a place that already joined: names itself and challenges the host. */
-export const PlaceAuthRequest = z.object({ id: reqId, op: z.literal("place.auth"), placeId: z.string().max(64), nonce: PlaceNonce });
+export const PlaceAuthRequest = z.object({ id: reqId, op: z.literal("place.auth"), placeId: z.string().max(64), nonce: PlaceNonce, ephemeral: PlaceEphemeral.optional() });
 export type PlaceAuthRequest = z.infer<typeof PlaceAuthRequest>;
-export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature });
+export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
 export type PlaceAuthReply = z.infer<typeof PlaceAuthReply>;
 
-/** The second frame: the place's answer to the host's nonce, and its report as it stands now. After this the socket
- * is the place link and carries daemon frames only. */
-export const PlaceProveRequest = z.object({ id: reqId, op: z.literal("place.prove"), signature: PlaceSignature, report: PlaceReport });
+/** The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
+ * now. A join's prove carries the code it spends and the window it wants too, which is where they cross now that
+ * the host has proved itself and nothing of the person's may travel before it. After this the socket is the place
+ * link and carries daemon frames only. */
+export const PlaceProveRequest = z.object({
+  id: reqId,
+  op: z.literal("place.prove"),
+  signature: PlaceSignature,
+  report: PlaceReport,
+  /** A join's own: the code this computer spends, and the window it also wants a token for. Absent on a relink,
+   * which spends nothing, and on a join typed in a terminal, which wants no window. */
+  code: z.string().max(64).optional(),
+  client: z.object({ name: z.string().min(1).max(200) }).optional(),
+});
 export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
 
-/** What both sides sign, built by one function so they cannot drift: the role of the signer, the place id and the
- * two nonces, the challenged party's nonce first. The host signs the transcript the place challenged it with and
- * the place signs the host's, so neither side's signature can be replayed back at it as the other's. */
-export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string): Uint8Array {
-  return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
+/** What both sides sign, built by one function so they cannot drift: the role of the signer, the place id, the two
+ * nonces and the two ephemerals, the challenged party's first in each pair. The host signs the transcript the
+ * place challenged it with and the place signs the host's, so neither side's signature can be replayed back at it
+ * as the other's; the ephemerals are inside it, so the key the two ends agree is one both signatures cover and a
+ * carrier that swapped either of them has signed nothing. */
+export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string, ephemerals: { challenger: string; answerer: string }): Uint8Array {
+  return new TextEncoder().encode(`wsp place link v2\n${role}\n${placeId}\n${challenge}\n${answer}\n${ephemerals.challenger}\n${ephemerals.answerer}\n`);
 }
 
 /** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
@@ -4399,6 +4423,18 @@ export const joinKeyRefusal = (url: string): string => `the host at ${url} prove
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
  * mints this one, since a person joining a computer never typed wsp host pair. */
 export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
+
+/** The refusal for a word two computers on this host answer to: ids tell them apart, and the person picks one.
+ * `typed` is the word that was written, since more than one word names a computer and each says its own back. A
+ * relink cannot take another computer's name, so two by one name are two a person joined under one word, and
+ * every road that resolves a word reads this one sentence. */
+export const twoPlacesRefusal = (typed: string, ids: readonly string[]): string =>
+  `${typed}: this host holds ${ids.length} places by that name; name one by its id (${ids.join(", ")}).`;
+
+/** The refusal a join from a computer whose wsp seals no link gets: every frame of a link after the handshake
+ * travels inside a key the two ends agree, and a computer that cannot agree one would send its code and its
+ * report where the carrier reads them. */
+export const PLACE_UNSEALED_JOIN_REFUSAL = "that computer's wsp is older than this host and seals no link; update wsp there and join again";
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
  * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
@@ -5267,7 +5303,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";

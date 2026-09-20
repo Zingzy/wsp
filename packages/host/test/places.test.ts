@@ -16,7 +16,7 @@ import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
-import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
+import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
@@ -170,8 +170,10 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
   const frames: Record<string, unknown>[] = [];
   wss.on("connection", ws => {
     ws.on("error", () => {});
+    /** Set once this host has answered the join: from the prove on the link is sealed both ways. */
+    let seal: Seal | undefined;
     ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+      const frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       frames.push(frame);
       if (frame["op"] === "place.join") {
         if (opts.refuse !== undefined) {
@@ -181,7 +183,8 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
         }
         const placeId = "p_ab12cd34ab12cd34";
         const nonce = Buffer.alloc(32, 5).toString("base64");
-        const bytes = placeLinkTranscript("host", placeId, String(frame["nonce"]), nonce);
+        const mine = freshEphemeral();
+        const bytes = placeLinkTranscript("host", placeId, String(frame["nonce"]), nonce, { challenger: String(frame["ephemeral"]), answerer: mine.publicKey });
         // A host whose signature is made by a key other than the one it sent is the one thing a join must refuse.
         // A stranger answering at the host's address holds a key of its own and signs the transcript with it
         // perfectly well: what tells it from the host is which key it is, not whether it can sign.
@@ -195,13 +198,18 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
             hostPublicKey: answering,
             nonce,
             signature,
+            ephemeral: mine.publicKey,
             hostName: "zingzy-mbp",
-            ...(frame["client"] === undefined ? {} : { device: { deviceId: "d_1", deviceToken: "dev-token" } }),
           }),
         );
+        seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, String(frame["ephemeral"])), placeId), "host");
         return;
       }
-      if (frame["op"] === "place.prove") ws.send(JSON.stringify({ id: frame["id"], ok: true }));
+      if (frame["op"] === "place.prove") {
+        // The token the window asked for rides the sealed reply to the prove, since the code that bought it
+        // crossed on this frame and no earlier.
+        ws.send(seal!.seal(JSON.stringify({ id: frame["id"], ok: true, ...(frame["client"] === undefined ? {} : { device: { deviceId: "d_1", deviceToken: "dev-token" } }) })));
+      }
     });
   });
   const port = await new Promise<number>((done, fail) => {
@@ -547,8 +555,11 @@ describe("a computer joining a wsp", () => {
     expect(written).toContain(`HOME=${home}`);
     expect(io.lines.join("\n")).toContain("old-macbook joined the wsp at");
     expect(io.lines.join("\n")).toContain("wsp leave takes this computer back out.");
-    // The report it sent names this computer and the address it dialled.
-    const sent = host.frames.find(f => f["op"] === "place.join")!;
+    // Frame one carries public values only; the report names this computer and the address it dialled, and it
+    // rides the prove, inside the seal, after the host proved the key the join line named.
+    const first = host.frames.find(f => f["op"] === "place.join")!;
+    expect(Object.keys(first).sort()).toEqual(["ephemeral", "id", "nonce", "op", "publicKey"]);
+    const sent = host.frames.find(f => f["op"] === "place.prove")!;
     expect((sent["report"] as { name: string; dialed: string }).name).toBe("old-macbook");
     expect((sent["report"] as { dialed: string }).dialed).toBe(host.url);
   });
@@ -630,7 +641,7 @@ describe("a computer joining a wsp", () => {
     const home = tmp("join-dashed");
     const host = await fakeHost();
     expect(await joinCommand(captured(), [host.url], { code: `qw4k-7pzx.${keyFingerprint(host.publicKey)}` }, joinDepsFor(home, fakeRunner().run))).toBe(0);
-    expect(String((host.frames.find(f => f["op"] === "place.join")!)["code"])).toBe("QW4K7PZX");
+    expect(String((host.frames.find(f => f["op"] === "place.prove")!)["code"])).toBe("QW4K7PZX");
   });
 
   it("reads the code off a file and deletes it before dialing, so a code never sits on a disk", async () => {
@@ -640,7 +651,7 @@ describe("a computer joining a wsp", () => {
     writeFileSync(codeFile, `${codeFor(host, "7QK3M2VD")}\n`);
     expect(await joinCommand(captured(), [host.url], { codeFile }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(existsSync(codeFile)).toBe(false);
-    expect(String((host.frames.find(f => f["op"] === "place.join")!)["code"])).toBe("7QK3M2VD");
+    expect(String((host.frames.find(f => f["op"] === "place.prove")!)["code"])).toBe("7QK3M2VD");
   });
 
   it("refuses a host that proves a key the join line did not name, before it sends anything of its own", async () => {
@@ -665,7 +676,7 @@ describe("a computer joining a wsp", () => {
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, runner.run))).toBe(0);
     expect(readPlaceFile(placeFilePath(home))!.hostPublicKey).toBe(host.publicKey);
     // The code that went over is the code alone: the fingerprint is this computer's to check and no part of the frame.
-    expect(host.frames.find(f => f["op"] === "place.join")!["code"]).toBe("7QK3M2VD");
+    expect(host.frames.find(f => f["op"] === "place.prove")!["code"]).toBe("7QK3M2VD");
     expect(runner.ran.length).toBeGreaterThan(0);
   });
 
@@ -2228,7 +2239,7 @@ describe("a join as the app's shell runs it", () => {
     // name rather than this computer's: wsp remove finds the token a computer still holds by the place's name, so a
     // second word here would be a device nothing could ever name. The two are different words in this run.
     expect(placeNameHere()).not.toBe("old-macbook");
-    expect(host.frames.find(f => f["op"] === "place.join")!["client"]).toEqual({ name: "old-macbook" });
+    expect(host.frames.find(f => f["op"] === "place.prove")!["client"]).toEqual({ name: "old-macbook" });
   });
 
   it("is the same road the command line takes, which hands the daemon binary and its flags", async () => {
@@ -2241,7 +2252,7 @@ describe("a join as the app's shell runs it", () => {
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
     expect(written).toContain("'--kind' 'place'");
     // Nothing on that road asks for a window, so nothing on it buys a device.
-    expect(host.frames.find(f => f["op"] === "place.join")!["client"]).toBeUndefined();
+    expect(host.frames.find(f => f["op"] === "place.prove")!["client"]).toBeUndefined();
   });
 
   it("takes a bare host and port as the join screen shows it, and refuses a word that is no address", async () => {

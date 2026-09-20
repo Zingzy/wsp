@@ -8,7 +8,7 @@ import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON } from "@wsp/catalog";
-import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
+import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
 import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
 import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import { provisionMcp, theirServerLine } from "../src/provision-mcp.js";
@@ -118,6 +118,7 @@ async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: bool
     home: g.root,
     landed: landed.owned,
     tools: [],
+    path: TOOLS_PATH,
     stage: (_which, detail) => {
       if (detail !== undefined) said.push(detail);
     },
@@ -278,6 +279,7 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
       home: root,
       landed: landed.owned,
       tools: [],
+      path: TOOLS_PATH,
       stage: (_which, detail) => {
         if (detail !== undefined) said.push(detail);
       },
@@ -295,7 +297,7 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
 
   it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {
     const { root, machine } = box();
-    const rows = await provisionMcp(machine, planOn(root), { home: root, landed: new Map(), tools: [], stage: () => {} });
+    const rows = await provisionMcp(machine, planOn(root), { home: root, landed: new Map(), tools: [], stage: () => {}, path: TOOLS_PATH });
     expect(rows.every(r => r.outcome === "skipped")).toBe(true);
     expect(rows[0]!.note).toContain("Claude Code's config is not on the machine");
   });

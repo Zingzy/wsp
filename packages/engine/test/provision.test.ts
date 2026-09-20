@@ -4,12 +4,13 @@
 // run under bash here rather than matched as text: what it is for is deciding
 // whether a command answers and at which version, which only a shell decides.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
 import {
+  probePath,
   HOMEBREW_PREFIX,
   MCP_ID_PREFIX,
   placeProvisionPaths,
@@ -23,8 +24,8 @@ import {
   provisionWord,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
-import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
+import { baseVersionsCmd } from "../src/golden-base.js";
+import { PROFILE_PATH_FILE, TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { presentByWhatWaits, presentElsewhere, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
@@ -66,7 +67,7 @@ function shellMachine(dir: string): Machine {
 }
 
 /** A computer that answers every exec and every run from `answer` and records the order it was asked in. */
-function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => undefined) {
+function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => undefined, path: string = TOOLS_PATH) {
   const calls: string[] = [];
   const puts: string[] = [];
   const machine = {
@@ -78,7 +79,7 @@ function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => unde
       const said = answer(cmd);
       if (said !== undefined) return said;
       if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" };
-      if (cmd === BASE_VERSIONS_CMD) return { exitCode: 0, stdout: `${FLOOR_READ}\n`, stderr: "" };
+      if (cmd === baseVersionsCmd(path)) return { exitCode: 0, stdout: `${FLOOR_READ}\n`, stderr: "" };
       if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nAGENT claude\nWSP_CTX_END\n", stderr: "" };
       return ok;
     },
@@ -93,7 +94,7 @@ function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => unde
 
 const step = (over: Partial<ToolInstall> & Pick<ToolInstall, "id" | "label">): ToolInstall => ({ manager: "script", cmd: `install ${over.id}`, ...over });
 
-const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = [], over: Partial<ProvisionPlan> = {}): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", steps, skipped, ...over });
+const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = [], over: Partial<ProvisionPlan> = {}): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", path: TOOLS_PATH, steps, skipped, ...over });
 
 /** The login the computer's own agent runs as, which is where the agents' folders are there. */
 const ON = { home: "/root" };
@@ -158,6 +159,7 @@ describe("what a computer already satisfies", () => {
         tools: toolInstallsFor([row("tools/brew/gh", "tools"), row("tools/brew/yq", "tools")]).installs,
       },
       "2026-09-17T10:00:00.000Z",
+      TOOLS_PATH,
     );
     expect(plan.steps.length).toBeGreaterThan(6);
     // No step of the plan is unreadable: each says either a command it puts on PATH or a check of its own.
@@ -268,7 +270,7 @@ describe("what a computer already satisfies", () => {
 
   it("is the apt index of a real plan and no other step of it, since every other step says a command, a check or a version", async () => {
     // Two apt rows of the catalog: the plan reads the index once, before the first row that waits on it.
-    const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools: toolInstallsFor([row("tools/catalog/ffmpeg", "tools"), row("tools/catalog/ruby", "tools")]).installs }, "2026-09-17T10:00:00.000Z");
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools: toolInstallsFor([row("tools/catalog/ffmpeg", "tools"), row("tools/catalog/ruby", "tools")]).installs }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
     // Through the rule itself rather than a second copy of it here: on a computer where every step's own read
     // answers, the apt index is the one step the dependents rule has anything to say about.
     const byWhatWaits = presentByWhatWaits(plan.steps, new Set(plan.steps.map(s => s.id)));
@@ -295,7 +297,7 @@ describe("the run on the computer itself", () => {
     const seen: string[] = [];
     const rows = await provisionBox(machine, planOf(steps), detail => void seen.push(detail), ON);
     const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
-    expect(at(BASE_VERSIONS_CMD)).toBe(0);
+    expect(at(baseVersionsCmd(TOOLS_PATH))).toBe(0);
     expect(at("wsp-present")).toBeGreaterThan(0);
     expect(at("install agents/codex")).toBeGreaterThan(at("wsp-present"));
     expect(at("install tools/release/gh")).toBeGreaterThan(at("install agents/codex"));
@@ -309,7 +311,7 @@ describe("the run on the computer itself", () => {
   it("says the floor's own lines as a person reads them, with no stage id of the image build's in front", async () => {
     // A computer with none of the floor on it: every floor row runs, and what the terminal and the log on that
     // computer read is the row and the tally, not the stage the image build files them under.
-    const { machine } = boxMachine(cmd => (cmd === BASE_VERSIONS_CMD ? { exitCode: 0, stdout: "", stderr: "" } : undefined));
+    const { machine } = boxMachine(cmd => (cmd === baseVersionsCmd(TOOLS_PATH) ? { exitCode: 0, stdout: "", stderr: "" } : undefined));
     const seen: string[] = [];
     await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), detail => void seen.push(detail), ON);
     expect(seen.some(l => l.startsWith("deploying-daemon"))).toBe(false);
@@ -396,7 +398,7 @@ describe("the run on the computer itself", () => {
       id: "spoo",
       kind: "sandbox",
       exec: async (cmd: string) => {
-        if (cmd === BASE_VERSIONS_CMD) return { exitCode: 0, stdout: `${FLOOR_READ}\n`, stderr: "" };
+        if (cmd === baseVersionsCmd(TOOLS_PATH)) return { exitCode: 0, stdout: `${FLOOR_READ}\n`, stderr: "" };
         // The floor's own step is one run, so the link goes while the third of the recipe's rows is going on.
         if (ran >= 4) throw new Error("spoo is not connected");
         if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" };
@@ -531,5 +533,76 @@ describe("the person's own files and their servers, on the same run", () => {
     // The close is where the job's own folder on that computer is swept, so it runs whether or not this recipe
     // carries a file of the person's; with no landing it leaves the list exactly as it was.
     expect(calls.some(c => c.includes(OLD_APPEND_MARKS))).toBe(true);
+  });
+});
+
+describe("the PATH every script of the job exports", () => {
+  /** The list a computer somebody owns runs the job on: its own system directories, root's home left out. */
+  const PROBE = probePath("/root");
+
+  /** Every PATH one script runs under. The line that writes the login shell's PATH into a file on that computer
+   * is not one of them: what a person's own shell there looks along is not what this job resolves a command
+   * through, and it still names where the recipe installs. */
+  const exportedPaths = (script: string): string[] =>
+    script
+      .split("\n")
+      .filter(line => !line.includes(PROFILE_PATH_FILE))
+      .flatMap(line => [...line.matchAll(/export PATH=(\S+)/g)].map(m => m[1]!));
+
+  it("is the plan's own on every script the job sends, and no line of one names a directory under the home the workspaces there write", async () => {
+    const plan = provisionPlanOf(
+      {
+        recipeHash: "h1",
+        agents: agentInstallsFor([row("agents/claude"), row("agents/codex")]).installs,
+        node: agentInstallsFor([row("agents/codex")]).node!,
+        tools: toolInstallsFor([row("tools/brew/gh", "tools"), row("tools/npm/turbo", "tools")], new Map(), [], PROBE).installs,
+      },
+      "2026-09-17T10:00:00.000Z",
+      PROBE,
+    );
+    const { machine, calls } = boxMachine(undefined, PROBE);
+    await provisionBox(machine, plan, () => {}, ON);
+    const scripts = [...calls, ...plan.steps.map(s => s.cmd)];
+    const exported = scripts.flatMap(exportedPaths);
+    // The presence read, the checks, the floor's versions read, the cache sweep, the context probe and every
+    // step's own line are all in here; the node line a harness install carries is the one other PATH they set.
+    expect(exported.length).toBeGreaterThan(8);
+    for (const value of exported) {
+      expect(value === PROBE || value === `${PROBE}:$PATH` || value === '"/usr/local/bin:$PATH"', value).toBe(true);
+    }
+    expect(scripts.filter(c => c.includes("/root/.local/bin")).map(c => c.split("\n").find(l => l.includes("/root/.local/bin")))).toEqual([
+      // The one line that names it: the login shell's PATH written into a file on that computer, which the
+      // daemon and this job both stopped resolving a command through.
+      expect.stringContaining(PROFILE_PATH_FILE),
+    ]);
+  });
+
+  it("is the tools PATH for the image build, which is root's own machine and shares its home with nobody", () => {
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools: toolInstallsFor([row("tools/npm/turbo", "tools")]).installs }, "2026-09-17T10:00:00.000Z", TOOLS_PATH);
+    expect(plan.path).toBe(TOOLS_PATH);
+    expect(plan.steps.flatMap(s => exportedPaths(s.cmd))).toContain(TOOLS_PATH);
+  });
+
+  it("keeps a binary planted under that home out of what a row runs, under a real shell", () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-planted-"));
+    onTestFinished(() => rmSync(home, { recursive: true, force: true }));
+    const bin = join(home, ".local/bin");
+    mkdirSync(bin, { recursive: true });
+    const marker = join(home, "uv-ran");
+    writeFileSync(join(bin, "uv"), `#!/bin/sh\ntouch ${marker}\n`);
+    chmodSync(join(bin, "uv"), 0o755);
+    // The tools PATH as it reads on a computer somebody owns: that home's own directory first, the system's
+    // behind it; the probe list is the same with every directory under the home taken out.
+    const tools = `${bin}:/usr/bin:/bin`;
+    const probe = tools.split(":").filter(dir => !dir.startsWith(`${home}/`)).join(":");
+    const uvRow = (path: string): string => {
+      const step = toolInstallsFor([row("tools/uv/ruff", "tools")], new Map(), [], path).installs.find(t => t.cmd.includes("uv tool install"));
+      return step!.cmd;
+    };
+    spawnSync("sh", ["-c", uvRow(probe)], { encoding: "utf8" });
+    expect(existsSync(marker), "a row of the job ran the binary planted under the home").toBe(false);
+    // The same row on a list that does name that home runs it, which is what the probe list is here to stop.
+    spawnSync("sh", ["-c", uvRow(tools)], { encoding: "utf8" });
+    expect(existsSync(marker)).toBe(true);
   });
 });

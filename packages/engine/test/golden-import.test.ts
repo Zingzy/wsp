@@ -47,7 +47,7 @@ import {
   toolNames,
   toolInstallsFor,
   toolUninstall,
-  BREW_HOUSEKEEPING,
+  brewHousekeeping,
   TOOLS_PATH,
   type BrewTable,
   type DigestedFile,
@@ -912,6 +912,7 @@ describe("toolInstallsFor", () => {
   });
 
   it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
+    const BREW_HOUSEKEEPING = brewHousekeeping(TOOLS_PATH);
     expect(BREW_HOUSEKEEPING).toHaveLength(2);
     expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew autoremove'$/);
     expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew cleanup -s --prune=all'$/);

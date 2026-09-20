@@ -8,6 +8,7 @@
 import { existsSync } from "node:fs";
 import type { Manifest, Platform } from "@wsp/collect";
 import { agentStateFile, provisionBox, provisionPlanOf, type BrewTable } from "@wsp/engine";
+import { probePath } from "@wsp/protocol";
 import type { PlaceProvisioner } from "@wsp/runtime";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
@@ -27,23 +28,27 @@ export interface ProvisionReaders {
  * is what the join and the update say rather than installing nothing quietly. */
 export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
   return {
-    async plan() {
-      const path = smallRecipePath(o.statePath);
-      if (!existsSync(path)) return { noRecipe: path };
-      const recipe = loadRecipe(path);
+    async plan(on) {
+      const recipePath = smallRecipePath(o.statePath);
+      if (!existsSync(recipePath)) return { noRecipe: recipePath };
+      const recipe = loadRecipe(recipePath);
       const manifest = await o.collect();
       const brew = await brewTableFor(manifest, o.brew);
       // No record and so no pins: a computer somebody owns keeps no sealed version, and the catalog's own
       // versions are what its rows install at.
       const rows = copyRows(manifest, { recipe, pins: [] }, { home: o.home, brew });
+      // The one PATH every script of this job exports on that computer: its own system directories, with every
+      // directory under the home it shares with the workspaces on it left out, since a process inside one of them
+      // writes there and the job runs as root outside them.
+      const path = probePath(on.home);
       const imp = planImport(
         rows.filter(e => e.bring === true),
         // The files that travel to a computer somebody owns are the agents' own: their skills, their standing
         // instructions and their configuration, in the agents' homes there. A dotfile, a login's store and a
         // shell's rc are the person's computer, and the computer they joined is one they already live on.
-        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile },
+        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile, path },
       );
-      return provisionPlanOf(imp, recipe.at);
+      return provisionPlanOf(imp, recipe.at, path);
     },
     run: (machine, plan, stage, on) => provisionBox(machine, plan, stage, on),
   };

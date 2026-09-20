@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { openFrame, type Seal } from "../src/seal.js";
 
 export interface WireMsg {
   id?: string | number | null;
@@ -12,10 +13,17 @@ export class WsClient {
   private nextId = 1;
   private pending = new Map<number, (m: WireMsg) => void>();
   readonly events: WireMsg[] = [];
+  /** Set once a place's handshake agreed a key: every frame this client sends from then on rides inside it and
+   * every frame it reads is opened with it, which is what a computer on a place link does. */
+  seal: Seal | undefined;
+  /** Whoever is reading every frame this socket is pushed. One socket opens each frame once, since a seal counts
+   * the frames it opens: a second reader unsealing the same bytes would put the two counters out of step. */
+  private readonly readers: ((m: WireMsg) => void)[] = [];
 
   private constructor(readonly ws: WebSocket) {
     ws.on("message", raw => {
-      const m = JSON.parse(String(raw)) as WireMsg;
+      const m = JSON.parse(openFrame(this.seal, raw)) as WireMsg;
+      for (const read of this.readers) read(m);
       // A frame carrying an op is one the host sent this socket, and its id is the host's own numbering: it is
       // never the answer to a request made here, however that number lines up with one still waiting.
       if (typeof m.op === "string") {
@@ -55,8 +63,21 @@ export class WsClient {
     const id = this.nextId++;
     return new Promise(resolve => {
       this.pending.set(id, resolve);
-      this.ws.send(JSON.stringify({ id, op, ...params }));
+      const text = JSON.stringify({ id, op, ...params });
+      this.ws.send(this.seal === undefined ? text : this.seal.seal(text));
     });
+  }
+
+  /** Reads every frame the other end sends, opened with the seal where the handshake agreed one: what a fake
+   * computer answers the host's frames from. */
+  onFrame(read: (m: WireMsg) => void): void {
+    this.readers.push(read);
+  }
+
+  /** One frame out, sealed where the handshake agreed a key. */
+  say(payload: Record<string, unknown>): void {
+    const text = JSON.stringify(payload);
+    this.ws.send(this.seal === undefined ? text : this.seal.seal(text));
   }
 
   closed(): Promise<number> {

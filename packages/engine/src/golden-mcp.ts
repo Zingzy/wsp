@@ -344,11 +344,11 @@ export const asRun = (plan: McpPlan, command: string): string => (command.starts
 
 /** Which commands of a plan's kept servers the machine does not have on its tools PATH, asked in one call; none
  * when no kept server names a command, and none when the call itself did not answer. */
-export async function absentCommands(machine: Machine, plan: McpPlan, read: readonly ScopeOutcome[]): Promise<string[]> {
+export async function absentCommands(machine: Machine, plan: McpPlan, read: readonly ScopeOutcome[], path: string = TOOLS_PATH): Promise<string[]> {
   const commands = [...new Set(read.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(plan, r.command)] : []))))];
   if (commands.length === 0) return [];
   const check = await machine
-    .exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS })
+    .exec(`export PATH=${path}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS })
     .catch(refused);
   return check.stdout
     .split("\n")

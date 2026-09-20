@@ -23,6 +23,9 @@ import { provisionMcp } from "./provision-mcp.js";
  * not here: installBase reads what the computer has and runs its own steps first. */
 export interface ProvisionPlan {
   recipeAt: string;
+  /** The one PATH every script of this job exports, chosen when the plan was made: the probe list for a computer
+   * somebody owns, whose home every workspace on it writes, and the tools PATH for a machine wsp forked. */
+  path: string;
   steps: readonly ToolInstall[];
   /** Rows set aside before anything ran, with the plan's reason each. */
   skipped: readonly { id: string; label: string; note: string }[];
@@ -39,12 +42,13 @@ export type ProvisionStage = (detail: string, at?: { label: string; index: numbe
 /** The plan off a golden import: the agents as steps of the one tools loop, then the tools, and the import's own
  * set-aside rows as the plan's. The files, the shell and the MCP servers of that import are not put on a computer
  * somebody lives on; what installs is what this plan carries. */
-export function provisionPlanOf(imp: GoldenImport, recipeAt: string): ProvisionPlan {
-  const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) });
+export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string): ProvisionPlan {
+  const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path);
   const files = imp.files;
   const once = onceDests(imp);
   return {
     recipeAt,
+    path,
     steps: [...agents, ...imp.tools],
     skipped: [
       ...(imp.skippedAgents ?? []).map(a => ({ id: a.id, label: a.name, note: a.note })),
@@ -123,7 +127,7 @@ export interface PresentRead {
  * by the one paging rule every batched read here takes, each with what its read said about it. A page that could
  * not be made says nothing is present in it, which installs those steps again rather than skipping one that is not
  * there. */
-export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Map<string, PresentRead>> {
+export async function presentSteps(machine: Machine, steps: readonly ToolInstall[], path: string = TOOLS_PATH): Promise<Map<string, PresentRead>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
     return tests.length === 0 ? [] : [{ step, tests }];
@@ -135,7 +139,7 @@ export async function presentSteps(machine: Machine, steps: readonly ToolInstall
     machine,
     asked,
     (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s %s\\n' ${at} "${row.step.bin === undefined ? "" : `$(command -v ${shellQuote(row.step.bin)} 2>/dev/null)`}"; fi`,
-    `export PATH=${TOOLS_PATH}`,
+    `export PATH=${path}`,
   );
   for (const { rows, res } of pages) {
     if (res.exitCode !== 0) continue;
@@ -230,9 +234,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
   // image build files them under.
   const base = await installBase(machine, (_which, detail) => {
     if (detail !== undefined) stage(detail);
-  }, { caches: "keep" });
+  }, { caches: "keep", path: plan.path });
   stage(base.line);
-  const read = await presentSteps(machine, plan.steps);
+  const read = await presentSteps(machine, plan.steps, plan.path);
   // The steps nothing can be asked about carry no read of their own: what says they are there is the rows behind them.
   const present = new Map<string, PresentRead>([...read, ...[...presentByWhatWaits(plan.steps, new Set(read.keys()))].map(id => [id, {}] as [string, PresentRead])]);
   const stepOf = new Map(plan.steps.map(step => [step.id, step]));
@@ -249,6 +253,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     {
       present: new Set(present.keys()),
       caches: "keep",
+      path: plan.path,
       onTool: result => {
         const row = rowOf(result, present, stepOf.get(result.id));
         said.set(result.id, rowLine(row));
@@ -284,6 +289,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
       home: on.home,
       landed: landedNow,
       tools: tools.tools,
+      path: plan.path,
       stage: (_which, detail) => {
         if (detail !== undefined) stage(detail, round(MCP_LABEL));
       },
@@ -306,7 +312,7 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     agents: [],
     ...(plan.files !== undefined ? { files: { bytes: 0, skipped: skippedFiles } } : {}),
   };
-  const context = await applyMachineContext(machine, { result });
+  const context = await applyMachineContext(machine, { result, path: plan.path });
   stage(`machine context: ${context.summary}`);
   return rows;
 }

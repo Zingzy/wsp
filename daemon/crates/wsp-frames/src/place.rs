@@ -11,7 +11,7 @@ use base64::{alphabet, Engine};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, bounded_list, bounded_map, http_url, non_empty_list, under_paths_opt};
+use crate::validate::{bounded, bounded_list, bounded_map, bounded_opt, http_url, non_empty_list, under_paths_opt};
 use crate::{CopyWord, RequestId};
 
 /// Decodes what the protocol's regex accepts: the standard alphabet, padded, with the trailing bits of the last
@@ -64,6 +64,9 @@ pub type PlaceNonce = Base64Bytes<{ crate::numbers::PLACE_LINK_NONCE_BYTES }>;
 pub type PlacePublicKey = Base64Bytes<44>;
 /// An ed25519 signature.
 pub type PlaceSignature = Base64Bytes<64>;
+/// An X25519 public key as its raw 32 bytes: what each end of a link sends to agree the key every frame after the
+/// handshake is sealed under. Fresh per attempt and never held past the socket.
+pub type PlaceEphemeral = Base64Bytes<32>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -142,11 +145,12 @@ pub struct PlaceAuthRequest {
     #[serde(deserialize_with = "bounded::<_, 0, 64>")]
     pub place_id: String,
     pub nonce: PlaceNonce,
+    pub ephemeral: PlaceEphemeral,
 }
 
 impl PlaceAuthRequest {
-    pub fn new(id: RequestId, place_id: impl Into<String>, nonce: PlaceNonce) -> Self {
-        PlaceAuthRequest { id, op: PlaceAuthTag::PlaceAuth, place_id: place_id.into(), nonce }
+    pub fn new(id: RequestId, place_id: impl Into<String>, nonce: PlaceNonce, ephemeral: PlaceEphemeral) -> Self {
+        PlaceAuthRequest { id, op: PlaceAuthTag::PlaceAuth, place_id: place_id.into(), nonce, ephemeral }
     }
 }
 
@@ -156,6 +160,7 @@ pub struct PlaceAuthReply {
     pub nonce: PlaceNonce,
     pub host_public_key: PlacePublicKey,
     pub signature: PlaceSignature,
+    pub ephemeral: PlaceEphemeral,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,18 +169,31 @@ enum PlaceProveTag {
     PlaceProve,
 }
 
-/// The second frame: the place's answer to the host's nonce, and its report as it stands now.
+/// The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
+/// now. A join's prove carries the code it spends and the window it wants too, which this daemon never sends: a
+/// join is typed on the computer being joined and its own wsp sends it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaceProveRequest {
     pub id: RequestId,
     op: PlaceProveTag,
     pub signature: PlaceSignature,
     pub report: PlaceReport,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "bounded_opt::<_, 64>")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<PlaceClient>,
+}
+
+/// The window a join also wants a token for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaceClient {
+    #[serde(deserialize_with = "bounded::<_, 1, 200>")]
+    pub name: String,
 }
 
 impl PlaceProveRequest {
     pub fn new(id: RequestId, signature: PlaceSignature, report: PlaceReport) -> Self {
-        PlaceProveRequest { id, op: PlaceProveTag::PlaceProve, signature, report }
+        PlaceProveRequest { id, op: PlaceProveTag::PlaceProve, signature, report, code: None, client: None }
     }
 }
 
@@ -195,10 +213,21 @@ impl LinkRole {
     }
 }
 
+/// The two public values the seal is agreed from, in the order the transcript names them: the side that
+/// challenged first, then the side that answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkEphemerals<'a> {
+    pub challenger: &'a str,
+    pub answerer: &'a str,
+}
+
 /// The bytes both sides sign, as the protocol's placeLinkTranscript builds them: the role of the signer, the place
-/// id and the two nonces, the challenged party's nonce first, each on its own line.
-pub fn place_link_transcript(role: LinkRole, place_id: &str, challenge: &str, answer: &str) -> Vec<u8> {
-    format!("wsp place link v1\n{}\n{place_id}\n{challenge}\n{answer}\n", role.word()).into_bytes()
+/// id, the two nonces and the two ephemerals, the challenged party's first in each pair, each on its own line.
+/// The ephemerals are inside it, so the key the two ends agree is one both signatures cover and a carrier that
+/// swapped either of them has signed nothing.
+pub fn place_link_transcript(role: LinkRole, place_id: &str, challenge: &str, answer: &str, ephemerals: LinkEphemerals<'_>) -> Vec<u8> {
+    let LinkEphemerals { challenger, answerer } = ephemerals;
+    format!("wsp place link v2\n{}\n{place_id}\n{challenge}\n{answer}\n{challenger}\n{answerer}\n", role.word()).into_bytes()
 }
 
 /// What a computer joined as a place keeps about the wsp it belongs to, as wsp join writes it and the agent reads
@@ -230,9 +259,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_transcript_is_the_protocols_five_lines() {
-        assert_eq!(place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB="), b"wsp place link v1\nhost\np_1\nAAA=\nBBB=\n");
-        assert_eq!(place_link_transcript(LinkRole::Place, "p_1", "BBB=", "AAA="), b"wsp place link v1\nplace\np_1\nBBB=\nAAA=\n");
+    fn the_transcript_is_the_protocols_seven_lines() {
+        let pair = LinkEphemerals { challenger: "CCC=", answerer: "DDD=" };
+        assert_eq!(
+            place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB=", pair),
+            b"wsp place link v2\nhost\np_1\nAAA=\nBBB=\nCCC=\nDDD=\n"
+        );
+        let swapped = LinkEphemerals { challenger: "DDD=", answerer: "CCC=" };
+        assert_eq!(
+            place_link_transcript(LinkRole::Place, "p_1", "BBB=", "AAA=", swapped),
+            b"wsp place link v2\nplace\np_1\nBBB=\nAAA=\nDDD=\nCCC=\n"
+        );
     }
 
     #[test]

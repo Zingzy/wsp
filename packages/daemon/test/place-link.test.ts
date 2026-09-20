@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled, writePlaceFile } from "./fake-place-host.js";
 import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
@@ -141,20 +142,24 @@ describe("the link a place dials", () => {
     wss.on("connection", ws => {
       ws.on("error", () => {});
       let expect1: Uint8Array | undefined;
+      let seal: Seal | undefined;
       ws.on("message", raw => {
-        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        const frame = JSON.parse(seal === undefined ? String(raw) : seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
         if (frame["op"] === "place.auth") {
           const placeId = String(frame["placeId"]);
           const placeNonce = String(frame["nonce"]);
           const nonce = Buffer.alloc(32, 4).toString("base64");
-          expect1 = placeLinkTranscript("place", placeId, nonce, placeNonce);
-          const signature = sign(null, placeLinkTranscript("host", placeId, placeNonce, nonce), createPrivateKey(key.privateKeyPem)).toString("base64");
-          ws.send(JSON.stringify({ id: frame["id"], ok: true, nonce, hostPublicKey: key.publicKey, signature }));
+          const host = freshEphemeral();
+          const ephemerals = { challenger: String(frame["ephemeral"]), answerer: host.publicKey };
+          expect1 = placeLinkTranscript("place", placeId, nonce, placeNonce, { challenger: host.publicKey, answerer: String(frame["ephemeral"]) });
+          const signature = sign(null, placeLinkTranscript("host", placeId, placeNonce, nonce, ephemerals), createPrivateKey(key.privateKeyPem)).toString("base64");
+          ws.send(JSON.stringify({ id: frame["id"], ok: true, nonce, hostPublicKey: key.publicKey, signature, ephemeral: host.publicKey }));
+          seal = makeSeal(sealKeys(sharedSecret(host.privateKey, String(frame["ephemeral"])), placeId), "host");
           return;
         }
         if (frame["op"] === "place.prove") {
           proved = verify(null, expect1!, { key: Buffer.from(mine.publicKey, "base64"), format: "der", type: "spki" }, Buffer.from(String(frame["signature"]), "base64"));
-          ws.send(JSON.stringify({ id: frame["id"], ok: true }));
+          ws.send(seal!.seal(JSON.stringify({ id: frame["id"], ok: true })));
         }
       });
     });
@@ -162,6 +167,25 @@ describe("the link a place dials", () => {
     const place = placeFile([`http://127.0.0.1:${port}`], key.publicKey, mine.privateKeyPem);
     await placeDaemon(place);
     await vi.waitFor(() => expect(proved).toBe(true), { timeout: 5_000, interval: 10 });
+  });
+
+  it("agrees a key with the host and seals every frame after the prove, and ends the link on one sent in the clear", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkBackoffMs: 60_000 });
+    const { ws, seal } = await host.socket;
+    await untilLogged(d, line => line === linkedLine(host.url));
+    // The prove came back inside the key the two ends agreed, which is what the host having read one means: it
+    // opened the bytes the binary built with its own X25519, HKDF and AES-256-GCM.
+    expect(host.frames).toEqual([]);
+    expect(host.proofs).toHaveLength(1);
+    expect(PlaceProveRequest.parse(host.proofs[0]).report.name).toBe("old-macbook");
+    // A carrier writing into the link sends a frame this daemon would answer, in the clear; the socket ends.
+    const ended = new Promise<void>(done => ws.once("close", () => done()));
+    ws.send(JSON.stringify({ id: 5, op: "ping" }));
+    await Promise.race([ended, settled(5_000).then(() => Promise.reject(new Error("the link stayed open on a frame nobody sealed")))]);
+    expect(seal).toBeDefined();
   });
 
   it("cuts a link that carried no frame at all and dials again", async () => {
@@ -182,16 +206,16 @@ describe("the socket a place proved, served as an inbound one", () => {
     const host = await fakePlaceHost({ key });
     const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
     await placeDaemon(place);
-    const ws = await host.socket;
+    const { ws, seal } = await host.socket;
     const answers: Record<string, unknown>[] = [];
     const events: Record<string, unknown>[] = [];
     ws.on("message", raw => {
-      const f = JSON.parse(String(raw)) as Record<string, unknown>;
+      const f = JSON.parse(seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (f["type"] !== undefined) events.push(f);
       else answers.push(f);
     });
     const ask = (id: number, op: string): Promise<Record<string, unknown>> => {
-      ws.send(JSON.stringify({ id, op }));
+      ws.send(seal.seal(JSON.stringify({ id, op })));
       return new Promise(done => {
         const at = setInterval(() => {
           const found = answers.find(a => a["id"] === id);
@@ -214,13 +238,13 @@ describe("the socket a place proved, served as an inbound one", () => {
     const host = await fakePlaceHost({ key });
     const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
     const d = await placeDaemon(place);
-    const ws = await host.socket;
+    const { ws, seal } = await host.socket;
     const answers: Record<string, unknown>[] = [];
     ws.on("message", raw => {
-      const f = JSON.parse(String(raw)) as Record<string, unknown>;
+      const f = JSON.parse(seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (f["type"] === undefined) answers.push(f);
     });
-    ws.send(JSON.stringify({ id: 31, op: "machine.list" }));
+    ws.send(seal.seal(JSON.stringify({ id: 31, op: "machine.list" })));
     const onLink = await vi.waitFor(
       () => {
         const found = answers.find(a => a["id"] === 31);
@@ -272,13 +296,13 @@ describe("the socket a place proved, served as an inbound one", () => {
     // What a join and a daemon leave under the home: the token file beside the place file and its key.
     writeFileSync(at.tokenPath, "a-token\n");
     const d = await placeDaemon(place);
-    const ws = await host.socket;
+    const { ws, seal } = await host.socket;
     const answers: Record<string, unknown>[] = [];
     ws.on("message", raw => {
-      const f = JSON.parse(String(raw)) as Record<string, unknown>;
+      const f = JSON.parse(seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (f["type"] === undefined) answers.push(f);
     });
-    ws.send(JSON.stringify({ id: 21, op: "place.leave" }));
+    ws.send(seal.seal(JSON.stringify({ id: 21, op: "place.leave" })));
     const answer = await vi.waitFor(
       () => {
         const found = answers.find(a => a["id"] === 21);

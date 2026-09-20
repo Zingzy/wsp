@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { APT_INDEX, BREW_ENV, BREW_PREFIX, BREW_REAL, FROM_A_READABLE_DIR, LINUXBREW_SHIM, brewHasCheck } from "@wsp/catalog";
 import type { RecipeCustomRow } from "@wsp/protocol";
-import { CUSTOM_PREFIX, CUSTOM_PRELUDE, customInstallsFor, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
+import { CUSTOM_PREFIX, TOOLS_PATH, customInstallsFor, customPrelude, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes } from "../src/golden-diff.js";
 import { installTools } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -72,6 +72,7 @@ describe("the plan's rows outside the catalog", () => {
 
   it("run their lines as given, under the env the catalog roads run with", () => {
     const [install] = customInstallsFor([just]);
+    const CUSTOM_PRELUDE = customPrelude(TOOLS_PATH);
     expect(install!.cmd).toBe(`${CUSTOM_PRELUDE}\nbrew install just`);
     expect(CUSTOM_PRELUDE).toContain("export PATH=");
     expect(CUSTOM_PRELUDE).toContain("DEBIAN_FRONTEND=noninteractive");

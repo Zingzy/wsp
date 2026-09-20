@@ -97,6 +97,10 @@ export const DAEMON_TOKEN_REFUSED = "daemon token refused; the host holds the cu
 export const DAEMON_FIRST_FRAME_NOT_AUTH = "the first frame must be auth";
 export const DAEMON_PRE_AUTH_BYTES_EXCEEDED = "too many bytes before the auth frame";
 export const DAEMON_AUTH_DEADLINE_PASSED = "no auth frame arrived in time";
+/** What a socket already through the door is cut with once the token it authed with is no longer the file's: a
+ * rotation takes the sockets the old token opened with it, rather than leaving them answering for the life of the
+ * connection. Under the same close code the four above travel with. */
+export const DAEMON_TOKEN_ROTATED = "the daemon token was rotated; dial again with the current one";
 /** The reply to a frame that is not JSON, with a null id since none could be read. */
 export const DAEMON_INVALID_JSON = "invalid json";
 /** Why a daemon started with an empty token file refuses to start at all. */
@@ -131,6 +135,12 @@ export const dialFailedLine = (url: string, error: string): string => `${url} co
 export const notAFrameLine = (url: string): string => `${url} sent something that is not a frame`;
 export const authUnreadableLine = (url: string, error: string): string => `${url} answered place.auth with something this computer cannot read: ${error}`;
 export const hostRefusedLine = (url: string, refusal: string): string => `${url}: ${refusal}`;
+/** What a host that answered the handshake with no key agreement of its own is passed over with: it runs a wsp
+ * older than this one, and a link neither end can seal is one this computer does not hold. */
+export const linkHostUnsealedLine = (url: string): string => `the host at ${url} agreed no key for this link; it runs an older wsp`;
+/** What an address that answered something the handshake's order does not allow is passed over with: the id a frame
+ * carries says nothing about who sent it, so the order is the only thing a place holds a host to before the key. */
+export const linkOutOfOrderLine = (url: string): string => `${url} answered out of order; nothing was sent to it and the next address is tried`;
 
 /** What a socket that never asked to watch guest sessions is told when it answers or ends one. */
 export const GUEST_NOT_WATCHER = "only the socket that sent guest.watch may answer or close a guest session";

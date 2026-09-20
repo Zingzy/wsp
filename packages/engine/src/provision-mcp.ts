@@ -114,7 +114,7 @@ interface Merged {
 export async function provisionMcp(
   machine: Machine,
   planned: McpPlan,
-  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener },
+  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string },
 ): Promise<PlaceProvisionRow[]> {
   const plan = atHome(planned, o.home);
   o.stage("installing-mcp", mcpOpening(plan.agents));
@@ -247,7 +247,7 @@ export async function provisionMcp(
         return aside.length === 0 ? scope : { ...scope, keep: scope.keep.filter(name => !aside.some(a => a.name === name)), drop: [...scope.drop, ...aside] };
       }),
     }));
-    for (const command of await absentCommands(machine, plan, first.outcomes)) missing.add(command);
+    for (const command of await absentCommands(machine, plan, first.outcomes, o.path)) missing.add(command);
     agents = withoutAbsent(plan, agents, first.outcomes, missing, o.tools);
     merged = mergeAll(agents);
     failure = await landConfigs(machine, own, merged.texts);
