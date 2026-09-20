@@ -63,6 +63,21 @@ describe("a thread's messages", () => {
     ]);
   });
 
+  it("leaves a harness's note out: a read is the words of a thread, and the note is the harness talking about itself", () => {
+    const rows = threadMessages(
+      [
+        { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "say ready" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1, kind: "note", text: "loading hooks from both files; prefer a single representation for this layer" },
+        { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 2, kind: "text", text: "ready" },
+      ],
+      "t1",
+    );
+    expect(rows).toEqual([
+      { who: "person", at: AT, text: "say ready" },
+      { who: "agent", at: AT + 2, text: "ready" },
+    ]);
+  });
+
   it("keeps the pieces of one message in one row, and text a harness named no message for appends as it always did", () => {
     const pieces = (first: Partial<{ messageId: string }>, second: Partial<{ messageId: string }>): string[] =>
       threadMessages(

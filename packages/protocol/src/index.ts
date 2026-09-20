@@ -1253,7 +1253,10 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
 
 // --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
-export const DeltaKind = z.enum(["text", "thinking", "tool_use", "tool_result"]);
+/** What one piece of a turn's stream is. `note` is the harness's own line about itself, a warning about the
+ * person's configuration among them: not the agent's words, not a call, and never the turn's verdict, so a reader
+ * prints it as an aside and the word failed stays for a call that failed and for a turn that did. */
+export const DeltaKind = z.enum(["text", "thinking", "note", "tool_use", "tool_result"]);
 export type DeltaKind = z.infer<typeof DeltaKind>;
 
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);

@@ -389,6 +389,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(call.name, call.input), status: "inProgress" }, key);
         return;
       }
+      case "note":
+        addFoldLine(t, parent, at, { createdAt: at, kind: "text", label: e.text });
+        return;
       case "tool_result": {
         const key = foldLineKey(parent, e.toolUseId);
         const call = key === undefined ? undefined : t.childCalls.get(key);
@@ -447,6 +450,13 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           t.openMessageId = e.messageId ?? null;
         }
         t.sawText = true;
+        return;
+      }
+      case "note": {
+        // The harness's own line about itself, shown the way the resumed-past-a-cut line is: a notice beside the
+        // work, never a message under the agent's name and never a failure.
+        closeOpenMessage(t);
+        addWork(t, { createdAt: at, label: e.text, tone: "notice", sourceActivityKind: "harness.note" }, at);
         return;
       }
       case "thinking": {

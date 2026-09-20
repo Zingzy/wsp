@@ -2062,6 +2062,9 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
         if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
         if (e.type === "session.delta" && e.kind === "text") stream.text(e.text, e.messageId);
+        // The harness's own note reads as the aside it is: the muted ink every line around the prose takes, and no
+        // word of failure, which belongs to a call that failed and to the turn's own end.
+        if (e.type === "session.delta" && e.kind === "note") stream.line(e.text);
         if (e.type === "session.delta" && e.kind === "tool_use") {
           stream.line(toolActivityLine(e.toolName, e.text));
           if (e.toolUseId !== undefined) {

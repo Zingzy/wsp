@@ -192,7 +192,9 @@ function itemDeltas(phase: string, item: Item, sessionId: string): AdapterEvent[
           ]
         : [];
     case "error":
-      return done ? [delta({ kind: "tool_result", text: str(item.message) ?? "", toolName: item.type, toolUseId: item.id, isError: true })] : [];
+      // The CLI's own note about itself, a warning about this machine's codex configuration among them, which it
+      // writes before its first output and goes on to answer past. Nothing of the turn failed here.
+      return done ? [delta({ kind: "note", text: str(item.message) ?? "" })] : [];
     default:
       return [];
   }

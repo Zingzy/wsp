@@ -76,6 +76,23 @@ describe("deriveSession: a turn whose agent wrote twice", () => {
   });
 });
 
+describe("deriveSession: a harness's note about itself", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_n" };
+  const warning = "loading hooks from both hooks.json and config.toml; prefer a single representation for this layer";
+
+  it("is a notice beside the work, not a message under the agent's name and not a failure", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, at: 1_000, prompt: "say ready" },
+      { type: "session.delta", ...scoped, at: 1_500, kind: "note", text: warning },
+      { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "ready", messageId: "msg_a" },
+      { type: "session.done", ...scoped, at: 2_500, result: { status: "completed", text: "ready" } },
+    ]);
+    expect(model.messages.map(m => [m.role, m.text])).toEqual([["user", "say ready"], ["assistant", "ready"]]);
+    const notes = model.timeline.filter(row => row.kind === "work" && row.entry.label === warning);
+    expect(notes.map(row => (row.kind === "work" ? [row.entry.tone, row.entry.sourceActivityKind] : []))).toEqual([["notice", "harness.note"]]);
+  });
+});
+
 describe("deriveSession: the chat fixture", () => {
   const model = deriveSession(CHAT_STREAM);
 

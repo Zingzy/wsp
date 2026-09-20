@@ -132,7 +132,7 @@ describe("CodexAdapter over a codex exec --json turn", () => {
       ["tool_result", undefined, "item_3"],
       ["tool_use", "web_search", "item_4"],
       ["tool_result", undefined, "item_4"],
-      ["tool_result", "error", "item_6"],
+      ["note", undefined, undefined],
       ["text", undefined, undefined],
     ]);
     // Every tool_use has its tool_result, so no entry of the timeline is left running once the turn ended.
@@ -148,7 +148,7 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     expect(deltas[6]).toMatchObject({ text: JSON.stringify([{ type: "text", text: '{"threads":[]}' }]), isError: false });
     expect(deltas[7]!.text).toBe(JSON.stringify({ query: "codex exec json" }));
     expect(deltas[8]).toMatchObject({ text: "codex exec json", isError: false });
-    expect(deltas[9]).toMatchObject({ text: "one MCP server did not answer", isError: true });
+    expect(deltas[9]).toEqual({ type: "turn.delta", sessionId: THREAD_ID, kind: "note", text: "one MCP server did not answer" });
     expect(deltas[10]!.text).toBe("Repo contains docs, sdk, and examples directories.");
     for (const d of deltas) expect(d.sessionId).toBe(THREAD_ID);
 
@@ -160,6 +160,18 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: THREAD_ID, exitCode: 0, sawResult: true });
     expect(session.threadId).toBe(THREAD_ID);
     expect(session.localId).not.toBe(THREAD_ID);
+  });
+
+  it("reads the CLI's own warning about itself as a note, not as a call that failed, and the turn still completes", async () => {
+    const warning = "loading hooks from both /root/.codex/hooks.json and /root/.codex/config.toml; prefer a single representation for this layer";
+    const exec = scriptedExec([started, `{"type":"item.completed","item":{"id":"item_0","type":"error","message":${JSON.stringify(warning)}}}`, '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"ready"}}', '{"type":"turn.completed","usage":{"output_tokens":1}}']);
+    const { events, onEvent } = collect();
+    const result = await adapterOver(exec).start({ prompt: "say ready", onEvent }).finished;
+
+    const deltas = events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
+    expect(deltas.map(d => [d.kind, d.text])).toEqual([["note", warning], ["text", "ready"]]);
+    expect(deltas.some(d => d.isError === true)).toBe(false);
+    expect(result.status).toBe("completed");
   });
 
   it("carries the CLI's own id for the message each reply came out of, so two replies of one turn read as two", async () => {
@@ -277,7 +289,7 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     const { events, onEvent } = collect();
     const result = await adapterOver(exec).start({ prompt: "say hi", onEvent }).finished;
     expect(events.map(e => e.type)).toEqual(["session.start", "turn.delta", "turn.delta", "turn.done", "session.end"]);
-    expect(events[1]).toMatchObject({ kind: "tool_result", toolUseId: "item_0", isError: true, text: expect.stringContaining("Model metadata for `fake-model` not found") });
+    expect(events[1]).toMatchObject({ kind: "note", text: expect.stringContaining("Model metadata for `fake-model` not found") });
     expect(events[2]).toMatchObject({ kind: "text", text: "fake reply to: say hi" });
     expect(result).toMatchObject({ status: "completed", text: "fake reply to: say hi", usage: { input_tokens: 10, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 3, reasoning_output_tokens: 0 } });
   });

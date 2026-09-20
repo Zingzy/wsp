@@ -1565,6 +1565,17 @@ describe("wsp verbs over the host", () => {
     ]);
   });
 
+  it("a harness's note about itself streams muted above the reply, with no word of failure, and the turn reads completed", async () => {
+    const warning = "loading hooks from both /root/.codex/hooks.json and /root/.codex/config.toml; prefer a single representation for this layer";
+    await restartHost({ claude: sayingAgent([{ kind: "note", text: warning }, { kind: "text", text: "ready", messageId: "msg_a" }], { status: "completed", text: "ready" }) });
+    await run("new", "alpha");
+    const io = captured();
+    io.muted = text => `~${text}~`;
+    expect(await cli(["run", "alpha", "say ready", "--state", statePath], io, undefined, env)).toBe(0);
+    expect(io.streamed.split("\n")).toEqual([`~${warning}~`, "ready", "~completed~", ""]);
+    expect(io.streamed).not.toContain("failed");
+  });
+
   it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
     await restartHost({
       claude: toolingAgent(

@@ -289,10 +289,10 @@ export function toolingAgent(calls: ReadonlyArray<ScriptedCall>, result: TurnRes
 
 /** One piece of a scripted turn's stream: what the harness wrote, under the kind it wrote it as and the message it
  * belongs to where it named one. */
-export type ScriptedSay = { kind: "text"; text: string; messageId?: string };
+export type ScriptedSay = { kind: "text" | "note"; text: string; messageId?: string };
 
 /** A harness whose turn is the pieces it was handed and nothing else: what a reply split across two of the
- * harness's own messages reaches a watcher as. */
+ * harness's own messages, and a note the harness wrote about itself, reach a watcher as. */
 export function sayingAgent(said: ReadonlyArray<ScriptedSay>, result: TurnResult): HarnessAdapterFactory {
   return () => ({
     steers: false,
