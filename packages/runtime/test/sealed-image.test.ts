@@ -361,6 +361,47 @@ describe("building the image at a second place", () => {
   });
 });
 
+describe("a version's sign-ins live as long as the version and no longer", () => {
+  it("the seal that replaces a version takes that version's blob, whether or not the cut kept its snapshot", async () => {
+    const { store, rt } = started();
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    expect(await store.getBlob("image-vaults", "default@v1")).toBeDefined();
+    await rt.golden.upgrade({ delta: { import: importOf("h2"), retired: [], retiredOnImage: [] }, keepPrevious: true });
+    expect(await rt.golden.get()).toMatchObject({ head: 2 });
+    expect(await store.getBlob("image-vaults", "default@v1")).toBeUndefined();
+    expect(await store.getBlob("image-vaults", "default@v2")).toBeDefined();
+    await rt.close();
+  });
+
+  it("prune takes the blob of every version it drops and leaves the ones it keeps", async () => {
+    const store = memoryStore();
+    const backend = stubBackend();
+    const versions = [1, 2, 3, 4].map(n => ({
+      version: n,
+      snapshotId: `snap_golden-v${n}`,
+      baseTemplate: "base",
+      setupSha: `sha${n}`,
+      createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+      smoke: { cmd: "true", exitCode: 0 },
+      ...(n > 1 ? { parentSnapshotId: `snap_golden-v${n - 1}` } : {}),
+    }));
+    await store.put("goldens", copyKey("default", "default"), { head: 4, versions });
+    for (const n of [1, 2, 3, 4]) {
+      backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: (7 + n) * 1e9, createdAt: versions[n - 1]!.createdAt });
+      await store.put("golden-recipes", copyKey("default", `default@v${n}`), { ticks: [], files: [] });
+      await store.putBlob("image-vaults", `default@v${n}`, Buffer.from(`sign-ins v${n}`));
+    }
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
+    expect((await rt.golden.prune()).dropped.map(v => v.version)).toEqual([1, 2]);
+    expect(await store.getBlob("image-vaults", "default@v1")).toBeUndefined();
+    expect(await store.getBlob("image-vaults", "default@v2")).toBeUndefined();
+    expect(await store.getBlob("image-vaults", "default@v3")).toBeDefined();
+    expect(await store.getBlob("image-vaults", "default@v4")).toBeDefined();
+    await rt.close();
+  });
+});
+
 describe("the image over the protocol", () => {
   let srv: Awaited<ReturnType<typeof serveRuntime>> | undefined;
   let rt: Runtime | undefined;

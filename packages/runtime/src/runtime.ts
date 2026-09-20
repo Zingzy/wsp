@@ -7171,8 +7171,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(result.version.usedBytes !== undefined ? { usedBytes: result.version.usedBytes } : {}),
         place,
       };
+      const replaced = (await store.get(IMAGES, name)) as SealedImage | undefined;
       if (result.vault !== undefined) await store.putBlob(IMAGE_VAULTS, vaultKey(name, result.version.version), result.vault.tar);
       await store.put(IMAGES, name, image);
+      // No version's sign-ins in the clear outlive the record that named that version, whatever the cut did with
+      // its snapshot: the record names one version, and the blob of the one it replaced goes with it.
+      if (replaced !== undefined && replaced.version !== result.version.version) await store.deleteBlob(IMAGE_VAULTS, vaultKey(name, replaced.version));
     }
     if (hash === undefined) return result;
     const version: GoldenVersion = { ...result.version, imageHash: hash };
@@ -7239,15 +7243,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
-  /** Deletes what a version's forks boot from. The template goes first: the provider refuses to delete a snapshot
-   * while a template stands on it, and a template already gone is no failure. */
-  const dropImage = async (v: GoldenVersion, at: MachineBackend = backend): Promise<void> => {
+  /** Deletes what a version's forks boot from, and the sign-ins that version was sealed with. The template goes
+   * first: the provider refuses to delete a snapshot while a template stands on it, and a template already gone is
+   * no failure. */
+  const dropImage = async (v: GoldenVersion, name: string, at: MachineBackend = backend): Promise<void> => {
     if (v.templateId !== undefined) {
       await templatesOf(at)?.delete(v.templateId).catch((e: unknown) => {
         if (!isMissing(e)) throw e;
       });
     }
     await at.deleteSnapshot(v.snapshotId);
+    await store.deleteBlob(IMAGE_VAULTS, vaultKey(name, v.version));
   };
 
   const golden: Runtime["golden"] = {
@@ -7567,7 +7573,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             builderKept = false;
           }
           try {
-            await dropImage(head, at);
+            await dropImage(head, name, at);
             manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
             await putCopy(place, name, manifest);
             await dropCopyRecipe(place, name, head.version);
@@ -7699,7 +7705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (plan === undefined) return { dropped, failed };
       for (const v of plan.drop) {
         try {
-          await dropImage(v);
+          await dropImage(v, key);
         } catch (e) {
           // A snapshot the provider already lost is gone either way; its version goes with it.
           if (!isMissing(e)) {

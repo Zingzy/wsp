@@ -6,7 +6,7 @@
 // the road the host takes.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
@@ -100,6 +100,13 @@ describe("local daemon", () => {
     await link.ready;
     await link.request("ping");
     link.close();
+  });
+
+  it("the inbox folder is the owner's, and one an older build left wider is repaired", async () => {
+    mkdirSync(join(stateFolder(), "inbox"), { recursive: true });
+    chmodSync(join(stateFolder(), "inbox"), 0o755);
+    daemon = await startLocal();
+    expect(statSync(join(stateFolder(), "inbox")).mode & 0o777).toBe(0o700);
   });
 
   it("binds a free ephemeral port the host's own port check never sees as a clash, and leaves nothing of its own beside the host's files", async () => {

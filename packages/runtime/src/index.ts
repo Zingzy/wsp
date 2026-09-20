@@ -3,6 +3,7 @@ export * from "./runtime.js";
 export * from "./serve.js";
 export * from "./status.js";
 export * from "./store.js";
+export * from "./own-file.js";
 export * from "./machine-exec.js";
 export * from "./local-exec.js";
 export * from "./reach.js";
