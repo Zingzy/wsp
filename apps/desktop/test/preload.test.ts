@@ -7,10 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn(async () => undefined);
 const send = vi.fn();
+const sendSync = vi.fn(() => false);
 const on = vi.fn();
 const off = vi.fn();
 const exposeInMainWorld = vi.fn();
-vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld }, ipcRenderer: { invoke, send, on, off } }));
+const DROPPED = "/Users/me/Projects/spoo";
+vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld }, ipcRenderer: { invoke, send, sendSync, on, off }, webUtils: { getPathForFile: () => DROPPED } }));
 
 // The preload reads the renderer's argv as its module body runs, which is the first import below.
 process.argv.push("--wsp-version=0.1.7");
@@ -48,6 +50,16 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("onboarding:install", ["claude", "codex"]);
     await wsp.finish();
     expect(invoke).toHaveBeenLastCalledWith("onboarding:finish");
+  });
+
+  it("asks the shell before it hands over the path of a dropped file, and answers nothing when that is refused", async () => {
+    const wsp = await bridge();
+    const dropped = {} as File;
+    sendSync.mockReturnValueOnce(true);
+    expect(wsp.droppedPath(dropped)).toBe(DROPPED);
+    expect(sendSync).toHaveBeenLastCalledWith("drop:allowed");
+    sendSync.mockReturnValueOnce(false);
+    expect(wsp.droppedPath(dropped)).toBeUndefined();
   });
 
   it("says when a terminal has focus and hands back the chords the shell stood aside from, unsubscribing with the same listener", async () => {

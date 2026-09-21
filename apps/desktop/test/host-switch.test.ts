@@ -46,20 +46,23 @@ const record = (url: string, over: Partial<HostRecord> = {}): HostRecord => ({ u
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
 const TOKEN = `7K3MQP2X.${HOST_KEY}`;
 
-type Deps = Omit<SwitcherDeps, "local"> & { local: ReturnType<typeof local>; loaded: HostSession[] };
+type Deps = Omit<SwitcherDeps, "local"> & { local: ReturnType<typeof local>; loaded: HostSession[]; opened: string[] };
 
 function deps(over: Partial<Omit<SwitcherDeps, "local">> = {}): Deps {
   const loaded: HostSession[] = [];
+  const opened: string[] = [];
   return {
     local: local(),
     home: home(),
     statePath: "/nowhere/state.json",
     here: "This Mac",
-    load: async session => {
+    load: async (session, hash) => {
       loaded.push(session);
+      opened.push(`${session.url}${hash ?? ""}`);
     },
     log: () => {},
     loaded,
+    opened,
     ...over,
   };
 }
@@ -111,6 +114,19 @@ describe("hostSwitcher", () => {
     expect(switcher.current()).toBe(d.local);
     expect(gate("http://127.0.0.1:41000/")).toBe(true);
     expect(d.local.closes).toBe(0);
+  });
+
+  it("moves home on the fragment the shell's connect row names, so the page opens on the sheet with nothing sent", async () => {
+    const d = deps();
+    writeHost(d.home, "box", record("http://127.0.0.1:14400"));
+    const switcher = hostSwitcher(d);
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    expect(await switcher.to(null, HOST_WORDS.connectHash)).toEqual({ ok: true });
+    expect(d.opened).toEqual(["http://127.0.0.1:14400", `http://127.0.0.1:41000${HOST_WORDS.connectHash}`]);
+    // A move with no fragment named loads the host's own url, which is every other move the shell makes.
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    expect(d.opened.at(-1)).toBe("http://127.0.0.1:14400");
+    expect(switcher.view().current).toBe("box");
   });
 
   it("a switch to a host this computer never paired with is refused in one sentence and moves nothing", async () => {

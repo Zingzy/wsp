@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cli.js";
+import { ownPid, pidAlive } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -174,5 +175,36 @@ describe("serve takes host.lock next to the state file", () => {
     mkdirSync(broken);
     await expect(start(broken)).rejects.toThrow(/web app not built/);
     expect(existsSync(lockPath)).toBe(false);
+  });
+});
+
+describe("what the lock's pid says", () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "wsp-lock-reads-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  /** A pid that was real a moment ago and is not alive now. */
+  function deadPid(): number {
+    const child = spawnSync(process.execPath, ["-e", "0"]);
+    expect(child.status).toBe(0);
+    return child.pid;
+  }
+
+  it("reads a pid of this login as its own, and a pid that is gone as neither own nor alive", () => {
+    expect(ownPid(process.pid)).toBe(true);
+    expect(pidAlive(process.pid)).toBe(true);
+    const gone = deadPid();
+    expect(ownPid(gone)).toBe(false);
+    expect(pidAlive(gone)).toBe(false);
+  });
+
+  it.runIf(process.getuid !== undefined && process.getuid() !== 0)("reads a live process of another login as not this login's, while it is still a held lock", () => {
+    // Process 1 belongs to root and answers EPERM to a signal from anyone else, which is the one reading here.
+    expect(ownPid(1)).toBe(false);
+    expect(pidAlive(1)).toBe(true);
   });
 });

@@ -4,14 +4,15 @@ import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, assetDir, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
-import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
-import { fromAppPage, fromOnboardingPage } from "./origin.js";
+import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
+import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, openThisComputer } from "./setup.js";
 import { installShim, shimText } from "./shim.js";
@@ -41,45 +42,55 @@ function launch(): Launch {
   return { packaged: app.isPackaged, cwd: process.cwd(), ...(env !== undefined ? { env } : {}) };
 }
 
-/** The host the window is on; every bridge call is gated on its origin. */
+/** The host the window is on; every bridge call is gated on its origin and on what a page on it may ask for. */
 let session: HostSession | undefined;
 /** The app's own host, attached or started: the window opens on it, returns to it, and it is stopped on quit alone. */
 let local: HostSession | undefined;
 let switcher: HostSwitcher | undefined;
 let win: BrowserWindow | undefined;
 
+/** Whether the frame that sent this may call this channel, which is the page's origin and the bridge's table
+ * together; read before a handler does anything. */
+const may = (event: { senderFrame: { url: string } | null }, channel: string): boolean => allowed(event.senderFrame?.url, session, channel);
+
+/** One bridge call the page invokes, gated: a channel the page may not call is refused in one sentence before the
+ * handler runs, so the channel's name is written once and no handler can be registered without the gate. */
+function answer(channel: string, run: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (event, ...args: unknown[]) => {
+    if (!may(event, channel)) throw new Error(notForThisPage(channel));
+    return run(event, ...args);
+  });
+}
+
+/** The same gate on a message the page sends: a refused one is dropped, since a send waits for no answer. */
+function listen(channel: string, run: (event: IpcMainEvent, ...args: unknown[]) => void): void {
+  ipcMain.on(channel, (event, ...args: unknown[]) => {
+    if (!may(event, channel)) return;
+    run(event, ...args);
+  });
+}
+
 // Read once per run: a font installed while the app is open is seen after a restart.
 let fontIndex: Promise<FontFile[]> | undefined;
 const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
-// Only the host's own page may read the computer's fonts: the setup page and anything else the window shows are refused.
-ipcMain.handle("fonts:local", (event, family: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("fonts:local: not the app's page");
-  return localFontFaces(typeof family === "string" ? family : "", fonts);
-});
+// The font files are this computer's, so only the app's own host's page may read them.
+answer("fonts:local", (_event, family) => localFontFaces(typeof family === "string" ? family : "", fonts));
 
 const previews = pagePreviews();
-// A picture of the page can hold anything the page shows, so only the host's own page may ask for one or read one.
-ipcMain.handle("preview:capture", (event, workspaceId: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("preview:capture: not the app's page");
-  return previews.capture(typeof workspaceId === "string" ? workspaceId : "", event.sender);
-});
-ipcMain.handle("preview:read", (event, workspaceId: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("preview:read: not the app's page");
-  return previews.get(typeof workspaceId === "string" ? workspaceId : "");
-});
+// A picture of the page can hold anything the page shows, so only the app's own host's page may take one or read one.
+answer("preview:capture", (event, workspaceId) => previews.capture(typeof workspaceId === "string" ? workspaceId : "", event.sender));
+answer("preview:read", (_event, workspaceId) => previews.get(typeof workspaceId === "string" ? workspaceId : ""));
 
-// The picker returns a path on this computer, so only the host's own page may open it.
-ipcMain.handle("folder:pick", async event => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("folder:pick: not the app's page");
+// The picker returns a path on this computer, so only the app's own host's page may open it.
+answer("folder:pick", async event => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const options = { properties: ["openDirectory" as const], title: "Choose a folder" };
   const picked = await (win === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(win, options));
   return picked.canceled ? undefined : picked.filePaths[0];
 });
 
-// The menu runs actions on the page's own registries, so only the host's page may ask for one.
-ipcMain.handle("menu:context", (event, raw: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("menu:context: not the app's page");
+// The menu runs actions on the page's own registries, so it is drawn for the page of whichever host the window is on.
+answer("menu:context", (event, raw) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return chooseFrom(parseContextMenuItems(raw), (template, onClose) => Menu.buildFromTemplate(template).popup({ ...(win === null ? {} : { window: win }), callback: onClose }));
 });
@@ -87,16 +98,14 @@ ipcMain.handle("menu:context", (event, raw: unknown) => {
 // The windows whose page says a terminal holds focus. The page pushes it, since a key press is read here before the
 // page is asked anything.
 const terminalFocus = new Set<number>();
-ipcMain.on("terminal:focus", (event, focused: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+listen("terminal:focus", (event, focused) => {
   if (focused === true) terminalFocus.add(event.sender.id);
   else terminalFocus.delete(event.sender.id);
 });
 
 // The window's chrome, the frosted sidebar and the traffic-light bar follow the theme the page draws, which the page
-// reads off the host's preferences; only the host's own page may move it.
-ipcMain.on("theme:set", (event, theme: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+// reads off the preferences of whichever host the window is on.
+listen("theme:set", (_event, theme) => {
   const parsed = ThemePreference.safeParse(theme);
   if (parsed.success) nativeTheme.themeSource = parsed.data;
 });
@@ -114,50 +123,51 @@ function raiseWindow(win: BrowserWindow): void {
 }
 
 // A build waiting on the person, or a machine that came up, said over the system while the window is not the one they
-// are looking at. Only the host's own page may speak here, and only its own sentence: what a notification says is
-// whatever the field holds.
-ipcMain.on("needs-you:say", (event, need: unknown) => {
-  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+// are looking at. Only the page of the host the window is on speaks here, and only its own sentence: what a
+// notification says is whatever the field holds.
+listen("needs-you:say", (event, need) => {
   const parsed = InitNeedsYou.safeParse(need);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!parsed.success || win === null) return;
   sayNeedsYou(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
 });
 
-/** Whether a frame is the page of the host the window is on, so a page from anywhere else is answered nothing. */
-const fromCurrentPage = (event: { senderFrame: { url: string } | null }): boolean => session !== undefined && fromAppPage(event.senderFrame?.url, session.url);
+// The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
+// computer this one does not own serves is handed no path from this computer's desktop.
+ipcMain.on("drop:allowed", event => {
+  event.returnValue = may(event, "drop:allowed");
+});
 
 // The device token of a host somewhere else is the shell's to hold: the page asks for it over the bridge and it never
 // rides in the page the host served.
-ipcMain.handle("hosts:token", event => {
-  if (!fromCurrentPage(event)) throw new Error("hosts:token: not the app's page");
-  return switcher?.token();
-});
-ipcMain.handle("hosts:list", event => {
-  if (!fromCurrentPage(event)) throw new Error("hosts:list: not the app's page");
-  return switcher?.view();
-});
+answer("hosts:token", () => switcher?.token());
+// A page on a host somewhere else is shown this computer and the host it came from; the shell's own Hosts menu
+// reads the whole list, so the owner still moves from one saved host to another through it.
+answer("hosts:list", () => (switcher === undefined || session === undefined ? undefined : hostsViewFor(session, switcher.view())));
 // A move, a connect and a disconnect answer with what the host said rather than throwing: a thrown refusal reaches the
 // page wrapped in the channel's own words, and the sheet puts the host's sentence under a field as it is.
-ipcMain.handle("hosts:switch", async (event, alias: unknown) => {
-  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:switch: not the app's page");
-  const answer = await switcher.to(typeof alias === "string" ? alias : null);
+answer("hosts:switch", async (_event, alias) => {
+  const to = typeof alias === "string" ? alias : null;
+  // The move a page on a host somewhere else may ask for is the one home: a box that named another alias would
+  // put the window on a host of its choosing.
+  if (switcher === undefined || (to !== null && session?.remote === true)) throw new Error(notForThisPage("hosts:switch"));
+  const moved = await switcher.to(to);
   refreshMenu();
-  return answer;
+  return moved;
 });
-ipcMain.handle("hosts:connect", async (event, raw: unknown) => {
-  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:connect: not the app's page");
+answer("hosts:connect", async (_event, raw) => {
+  if (switcher === undefined) throw new Error(notForThisPage("hosts:connect"));
   const ask = parseConnectAsk(raw);
   if (ask === undefined) throw new Error("hosts:connect: not the sheet's ask");
-  const answer = await switcher.connect(ask);
+  const made = await switcher.connect(ask);
   refreshMenu();
-  return answer;
+  return made;
 });
-ipcMain.handle("hosts:disconnect", async (event, alias: unknown) => {
-  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:disconnect: not the app's page");
-  const answer = await switcher.disconnect(typeof alias === "string" ? alias : "");
+answer("hosts:disconnect", async (_event, alias) => {
+  if (switcher === undefined) throw new Error(notForThisPage("hosts:disconnect"));
+  const dropped = await switcher.disconnect(typeof alias === "string" ? alias : "");
   refreshMenu();
-  return answer;
+  return dropped;
 });
 
 /** The shell's own menu bar: the platform's rows by their roles, and Hosts, drawn from the same list the sidebar's
@@ -170,7 +180,10 @@ function refreshMenu(): void {
     const action = hostMenuAction(id);
     if (action === undefined) return;
     if (action.kind === "connect") {
-      win?.webContents.send("hosts:connect-open");
+      // On a host somewhere else the sheet belongs to this computer's own page, so the window moves home loaded on
+      // the fragment that opens it; nothing is sent, since a message would race the load.
+      if (session?.remote === true) void hostsHeld.to(null, HOST_WORDS.connectHash).then(() => refreshMenu());
+      else win?.webContents.send("hosts:connect-open");
       return;
     }
     if (action.kind !== "switch" && action.kind !== "disconnect") return;
@@ -192,7 +205,7 @@ function refreshMenu(): void {
 }
 
 function locate(): Promise<Located> {
-  return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch() });
+  return locateHost(launch());
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
@@ -227,14 +240,15 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   nativeTheme.themeSource = "dark";
   win = newWindow(PRELOAD);
   const page = win;
+  guardWorkers(page.webContents.session);
   switcher = hostSwitcher({
     local,
     home: wspHome(),
     statePath,
     here: hereWord(process.platform === "darwin"),
-    load: async next => {
+    load: async (next, hash) => {
       session = next;
-      await page.loadURL(next.url);
+      await loadHostPage(page, `${next.url}${hash ?? ""}`);
     },
     log: io.log,
     ssh: sshRoad(systemSshDeps()),
@@ -262,7 +276,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await page.loadURL(session.url);
+  await loadHostPage(page, session.url);
   return true;
 }
 

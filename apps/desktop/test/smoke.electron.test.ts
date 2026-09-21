@@ -2,16 +2,16 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, fmtSize, hereWord, kindWords, pairToken } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, madeOfWord, pairToken } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { _electron as electron, type ElectronApplication, type Page } from "playwright";
+import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
@@ -21,6 +21,7 @@ import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
+import { notForThisPage } from "../src/origin.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -46,8 +47,9 @@ function seedGolden(home: string): void {
   writeFileSync(join(home, "state.json"), JSON.stringify({ goldens: { default: GOLDEN } }));
 }
 
-/** One local workspace record as the first launch and wsp new --local leave it, in the store's on-disk shape: the
- * whole of what a computer that never held a provider key has. */
+/** One local workspace record as wsp add and wsp new --local leave it, in the store's on-disk shape: a project of
+ * this computer and the workspace working it in place, which is the whole of what a computer that never held a
+ * provider key has. */
 const LOCAL_WORKSPACE = {
   id: "ws_1",
   name: "seeded-mac",
@@ -56,6 +58,7 @@ const LOCAL_WORKSPACE = {
   phase: "running",
   golden: "",
   createdAt: "2026-09-01T00:00:00.000Z",
+  project: "pr_1",
   spec: {},
   size: { cpu: 8, memMb: 16384 },
   firstLife: false,
@@ -63,7 +66,34 @@ const LOCAL_WORKSPACE = {
 };
 
 function seedLocalWorkspace(home: string): void {
-  writeFileSync(join(home, "state.json"), JSON.stringify({ workspaces: { [LOCAL_WORKSPACE.id]: LOCAL_WORKSPACE } }));
+  const folder = join(home, "work", LOCAL_WORKSPACE.name);
+  mkdirSync(folder, { recursive: true });
+  const project = {
+    id: LOCAL_WORKSPACE.project,
+    name: LOCAL_WORKSPACE.name,
+    computer: "here",
+    source: { kind: "folder", path: folder },
+    path: folder,
+    defaultBranch: "main",
+    createdAt: LOCAL_WORKSPACE.createdAt,
+  };
+  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
+  writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
+}
+
+/** A saved host record under the launch's own wsp home, as wsp host connect leaves one: the list the shell reads
+ * has a host in it the window is not on, which is what a page on a host somewhere else may not learn. */
+function seedSavedHost(home: string, alias: string, label: string): void {
+  mkdirSync(join(home, "hosts"), { recursive: true });
+  writeFileSync(join(home, "hosts", `${alias}.json`), JSON.stringify({ url: `http://${label}`, deviceId: "d_seed", deviceToken: "tok-seed", pairedAt: "2026-09-01T00:00:00.000Z", label, road: "direct" }));
+}
+
+/** The lock and the token file a host serving this home left beside its state, which is what the window reads to
+ * attach to it: a page on a port is no reason to, whoever is serving there. */
+function seedServingLock(home: string, at: { port: number; token: string }): void {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, wsPort: 0, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host-token"), `${at.token}\n`);
 }
 
 interface Launched {
@@ -212,6 +242,39 @@ function listenOn(server: Server): Promise<number> {
     });
   });
 }
+
+/** A page served on a loopback port the way a process inside a workspace serves one: it asks for a service worker on
+ * its own origin when the test says so, and answers on either spelling of loopback, so the frame on one holds a
+ * frame on the other. */
+function workerPage(): Promise<{ port: number; server: Server }> {
+  const server = createServer((req, res) => {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/sw.js") {
+      res.writeHead(200, { "content-type": "text/javascript" }).end("self.addEventListener('fetch', () => {});");
+      return;
+    }
+    const port = Number((req.headers.host ?? "").split(":")[1] ?? 0);
+    const nested = path === "/nested" ? "" : `<iframe src="http://127.0.0.1:${port}/nested"></iframe>`;
+    const asks = '<script>window.registerWorker = () => navigator.serviceWorker.register("/sw.js").then(() => "registered", e => "refused: " + e.name);</script>';
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(`<!doctype html><html><body>${nested}${asks}</body></html>`);
+  });
+  return listenOn(server).then(port => ({ port, server }));
+}
+
+/** A frame the window holds, by the url it is on. */
+function frameAt(win: Page, url: string): Promise<Frame> {
+  return vi.waitFor(
+    () => {
+      const frame = win.frames().find(f => f.url() === url);
+      if (frame === undefined) throw new Error(`no frame at ${url}, saw ${JSON.stringify(win.frames().map(f => f.url()))}`);
+      return frame;
+    },
+    { timeout: 30_000, interval: 50 },
+  );
+}
+
+/** What the page inside a frame made of the worker it asked for. */
+const registerWorker = (frame: Frame): Promise<string> => frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 
 async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
   await page.waitForLoadState("domcontentloaded");
@@ -408,7 +471,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const api = await existing.createWorkspace("api");
     const web = await existing.createWorkspace("web");
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
     await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
@@ -596,24 +659,54 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is the seeded record's size in the local kind's word for a cpu, as every row reads its machine.
-    expect(await row.locator("[data-workspace-machine]").textContent()).toBe(fmtSize(LOCAL_WORKSPACE.size, kindWords("local").cpu));
+    // Line two is what the workspace is made of, in the protocol's own word for the folder worked where it sits.
+    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("in-place"));
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
   });
 
-  it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
+  it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
+    const served = await workerPage();
+    standIn = served.server;
+    launched = await launch({}, seedLocalWorkspace);
+    const win = await windowAt(launched.app, APP_URL);
+    const row = `[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`;
+    await win.click(row);
+    // The preview pane on this computer's own workspace frames this computer's port, which is the pane a person types one into.
+    await win.keyboard.press("Meta+k");
+    await win.locator("[data-command-palette]").getByText(WORKSPACE_WORDS.openBrowser, { exact: true }).click();
+    await win.fill("[data-preview-url-input]", `localhost:${served.port}`);
+    await win.press("[data-preview-url-input]", "Enter");
+    const framed = await frameAt(win, `http://localhost:${served.port}/`);
+    const nested = await frameAt(win, `http://127.0.0.1:${served.port}/nested`);
+    // The road the finding names is the 127.0.0.1 frame, which is the nested one; the localhost frame is the same
+    // rule read on the other spelling, and neither may plant a worker on a port the kernel hands out again.
+    expect(await registerWorker(framed)).toMatch(/^refused/);
+    expect(await registerWorker(nested)).toMatch(/^refused/);
+    // The rule is the worker's alone: the framed page keeps its own storage, which a sandbox attribute would have taken.
+    expect(await framed.evaluate(() => {
+      localStorage.setItem("wsp-smoke", "kept");
+      return localStorage.getItem("wsp-smoke");
+    })).toBe("kept");
+    // And the move a person makes through the Hosts menu loads the host page with the session swept first.
+    await hostsMenu(launched.app, hereWord(process.platform === "darwin"));
+    await win.waitForURL(APP_URL);
+    expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
+  });
+
+  it("does not attach to a host on the port that no lock beside the resolved home names: the first launch runs", async () => {
+    // Any login on this computer can bind a port and answer with the boot line; the lock beside the state file of
+    // the home this launch resolved is what says a host of the owner's is serving, and there is none here.
     existing = await fixtureHost();
     launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
-    const win = await windowAt(launched.app, APP_URL);
-    const boot = await bootOf(win);
-    expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
-    expect(boot.token).toBe(existing.authToken);
-    // Nothing of a host's lands in ~/.wsp; the wsp command the app installs on every launch is all that is there.
-    expect(readdirSync(join(launched.home, ".wsp"))).toEqual(["bin"]);
+    const page = await windowAt(launched.app, ONBOARDING_URL);
+    await page.waitForLoadState("domcontentloaded");
+    expect(await page.textContent("h1")).toBe("Welcome to wsp");
+    expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
     await launched.app.close();
+    // The host on that port was never touched: it is still serving, with the page it was serving before.
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
   });
 
@@ -621,7 +714,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "9.9.9");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const line = win.locator("[role=status]");
     await line.waitFor();
@@ -641,7 +734,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "0.0.1");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const line = win.locator("[role=status]");
     await line.waitFor();
@@ -651,7 +744,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("attached to a host of its own release, says nothing at all", async () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector("[data-slot=sidebar-container]");
     expect(await win.locator("[role=status]").count()).toBe(0);
@@ -684,7 +777,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const first = await existing.createWorkspace("first");
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const row = `[data-row-id='ws:${first.id}']`;
     await win.waitForSelector(row);
@@ -718,7 +811,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("connects to a second host by its address and a code, the Hosts menu lists both with the current one marked, and This Mac takes the window back", async () => {
     existing = await fixtureHost();
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, home => {
+      seedGolden(home);
+      seedSavedHost(home, "attic", "attic.example:4400");
+    });
     const win = await windowAt(launched.app, APP_URL);
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
@@ -738,20 +834,70 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await dialog.locator("#connect-code").inputValue()).toBe(code);
     await dialog.locator("[data-k=primary]").click();
     await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
-    const away = await hostsMenuRows(launched.app);
-    expect(away).toEqual([
-      { label: here, checked: false, enabled: true },
-      { label: `127.0.0.1:${existing.port}`, checked: true, enabled: true },
-      { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
-      { label: HOST_WORDS.disconnect(`127.0.0.1:${existing.port}`), checked: false, enabled: true },
-    ]);
+    // The shell's own menu lists every saved host, so the owner still moves from one to another while the window
+    // stands on a host somewhere else. It is rebuilt once the page is up, which is a beat after the window moved.
+    await vi.waitFor(async () => {
+      expect(await hostsMenuRows(launched!.app)).toEqual([
+        { label: here, checked: false, enabled: true },
+        { label: `127.0.0.1:${existing!.port}`, checked: true, enabled: true },
+        { label: "attic.example:4400", checked: false, enabled: true },
+        { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
+        { label: HOST_WORDS.disconnect(`127.0.0.1:${existing!.port}`), checked: false, enabled: true },
+      ]);
+    }, { timeout: 30_000, interval: 100 });
+    // The page that host serves is shown this computer and that host alone, and what it asks of this computer is
+    // refused in one sentence naming the channel, before anything on this computer is read or written.
+    const asked = await win.evaluate(async () => {
+      const wsp = (
+        window as unknown as {
+          wsp: {
+            hosts(): Promise<{ here: string; current: string | null; hosts: { label: string }[] }>;
+            localFonts(family: string): Promise<unknown>;
+            connectHost(ask: unknown): Promise<unknown>;
+            disconnectHost(alias: string): Promise<unknown>;
+            switchHost(alias: string | null): Promise<unknown>;
+          };
+        }
+      ).wsp;
+      const said = async (call: () => Promise<unknown>): Promise<string> => {
+        try {
+          await call();
+          return "answered";
+        } catch (e) {
+          return (e as Error).message;
+        }
+      };
+      return {
+        hosts: await wsp.hosts(),
+        fonts: await said(() => wsp.localFonts("Menlo")),
+        connect: await said(() => wsp.connectHost({ road: "direct", url: "http://127.0.0.1:1", code: "AAAAAAAA.k" })),
+        disconnect: await said(() => wsp.disconnectHost("attic")),
+        elsewhere: await said(() => wsp.switchHost("attic")),
+      };
+    });
+    expect(asked.hosts.hosts.map(h => h.label)).toEqual([`127.0.0.1:${existing.port}`]);
+    expect(asked.hosts.here).toBe(here);
+    expect(asked.fonts).toContain(notForThisPage("fonts:local"));
+    expect(asked.connect).toContain(notForThisPage("hosts:connect"));
+    expect(asked.disconnect).toContain(notForThisPage("hosts:disconnect"));
+    expect(asked.elsewhere).toContain(notForThisPage("hosts:switch"));
+    // The move home is the one move that page may ask for, and the record it could not read still stands after it.
+    await win.evaluate(() => {
+      void (window as unknown as { wsp: { switchHost(alias: string | null): Promise<unknown> } }).wsp.switchHost(null);
+    });
+    await win.waitForURL(home);
+    expect(existsSync(join(launched.home, "hosts", "attic.json"))).toBe(true);
+    await hostsMenu(launched.app, `127.0.0.1:${existing.port}`);
+    await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
     // The record is the one wsp host connect writes, under the launch's own wsp home, with what the desktop adds.
     const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
     expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
     expect(typeof record["deviceToken"]).toBe("string");
     await hostsMenu(launched.app, here);
     await win.waitForURL(home);
-    expect((await hostsMenuRows(launched.app)).map(r => r.checked)).toEqual([true, false, false, false]);
+    await vi.waitFor(async () => {
+      expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false, false, false]);
+    }, { timeout: 30_000, interval: 100 });
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
     // The app's own host was never stopped by the move.
     await launched.app.close();

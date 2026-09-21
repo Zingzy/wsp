@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { fromAppPage, fromOnboardingPage } from "../src/origin.js";
+import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "../src/origin.js";
 
 describe("fromAppPage", () => {
   const app = "http://127.0.0.1:4400";
@@ -37,5 +37,46 @@ describe("fromOnboardingPage", () => {
     expect(fromOnboardingPage("file:///Users/me/onboarding.html", page)).toBe(false);
     expect(fromOnboardingPage(undefined, page)).toBe(false);
     expect(fromOnboardingPage("not a url", page)).toBe(false);
+  });
+});
+
+describe("what a page may ask the shell for", () => {
+  const here = { url: "http://127.0.0.1:4400", remote: false };
+  const away = { url: "http://box.example:4400", remote: true };
+  /** Its own device token, the hosts list, a move home, and the shell's own presentation. */
+  const REMOTE = ["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "needs-you:say"];
+  /** This computer's files, its pictures, its picker and its host records. */
+  const HERE_ONLY = ["fonts:local", "folder:pick", "preview:capture", "preview:read", "hosts:connect", "hosts:disconnect", "drop:allowed"];
+
+  it("a page served by a host somewhere else reaches the narrow set and nothing of this computer", () => {
+    for (const channel of REMOTE) expect(allowed(`${away.url}/`, away, channel)).toBe(true);
+    for (const channel of HERE_ONLY) expect(allowed(`${away.url}/`, away, channel)).toBe(false);
+  });
+
+  it("the app's own host's page reaches every channel, and a page of any other origin reaches none", () => {
+    for (const channel of [...REMOTE, ...HERE_ONLY]) {
+      expect(allowed(`${here.url}/workspaces/w1`, here, channel)).toBe(true);
+      expect(allowed("http://evil.example/", here, channel)).toBe(false);
+      expect(allowed(`${away.url}/`, here, channel)).toBe(false);
+      expect(allowed(`${here.url}/`, undefined, channel)).toBe(false);
+      expect(allowed(undefined, here, channel)).toBe(false);
+    }
+  });
+
+  it("names the channel it refused and nothing else", () => {
+    expect(notForThisPage("fonts:local")).toBe("fonts:local: not for this page");
+  });
+});
+
+describe("hostsViewFor", () => {
+  const listing = (alias: string) => ({ alias, label: alias, url: `http://${alias}:4400`, road: "direct" as const });
+  const view = { here: "This Mac", current: "box", hosts: [listing("box"), listing("attic")] };
+
+  it("shows a page on a host somewhere else this computer and the host it came from, and no other saved host", () => {
+    expect(hostsViewFor({ url: "http://box:4400", remote: true }, view)).toEqual({ here: "This Mac", current: "box", hosts: [listing("box")] });
+  });
+
+  it("shows the app's own host's page every saved host, which is what the shell's own menu draws", () => {
+    expect(hostsViewFor({ url: "http://127.0.0.1:4400", remote: false }, view)).toEqual(view);
   });
 });

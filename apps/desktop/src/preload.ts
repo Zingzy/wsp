@@ -31,7 +31,9 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
-  droppedPath: (file: File): string => webUtils.getPathForFile(file),
+  // Answered here rather than over a handler, since only the preload can read the path off a dropped file; the
+  // shell is asked first, so a page served by a host somewhere else is handed nothing from this computer.
+  droppedPath: (file: File): string | undefined => (ipcRenderer.sendSync("drop:allowed") === true ? webUtils.getPathForFile(file) : undefined),
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
   capturePreview: (workspaceId: string): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId),
   workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
