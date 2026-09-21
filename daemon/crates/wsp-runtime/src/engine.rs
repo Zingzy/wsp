@@ -210,6 +210,10 @@ pub fn default_network(workspace: &str) -> String {
     format!("wsp-{workspace}")
 }
 
+/// What compose adds to a project's name for the network a stack that named none of its own runs on. The project
+/// is the workspace's own id, so `<id>_default` is the one network a workspace's stack derives for itself.
+const COMPOSE_DEFAULT: &str = "_default";
+
 /// The name the box's link for one of a workspace's networks wears: under the prefix every rule of the
 /// workspace table matches, so a container on it meets the same drops the workspace does, and short enough for
 /// an interface name. Off the workspace and the network's own name, so one network asked for twice is one
@@ -238,13 +242,22 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 /// fence names, since the rules that keep a workspace off the box's metadata and off its neighbours match on that
 /// name. Answers the bridge name the engine is being told to make.
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
-    // The one shape this computer mints for itself: `default_network` of a workspace, whose id is itself under
-    // the link prefix, so the name a sibling's own default network holds or will hold reads as the prefix twice
-    // over, and a workspace taking one would refuse every plain container that sibling starts. Every other name
-    // under the prefix is the workspace's own to take, and compose names its default network after the project,
-    // which is the workspace's id.
+    // Two names belong to a workspace on this box and to nobody else: the one this computer mints for its own
+    // default network, `default_network`, which reads as the link prefix twice over since every id is itself
+    // under the prefix; and the one its `compose up` derives from its project, which is that id, so the shape is
+    // `<id>_default`. A workspace holding either of a sibling's would refuse that sibling every plain container
+    // it starts, or its whole stack at the network step. What the rule leaves: every other name under the prefix
+    // is this workspace's to take, and two workspaces reaching for one such name meet the engine's own refusal
+    // of a name already held rather than anything here.
     let asked = word(body.get("Name"));
-    if asked.starts_with(&default_network(crate::net::LINK_PREFIX)) {
+    let derived = asked.strip_suffix(COMPOSE_DEFAULT).filter(|stem| stem.starts_with(crate::net::LINK_PREFIX));
+    if let Some(stem) = derived {
+        if stem != workspace {
+            return Err(format!(
+                "a network named {asked} is the one the workspace {stem} brings its own stack up on, so it is refused here"
+            ));
+        }
+    } else if asked.starts_with(&default_network(crate::net::LINK_PREFIX)) {
         return Err(format!("a network named {asked} is one this computer makes for a workspace of its own, so it is refused here"));
     }
     let driver = word(body.get("Driver"));
@@ -1709,9 +1722,9 @@ mod tests {
         let taken = made(&mut json!({ "Name": "wsp-wsp-b" })).unwrap_err();
         assert_eq!(taken, "a network named wsp-wsp-b is one this computer makes for a workspace of its own, so it is refused here");
         assert!(made(&mut json!({ "Name": "wsp" })).is_ok(), "a name that is not under the prefix passes");
-        // The name compose gives its default network, which is the workspace's own id and a prefix short of the
-        // shape above: refusing it is refusing every stack a workspace brings up without naming a project.
-        assert!(made(&mut json!({ "Name": "wsp-b_default" })).is_ok(), "the compose default network of a workspace is refused");
+        // The name compose gives this workspace's own default network, which is its id and the suffix: refusing
+        // it is refusing every stack a workspace brings up without naming a project.
+        assert!(made(&mut json!({ "Name": "wsp-a_default" })).is_ok(), "the compose default network of a workspace is refused");
         // A subnet inside the workspaces' range, and one that holds the whole of it.
         for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
             let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();

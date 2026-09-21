@@ -1036,3 +1036,18 @@ async fn a_network_named_as_this_computer_names_its_own_is_refused_and_a_project
     assert_eq!(sent["Labels"][LABEL], WORKSPACE);
     assert!(sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"), "{sent}");
 }
+
+/// The network a sibling's own stack will derive: its project is that sibling's id and compose adds the suffix,
+/// so a workspace holding the name first would refuse that sibling's stack the network it asks for at its first
+/// step. The name is the stem's, whoever asks for it.
+#[tokio::test]
+async fn a_network_named_for_a_siblings_own_stack_is_refused() {
+    let w = world();
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-b_default" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&answered));
+    assert_eq!(
+        World::message(&answered),
+        "a network named wsp-b_default is the one the workspace wsp-b brings its own stack up on, so it is refused here"
+    );
+    assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+}

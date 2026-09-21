@@ -1895,8 +1895,7 @@ mod tests {
 
         ops.watch(Arc::new(Heard::default()) as Arc<dyn Watches>).unwrap();
         assert!(ops.deaths.lock().unwrap().contains_key(id), "the running workspace's init is watched by nothing");
-        // SAFETY: kill takes two plain integers and touches no memory of ours.
-        assert_eq!(unsafe { libc::kill(record.init.pid, libc::SIGKILL) }, 0, "the child could not be killed");
+        child.kill().unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while door.exists() {
             assert!(std::time::Instant::now() < deadline, "the door stands on a workspace whose init is gone");
