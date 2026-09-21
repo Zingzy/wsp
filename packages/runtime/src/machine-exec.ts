@@ -437,7 +437,10 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
           // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
           // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
-          before: [`mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
+          // Every file of the run is the login's alone from the moment it is made, not chmodded after: the script
+          // carries the turn's environment as export lines, the provider key and the thread token among them, and
+          // a machine somebody owns may carry other logins that can read a folder wsp did not make.
+          before: ["umask 077", `mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
           after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
         }),

@@ -254,6 +254,9 @@ export interface PlaceInstallRequest {
   name?: string;
   sshPort?: number;
   keyPath?: string;
+  /** The host key the person confirmed or pinned; the install compares what answered the first dial against it
+   * before anything of wsp's is sent, and refuses a computer nobody confirmed a key for. */
+  hostKey?: string;
   /** The whole token the join on that computer spends: the single-use code and the fingerprint of the key this
    * host will prove, as one word, the same one the printed join line carries. */
   code: string;
@@ -407,7 +410,7 @@ export interface PlaceDoor {
   markUsed(placeId: string | undefined): Promise<void>;
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
-  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostUrls: readonly string[] }, now: number): Promise<PlaceAdded>;
+  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[] }, now: number): Promise<PlaceAdded>;
   /** Dials one computer once: a frame over the link it is holding, or one login over the road it was added on when
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
