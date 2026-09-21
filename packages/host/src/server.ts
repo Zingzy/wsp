@@ -417,8 +417,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const callerOf = async (req: IncomingMessage, here: boolean): Promise<{ caller?: Caller } | undefined> => {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
     if (who === undefined) return here ? {} : undefined;
-    const scope = who.kind === "device" ? who.device.scope : undefined;
-    if (scope === undefined) return {};
+    if (who.kind !== "device") return {};
+    const scope = who.device.scope;
+    // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
+    // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
+    if (scope === undefined) return { caller: "paired" };
     return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 
