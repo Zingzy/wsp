@@ -1920,16 +1920,19 @@ export function bootLineOf(html: string): BootPayload | undefined {
 
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
-  /** The runtime's own port, inlined only on the loopback page beside the token; a page served beyond loopback
-   * carries none and dials the origin it came from at wsPath. */
+  /** The runtime's own port, inlined only on the loopback page beside the token's digest; a page served beyond
+   * loopback carries none and dials the origin it came from at wsPath. */
   wsPort?: number;
-  /** The host's own token, inlined only when the page was served on loopback, where reaching it already means being
-   * on the computer. A page served beyond loopback carries none and pairs for a device token of its own. */
-  token?: string;
+  /** The sha256 of the host's own token, hex, inlined only on the loopback page: the desktop shell compares it to the
+   * digest of the token file beside the state and sends nothing, so a page a squatter serves on the lock's port
+   * cannot learn the token by being read. The token itself is never in any page: a browser here dials with a
+   * device token wsp init or wsp host pair let it in with, and the shell hands its page the file's over the bridge. */
+  tokenHash?: string;
   /** The path on this page's own origin the runtime WebSocket answers on, which is the one road a client reaching
    * the host through an ssh forward or a tunnel hostname has. */
   wsPath: string;
-  /** False when this page carries no token and has to redeem a pairing code before it can dial anything. */
+  /** True when this page was served on the computer the host runs on, which is the page's one reading of being at
+   * home: false is a host on another computer, whose page pairs for a device token of its own. */
   paired: boolean;
   /** The release this host is, which is the release this page is: a desktop shell attached to a host it did not
    * start reads it to tell whether the two halves were built apart. */
@@ -4237,6 +4240,10 @@ export const DeviceView = z.object({
    * environment, which drives only the tree that turn's thread is in. Absent is a paired computer, which drives
    * everything this host holds. */
   scope: ThreadScope.optional(),
+  /** Set on the browser wsp init opened on the computer the host runs on: its code was minted by init itself, so
+   * the device is read as the owner on the socket and the JSON routes alike, and is still listed and revoked like
+   * every other. Absent is a computer or a browser that took a code from wsp host pair. */
+  here: z.literal(true).optional(),
 });
 export type DeviceView = z.infer<typeof DeviceView>;
 
@@ -4300,9 +4307,9 @@ export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or
  * the host takes anyone else's away. */
 export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
 
-/** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
- * device token. */
-export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
+/** The refusal the JSON routes answer with when a request carries no token this host takes: reaching the port,
+ * the loopback one included, names nobody, since another login on the same computer reaches it too. */
+export const API_UNAUTHORIZED = "this route needs a token in an Authorization header, the host's own from the token file beside its state or a paired device's; run wsp host pair on the computer the host runs on for one";
 
 /** The refusal a write route and a browser's upgrade answer with when the page that sent them was loaded at
  * another name than the one this host was reached at. A page may only drive the host it was served by, and the
@@ -4722,8 +4729,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
   /** Mints a one time code another computer redeems for a device token of its own. Answers `{ code, expiresAt }`.
-   * Only on a socket holding the host's own token, and never on one let in by a ticket. */
-  z.object({ id: reqId, op: z.literal("pair.issue") }),
+   * Only on a socket holding the host's own token, and never on one let in by a ticket. `here` marks the code wsp
+   * init mints for the browser it opens on this computer, whose device is then read as the owner. */
+  z.object({ id: reqId, op: z.literal("pair.issue"), here: z.literal(true).optional() }),
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
   z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
@@ -5470,7 +5478,7 @@ export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
+export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";

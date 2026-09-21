@@ -10,6 +10,11 @@
 const PREFIX = "#w/";
 const THREAD = "/t/";
 const NEW = "/new";
+/** The pairing code wsp init minted for the browser it opens, as the last segment of the hash: spent on the page's
+ * first paint and written back out of the address, so what the person is reading never carries it. */
+const CODE = "/c/";
+/** The same code on a page opened on no workspace. */
+const CODE_ALONE = "#c/";
 
 /** What a page's address names. */
 export interface AppAddress {
@@ -30,10 +35,26 @@ export function appHash(address: AppAddress): string {
   return address.fresh === true ? `${base}${NEW}` : base;
 }
 
-/** What a hash names, or nothing: every other hash is the app's own (#gallery) or none at all. */
+/** The hash wsp init opens the app on: the workspace it made, or none, with the code that lets the browser in. */
+export function openingHash(code: string, workspaceId?: string): string {
+  return `${workspaceId === undefined ? CODE_ALONE : `${workspaceHash(workspaceId)}${CODE}`}${encodeURIComponent(code)}`;
+}
+
+/** The pairing code a hash carries and the hash left once it is taken out, or nothing when it carries none. */
+export function pairingCodeOf(hash: string): { code: string; rest: string } | undefined {
+  const alone = hash.startsWith(CODE_ALONE);
+  const cut = alone ? 0 : hash.startsWith(PREFIX) ? hash.lastIndexOf(CODE) : -1;
+  if (cut === -1) return undefined;
+  const code = decodeURIComponent(hash.slice(cut + (alone ? CODE_ALONE.length : CODE.length)));
+  return code === "" ? undefined : { code, rest: hash.slice(0, cut) };
+}
+
+/** What a hash names, or nothing: every other hash is the app's own (#gallery) or none at all. A code riding the
+ * end of it is not part of what it names. */
 export function addressFromHash(hash: string): AppAddress | undefined {
-  if (!hash.startsWith(PREFIX)) return undefined;
-  const rest = hash.slice(PREFIX.length);
+  const named = pairingCodeOf(hash)?.rest ?? hash;
+  if (!named.startsWith(PREFIX)) return undefined;
+  const rest = named.slice(PREFIX.length);
   const cut = rest.indexOf(THREAD);
   const fresh = cut === -1 && rest.endsWith(NEW);
   const workspaceId = decodeURIComponent(fresh ? rest.slice(0, -NEW.length) : cut === -1 ? rest : rest.slice(0, cut));

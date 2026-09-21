@@ -218,11 +218,11 @@ describe("the boot gate in the shell", () => {
     expect(await screen.findByText(PAIR_HEADING)).toBeTruthy();
   });
 
-  it("with the host's own token in the page never asks the shell", async () => {
-    const bridge = fakeBridge();
-    render(<BootGate boot={boot({ token: "host-token", paired: true })} at={at} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
-    await act(async () => {});
-    expect(bridge.hostToken).not.toHaveBeenCalled();
+  it("on this computer's own page asks the shell too, since the page carries a digest of the host's token and never the token", async () => {
+    const bridge = fakeBridge({ hostToken: vi.fn(async () => "host-token") });
+    render(<BootGate boot={boot({ tokenHash: "a".repeat(64), paired: true })} at={at} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    await waitFor(() => expect(bridge.hostToken).toHaveBeenCalledOnce());
+    await waitFor(() => expect(document.querySelector("[data-k=booting]")).toBeNull());
     expect(screen.queryByText(PAIR_HEADING)).toBeNull();
   });
 });

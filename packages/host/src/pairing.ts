@@ -97,10 +97,10 @@ export function deviceLines(devices: readonly DeviceView[]): string[] {
   return table([["DEVICE", "ID", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, d.createdAt, d.lastSeenAt])]);
 }
 
-/** The line a host that binds this computer alone answers wsp host pair with: nothing outside can reach it, so a code
- * would open nothing. */
+/** The line a host that binds this computer alone answers wsp host pair with: nothing outside can reach it, so the
+ * code lets in a browser on this computer, as a device, and no other computer. */
 export function pairOnLoopbackLine(address: string): string {
-  return `wsp host pair: this host listens on ${address}, which no other computer can reach, so a pairing code would open nothing. Start it with wsp up --listen <address> first.`;
+  return `wsp host pair: this host listens on ${address}, which no other computer can reach, so this code lets in a browser on this computer as a device and nothing beyond it. Start the host with wsp up --listen <address> for another computer.`;
 }
 
 interface PairDeps {

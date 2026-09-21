@@ -88,8 +88,8 @@ async function mountShell() {
 const tabbar = () => document.querySelector("[data-right-panel-tabbar]");
 /** The boot object the host inlined into this page: with a token it was served on this computer's loopback, without
  * one it was served beyond it, which is the app's one reading of a window on another computer. */
-const served = (token: string | undefined): void => {
-  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", ...(token === undefined ? {} : { token }) };
+const served = (here: boolean): void => {
+  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { wsPort: 7788, tokenHash: "a".repeat(64) } : {}) };
 };
 // Lets the kit's post-mount effects (scroll fades, the machine surface's lineage fetch) settle inside act.
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
@@ -351,7 +351,7 @@ describe("disconnected banner", () => {
   });
 
   it("is held back on a window the host did not serve on this computer: there the sidebar says the computer is asleep, and the banner is for a wsp that stopped where this window is", async () => {
-    served(undefined);
+    served(false);
     await mountShell();
     act(() => useStore.setState({ conn: "reconnecting" }));
     expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
@@ -360,7 +360,7 @@ describe("disconnected banner", () => {
     act(() => useStore.setState({ conn: "closed" }));
     expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
     // The same window with the host's own token is on the computer wsp runs on, where the banner is the right words.
-    served("t_local");
+    served(true);
     act(() => useStore.setState({ conn: "reconnecting" }));
     expect(screen.getByText("wsp is not running, reconnecting.")).toBeTruthy();
     expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull();

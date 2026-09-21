@@ -10,6 +10,7 @@ import { isCancel, log, outro } from "@clack/prompts";
 import { NO_PROVIDER_LINE, THIS_COMPUTER, isLocalWorkspace, type AppPorts, type PortsAsked, type WorkspaceView } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { appUrl, askAlsoLocal, runLocal } from "./init-first.js";
+import { hostRunDir } from "./host-lock.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
@@ -104,7 +105,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
     return { code: 0 };
   }
   const at = { port: handle.port, address: opts.address };
-  await openApp(appUrl(at, workspace?.id), at, io, interactive);
+  await openApp(appUrl(at, workspace?.id, await handle.hereCode()), at, io, interactive, { runDir: hostRunDir(opts.statePath) });
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   return { code: 0, handle };
 }

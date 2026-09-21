@@ -39,7 +39,7 @@ Every step ends in what to expect. The agent runs the command, reads that line, 
    {"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open 'https://github.com/login/device'","waitSeconds":960}
    ```
 
-   The agent hands you that line as it comes: the page, the code when there is one, and the command that opens it. It then reads the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Expect one `sign-in-result` line per hand-off, then `Golden v<n> sealed.` in the log, `Workspace first (<id>) forked from golden v<n>.` on the first seal, and `Open http://127.0.0.1:4400/`.
+   The agent hands you that line as it comes: the page, the code when there is one, and the command that opens it. It then reads the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Expect one `sign-in-result` line per hand-off, then `Golden v<n> sealed.` in the log, `Workspace first (<id>) forked from golden v<n>.` on the first seal, and `Open http://127.0.0.1:4400/#w/<id>/c/<code>`, whose code lets the browser that opens it in as the owner, once.
 
 7. **The host.** Init serves a host for as long as it runs, and when nothing serves after it ends the next command starts one, so there is nothing for the agent to do here.
 

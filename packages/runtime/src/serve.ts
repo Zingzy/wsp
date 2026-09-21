@@ -406,7 +406,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
      * device: both roads a device comes in by, the auth frame and a redeem, pass here, so neither is a way around
      * the stamp. */
     const bind = (device: DeviceView): void => {
-      pairedRoad = device.scope === undefined;
+      // The browser wsp init let in is the owner's own window, so its socket takes the person's road.
+      pairedRoad = device.scope === undefined && device.here !== true;
       me = { kind: "device", device };
       bound = { deviceId: device.id, cut: () => ws.close(4401, UNAUTHORIZED) };
       held.add(bound);
@@ -587,7 +588,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // holds this host to that key before it spends it. A runtime wired with no place door proves none
               // and answers the code alone, which the line that asked refuses to print in its own words.
               const hostKey = rt.places?.hostKey();
-              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs });
+              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs, ...(msg.here === true ? { here: true } : {}) });
               send({ id: msg.id, ok: true, code, expiresAt, ...(hostKey === undefined ? {} : { hostKey }) });
               return;
             }

@@ -8,7 +8,9 @@
 import { log } from "@clack/prompts";
 import { styleText } from "node:util";
 import { CLOUD_SETUP_WORDS, InitJob, SIGN_IN_OPEN_STATE, fmtDuration, initJobOver, initRowOver, initRowUnrun, INIT_ROW_STATES, type InitRow } from "@wsp/protocol";
+import { appUrl } from "./init-first.js";
 import { textPrompt } from "./init-layout.js";
+import { openApp, type ServedAt } from "./init-serve.js";
 import type { InitIO } from "./init.js";
 
 const dim = (s: string): string => styleText("dim", s);
@@ -35,8 +37,10 @@ export interface BesideOptions {
   on?: string;
   /** wsp init --rebuild: the next version is sealed from a fresh machine, as it is on the road with no host serving. */
   rebuild?: boolean;
-  /** Where the host serving this state answers, printed once the build is over. */
-  appUrl?: string;
+  /** The app the host serving this state already serves, opened once the build is over the way every init road
+   * opens it: on the workspace the build forked, with a code that host minted for the browser, through a page in
+   * that host's run folder. */
+  app?: { at: ServedAt; runDir: string; interactive: boolean };
 }
 
 /** A row's state as one line under the terminal's own glyphs: the label, what the row said and how long it took. */
@@ -131,7 +135,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       draw(view);
     }
     const read = await until(job => job.phase === "answering" || initJobOver(job.phase));
-    if (read.phase !== "answering") return ended(o, read);
+    if (read.phase !== "answering") return await ended(o, read);
     await o.client.request("init.build", {
       ...(o.fork !== undefined ? { firstWorkspace: o.fork.name } : {}),
       ...(o.fork?.folder !== undefined ? { importFolder: o.fork.folder } : {}),
@@ -139,7 +143,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       ...(o.on !== undefined ? { on: o.on } : {}),
       ...(o.rebuild === true ? { rebuild: true } : {}),
     });
-    return ended(o, await until(job => initJobOver(job.phase)));
+    return await ended(o, await until(job => initJobOver(job.phase)));
   } finally {
     o.io.signals.off("SIGINT", stop);
     off();
@@ -162,8 +166,9 @@ async function askCode(o: BesideOptions, row: InitRow, signal: AbortSignal): Pro
   });
 }
 
-/** What the run says once the job is over, and the exit code it ends on. */
-function ended(o: BesideOptions, job: InitJob): number {
+/** What the run says once the job is over, and the exit code it ends on. The code the browser is let in with is
+ * minted over this run's own socket, which holds the host's token: the same door wsp host pair mints at. */
+async function ended(o: BesideOptions, job: InitJob): Promise<number> {
   const out = { output: o.io.output };
   if (job.phase !== "done") {
     log.error(`${job.phase === "cancelled" ? CLOUD_SETUP_WORDS.build.stopped : CLOUD_SETUP_WORDS.build.failed}${job.error !== undefined ? `: ${job.error}` : ""}`, out);
@@ -171,6 +176,9 @@ function ended(o: BesideOptions, job: InitJob): number {
   }
   if (job.golden !== undefined) log.step(`Image v${job.golden.version} sealed on the host serving this state.`, out);
   if (job.workspace !== undefined) log.step(`Workspace ${job.workspace.name} (${job.workspace.id}) forked from it.`, out);
-  if (o.appUrl !== undefined) log.step(`The app is already running at ${o.appUrl}.`, out);
+  if (o.app !== undefined) {
+    const { code } = await o.client.request<{ code: string }>("pair.issue", { here: true });
+    await openApp(appUrl(o.app.at, job.workspace?.id, code), o.app.at, o.io, o.app.interactive, { runDir: o.app.runDir });
+  }
   return 0;
 }

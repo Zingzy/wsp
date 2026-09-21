@@ -4,7 +4,7 @@
 // provider: the runtime's provider module is the one that holds no machine.
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -22,6 +22,8 @@ import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
 
 const ENTER = "\r";
+/** The code the fake host mints for the browser init opens, which the address the run opens carries. */
+const CODE = "7K3MQP2X";
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -102,7 +104,7 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
     roads,
     host: async rt => {
       counters.hosts += 1;
-      return { port: 4400, wsPort: 4410, authToken: "tok", door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
+      return { port: 4400, wsPort: 4410, authToken: "tok", hereCode: async () => CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
     },
   };
   const press = async (...keys: string[]): Promise<void> => {
@@ -151,8 +153,12 @@ describe("wsp init with no provider key", () => {
     expect(result.code).toBe(0);
     const workspaces = await f.runtime().workspaces.list();
     expect(workspaces.map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "this-mac", kind: "local" }]);
-    expect(f.trail).toEqual(["local", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    // The browser is opened on a page in the host's run folder that sends it to the address, which carries the
+    // code the host minted for it: that browser is the owner's, and the code rides no process argument.
+    expect(f.trail).toEqual(["local", expect.stringMatching(/^open .*\/runs\/open-[0-9a-f]+\.html$/)]);
+    expect(readFileSync(f.trail[1]!.slice("open ".length), "utf8")).toContain(`url=http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${CODE}`);
     const out = f.text();
+    expect(out).toContain(`Opened http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${CODE}`);
     expect(out).toContain(NO_PROVIDER_LINE);
     expect(out).toContain("So this run seals nothing and boots nothing.");
     expect(out).toContain(`Workspace this-mac (${workspaces[0]!.id}) is this computer`);
@@ -172,7 +178,7 @@ describe("wsp init with no provider key", () => {
     const workspaces = await f.runtime().workspaces.list();
     expect(f.trail).toEqual(["local"]);
     const out = f.text();
-    expect(out).toContain(`Open http://100.64.0.3:4400/#w/${workspaces[0]!.id}`);
+    expect(out).toContain(`Open http://100.64.0.3:4400/#w/${workspaces[0]!.id}/c/${CODE}`);
     expect(out).not.toContain("ssh -L");
   });
 
@@ -183,8 +189,9 @@ describe("wsp init with no provider key", () => {
     await f.press("n");
     expect((await run).code).toBe(0);
     expect(await f.runtime().workspaces.list()).toEqual([]);
-    // No workspace, so the address is the plain one.
-    expect(f.trail).toEqual(["open http://127.0.0.1:4400/"]);
+    // No workspace, so the address names none and carries the code alone.
+    expect(f.trail).toEqual([expect.stringMatching(/^open .*\/runs\/open-[0-9a-f]+\.html$/)]);
+    expect(readFileSync(f.trail[0]!.slice("open ".length), "utf8")).toContain(`url=http://127.0.0.1:4400/#c/${CODE}`);
   });
 
   it("a second run on the same state opens the app on the workspace already here and asks nothing", async () => {
@@ -197,7 +204,8 @@ describe("wsp init with no provider key", () => {
     f.trail.splice(0);
     expect((await runLocalInit(f.opts, f.io)).code).toBe(0);
     expect(f.text()).toContain(`this-mac (${workspaces[0]!.id}) is already this computer; this run opens the app on it.`);
-    expect(f.trail).toEqual([`open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.trail).toEqual([expect.stringMatching(/^open .*\/runs\/open-[0-9a-f]+\.html$/)]);
+    expect(readFileSync(f.trail[0]!.slice("open ".length), "utf8")).toContain(`url=http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${CODE}`);
     // One local workspace per host: the second run made none.
     expect((await f.runtime().workspaces.list()).map(w => w.name)).toEqual(["this-mac"]);
   });

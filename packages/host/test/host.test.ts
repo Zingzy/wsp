@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
@@ -95,8 +96,9 @@ async function wsClient(port: number, token: string): Promise<{ request(op: stri
   return { request, frames, close: () => ws.close() };
 }
 
-async function getJson(url: string): Promise<{ status: number; body: any }> {
-  const res = await fetch(url);
+/** A JSON route read with the host's own token, as every tool on this computer reads it off the file beside the state. */
+async function getJson(url: string, token: string): Promise<{ status: number; body: any }> {
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   return { status: res.status, body: await res.json() };
 }
 
@@ -293,7 +295,7 @@ describe("host serves the app", () => {
     vi.unstubAllEnvs();
   });
 
-  it("the page's one inline script is the boot object: runtime port, token and the release this host is, nothing else", async () => {
+  it("the page's one inline script is the boot object: runtime port, the token's digest and the release this host is, nothing else", async () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     expect(handle.wsPort).toBeGreaterThan(0);
@@ -304,7 +306,7 @@ describe("host serves the app", () => {
     const html = await page.text();
     expect(html).toContain('<script type="module" crossorigin src="/assets/app.js">');
     expect(inlineScripts(html)).toEqual([
-      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}"};`,
+      `window.__WSP__ = {"wsPort":${handle.wsPort},"tokenHash":"${createHash("sha256").update(handle.authToken).digest("hex")}","wsPath":"/ws","paired":true,"version":"${VERSION}"};`,
     ]);
     expect(html).not.toContain("window.__WSP__ ||");
   });
@@ -313,7 +315,7 @@ describe("host serves the app", () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), statePath: "/Users/dev/.wsp/state.json" });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}","statePath":"/Users/dev/.wsp/state.json"};`]);
+    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"tokenHash":"${createHash("sha256").update(handle.authToken).digest("hex")}","wsPath":"/ws","paired":true,"version":"${VERSION}","statePath":"/Users/dev/.wsp/state.json"};`]);
   });
 
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
@@ -326,7 +328,7 @@ describe("host serves the app", () => {
     const machine = backend.machines.find(m => m.id === first.machineId)!;
     expect(machine.spec.envs?.["CLAUDE_CONFIG_DIR"]).toBe("/root/.claude-cfg");
     expect(machine.spec.labels).toMatchObject({ wsp: "1", "wsp-host": "1" });
-    const list = (await (await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).json()) as { workspaces: { id: string }[] };
+    const list = (await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken)).body as { workspaces: { id: string }[] };
     expect(list.workspaces.map(w => w.id)).toEqual([first.id]);
     await handle.close();
     const bare = testRuntime(false);
@@ -344,7 +346,7 @@ describe("host serves the app", () => {
     writeFileSync(recipePath, JSON.stringify({ entries: [{ rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 10, default: "bring", bring: true }, font(true)] }));
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), recipePath });
     const boot = async () => inlineScripts(await (await fetch(`http://127.0.0.1:${handle!.port}/`)).text())[0];
-    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}","terminalFont":"Hack"};`);
+    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"tokenHash":"${createHash("sha256").update(handle.authToken).digest("hex")}","wsPath":"/ws","paired":true,"version":"${VERSION}","terminalFont":"Hack"};`);
     writeFileSync(recipePath, JSON.stringify({ entries: [font(false)] }));
     expect(await boot()).not.toContain("terminalFont");
     writeFileSync(recipePath, "not json");
@@ -423,7 +425,9 @@ describe("host serves the app", () => {
 
     // A file of the bundle that is not there is still a miss: a script answering as a page breaks silently.
     expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
-    const api = await fetch(`${base}/api/nothing`);
+    // A route that is not there is named to nobody who carries no token, and a miss to the host's own.
+    expect((await fetch(`${base}/api/nothing`)).status).toBe(401);
+    const api = await fetch(`${base}/api/nothing`, { headers: { authorization: `Bearer ${handle!.authToken}` } });
     expect(api.status).toBe(404);
     expect(((await api.json()) as { error: string }).error).toBe("no route: GET /api/nothing");
     expect((await fetch(`${base}/new`, { method: "POST" })).status).toBe(404);
@@ -458,7 +462,7 @@ describe("host serves the app", () => {
     const { rt } = testRuntime();
     await createOn(rt, { golden: "snap_gold", name: "alpha" });
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
-    const { status, body } = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    const { status, body } = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(status).toBe(200);
     expect(body.workspaces).toHaveLength(1);
     expect(body.workspaces[0]).toMatchObject({
@@ -475,7 +479,7 @@ describe("host serves the app", () => {
     await handle.addProject("https://github.com/dev/beta.git", "default");
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${handle.authToken}` },
       body: JSON.stringify({ name: "beta" }),
     });
     expect(res.status).toBe(200);
@@ -484,7 +488,7 @@ describe("host serves the app", () => {
     expect(backend.machines[0]?.spec.fromSnapshot).toBe("snap_gold");
     expect(backend.machines[0]?.spec.labels).toMatchObject({ wsp: "1", "wsp-host": "1", "wsp-owner": expect.stringMatching(/^h_[0-9a-f]{8}$/) });
 
-    const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(list.body.workspaces).toHaveLength(1);
   });
 
@@ -498,7 +502,7 @@ describe("host serves the app", () => {
       const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs(g) });
       try {
         await h.addProject("https://github.com/dev/beta.git", "default");
-        const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "beta" }) });
+        const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${h.authToken}` }, body: JSON.stringify({ name: "beta" }) });
         expect(res.status).toBe(200);
         const envs = backend.machines[0]?.spec.envs ?? {};
         expect(envs["CLAUDE_CONFIG_DIR"]).toBe("/root/.claude-cfg");
@@ -515,7 +519,7 @@ describe("host serves the app", () => {
     await handle.addProject("https://github.com/dev/beta.git", "default");
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${handle.authToken}` },
       body: JSON.stringify({ name: "beta" }),
     });
     expect(res.status).toBe(409);
@@ -548,18 +552,18 @@ describe("host serves the app", () => {
     };
 
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
-    const first = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    const first = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(first.body.workspaces[0].reach).toMatchObject({ state: "reachable" });
     expect(first.body.workspaces[0].reach.url).toContain("pt_token=");
 
     // Fresh reach is reused across polls, not reminted per request.
-    await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(minted).toBe(1);
 
     // Napping workspaces are not probed; their reach state says so.
     const ws = (await rt.workspaces.list())[0]!;
     await rt.workspaces.nap(ws.id);
-    const napped = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    const napped = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(napped.body.workspaces[0].reach.state).toBe("napping");
     expect(napped.body.workspaces[0].machineState).toBe("paused");
   });
@@ -679,7 +683,7 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([`reap: recorded ${lost.machineId} as workspace first (${lost.id}): a machine from this setup that no record claimed; it bills until wsp delete first`]);
-    const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
+    const list = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`, handle.authToken);
     expect(list.body.workspaces).toMatchObject([{ id: lost.id, name: "first", machineId: lost.machineId, phase: "running" }]);
     await rt.workspaces.delete(lost.id);
     expect(backend.machines[0]!.killed).toBe(true);

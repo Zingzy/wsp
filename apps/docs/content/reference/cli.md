@@ -305,7 +305,7 @@ usage: wsp add
        [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|…
        [--on <computer>] [--name <name>] [--base <branch>] [--yes]
        [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember]
-       [--ssh-port <port>] [--ssh-key <path>]
+       [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]
   a computer of yours over ssh, or a project: a folder on this computer worked
   in place, or a repo a computer clones with --on <computer>; <provider> takes a
   provider's key, nothing prints the join line another computer types, a
@@ -322,6 +322,10 @@ usage: wsp add
   --ssh-port      the port ssh dials that computer on (default 22)
   --ssh-key       the key file ssh logs in with; whatever your own ssh config
                   and agent already use without it
+  --host-key      the host key of a computer this one has never dialled, as you
+                  read it on that computer; without it the add shows you the key
+                  that computer answers with and asks, and off a terminal it
+                  refuses rather than trusting whatever answers
   --update        the place named is already in this wsp: put the daemon this
                   wsp deploys on it, over the link it is holding or over the ssh
                   road it was added on, restart its agent and keep the
@@ -622,8 +626,10 @@ usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
   --ws-port      the runtime websocket port on its own (default 4410); --port
                  alone moves both
   --listen       the address to bind (default 127.0.0.1, this computer alone).
-                 On any other address the page is served without the host token
-                 and every client pairs for a device token of its own
+                 No page carries the host's token on any address: the desktop
+                 attaches by the token file beside the state, the browser wsp
+                 init opens is let in by init, and every other browser pairs for
+                 a device token of its own
   --advertise    the address every machine dials this host at, whatever kind it
                  is; each kind answers for its own machines without it
   --no-relay     serve without the tunnel, on a computer that is linked to a

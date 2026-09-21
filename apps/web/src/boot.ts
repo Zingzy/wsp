@@ -7,12 +7,11 @@ export function bootPayload(): BootPayload | undefined {
   return typeof window === "undefined" ? undefined : (window as unknown as { __WSP__?: BootPayload }).__WSP__;
 }
 
-/** Whether this window is on a computer other than the one the wsp it shows runs on. A page served on loopback
- * carries the host's own token, since reaching it there already means being at that computer; a page served beyond
- * it carries none and holds a token of its own, which is the one reading the page has of being away. */
+/** Whether this window is on a computer other than the one the wsp it shows runs on: the host says so in the page,
+ * which reads paired only when it was served on its own computer. */
 export function onAnotherComputer(): boolean {
   const boot = bootPayload();
-  return boot !== undefined && boot.token === undefined;
+  return boot !== undefined && !boot.paired;
 }
 
 /** Whether the computer the host runs on has gone quiet while this window watches from another one: its lid is
