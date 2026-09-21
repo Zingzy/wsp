@@ -110,7 +110,7 @@ const inPlace = (id: string, name: string, p: ProjectView): WorkspaceView => ({
   phase: "running",
   golden: "",
   createdAt: AT,
-  copy: { road: "in-place", path: p.path, source: p.path, base: "", branch: "", carried: "nothing" },
+  copy: { road: "clonefile", path: `${p.path}-first`, source: p.path, base: "", branch: "main", carried: "deps-and-config" },
 });
 /** A copy of that folder beside it, with the port an app reading PORT binds inside it. */
 const copyHere = (id: string, name: string, p: ProjectView, portBase: number, branch: string, extra: Partial<WorkspaceView> = {}): WorkspaceView => ({

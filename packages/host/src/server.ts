@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -307,13 +307,13 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
       // the same sentence the command line uses when there are several.
       const all = await rt.projects.list(caller);
       // A road that names none is forking, so the projects it can mean are the ones on a computer that forks: a
-      // folder worked in place here is a workspace of its own and is never what a fork was asked for.
-      const held = named === undefined ? all.filter(p => !worksInPlace(kindForComputer(p.computer))) : all;
+      // folder here is copied, never forked, and is never what a fork was asked for.
+      const held = named === undefined ? all.filter(p => !copiesFolder(kindForComputer(p.computer))) : all;
       const project = named === undefined ? held[0] : held.find(p => p.id === named || p.name === named);
       if (project === undefined || (named === undefined && held.length !== 1)) throw new Error(held.length === 0 ? NO_PROJECT_YET : nameTheProjectLine(held.map(p => p.name)));
       const head = goldenHead(await rt.golden.get());
-      // A project worked in place forks nothing, so it needs no image; every other computer's copy does.
-      if (!head && !worksInPlace(kindForComputer(project.computer))) throw new NoGoldenError();
+      // A copy of a folder here forks nothing, so it needs no image; every other computer's copy does.
+      if (!head && !copiesFolder(kindForComputer(project.computer))) throw new NoGoldenError();
       return rt.workspaces.create(
         {
           project: project.id,

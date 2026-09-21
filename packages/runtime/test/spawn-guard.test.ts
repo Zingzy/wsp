@@ -44,7 +44,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
-import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -122,6 +122,7 @@ describe("agents spawning agents", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {

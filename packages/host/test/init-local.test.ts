@@ -19,7 +19,7 @@ import { noKeyLines, runLocalInit, type LocalInitOptions } from "../src/init-loc
 import { KEY_LAYER_WORDS } from "../src/env-keys.js";
 import type { InitIO } from "../src/init.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
+import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 
 const ENTER = "\r";
 const dirs: string[] = [];
@@ -51,6 +51,7 @@ function localWiring(root: string): LocalWiring {
     rootsPath: join(root, "roots"),
     env: () => ({}),
     platform: hostPlatform(),
+    copier: copyingFake(),
   };
 }
 
@@ -155,7 +156,8 @@ describe("wsp init with no provider key", () => {
     const out = f.text();
     expect(out).toContain(NO_PROVIDER_LINE);
     expect(out).toContain("So this run seals nothing and boots nothing.");
-    expect(out).toContain(`Workspace this-mac (${workspaces[0]!.id}) is this computer`);
+    expect(out).toContain(`Workspace this-mac (${workspaces[0]!.id}) is a copy of `);
+    expect(out).toContain("on this computer; its threads run here, under your own sign-ins.");
     // Nothing was built or sealed: the only mention of a golden is the offer to add one later.
     expect(out).not.toMatch(/Sealing|is sealed|Forking/);
     expect(f.hosts).toBe(1);
@@ -196,7 +198,7 @@ describe("wsp init with no provider key", () => {
     const workspaces = await f.runtime().workspaces.list();
     f.trail.splice(0);
     expect((await runLocalInit(f.opts, f.io)).code).toBe(0);
-    expect(f.text()).toContain(`this-mac (${workspaces[0]!.id}) is already this computer; this run opens the app on it.`);
+    expect(f.text()).toContain(`this-mac (${workspaces[0]!.id}) is already the workspace here; this run opens the app on it.`);
     expect(f.trail).toEqual([`open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
     // One local workspace per host: the second run made none.
     expect((await f.runtime().workspaces.list()).map(w => w.name)).toEqual(["this-mac"]);

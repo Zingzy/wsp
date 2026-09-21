@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
+import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -1010,11 +1010,11 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
     // A folder of the person's seeding a project on a computer that clones: the menu first, and nothing is sent
-    // until they have said what travels. A folder worked where it sits seeds nothing and reads no menu, which the
+    // until they have said what travels. A folder this computer copies seeds nothing and reads no menu, which the
     // computer's own kind says rather than this line: naming this computer with --on is the same road as naming
-    // none, and both work the folder where it already is.
+    // none, and both copy the folder where it already is.
     const onComputer = flags.on;
-    const seeding = sourceKindOf(source) === "folder" && onComputer !== undefined && !(await worksInPlaceOn(client, onComputer));
+    const seeding = sourceKindOf(source) === "folder" && onComputer !== undefined && !(await copiesFolderOn(client, onComputer));
     let seed: SeedChoice | undefined;
     if (seeding && onComputer !== undefined) {
       const { plan } = await client.request<{ plan: SeedPlan }>("project.seed.plan", { source });
@@ -1070,13 +1070,13 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   }
 }
 
-/** Whether the computer a word names works a folder where it sits rather than holding a copy of it: the kind
- * table's own answer for the computer that word is, off the same places listing every other row reads. A word
- * naming no computer is left to the host, which refuses it naming the computers there are. */
-async function worksInPlaceOn(client: HostClient, word: string): Promise<boolean> {
+/** Whether the computer a word names copies a folder here by directory rather than cloning onto its own disk: the
+ * kind table's own answer for the computer that word is, off the same places listing every other row reads. A
+ * word naming no computer is left to the host, which refuses it naming the computers there are. */
+async function copiesFolderOn(client: HostClient, word: string): Promise<boolean> {
   const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
   const found = places.find(p => p.id === word || p.name === word);
-  return found !== undefined && worksInPlace(kindForComputer(found.id));
+  return found !== undefined && copiesFolder(kindForComputer(found.id));
 }
 
 /** What the person's own words make of the menu: the ticks the catalog decided, then their keeps and cuts and the

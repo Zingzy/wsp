@@ -69,7 +69,7 @@ import {
 import { agentName, catalogEntry, GUEST_HOME, VAULT_VARIABLES } from "@wsp/catalog";
 import { daemonFixLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
-import { captured, createOn, projectOn } from "./verbs-fixture.js";
+import { captured, copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 import { commandPage, COMMANDS_FOR_HELP, doctorRow, localWiring, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -1674,6 +1674,7 @@ describe("the doctor's local road", () => {
           rootsPath: join(root, "roots"),
           env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
           platform: hostPlatform(),
+          copier: copyingFake(),
         },
         hostId: "box:h1",
       }),

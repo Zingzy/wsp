@@ -169,7 +169,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("wsp threads --json");
     expect(setup).toContain("starting the host for <path>; its log is <path>, and wsp down stops it");
     expect(setup).toContain("no host answered for <path> within 20.0s");
-    expect(setup).toContain(thisComputerLine("<name>", "ws_..."));
+    expect(setup).toContain(thisComputerLine("<name>", "ws_...", "<folder>"));
     expect(setup).toContain("Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
     expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");

@@ -557,9 +557,16 @@ export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDe
 export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
 
 /** Which road made a workspace's copy on a computer that copies by directory: a directory clone of the project
- * folder, a git worktree of it, or the folder itself worked where it sits. */
-export const CopyRoad = z.enum(["clonefile", "worktree", "in-place"]);
+ * folder or a git worktree of it. Every workspace on such a computer is a copy, from the first piece of work on. */
+export const CopyRoad = z.enum(["clonefile", "worktree"]);
 export type CopyRoad = z.infer<typeof CopyRoad>;
+
+/** The one home of the word for a folder worked where it sits, which no workspace is any more: the copy verb still
+ * answers it when asked for it, and nothing asks; a record carrying it is refused at boot in one sentence. */
+export const IN_PLACE_ROAD = "in-place";
+/** What the copy verb may answer as its road: the two a record keeps, and the word above, kept on the wire so the
+ * daemon's contract stands while every host asks for a copy. */
+export const CopyVerbRoad = z.enum([...CopyRoad.options, IN_PLACE_ROAD]);
 
 /** What rode along in the copy: everything the folder held that git ignores, so the dependencies are there and a
  * build runs at once; the config files alone, so the dependencies install first; or nothing. */
@@ -586,7 +593,7 @@ export type CopyAsk = z.infer<typeof CopyAsk>;
 /** What the daemon binary's copy verb printed, read back by the host and kept on the workspace's record as
  * `copy`. */
 export const CopyReport = z.object({
-  road: CopyRoad,
+  road: CopyVerbRoad,
   path: z.string(),
   base: z.string(),
   branch: z.string(),
@@ -605,7 +612,8 @@ export type CopyReport = z.infer<typeof CopyReport>;
 /** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
  * landed, what it stands on and what rode along. Absent on a fork and on a box snapshot, whose project arrives by
  * the runtime's own road. */
-export const ProjectCopy = CopyReport.pick({ road: true, path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+export const ProjectCopy = CopyReport.pick({ path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+  road: CopyRoad,
   /** The project folder the copy was taken from: what a worktree's remove needs and what the row names. */
   source: z.string(),
 });
@@ -688,8 +696,7 @@ export const WorkspaceView = z.object({
    * arrives by the runtime's own road. */
   copy: ProjectCopy.optional(),
   /** The port an app that reads PORT binds in this workspace, on a computer whose copies share its network.
-   * Absent where a copy has a network of its own, and absent on the folder worked in place, whose ports are the
-   * person's own. */
+   * Absent where a copy has a network of its own. */
   portBase: z.number().int().positive().optional(),
   /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
    * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's

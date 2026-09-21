@@ -72,9 +72,9 @@ describe("what one word to wsp add names", () => {
     expect(kindWords("local").projectSources).toEqual(["folder"]);
     expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("ssh").projectSources).toEqual([]);
-    // Working the folder where it sits is its own word: a computer that clones takes a folder as a source and
-    // still holds a copy of it, so the two cannot be read off one list.
-    expect([kindWords("local").worksInPlace, kindWords("cloud").worksInPlace, kindWords("ssh").worksInPlace]).toEqual([true, false, false]);
+    // Copying the folder beside itself is its own word: a computer that clones takes a folder as a source and
+    // still holds a checkout of it, so the two cannot be read off one list.
+    expect([kindWords("local").copiesFolder, kindWords("cloud").copiesFolder, kindWords("ssh").copiesFolder]).toEqual([true, false, false]);
   });
 
   it("the refusals name the project, the folder and the computer", () => {

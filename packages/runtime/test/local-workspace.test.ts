@@ -9,14 +9,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, alreadyRecorded, copyPathFor, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -202,6 +202,7 @@ describe("local workspace", () => {
       rootsPath: join(root, "host", "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {
@@ -239,16 +240,21 @@ describe("local workspace", () => {
     expect(over.pid).toBeUndefined();
   });
 
-  it("a project worked in place has one workspace where this host has no copy road, and says why a second cannot be made", async () => {
-    const rt = runtime();
+  it("a host with no copy road refuses the first workspace of a project here, since every workspace here is a copy", async () => {
+    const { copier: _none, ...bare } = localWiring;
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: bare });
     const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
-    await rt.workspaces.create({ project: project.id, name: "mac" });
-    // This wiring hands in no copier, so the second piece of work has no road to a copy and the sentence says so.
+    // This wiring hands in no copier, so the first piece of work has no road to a copy and the sentence says so.
     // With one wired it is a copy of the folder; that is local-copy.test.ts.
-    await expect(rt.workspaces.create({ project: project.id, name: "mac2" })).rejects.toThrow(NO_COPIER_HERE);
-    // A second project here is a second workspace: this computer runs as many as there are folders to work in.
-    const second = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"));
-    expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
+    await expect(rt.workspaces.create({ project: project.id, name: "mac" })).rejects.toThrow(NO_COPIER_HERE);
+    expect(await rt.workspaces.list()).toEqual([]);
+    // A second project on a host that copies is a second workspace: this computer runs as many as there are
+    // folders to copy.
+    const copying = runtime();
+    const first = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "one"));
+    const second = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "other"));
+    expect((await copying.workspaces.create({ project: first.id, name: "mac" })).kind).toBe("local");
+    expect((await copying.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
   });
 
   it("a create on this computer that its own refusal stops asks nothing of the workspace it names as a parent", async () => {
@@ -375,13 +381,14 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
-  it("the view names the project's own folder, which is what a workspace worked in place is, so the app's line under the box says what the runtime will do", async () => {
+  it("the view names the copy beside the project's folder, never the folder itself, so the app's line under the box says what the runtime did", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    // The workspace here is the folder the project was recorded on, and a thread on it starts there.
-    expect(ws.folder).toBe(ws.project.path);
-    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.project.path);
-    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.project.path);
+    // The workspace here is a copy of the folder the project was recorded on, and a thread on it starts there.
+    expect(ws.folder).toBe(copyPathFor(ws.project.path, "mac"));
+    expect(ws.folder).not.toBe(ws.project.path);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.folder);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.folder);
     await rt.close();
   });
 
@@ -390,9 +397,9 @@ describe("local workspace", () => {
     const folder = repoIn(root);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const result = await (await rt.sessions.start(ws.id, { prompt: "where are you" })).finished;
-    expect(realpathSync(result.text!.trim())).toBe(realpathSync(folder));
+    expect(realpathSync(result.text!.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
     const [session] = await rt.sessions.list(ws.id);
-    expect(session!.cwd).toBe(folder);
+    expect(session!.cwd).toBe(copyPathFor(folder, "mac"));
     await rt.close();
   });
 
@@ -402,11 +409,11 @@ describe("local workspace", () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
     // The stream says which folder it resolved, so the client that prints it never restates the rule.
-    expect(stream.ranIn).toBe(folder);
+    expect(stream.ranIn).toBe(copyPathFor(folder, "mac"));
     let out = "";
     for await (const line of stream.lines) out += line;
     expect(await stream.exited).toBe(0);
-    expect(realpathSync(out.trim())).toBe(realpathSync(folder));
+    expect(realpathSync(out.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
     await rt.close();
   });
 
@@ -979,6 +986,7 @@ describe("a local turn and a host restart", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {

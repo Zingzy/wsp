@@ -10,14 +10,14 @@ import { HERE_PLACE_ID } from "@wsp/protocol";
 // with another host start would read the PATH that start already took.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "@wsp/runtime";
-import { cli, makeRuntime, serve } from "../src/cli.js";
+import { cli, localWiring, makeRuntime, serve } from "../src/cli.js";
 import { LAUNCHD_PATH, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
-import { PAGE, captured, createOn, projectOn } from "./verbs-fixture.js";
+import { PAGE, captured, copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
 
 describe("the login shell PATH and the runtime built over it", () => {
   let dir: string;
@@ -60,8 +60,10 @@ describe("the login shell PATH and the runtime built over it", () => {
 
   it("serve on launchd's PATH builds its runtime after the read, so a turn on this computer runs under the person's PATH", async () => {
     const io = captured();
-    // opts.runtime absent: this is the road the desktop's host takes, where serve builds what it serves.
-    handle = await serve(io, { port: 0, wsPort: 0, statePath, webDir });
+    // The runtime the desktop's host builds, with the copy road alone faked, since every workspace here is a copy
+    // and this checkout stages no daemon binary; its environment is read at every call, so the PATH the read moves
+    // is the one a turn runs under.
+    handle = await serve(io, { port: 0, wsPort: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake())) });
     const folder = mkdtempSync(join(tmpdir(), "wsp-login-path-"));
     execFileSync("git", ["init", "-q", folder]);
     const project = await handle.addProject(folder);
@@ -74,7 +76,7 @@ describe("the login shell PATH and the runtime built over it", () => {
   });
 
   it("a runtime built on launchd's PATH runs its turns under the PATH the read leaves afterwards", async () => {
-    runtime = makeRuntime({}, statePath);
+    runtime = makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake()));
     const workspace = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
     // The read is what moves this process's PATH, and here it lands after the runtime was built.
     await takeLoginPath({ env: process.env, log: () => {} });

@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { cpSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
-import { LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
+import { fakeCopier, LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type ProjectView } from "@wsp/protocol";
 import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
@@ -361,5 +361,23 @@ export function fakeLocal(root: string): LocalWiring {
     rootsPath: join(root, "roots"),
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     platform: testPlatform(),
+    copier: copyingFake(),
+  };
+}
+
+/** The copy road as a test wires it: the engine's fake, which records every ask, over a folder copied for real, so
+ * a thread or a command on the copy has a folder to start in and a delete takes it away. Every workspace on this
+ * computer is a copy, so every wiring that makes one carries this. */
+export function copyingFake(): ReturnType<typeof fakeCopier> {
+  const inner = fakeCopier(ask => {
+    cpSync(ask.from, ask.to, { recursive: true });
+    return { road: ask.road ?? "clonefile", path: ask.to, base: "0".repeat(40), branch: "main", fetched: true, carried: "deps-and-config", excluded: [...ask.exclude], bytes: 1024, ms: 1 };
+  });
+  return {
+    ...inner,
+    remove: async (from, to, road) => {
+      await inner.remove(from, to, road);
+      rmSync(to, { recursive: true, force: true });
+    },
   };
 }

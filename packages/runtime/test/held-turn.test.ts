@@ -14,7 +14,7 @@ import { LocalBackend } from "@wsp/engine";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { createOn, stubBackend, testPlatform } from "./stub-backend.js";
+import { copyingFake, createOn, stubBackend, testPlatform } from "./stub-backend.js";
 
 const ASK: PermissionAsk = {
   askId: "ask_1",
@@ -71,6 +71,7 @@ describe("what holds a turn's idle clock", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
     rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: drivenAdapter(said) }, local: wiring });
   });

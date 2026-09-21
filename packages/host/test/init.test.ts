@@ -41,7 +41,7 @@ import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
 import { guestAnswer, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 import { loginOf } from "./signin-questions.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
+import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 
 /** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
 const HOME_HERE = "/home/nobody";
@@ -324,6 +324,7 @@ function localWiring(root: string): LocalWiring {
     rootsPath: join(root, "roots"),
     env: () => ({}),
     platform: hostPlatform(),
+    copier: copyingFake(),
   };
 }
 

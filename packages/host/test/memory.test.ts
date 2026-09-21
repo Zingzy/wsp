@@ -37,12 +37,13 @@ interface Reading {
  * turn's worth of events instead of starting an agent, so no machine and no agent is involved in the measurement. */
 const hostScript = (home: string): string => `
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
 import { startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
-import { NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
+import { fakeCopier, NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
+import { DAEMON_VERSION } from ${JSON.stringify(distOf("protocol"))};
 
 const home = ${JSON.stringify(home)};
 const webDir = join(home, "web");
@@ -69,14 +70,21 @@ const scripted = () => ({
   },
 });
 
+// The copy road and the daemon beside the host are the fakes: every workspace here is a copy, this checkout stages
+// no daemon binary, and what is measured is the host's own bookkeeping.
+const copier = fakeCopier(ask => {
+  cpSync(ask.from, ask.to, { recursive: true });
+  return { road: "clonefile", path: ask.to, base: "0".repeat(40), branch: "main", fetched: true, carried: "deps-and-config", excluded: [...ask.exclude], bytes: 1024, ms: 1 };
+});
+const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
 const runtime = createRuntime({
   backend: new NoProviderBackend(),
-  local: localWiring(home),
+  local: localWiring(home, undefined, daemon, statePath, copier),
   store: jsonFileStore(statePath, stateWriterHere()),
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, wsPort: 0, statePath });
-// A workspace is one project's copy, so the measurement records a repo of its own here and works it in place.
+// A workspace is one project's copy, so the measurement records a repo of its own here and copies it.
 const folder = join(home, "repo");
 mkdirSync(folder, { recursive: true });
 execFileSync("git", ["init", "-q", folder]);
