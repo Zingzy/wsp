@@ -140,11 +140,16 @@ describe("wsp host devices", () => {
     expect(host.closes()).toBe(1);
   });
 
-  it("says so plainly when nobody is paired", async () => {
+  it("says so plainly when nobody is paired, naming the host the line was aimed at", async () => {
     const host = fakeHost({ "devices.list": { devices: [] } });
     const log: string[] = [];
     await devicesCommand(io(log, []), here(), [], deps(host.client));
     expect(log).toEqual(["No computer is paired with this host. Run wsp host pair for a code."]);
+    // Aimed at a host on another computer, the line names it, and the code is minted at that host's own terminal.
+    const box = fakeHost({ "devices.list": { devices: [] } });
+    const aimed: string[] = [];
+    await devicesCommand(io(aimed, []), { ...here(homeWithBox(false)), host: "box" }, [], deps(box.client));
+    expect(aimed).toEqual(["No computer is paired with box. Run wsp host pair on box for a code."]);
   });
 
   it("revokes by id, and exits non-zero on an id nothing is paired under", async () => {
@@ -388,7 +393,7 @@ describe("the words", () => {
   });
 
   it("pads the device table's columns and never carries a token", () => {
-    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }]);
+    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }], { kind: "here" });
     expect(lines[0]).toMatch(/^DEVICE\s+ID\s+AS\s+PAIRED\s+LAST SEEN$/);
     expect(lines.join("\n")).not.toContain("token");
   });

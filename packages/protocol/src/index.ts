@@ -4299,8 +4299,8 @@ export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token m
 export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
- * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
- * taken away at the terminal of the computer it runs on, and nowhere else. */
+ * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out at the
+ * terminal of the computer it runs on, and read and taken away there or from a computer paired with it. */
 export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
 /** The refusal the JSON routes answer with when a request carries no token this host takes: reaching the port,

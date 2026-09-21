@@ -99,10 +99,19 @@ export function deviceRoleWord(device: Pick<DeviceView, "here" | "scope">): stri
   return device.here === true ? "owner" : device.scope !== undefined ? "thread" : "device";
 }
 
-/** The rows wsp host devices prints, oldest pairing first. */
-export function deviceLines(devices: readonly DeviceView[]): string[] {
-  if (devices.length === 0) return ["No computer is paired with this host. Run wsp host pair for a code."];
+/** The rows wsp host devices prints, oldest pairing first. With nobody paired, the line names the host it was aimed
+ * at and sends the person to that host's own terminal for a code, since wsp host pair runs nowhere else. */
+export function deviceLines(devices: readonly DeviceView[], aim: HostAim): string[] {
+  if (devices.length === 0) {
+    const pair = aim.kind === "here" ? "Run wsp host pair for a code." : `Run wsp host pair on ${aimName(aim)} for a code.`;
+    return [`No computer is paired with ${hostWord(aim)}. ${pair}`];
+  }
   return table([["DEVICE", "ID", "AS", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, deviceRoleWord(d), d.createdAt, d.lastSeenAt])]);
+}
+
+/** How a devices line names the host it was aimed at: the alias or address it dialled, or this host. */
+function hostWord(aim: HostAim): string {
+  return aim.kind === "here" ? "this host" : aimName(aim);
 }
 
 /** The line a host that binds this computer alone answers wsp host pair with: nothing outside can reach it, so the
@@ -164,14 +173,14 @@ export async function devicesCommand(io: CliIO, opts: PairOpts, args: readonly s
     if (word === "revoke") {
       const { revoked } = await client.request<{ revoked: boolean }>("devices.revoke", { deviceId: id });
       if (!revoked) {
-        io.error(`wsp host devices revoke: no device ${id!} is paired with ${aim.kind === "here" ? "this host" : aimName(aim)}.`);
+        io.error(`wsp host devices revoke: no device ${id!} is paired with ${hostWord(aim)}.`);
         return 1;
       }
       io.log(`device ${id!} revoked; its token opens nothing and the sockets it held are cut`);
       return 0;
     }
     const { devices } = await client.request<{ devices: DeviceView[] }>("devices.list");
-    for (const line of deviceLines(devices)) io.log(line);
+    for (const line of deviceLines(devices, aim)) io.log(line);
     return 0;
   } finally {
     client.close();
