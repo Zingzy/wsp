@@ -39,7 +39,7 @@ import {
 } from "../src/machine-context.js";
 import type { ImportResult } from "../src/golden.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { EXEC_ENV } from "../src/golden-import.js";
+import { EXEC_ENV, TOOLS_PATH } from "../src/golden-import.js";
 
 const bash = promisify(execFile);
 
@@ -93,6 +93,7 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
       { name: "o", word: "open" },
       { name: "rc", word: "code" },
     ],
+    aliasesRead: true,
     conflicts: new Set(),
     ...over,
   };
@@ -223,6 +224,12 @@ describe("the document", () => {
     expect(doc).toContain("or tmux new -d -s <name> '<cmd>'");
     expect(doc).not.toMatch(/\u2014/);
     expect(doc).toMatchSnapshot();
+  });
+
+  it("says the aliases were not read where no shell was opened to read them, rather than saying there are none", () => {
+    const doc = renderMachineContext({ workspace: { name: "box-1" }, probe: probeOf({ aliases: [], aliasesRead: false }), facts: FACTS });
+    expect(doc).toContain("- Aliases: not read here. This computer's home is shared with every workspace on it, so wsp opens no login shell on it.");
+    expect(doc).not.toContain("- Aliases whose command is not here:");
   });
 
   it("renders a builder before the seal, with nothing missing and no tmux, brew or fish", () => {
@@ -467,6 +474,36 @@ describe("the guest scripts on a local bash", () => {
     writeFileSync(join(roots.home, ".gemini/settings.json"), '{ "theme": "dark" }\n');
     probe = parseProbe((await run(probeCommand(roots))).stdout)!;
     expect([...probe.conflicts].sort()).toEqual(["hermes", "pi"]);
+  }, 30_000);
+
+  it("opens no shell of the machine's own where it may open none, and reads every other fact just the same", async () => {
+    const roots = fakeGuest();
+    const marker = join(roots.home, "sourced");
+    // Every startup file a login shell of any family reads under the home it is pointed at, each writing its own
+    // name: a box's root home is the one every workspace on it writes, so a line in any of them is a workspace's.
+    for (const rc of [".profile", ".bash_profile", ".bashrc", ".zshenv", ".zprofile", ".zshrc"]) writeFileSync(join(roots.home, rc), `echo ${rc} >> ${marker}\n`);
+
+    const none = probeCommand(roots, TOOLS_PATH, "none");
+    expect(none).not.toContain("-lic");
+    expect(none).not.toContain("bash -l");
+    const quiet = parseProbe((await run(`export HOME=${roots.home}\n${none}`)).stdout)!;
+    expect(existsSync(marker)).toBe(false);
+    expect(quiet.kernel).toBeTruthy();
+    expect(quiet.disk?.sizeBytes).toBeGreaterThan(0);
+    expect(quiet.shell).toBeTruthy();
+    expect(quiet.aliasesRead).toBe(false);
+    expect(quiet.aliases).toEqual([]);
+
+    // And the machine wsp forked, whose home is its own root's: the shell is opened there and the files are read.
+    const login = probeCommand(roots, TOOLS_PATH, "login");
+    expect(login).toContain("-lic");
+    const read = parseProbe((await run(`export HOME=${roots.home}\n${login}`)).stdout)!;
+    expect(read.aliasesRead).toBe(true);
+    // Which shell was opened is this computer's own, so what it reads first is read off the word the probe named
+    // rather than off one written here: the file differs by family and the platform decides which family runs.
+    expect(readFileSync(marker, "utf8").trim()).not.toBe("");
+    const first: Record<string, string> = { bash: ".bash_profile", sh: ".profile", zsh: ".zshenv" };
+    if (first[read.shell] !== undefined) expect(readFileSync(marker, "utf8")).toContain(first[read.shell]!);
   }, 30_000);
 
   const shellOf = (name: string): string | undefined => ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].map(d => join(d, name)).find(p => existsSync(p));

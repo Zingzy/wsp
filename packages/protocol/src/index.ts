@@ -4755,6 +4755,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     name: z.string().max(200).optional(),
     sshPort: z.number().int().min(1).max(65535).optional(),
     keyPath: z.string().max(1024).optional(),
+    /** The host key the person confirmed or pinned for a computer this one has never dialled. The install refuses
+     * before a byte of wsp's leaves this computer where it is absent and the client holds no key of its own, so a
+     * caller that sends none meets the same wall as one that sends a wrong one. */
+    hostKey: z.string().max(200).optional(),
   }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is

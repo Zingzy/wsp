@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { jsonlCwdStep, mergeScript } from "./merge.js";
 import { pyData } from "./py.js";
-import { movedOr, rewriteCwd, type MovedState, type ProjectStateResolver } from "./resolver.js";
+import { movedOr, rewriteCwd, underHome, type MovedState, type ProjectStateResolver } from "./resolver.js";
 import { countRows, inTransaction, movedColumn, pathParams, projectRows, readOnly, runUpdate, sqliteFilter, sqliteMergeStep, underPath, type ProjectTable } from "./sqlite.js";
 
 const SESSIONS_DIR = "sessions";
@@ -17,7 +17,7 @@ const INDEXED_ROLLOUTS = `select rollout_path from ${THREADS.table} where ${THRE
 /** The rollout under this home: rollout_path is absolute on the machine that wrote it, so only its tail past sessions/ carries over. */
 function rolloutUnder(home: string, recorded: string): string | undefined {
   const i = recorded.lastIndexOf(SESSIONS);
-  return i < 0 ? undefined : join(home, SESSIONS_DIR, recorded.slice(i + SESSIONS.length));
+  return i < 0 ? undefined : underHome(home, SESSIONS_DIR, recorded.slice(i + SESSIONS.length));
 }
 
 /** The rollouts present under this home among the ones the index recorded, and how many it recorded that are not:

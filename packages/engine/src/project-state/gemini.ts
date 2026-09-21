@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { mergeScript } from "./merge.js";
 import { pyData } from "./py.js";
 import { underProject } from "@wsp/protocol";
-import { filesUnder, movedPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
+import { filesUnder, movedPath, underHome, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 /** The registry maps each resolved project path to the slug naming its tmp and history directories. */
 interface Registry {
@@ -13,8 +13,10 @@ interface Registry {
 
 const REGISTRY = "projects.json";
 const readRegistry = (file: string): Registry | undefined => (existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Registry) : undefined);
-/** The slugs registered at the path or under it, in registry order. */
-const slugsUnder = (home: string, path: string): string[] => Object.entries(readRegistry(join(home, REGISTRY))?.projects ?? {}).flatMap(([key, slug]) => (underProject(key, path) ? [slug] : []));
+/** The slugs registered at the path or under it, in registry order. A slug names a directory under the home, so one
+ * that climbs out of it is dropped: the registry is the machine's own bytes. */
+const slugsUnder = (home: string, path: string): string[] =>
+  Object.entries(readRegistry(join(home, REGISTRY))?.projects ?? {}).flatMap(([key, slug]) => (underProject(key, path) && underHome(home, slug) !== undefined ? [slug] : []));
 /** The catalog rows a slug names, each with its directory under the home. */
 const SLUG_DIRS = [["project temp dir", "tmp"], ["shell history", "history"]] as const;
 const ROOTS = [REGISTRY, ...SLUG_DIRS.map(([, dir]) => dir)];
@@ -31,7 +33,7 @@ export const geminiResolver: ProjectStateResolver = {
     const renamed = new Map<string, { slug: string; path: string }>();
     for (const [path, slug] of Object.entries(registry.projects)) {
       const target = movedPath(path, from, to);
-      if (target === undefined) continue;
+      if (target === undefined || underHome(home, slug) === undefined) continue;
       if (registry.projects[target] !== undefined) throw new Error(`${target} already exists in ${file}`);
       renamed.set(path, { slug, path: target });
     }
