@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { WebSocketServer } from "ws";
 import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE, type ProvisionPlan, type ToolInstall } from "@wsp/engine";
+import { PLACE_WORKSPACE_PATH } from "@wsp/protocol";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
@@ -568,7 +569,7 @@ describe("the recipe's tools read from inside the workspace", () => {
       asked,
       exec: async cmd => {
         asked.push(cmd);
-        const res = spawnSync("bash", ["-c", cmd.replaceAll(TOOLS_PATH, `${dir}:${TOOLS_PATH}`)], { encoding: "utf8" });
+        const res = spawnSync("bash", ["-c", cmd.replaceAll(PLACE_WORKSPACE_PATH, `${dir}:${PLACE_WORKSPACE_PATH}`)], { encoding: "utf8" });
         return { exitCode: res.status ?? -1, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
       },
     };
@@ -592,8 +593,10 @@ describe("the recipe's tools read from inside the workspace", () => {
     const said = await toolsInside(machine, plan);
     // Three steps were askable and all three answered; the fourth says nothing that can be read.
     expect(said).toBe(`3 answered inside; node answers from ${join(dir, "node")}, outside where its own installer puts it (/usr/local/bin)`);
-    // On the one PATH a machine's tools sit on, which is the PATH the workspace boots with.
-    expect(machine.asked[0]).toContain(`export PATH=${TOOLS_PATH}`);
+    // On the order a workspace on a computer somebody owns boots with, which is what a thread there reads too:
+    // a copy of one of these tools under the shared home does not answer ahead of the recipe's own.
+    expect(machine.asked[0]).toContain(`export PATH=${PLACE_WORKSPACE_PATH}`);
+    expect(machine.asked[0]).not.toContain(`export PATH=${TOOLS_PATH}`);
     // The formula row is read by its road's own test and never by a command of its name, which is another road's work.
     expect(machine.asked[0]).not.toContain("command -v 'gh'");
   });
@@ -703,8 +706,8 @@ describe("the doctor's computer road", () => {
     ]);
     // The workspace is made of the project whose checkout stands, at the size anybody gets there without asking.
     expect(host.created).toEqual([{ project: "pr_1", name: `doctor-${(7).toString(36)}` }]);
-    // The tools were read inside that workspace, on the one PATH a machine's tools sit on.
-    expect(host.execs.some(cmd => cmd.includes(`export PATH=${TOOLS_PATH}`) && cmd.includes("agent-browser"))).toBe(true);
+    // The tools were read inside that workspace, on the order a workspace there boots with.
+    expect(host.execs.some(cmd => cmd.includes(`export PATH=${PLACE_WORKSPACE_PATH}`) && cmd.includes("agent-browser"))).toBe(true);
     expect(host.deleted).toEqual(["w_1"]);
     // Each agent the computer reported, by its catalog name. This one reported no version and no sign-in, which
     // is a daemon older than those fields, so the name is the whole of the line.

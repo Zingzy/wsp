@@ -339,6 +339,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("homebrewPrefix", Value::from(numbers::HOMEBREW_PREFIX));
     m.insert("sharedToolRoots", Value::from(numbers::SHARED_TOOL_ROOTS.to_vec()));
     m.insert("toolsPath", Value::from(numbers::TOOLS_PATH));
+    m.insert("placeWorkspacePath", Value::from(numbers::PLACE_WORKSPACE_PATH));
     m.insert("daemonTokenPath", Value::from(numbers::DEFAULT_TOKEN_PATH));
     m.insert("daemonRootsPath", Value::from(numbers::DAEMON_ROOTS_PATH));
     m.insert("guestInboxDir", Value::from(numbers::DEFAULT_INBOX_DIR));

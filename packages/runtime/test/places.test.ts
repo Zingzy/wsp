@@ -18,6 +18,7 @@ import {
   placeRefusalTranscript,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  PLACE_WORKSPACE_PATH,
   placeBehindLine,
   agentsCell,
   placeDaemonBehind,
@@ -58,8 +59,8 @@ import {
   type PlaceView,
   type TurnResult,
 } from "@wsp/protocol";
-import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
-import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
+import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
@@ -885,9 +886,12 @@ async function remove(placeId: string): Promise<Record<string, unknown>> {
 
 describe("moving a place onto the daemon this host deploys", () => {
   /** What the host's own updater does, in miniature: the binary in parts over the link the place is holding, each
-   * under one upload id with the sha256 of the whole, and the path the place answered with. */
+   * under one upload id with the sha256 of the whole, and the path the place answered with. An update that asks
+   * for no binary answers no landing, as the host's own does: what it runs there instead is wsp's login files,
+   * which is the host's road and not this one's. */
   const overTheLink = (bytes: Uint8Array, asked: { req: PlaceUpdateRequest }[]): PlaceUpdater => async req => {
     asked.push({ req });
+    if (!req.daemon) return undefined;
     const half = Math.ceil(bytes.length / 2);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     let at = "";
@@ -1016,10 +1020,36 @@ describe("moving a place onto the daemon this host deploys", () => {
     expect(answer.ok, String(answer["error"])).toBe(true);
     expect(answer["daemon"]).toBeUndefined();
     expect(answer["provision"]).toBeUndefined();
-    expect(asked).toEqual([]);
+    // The updater is asked all the same, since wsp's login files there are this host's to spell; it is told no
+    // binary goes with this one, and picks up none.
+    expect(asked.map(a => a.req.daemon)).toEqual([false]);
     const nowhere = await update("p_nothing");
     expect(nowhere.ok).toBe(false);
     expect(String(nowhere["error"])).toContain("p_nothing");
+  });
+
+  it("hands back the updater's own refusal for a computer that is away, on an update that carries no binary", async () => {
+    // What the host's own updater does with the road it has not got: a computer joined by a code holds no ssh
+    // login, so an ask that arrives with neither a link nor one is refused there rather than run nowhere.
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const away = "srv is not connected and this wsp has no login for it";
+    const { hostKey } = await serving({
+      update: async req => {
+        asked.push({ req });
+        if (req.link === undefined && req.ssh === undefined) throw new Error(away);
+        return undefined;
+      },
+    });
+    const level = report("srv", { daemonVersion: DAEMON_VERSION });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: level });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === false);
+    const answer = await update(placeId);
+    // The person reads the road's own sentence and the recipe is not started behind it: a computer that is off
+    // takes neither wsp's login files nor its recipe until it is back.
+    expect(answer.ok).toBe(false);
+    expect(answer["error"]).toBe(away);
+    expect(asked.map(a => a.req.daemon)).toEqual([false]);
   });
 
   it("says so plainly on a host wired with no road to put a daemon on a computer", async () => {
@@ -2244,6 +2274,57 @@ describe("a fork on a computer you joined", () => {
     expect(asked.at(-1)).toEqual({ claude: false, codex: true });
   });
 
+  it("carries the workspace order and the recipe's knobs into a workspace on that computer, its turns and its commands", async () => {
+    const envs: Readonly<Record<string, string>>[] = [];
+    const factory: HarnessAdapterFactory = ctx => {
+      envs.push(ctx.env);
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = randomUUID();
+          const result: TurnResult = { status: "completed", text: "ok" };
+          onEvent({ type: "session.start", sessionId });
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+        },
+      };
+    };
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: factory },
+      places: wiredPlace("solari", backend),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
+    sockets.push(client.ws);
+    const ws = await createOn(runtime, { name: "x", on: "srv" });
+
+    // The boot: the order that reads the folders no process inside can write before the home every workspace on
+    // that computer shares, and every knob the recipe's job installs under, off the catalog's one table.
+    const created = place.created[0]!["envs"] as Record<string, string>;
+    expect(created["PATH"]).toBe(PLACE_WORKSPACE_PATH);
+    expect(created).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
+    expect(created).toMatchObject({ UV_TOOL_DIR: "/opt/wsp/uv/tools", CARGO_HOME: "/opt/wsp/cargo", RUSTUP_HOME: "/opt/wsp/rustup", GOBIN: "/usr/local/bin" });
+
+    // And a turn on it: the adapter exports the same, so a thread there runs the copy under the prefix and the
+    // rustup proxy finds its own home.
+    await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+    expect(envs.length).toBeGreaterThan(0);
+    for (const env of envs) expect(env).toMatchObject({ PATH: PLACE_WORKSPACE_PATH, ...installEnv(installHomes(TOOL_PREFIX)) });
+
+    // A fork at this host's own provider is a copy of an image sealed on the other order, with each manager's
+    // own folders under a home that is root's alone: it takes neither the order nor a knob.
+    await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
+  });
+
   it("still names the image where the computer keeps them: a fork at this host's own provider carries the template its version was promoted to", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -3459,30 +3540,54 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(await provisionOf(placeId)).toBeUndefined();
   });
 
-  it("runs on an update alone where the computer already runs this wsp's daemon, and after the daemon where it is behind", async () => {
+  it("asks the updater on every update, with a binary only where the computer is behind", async () => {
     const current = provisioner();
-    const { placeId } = await joined({ provision: current.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    const asked: PlaceUpdateRequest[] = [];
+    const { placeId } = await joined({
+      provision: current.wired,
+      report: report("spoo", { daemonVersion: DAEMON_VERSION }),
+      // A computer already on this daemon takes no binary, so the updater answers no landing; what it does run
+      // there is wsp's own login files, whose text moves with this host and not with the daemon.
+      update: async req => {
+        asked.push(req);
+        return undefined;
+      },
+    });
     await until(async () => (await provisionOf(placeId))?.state === "done");
     const answer = await runtime!.places!.update(placeId);
-    // No updater is wired at all, and nothing refused the update: a computer that is current takes the recipe alone.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ name: "spoo", daemon: false });
+    // Nothing landed, so no dial-back was waited for and the row carries no daemon: the recipe is what the
+    // person asked for and it is all this answers.
     expect(answer.daemon).toBeUndefined();
     expect(answer.name).toBe("spoo");
     expect(answer.provision).toMatchObject({ state: "running", recipeAt: RECIPE_AT });
     await until(async () => current.calls.run === 2);
 
+    // And a runtime that wired no updater at all, which is every runtime outside the app: the recipe alone, and
+    // nothing refused.
+    const bare = provisioner();
+    const alone = await joined({ provision: bare.wired, report: report("mini", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(alone.placeId))?.state === "done");
+    const said = await runtime!.places!.update(alone.placeId);
+    expect(said.daemon).toBeUndefined();
+    expect(said.provision).toMatchObject({ state: "running" });
+    await until(async () => bare.calls.run === 2);
+
     const behind = provisioner();
-    const asked: PlaceUpdateRequest[] = [];
+    const behindAsked: PlaceUpdateRequest[] = [];
     const later = await joined({
       provision: behind.wired,
       report: report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 }),
       update: async req => {
-        asked.push(req);
+        behindAsked.push(req);
         return { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" };
       },
     });
     await until(async () => (await provisionOf(later.placeId))?.state === "done");
     const moved = await runtime!.places!.update(later.placeId);
-    expect(asked).toHaveLength(1);
+    expect(behindAsked).toHaveLength(1);
+    expect(behindAsked[0]).toMatchObject({ name: "old-macbook", daemon: true });
     expect(moved.daemon).toMatchObject({ from: DAEMON_VERSION - 1, road: "ssh" });
     expect(moved.provision?.state).toBe("running");
     await until(async () => behind.calls.run === 2);
@@ -3580,6 +3685,12 @@ describe("a project on a computer you joined", () => {
     // One workspace of that computer did the work and was stopped; the clone ran inside it.
     expect(place.created).toHaveLength(1);
     expect(place.killed).toHaveLength(1);
+    // And it read what a workspace there reads: a computer that keeps no image is worked in a copy of its own
+    // directories with the shared home bound in, so the install runs on the prefix's order and its knobs rather
+    // than finding whatever stands under that home.
+    const envs = place.created[0]!["envs"] as Record<string, string>;
+    expect(envs["PATH"]).toBe(PLACE_WORKSPACE_PATH);
+    expect(envs).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
     // The remove runs one command on the computer itself, over the same link, and says what went.
     const { said } = await runtime!.projects.remove(project.id);
     // That one command reads whether the agent there kept memory for this project and then takes wsp's own

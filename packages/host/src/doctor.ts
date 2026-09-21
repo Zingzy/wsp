@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -434,7 +434,8 @@ const sh = (place: DaemonPlace, path: string): string => (place.quotePaths ? she
  * symlinked into a dotfiles checkout stays a symlink (measured 2026-09-11, where a move turned one into a plain
  * file). grep says by its exit code whether it selected nothing or could not read the file at all, and only the
  * first of those writes, so a read that failed leaves them neither an empty login file nor a file of wsp's beside
- * their own. Every line of it exits 0, since the deploy runs under set -e. */
+ * their own. Every line of it exits 0, since the deploy runs under set -e. What the take-out writes back is the
+ * file line by line, so a last line the person left without a trailing newline comes back with one. */
 function unsourceStep(place: DaemonPlace, file: string): string {
   const copy = `${file}.wsp-out`;
   const named = shellQuote(place.profileFile);
@@ -455,6 +456,23 @@ export function profileSourceStep(place: DaemonPlace): string[] {
   const file = place.profileSource;
   if (file === undefined) return [];
   return [unsourceStep(place, file), `printf '%s\\n' ${shellQuote(profileSourceLine(place.profileFile))} >> ${sh(place, file)}`];
+}
+
+/** The login files this wsp puts on a machine: its own profile file, holding the browser shim and the display
+ * every guest tool reads, and the one line of wsp's in the person's own login file that loads it. Every road that
+ * puts this wsp on a computer runs these lines, the deploy at the join and the update after it, so a computer
+ * joined under an older spelling takes this one without being joined again. Every line exits 0, so the same text
+ * holds under the deploy's `set -e`, under the update's script, which sets none, and under the daemon's own
+ * `bash -c`. */
+export function loginFilesStep(place: DaemonPlace): string[] {
+  return [
+    // BROWSER is set by the daemon for its ptys, by this file for login shells, and in a fork's envs only when its
+    // golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
+    `mkdir -p ${sh(place, posix.dirname(place.profileFile))} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
+    // A place whose profile file is under the person's own folder is read only if their login file says so, and
+    // their login file is theirs: one line of wsp's is in it however many deploys have run.
+    ...profileSourceStep(place),
+  ];
 }
 
 /** The same for a unit file's Environment=, which systemd splits on whitespace into one assignment per word, so
@@ -770,14 +788,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
-    // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
-    // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
-    `mkdir -p ${sh(place, profileDir)} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
-    // A place whose profile file is under the person's own folder is read only if their login file says so, and
-    // their login file is theirs: one line of wsp's is in it however many deploys have run.
-    ...profileSourceStep(place),
+    ...loginFilesStep(place),
     // Login shells read it from the profile file; the daemon's ptys inherit it from the daemon, exported before it starts.
     ...(previewHostSuffix !== undefined
       ? [
@@ -1426,9 +1439,10 @@ const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
 export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps" | "prefix">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
   const asked = plan.steps.filter(step => presenceTests(step).length > 0);
   if (asked.length === 0) return "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside";
-  // On the tools PATH, which is what a workspace boots with, and under the same managers' knobs the job ran: a
-  // row's version read is its manager's own command and answers about the folder that manager was told to use.
-  const present = await presentSteps(machine as Machine, asked, TOOLS_PATH, plan.prefix);
+  // On the order a workspace on a computer somebody owns boots with, and under the same managers' knobs the job
+  // ran: a row's version read is its manager's own command and answers about the folder that manager was told to
+  // use, and a copy of that tool under the shared home does not answer ahead of it here either.
+  const present = await presentSteps(machine as Machine, asked, PLACE_WORKSPACE_PATH, plan.prefix);
   const notes = asked.flatMap(step => {
     const note = presentElsewhere(step, present.get(step.id));
     return note === undefined ? [] : [note];
