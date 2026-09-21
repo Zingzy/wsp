@@ -323,10 +323,15 @@ struct World {
 /// The proxy over the fake engine, its record naming one project folder `/root/demo`, the copy behind it on the
 /// box side, and the staging directory the fence binds a source into.
 fn world() -> World {
+    world_of(WORKSPACE)
+}
+
+/// The same for a workspace of another id, which the cases that read what the fence makes of an id need.
+fn world_of(workspace: &str) -> World {
     let dir = tempfile::tempdir().unwrap();
     let (engine, seen) = fake_engine(dir.path());
     let rootfs = dir.path().join("rootfs");
-    let on_box = dir.path().join("copies/wsp-a");
+    let on_box = dir.path().join("copies").join(workspace);
     let binds = dir.path().join("binds");
     for made in [rootfs.join("root/demo/html"), rootfs.join("root/.wsp"), rootfs.join("etc"), on_box.join("html"), binds.clone()] {
         std::fs::create_dir_all(made).unwrap();
@@ -337,7 +342,7 @@ fn world() -> World {
     let bridged = Arc::new(Bridged(Mutex::new(Vec::new())));
     let listener = engine::bind(&dir.path().join("ws")).unwrap();
     let fence = Fence::new(
-        WORKSPACE.into(),
+        workspace.to_owned(),
         rootfs.clone(),
         vec![("/root/demo".to_owned(), on_box)],
         binds,
@@ -1047,7 +1052,22 @@ async fn a_network_named_for_a_siblings_own_stack_is_refused() {
     assert_eq!(status, 403, "{}", World::message(&answered));
     assert_eq!(
         World::message(&answered),
-        "a network named wsp-b_default is the one the workspace wsp-b brings its own stack up on, so it is refused here"
+        "a network named wsp-b_default is the one the workspace whose compose project is wsp-b brings its own stack up on, so it is refused here"
     );
     assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+}
+
+/// A workspace whose id carries a character compose does not take: the project compose is handed is that id
+/// rewritten, so the network its own stack derives is named after the project and never after the id. The fence
+/// reads the stem the same way, so this workspace gets its own network and a sibling's is still refused.
+#[tokio::test]
+async fn a_workspace_whose_id_compose_rewrites_still_gets_the_network_its_stack_derives() {
+    let w = world_of("wsp-spoo.landing");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-spoo-landing_default" }))).await;
+    assert_eq!(status, 201, "{}", World::message(&answered));
+    let sent: Value = serde_json::from_str(&w.engine_saw("POST", "/v1.55/networks/create").unwrap().body).unwrap();
+    assert_eq!(sent["Labels"][LABEL], "wsp-spoo.landing");
+    assert!(sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"), "{sent}");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-b_default" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&answered));
 }
