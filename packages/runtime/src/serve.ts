@@ -327,6 +327,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let me: Authed | undefined = authed ? { kind: "host" } : undefined;
     /** The thread this socket is, when its token was one the host minted into a turn's launch. */
     let by: ThreadScope | undefined;
+    /** Set when the token that opened this socket is a computer the person paired, scoped to no thread: the road
+     * every verb below is handed, so what a paired computer may start here is the runtime's one rule and never
+     * this client's word. Beside `stamped` rather than in it, since a paired computer is still one of the person's
+     * own for the doors `ownRoad` guards and only what it starts on a workspace of this computer changes. */
+    let pairedRoad = false;
     // Whether this socket is one of the person's own rather than the road a machine's requests arrive by. Who may
     // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is. A
     // function rather than a constant: a thread scoped token is read at the auth frame, after this socket was let
@@ -393,8 +398,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       detaches.push(throughDoor);
     }
 
-    /** Remembers the socket under the device that authed it, so a revoke can cut it. */
+    /** Remembers the socket under the device that authed it, so a revoke can cut it, and takes the road off that
+     * device: both roads a device comes in by, the auth frame and a redeem, pass here, so neither is a way around
+     * the stamp. */
     const bind = (device: DeviceView): void => {
+      pairedRoad = device.scope === undefined;
       me = { kind: "device", device };
       bound = { deviceId: device.id, cut: () => ws.close(4401, UNAUTHORIZED) };
       held.add(bound);
@@ -554,8 +562,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
 
         // What every verb below is handed as where this request came from: the road the door stamped over the wire,
         // and beside it the thread whose token opened this socket, which is the host's own reading and never the
-        // client's. A socket nothing stamped carries the word the client sent, which is what it always did.
-        const road = stamped ?? msg.origin;
+        // client's. A socket nothing stamped and no device opened carries the word its client sent, as it always did.
+        const road = stamped ?? (pairedRoad ? "paired" : msg.origin);
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {

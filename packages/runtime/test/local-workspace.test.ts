@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, pairedRunRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
@@ -570,6 +570,93 @@ describe("local workspace", () => {
     } finally {
       await srv.close();
     }
+  });
+
+  it("a paired computer's socket is stamped paired by the host, whatever origin its client sends", async () => {
+    const rt = runtime();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const code = (await here.request("pair.issue"))["code"] as string;
+      // The socket that spends the code is that computer from its next frame on, so the road is read there and
+      // not only at an auth frame: a redeem is the other way in.
+      const spending = await WsClient.connect(srv.port);
+      const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
+      expect((await spending.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(pairedRunRefusal("mac"));
+      spending.close();
+
+      const paired = await WsClient.connect(srv.port, { token: deviceToken });
+      // The client fills the field in with this computer's own word; the road it arrived on answers for it instead.
+      expect((await paired.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"], origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await paired.request("sessions.start", { workspaceId: ws.id, prompt: "hi", origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await paired.request("daemon.open", { workspaceId: ws.id, origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
+      // Nothing ran: no thread stands on that workspace and the command left no run behind.
+      expect(await rt.sessions.list()).toEqual([]);
+      // What that computer does with this workspace otherwise is what it always did.
+      expect(((await paired.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["mac"]);
+      expect((await paired.request("workspaces.get", { workspaceId: ws.id }))["workspace"]).toMatchObject({ name: "mac" });
+      expect((await paired.request("workspaces.touch", { workspaceId: ws.id })).ok).toBe(true);
+      paired.close();
+
+      // A token the host minted into a turn's launch is still stamped relayed, and reads that rule's own sentence.
+      const thread = await rt.devices.mint("thread abcd1234", { kind: "thread", threadId: "t_1", workspaceId: ws.id, rootThreadId: "t_1" }, Date.now());
+      const machine = await WsClient.connect(srv.port, { token: thread.deviceToken });
+      expect((await machine.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(noWorkspaceRefusal());
+      machine.close();
+
+      // The host's own socket carries the word its client sends, which is what it always did, and starts one.
+      expect((await here.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"], origin: "relayed" }))["error"]).toBe(relayedRefusal("mac"));
+      const ran = await here.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] });
+      expect(ran.ok).toBe(true);
+      // Read to its end, so the run this case started is over before the case's folder goes.
+      await until(() => here.events.some(e => e.type === "exec.exit" && e["execId"] === ran["execId"]));
+      here.close();
+    } finally {
+      await srv.close();
+      await rt.close();
+    }
+  });
+
+  it("a computer the person paired starts no process on this computer's own workspace, and every other kind takes one", async () => {
+    const rt = runtime();
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
+    const said = (call: () => Promise<unknown>): Promise<string> => call().then(() => "answered it", (e: unknown) => (e instanceof Error ? e.message : String(e)));
+    const starts = (id: string, caller: "here" | "paired"): [string, () => Promise<unknown>][] => [
+      ["workspaces.execStream", () => rt.workspaces.execStream(id, ["true"], undefined, caller)],
+      ["sessions.start", () => rt.sessions.start(id, { prompt: "hi" }, caller).then(h => h.finished)],
+      ["workspaces.daemonChannel", () => rt.workspaces.daemonChannel(id, () => {}, caller)],
+    ];
+    // Every verb is asked, so one that stops refusing is named rather than hidden behind the first failure.
+    const answered: string[] = [];
+    for (const [name, call] of starts(mac.id, "paired")) {
+      const line = await said(call);
+      if (line !== pairedRunRefusal("mac")) answered.push(`${name}: ${line}`);
+    }
+    expect(answered).toEqual([]);
+    // Nothing ran on it, and the same three from this computer still run.
+    expect(await rt.sessions.list()).toEqual([]);
+    expect((await rt.sessions.start(mac.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
+    // A workspace whose machine is somewhere else answers a paired computer exactly as it answers this one: the
+    // rule is the kind's, and the sentence never reaches a fork. The stub machine never says it launched, so the
+    // command is read where it fails here rather than left rejecting after the case.
+    const onTheFork = async (caller: "here" | "paired"): Promise<string[]> => {
+      const running = await rt.workspaces.execStream(cloud.id, ["true"], undefined, caller);
+      const read = await said(async () => {
+        for await (const line of running.lines) void line;
+      });
+      running.teardown();
+      return [read, await said(() => rt.sessions.start(cloud.id, { prompt: "hi" }, caller).then(h => h.finished)), await said(() => rt.workspaces.daemonChannel(cloud.id, () => {}, caller))];
+    };
+    const fork = await onTheFork("paired");
+    expect(fork).not.toContain(pairedRunRefusal("b1"));
+    expect(fork).toEqual(await onTheFork("here"));
+    // Reading is untouched: the workspace is listed and read by that computer as it always was.
+    expect((await rt.workspaces.list("paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+    expect((await rt.status.list(undefined, "paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+    expect((await rt.workspaces.get(mac.id, "paired")).name).toBe("mac");
+    await rt.close();
   });
 
   it("status.list reads the same origin rule as every other listing, and hands over the state without the route the reach carries", async () => {

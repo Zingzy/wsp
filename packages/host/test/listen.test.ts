@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -327,6 +327,37 @@ describe("a host that listens beyond this computer", () => {
 
     const wrong = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: "Bearer nope" } });
     expect(wrong.status).toBe(401);
+  });
+
+  it("names an unscoped device as a paired computer on the JSON routes, so the runtime reads one road down both", async () => {
+    const { handle: h, runtime } = await up("0.0.0.0");
+    await createOn(runtime, { golden: GOLDEN.versions[0]!.snapshotId, name: "lead" });
+    const callers: (Caller | undefined)[] = [];
+    const listing = runtime.status.list.bind(runtime.status);
+    vi.spyOn(runtime.status, "list").mockImplementation(async (o, caller) => {
+      callers.push(caller);
+      return listing(o, caller);
+    });
+
+    const code = await pairCode(h.wsPort, h.authToken);
+    const { deviceToken } = await redeem(h.port, code);
+    const listed = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${deviceToken!}` } });
+    expect(listed.status).toBe(200);
+    // The listing is what it always was for that computer; what changed is the word the runtime is handed with it.
+    expect(((await listed.json()) as { workspaces: { name: string }[] }).workspaces.map(w => w.name)).toEqual(["lead"]);
+    expect(callers).toEqual(["paired"]);
+
+    // The host's own road is nobody in particular, exactly as it was: the page on this computer names no road.
+    await h.close();
+    const { handle: mine, runtime: here } = await up();
+    const own: (Caller | undefined)[] = [];
+    const ownList = here.status.list.bind(here.status);
+    vi.spyOn(here.status, "list").mockImplementation(async (o, caller) => {
+      own.push(caller);
+      return ownList(o, caller);
+    });
+    expect((await fetch(`http://127.0.0.1:${mine.port}/api/workspaces`)).status).toBe(200);
+    expect(own).toEqual([undefined]);
   });
 
   it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {
