@@ -54,15 +54,24 @@ function errnoCode(e: unknown): string | undefined {
   return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
 }
 
-/** EPERM means the pid exists under another user, so it counts as alive. */
-export function pidAlive(pid: number): boolean {
+/** What signal 0 says about a pid, read once here so the two readings below cannot drift: this login's own
+ * process, a process of another login (EPERM), or no process at all. */
+function signalled(pid: number): "own" | "another" | "gone" {
   try {
     process.kill(pid, 0);
-    return true;
+    return "own";
   } catch (e) {
-    return errnoCode(e) === "EPERM";
+    return errnoCode(e) === "EPERM" ? "another" : "gone";
   }
 }
+
+/** Whether a pid is a live process, whoever owns it: a lock another login holds is still a held lock, and a
+ * second host on the same state file gives way to it. */
+export const pidAlive = (pid: number): boolean => signalled(pid) !== "gone";
+
+/** Whether a pid is a process this login could signal, which is a process of its own. A lock naming a pid that
+ * answers EPERM names another login's process on a number a dead host once had, which is the stale lock case. */
+export const ownPid = (pid: number): boolean => signalled(pid) === "own";
 
 function readLock(path: string): HostLock | undefined {
   if (!existsSync(path)) return undefined;

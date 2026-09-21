@@ -205,7 +205,7 @@ function refreshMenu(): void {
 }
 
 function locate(): Promise<Located> {
-  return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch() });
+  return locateHost(launch());
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just

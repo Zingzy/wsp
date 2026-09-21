@@ -2,9 +2,9 @@
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { defaultHomeIn, devCheckoutState, homeNamed, serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
-import { hereWord } from "@wsp/protocol";
-import type { Runtime } from "@wsp/runtime";
+import { defaultHomeIn, devCheckoutState, dialAddress, homeNamed, hostTokenFor, lockPathFor, ownPid, serve, servingHost, type CliIO, type HostLock, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
+import { safeEqual, type Runtime } from "@wsp/runtime";
 
 export type PortState = "free" | "wsp" | "other";
 
@@ -41,10 +41,6 @@ export interface Launch {
   cwd: string;
 }
 
-export interface LocateOptions extends Launch {
-  port: number;
-}
-
 export interface OpenHostOptions {
   port: number;
   wsPort: number;
@@ -58,14 +54,6 @@ export interface OpenHostOptions {
   running?: RunningWsp;
 }
 
-// The host serves the page with its boot object inlined; nothing else on
-// loopback carries this line, so it is the whole attach test. What the page
-// says about this computer is not part of it: a host listening beyond this
-// computer inlines neither its token nor the runtime's port, and it is still
-// the host this window should attach to rather than start a second of. The
-// path every page dials is the one field both of them carry.
-const BOOT_LINE = /<script>window\.__WSP__ = \{[^<]*"wsPath":"/;
-
 function canListen(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const probe = createServer();
@@ -74,19 +62,40 @@ function canListen(port: number): Promise<boolean> {
   });
 }
 
-export async function probeHost(port: number): Promise<PortState> {
-  let res: Response;
+/** The boot object of the page a host on this computer's own port serves, or nothing where nothing there answers
+ * as a wsp host. */
+async function bootOn(port: number): Promise<BootPayload | undefined> {
   try {
-    res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`http://${authority(LOOPBACK, port)}/`, { signal: AbortSignal.timeout(2000) });
+    return res.ok ? bootLineOf(await res.text()) : undefined;
   } catch {
-    return (await canListen(port)) ? "free" : "other";
+    return undefined;
   }
-  return res.ok && BOOT_LINE.test(await res.text()) ? "wsp" : "other";
 }
 
-function attached(port: number): HostSession {
-  return { url: `http://127.0.0.1:${port}`, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
+/** What a port on this computer holds. Read by the ssh road to tell when the host behind a forward is up; a page
+ * carrying the boot line is no reason on its own to attach, which the lock is. */
+export async function probeHost(port: number): Promise<PortState> {
+  if ((await bootOn(port)) !== undefined) return "wsp";
+  return (await canListen(port)) ? "free" : "other";
 }
+
+function attached(port: number, url = `http://${authority(LOOPBACK, port)}`): HostSession {
+  return { url, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
+}
+
+/** Whether a token is the one the host serving this state file presents, compared the one way this repo compares
+ * a secret. False where no host has written the file, so nothing matches nothing. It lives here rather than
+ * beside the token file's own reader because the host package's MCP server may reach no runtime. */
+export function hostTokenMatches(statePath: string, token: string): boolean {
+  const held = hostTokenFor(statePath);
+  return held !== undefined && safeEqual(held, token);
+}
+
+/** One sentence for every live lock this window will not attach to, whichever of the three reasons it is: the
+ * owner's token is never sent to that page to settle the question, since a squatter would then have it. */
+const wontAttach = (statePath: string, lock: HostLock, why: string): Error =>
+  new Error(`a host (pid ${lock.pid}) holds ${lockPathFor(statePath)} on port ${lock.port} but ${why}: stop that process or run wsp down, then open wsp again`);
 
 /** The bin's rule, read from the bin: a checkout of wsp in cwd marks a dev run whose .wsp state is shared with wspx. It
  * holds for a development run and nothing else, since a packaged app is launched from a folder it did not choose,
@@ -96,36 +105,42 @@ export function statePathIn(home: string, launch: Launch): string {
   return dev ?? join(home, "state.json");
 }
 
-/** The host whose lock sits next to this state file, once it answers as wsp. */
+/** The host whose lock sits beside this state file, once this window has proof it is the owner's own. The lock is
+ * the whole road in: a page on a port carrying the boot line is anything any login on this computer cares to
+ * serve. Its pid is this login's, and then one of two readings by the address it bound. A host on loopback serves
+ * its page with its own token inlined, so the page is held to the token file beside the state. A host bound
+ * beyond this computer serves a page with no token by design, and the lock alone is the reading for it. Anything
+ * else is a refusal: this window starts no second host on a state file another process holds. */
 async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   const held = servingHost(statePath);
-  return held !== undefined && (await probeHost(held.port)) === "wsp" ? attached(held.port) : undefined;
+  if (held === undefined) return undefined;
+  if (!ownPid(held.pid)) throw wontAttach(statePath, held, "that process is not this login's");
+  if (!isLoopback(held.address ?? LOOPBACK)) return attached(held.port, `http://${authority(dialAddress(held), held.port)}`);
+  const boot = await bootOn(held.port);
+  if (boot === undefined) throw wontAttach(statePath, held, "no wsp host answers there");
+  if (boot.token === undefined || !hostTokenMatches(statePath, boot.token)) throw wontAttach(statePath, held, "the page it serves carries another token than the file beside this state");
+  return attached(held.port);
 }
 
 /** Runs before the setup gate: a serving host is the proof of setup. WSP_HOME
- * names the home when it is set, else this computer's own; the lock beside that
- * home's state file is read first, then the port. A window that should open on
+ * names the home when it is set, else this computer's own, and the lock beside
+ * that home's state file is the one thing read. A window that should open on
  * another home is launched with WSP_HOME naming it, which is the one way any
  * road here says which home it means. */
-export async function locateHost(opts: LocateOptions): Promise<Located> {
+export async function locateHost(opts: Launch): Promise<Located> {
   const env = homeNamed(opts.env);
   const home = env !== undefined ? resolve(env) : defaultHomeIn(homedir());
-  const session =
-    (await lockedHost(statePathIn(home, opts))) ??
-    (opts.port !== 0 && (await probeHost(opts.port)) === "wsp" ? attached(opts.port) : undefined);
+  const session = await lockedHost(statePathIn(home, opts));
   return { home, ...(session !== undefined ? { session } : {}) };
 }
 
-/** Attaches to the host already serving this state file (its lock names the
- * port, so a hand-started host on other ports is found too), else to a wsp
- * host on the requested port, else starts one the way the wsp bin does.
+/** Attaches to the host already serving this state file, which its lock names
+ * and this window has proof of, else starts one the way the wsp bin does.
  * Defaults held by anything else give way to free ports. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
   if (held !== undefined) return held;
-  const state = opts.port === 0 ? "free" : await probeHost(opts.port);
-  if (state === "wsp") return attached(opts.port);
-  const defaultsFree = state === "free" && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
+  const defaultsFree = (opts.port === 0 || (await canListen(opts.port))) && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
   const ports = defaultsFree ? { port: opts.port, wsPort: opts.wsPort } : { port: 0, wsPort: 0 };
   const handle = await serve(opts.io, {
     ...ports,
@@ -135,5 +150,5 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
     ...(opts.running !== undefined ? { running: opts.running } : {}),
   });
-  return { url: `http://127.0.0.1:${handle.port}`, port: handle.port, owned: true, remote: false, label: hereWord(process.platform === "darwin"), close: () => handle.close() };
+  return { url: `http://${authority(LOOPBACK, handle.port)}`, port: handle.port, owned: true, remote: false, label: hereWord(process.platform === "darwin"), close: () => handle.close() };
 }

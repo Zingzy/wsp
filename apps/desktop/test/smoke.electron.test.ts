@@ -2,7 +2,7 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -86,6 +86,14 @@ function seedLocalWorkspace(home: string): void {
 function seedSavedHost(home: string, alias: string, label: string): void {
   mkdirSync(join(home, "hosts"), { recursive: true });
   writeFileSync(join(home, "hosts", `${alias}.json`), JSON.stringify({ url: `http://${label}`, deviceId: "d_seed", deviceToken: "tok-seed", pairedAt: "2026-09-01T00:00:00.000Z", label, road: "direct" }));
+}
+
+/** The lock and the token file a host serving this home left beside its state, which is what the window reads to
+ * attach to it: a page on a port is no reason to, whoever is serving there. */
+function seedServingLock(home: string, at: { port: number; token: string }): void {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, wsPort: 0, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host-token"), `${at.token}\n`);
 }
 
 interface Launched {
@@ -463,7 +471,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const api = await existing.createWorkspace("api");
     const web = await existing.createWorkspace("web");
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
     await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
@@ -688,16 +696,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
   });
 
-  it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
+  it("does not attach to a host on the port that no lock beside the resolved home names: the first launch runs", async () => {
+    // Any login on this computer can bind a port and answer with the boot line; the lock beside the state file of
+    // the home this launch resolved is what says a host of the owner's is serving, and there is none here.
     existing = await fixtureHost();
     launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
-    const win = await windowAt(launched.app, APP_URL);
-    const boot = await bootOf(win);
-    expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
-    expect(boot.token).toBe(existing.authToken);
-    // Nothing of a host's lands in ~/.wsp; the wsp command the app installs on every launch is all that is there.
-    expect(readdirSync(join(launched.home, ".wsp"))).toEqual(["bin"]);
+    const page = await windowAt(launched.app, ONBOARDING_URL);
+    await page.waitForLoadState("domcontentloaded");
+    expect(await page.textContent("h1")).toBe("Welcome to wsp");
+    expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
     await launched.app.close();
+    // The host on that port was never touched: it is still serving, with the page it was serving before.
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
   });
 
@@ -705,7 +714,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "9.9.9");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const line = win.locator("[role=status]");
     await line.waitFor();
@@ -725,7 +734,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "0.0.1");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const line = win.locator("[role=status]");
     await line.waitFor();
@@ -735,7 +744,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("attached to a host of its own release, says nothing at all", async () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector("[data-slot=sidebar-container]");
     expect(await win.locator("[role=status]").count()).toBe(0);
@@ -768,7 +777,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const first = await existing.createWorkspace("first");
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const row = `[data-row-id='ws:${first.id}']`;
     await win.waitForSelector(row);

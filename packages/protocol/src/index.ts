@@ -1897,6 +1897,25 @@ export interface LocalFontFace {
   data: ArrayBuffer;
 }
 
+/** The one inline script the page carries, as the host writes the boot object into it and as a reader finds that
+ * object again: the whole script element, with the object as its one group. Nothing else the host serves carries
+ * this line, so finding it is the whole reading of whether a page came off a wsp host. */
+export const BOOT_SCRIPT = /<script>window\.__WSP__ = ([^<]*);<\/script>/;
+
+/** The boot object of a page a host served, or nothing where the page carries no such line, a line no wsp host
+ * wrote, or one that does not parse. */
+export function bootLineOf(html: string): BootPayload | undefined {
+  const found = BOOT_SCRIPT.exec(html);
+  if (found === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(found[1]!);
+    if (typeof parsed !== "object" || parsed === null || typeof (parsed as BootPayload).wsPath !== "string") return undefined;
+    return parsed as BootPayload;
+  } catch {
+    return undefined;
+  }
+}
+
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
   /** The runtime's own port, inlined only on the loopback page beside the token; a page served beyond loopback

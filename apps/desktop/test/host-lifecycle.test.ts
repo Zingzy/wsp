@@ -9,7 +9,7 @@ import { localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } 
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { locateHost, openHost, probeHost, statePathIn, type HostSession } from "../src/host-lifecycle.js";
+import { hostTokenMatches, locateHost, openHost, probeHost, statePathIn, type HostSession } from "../src/host-lifecycle.js";
 import { checkSetup } from "../src/setup.js";
 
 const PAGE = `<!doctype html>
@@ -163,16 +163,14 @@ describe("openHost", () => {
     expect(await refused(url)).toBe(true);
   });
 
-  it("attaches to a wsp host already on the port and leaves it running when closed", async () => {
+  it("starts its own host rather than attaching to a wsp host on the port no lock beside this state file names", async () => {
+    // Any login on this computer can bind a port and serve a page with the boot line in it; the lock beside the
+    // state file is what says a host of the owner's is serving, and there is none here.
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     session = await open(existing.port, 0);
-    expect(session.owned).toBe(false);
-    expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
-    const before = await bootOf(session.url);
-    await session.close();
-    session = undefined;
-    const after = await bootOf(`http://127.0.0.1:${existing.port}`);
-    expect(after).toEqual(before);
+    expect(session.owned).toBe(true);
+    expect(session.port).not.toBe(existing.port);
+    expect((await bootOf(session.url))?.token).toMatch(/^[A-Za-z0-9_-]{32}$/);
   });
 
   it("falls back to free ports when the defaults are held by something else", async () => {
@@ -204,10 +202,11 @@ describe("openHost", () => {
     }
   });
 
-  it("attaches to the host named in host.lock when its pid is alive, whatever port it was asked for", async () => {
+  it("attaches to the host named in host.lock when its page carries the token beside this state file, whatever port it was asked for", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     const lock = { pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() };
     writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
+    writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
 
     session = await open(await freePort(), 0);
     expect(session.owned).toBe(false);
@@ -249,6 +248,44 @@ describe("openHost", () => {
     expect(existsSync(localWorkFolder(home))).toBe(false);
   });
 
+  it("refuses a loopback lock whose page carries another token than the file beside the state, and starts nothing", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
+    const port = await freePort();
+    await expect(open(port, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token/);
+    // Nothing of this window's is on that port, and the lock is the one the other process wrote.
+    expect(await probeHost(port)).toBe("free");
+    expect((JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { port: number }).port).toBe(existing.port);
+  });
+
+  it("refuses a loopback lock with no wsp host answering on its port, which is the stale lock a squatter took", async () => {
+    const squatter = createServer((_req, res) => res.end("<html>hello</html>"));
+    const port = await listen(squatter);
+    try {
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: 0, startedAt: new Date().toISOString() }));
+      await expect(open(await freePort(), 0)).rejects.toThrow(/but no wsp host answers there/);
+    } finally {
+      await closeServer(squatter);
+    }
+  });
+
+  it("attaches through the lock alone to a host bound beyond this computer, whose page carries no token by design", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(home, "state.json") });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
+    // No token file is written and none is asked for: that page inlines none, and the lock is the whole reading.
+    session = await open(await freePort(), 0);
+    expect(session.owned).toBe(false);
+    expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
+  });
+
+  it.runIf(process.getuid !== undefined && process.getuid() !== 0)("refuses a lock naming a process of another login, whatever answers on its port", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: 1, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
+    await expect(open(await freePort(), 0)).rejects.toThrow(/but that process is not this login's/);
+  });
+
   it("ignores a host.lock whose pid is gone and starts its own host", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
@@ -286,23 +323,21 @@ describe("locateHost", () => {
     return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
   }
 
-  /** A home with a lock naming the fixture, the way a host serving it leaves things. */
+  /** A home with a lock naming the fixture and the token it serves, the way a host serving it leaves things. */
   function homeServedBy(h: HostHandle, lock: string = alive(h)): string {
     const dir = mkdtempSync(join(tmpdir(), "wsp-desktop-custom-"));
     writeFileSync(join(dir, "host.lock"), lock);
+    writeFileSync(join(dir, "host-token"), `${h.authToken}\n`);
     return dir;
   }
 
-  it("attaches to a wsp host on the port with an empty ~/.wsp and no keys anywhere", async () => {
+  it("finds nothing to attach to where a wsp host is on a port and no lock beside the resolved home names it", async () => {
     existing = await fixture();
-    const found = await locateHost({ port: existing.port, packaged: false, cwd });
-    expect(found.home).toBe(join(user, ".wsp"));
-    expect(found.session?.owned).toBe(false);
-    expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+    expect(await locateHost({ packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
   });
 
   it("names ~/.wsp with nothing to attach to when there is no host", async () => {
-    expect(await locateHost({ port: await freePort(), packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
+    expect(await locateHost({ packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
   });
 
   it("opens on the home WSP_HOME names, and a host serving some other home is not attached to", async () => {
@@ -311,17 +346,35 @@ describe("locateHost", () => {
     existing = await fixture();
     const custom = homeServedBy(existing);
     const env = join(user, "env-home");
-    const found = await locateHost({ port: await freePort(), packaged: false, env, cwd });
+    const found = await locateHost({ packaged: false, env, cwd });
     expect(found).toEqual({ home: env });
-    expect(await locateHost({ port: await freePort(), packaged: false, env: custom, cwd })).toMatchObject({ home: custom, session: { url: `http://127.0.0.1:${existing.port}` } });
+    expect(await locateHost({ packaged: false, env: custom, cwd })).toMatchObject({ home: custom, session: { url: `http://127.0.0.1:${existing.port}` } });
   });
 
   it("attaches through the lock next to the state file of the home it resolved", async () => {
     existing = await fixture();
     const env = homeServedBy(existing);
-    const found = await locateHost({ port: await freePort(), packaged: false, env, cwd });
+    const found = await locateHost({ packaged: false, env, cwd });
     expect(found.home).toBe(env);
     expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+  });
+});
+
+describe("hostTokenMatches", () => {
+  it("matches only the exact bytes of the token file beside the state, and nothing at all where there is no file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-desktop-token-"));
+    const statePath = join(dir, "state.json");
+    try {
+      expect(hostTokenMatches(statePath, "a-token")).toBe(false);
+      writeFileSync(join(dir, "host-token"), "a-token\n");
+      expect(hostTokenMatches(statePath, "a-token")).toBe(true);
+      expect(hostTokenMatches(statePath, "a-token ")).toBe(false);
+      expect(hostTokenMatches(statePath, "A-TOKEN")).toBe(false);
+      expect(hostTokenMatches(statePath, "a-toke")).toBe(false);
+      expect(hostTokenMatches(statePath, "")).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
