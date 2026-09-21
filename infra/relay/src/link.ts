@@ -7,9 +7,9 @@
 // on a computer already in, whose approval carries the admission it signed. The
 // code is spent by the approval and the token by the first poll that takes it.
 import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
-import { accountByProvider, accountOf, approveLink, clientKeyed, deleteLink, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+import { accountByProvider, accountOf, approveLink, clientKeyed, deleteLink, deleteRunOutClient, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
-import { boxNamedRefusal, clientFor, signedByBearer } from "./hosts.js";
+import { boxNamedRefusal, clientFor, signedByBearer, signedInSince } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
 import { approvePage, approvedPage, codePage, gonePage } from "./page.js";
@@ -152,12 +152,16 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   return new Response(null, { status: 302, headers });
 }
 
+/** The moment a client row has to be signed in from to hold its key: the same bound clientFor holds a token to,
+ * as an ISO string beside created_at. */
+const standingSince = (ctx: Ctx): string => new Date(signedInSince(ctx.deps.now())).toISOString();
+
 /** A key is one computer's on an account, as a name is one box's: the refusal for a client code started under a
- * key a computer on the account already signed in with, naming that computer and the sign-out that frees the key,
- * and nothing where the key is free. Both approval roads read it, and the poll reads it where two codes approved
- * under one key met the index. */
+ * key a computer on the account signed in with and still stands under, naming that computer and the sign-out that
+ * frees the key, and nothing where the key is free or held only by a sign-in that ran out. Both approval roads
+ * read it, and the poll reads it where two codes approved under one key met the index. */
 async function keyHeldRefusal(ctx: Ctx, accountId: string, fingerprint: string | null): Promise<Refusal | undefined> {
-  const held = await clientKeyed(ctx.env, accountId, fingerprint);
+  const held = await clientKeyed(ctx.env, accountId, fingerprint, standingSince(ctx));
   return held === undefined ? undefined : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, then run wsp login again`);
 }
 
@@ -225,10 +229,14 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
   // The row is spent before anything is minted, so two polls racing on one code make one token between them and
   // one client row, not two of each.
   if (!(await spendLink(ctx.env, row.code))) throw refuse(404, "this relay is waiting on no link with that token; run the link again");
+  // One reading of the clock for the row and the token, so the row's created_at is the token's issuedAt.
+  const now = ctx.deps.now();
   let subject = row.host_id;
   if (row.kind === "client") {
     subject = newId("c", ctx.deps.random);
-    const at = new Date(ctx.deps.now()).toISOString();
+    const at = new Date(now).toISOString();
+    // A computer signing in again after its month meets its own dead row at the index unless that row goes first.
+    await deleteRunOutClient(ctx.env, row.account_id!, row.fingerprint, standingSince(ctx));
     if (!(await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, fingerprint: row.fingerprint, created_at: at }))) {
       // Two codes approved under one key: the first poll took the key, and this one names the computer that holds it.
       throw (await keyHeldRefusal(ctx, row.account_id!, row.fingerprint)) ?? refuse(409, "the computer that held that key was signed out while this code waited; run wsp login again");
@@ -239,7 +247,7 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
       await insertAdmission(ctx.env, { id: newId("m", ctx.deps.random), account_id: row.account_id!, client_id: subject, signer: admission.by, issued_at: admission.issuedAt, signature: admission.signature, created_at: at });
     }
   }
-  const token = await mintToken(ctx.env.RELAY_SIGNING_KEY, { kind: row.kind, subject: subject!, account: row.account_id!, issuedAt: ctx.deps.now() });
+  const token = await mintToken(ctx.env.RELAY_SIGNING_KEY, { kind: row.kind, subject: subject!, account: row.account_id!, issuedAt: now });
   // Who approved it, so the box can say whose account it is on without holding a token that reads this relay back.
   const account = await accountOf(ctx.env, row.account_id!);
   return Response.json({

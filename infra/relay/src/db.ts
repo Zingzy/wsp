@@ -130,10 +130,19 @@ export async function clientsOf(env: Env, accountId: string): Promise<ClientRow[
   return results;
 }
 
-/** The computer this account already holds under this key, if any: a key is one computer's on an account, as a
- * name is one box's, and a code that named no key is held by nobody. */
-export async function clientKeyed(env: Env, accountId: string, fingerprint: string | null): Promise<ClientRow | undefined> {
-  return (await env.DB.prepare("SELECT * FROM clients WHERE account_id = ? AND fingerprint = ?").bind(accountId, fingerprint).first<ClientRow>()) ?? undefined;
+/** The computer this account holds under this key whose sign-in still stands, if any: a key is one computer's on
+ * an account, as a name is one box's; a code that named no key is held by nobody, and a row signed in before the
+ * moment named holds a token that opens nothing, so it holds the key for nobody either. */
+export async function clientKeyed(env: Env, accountId: string, fingerprint: string | null, since: string): Promise<ClientRow | undefined> {
+  return (await env.DB.prepare("SELECT * FROM clients WHERE account_id = ? AND fingerprint = ? AND created_at >= ?").bind(accountId, fingerprint, since).first<ClientRow>()) ?? undefined;
+}
+
+/** The row a run-out sign-in left under this key goes, admissions with it, so the index meets nothing when the
+ * same computer signs in again: the one road that frees a key without a token, since the token that could have
+ * signed the row out is the one that ran out. */
+export async function deleteRunOutClient(env: Env, accountId: string, fingerprint: string | null, before: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM admissions WHERE client_id IN (SELECT id FROM clients WHERE account_id = ? AND fingerprint = ? AND created_at < ?)").bind(accountId, fingerprint, before).run();
+  await env.DB.prepare("DELETE FROM clients WHERE account_id = ? AND fingerprint = ? AND created_at < ?").bind(accountId, fingerprint, before).run();
 }
 
 /** Answers whether the row landed: the index keeps one computer per key on an account, so a poll that lost to

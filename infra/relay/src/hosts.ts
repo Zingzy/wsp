@@ -22,6 +22,10 @@ import { mintToken, readToken, type TokenClaims } from "./tokens.js";
  * nobody is sitting at cannot open a browser, and wsp host unlink is how one is taken away. */
 export const CLIENT_TOKEN_MS = 30 * 24 * 60 * 60_000;
 
+/** The moment a sign-in has to be from to still stand now. A token issued before it has run out, and so has the
+ * client row the poll minted with it, whose created_at is that same moment: a run-out row holds its key for nobody. */
+export const signedInSince = (now: number): number => now - CLIENT_TOKEN_MS;
+
 /** The token a request carries, read from the one header it may ride in. A bearer never rides a URL, where a log would keep it. */
 export async function claimsOf(ctx: Ctx): Promise<TokenClaims> {
   const carried = /^Bearer\s+(\S+)$/i.exec(ctx.req.headers.get("authorization") ?? "")?.[1];
@@ -59,7 +63,7 @@ export async function clientFor(ctx: Ctx, read?: TokenClaims): Promise<SignedIn>
   if (claims.kind !== "client") throw refuse(403, "that is a host's own token; this route is for the token wsp login holds on a person's computer");
   const row = await clientOf(ctx.env, claims.subject);
   if (row === undefined || row.account_id !== claims.account) throw refuse(401, "this computer's sign-in was taken away; run wsp login <url> to sign in again");
-  if (ctx.deps.now() - claims.issuedAt > CLIENT_TOKEN_MS) throw refuse(401, "this computer's sign-in has run out; run wsp login <url> to sign in again");
+  if (claims.issuedAt < signedInSince(ctx.deps.now())) throw refuse(401, "this computer's sign-in has run out; run wsp login <url> to sign in again");
   await seenClient(ctx.env, row.id, new Date(ctx.deps.now()).toISOString());
   return { account: claims.account, subject: claims.subject, fingerprint: row.fingerprint };
 }

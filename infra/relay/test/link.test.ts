@@ -750,4 +750,29 @@ describe("a key is one computer's on an account", () => {
     expect(await count(relay, "link_codes")).toBe(0);
     expect((await poll(relay, second.pollToken)).status).toBe(404);
   });
+
+  it("takes a computer whose sign-in ran out back under its key, and its dead row goes with its admissions at the poll", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    expect((await relay.fetch(`/clients/${mac.id}/admissions`, { method: "POST", headers: bearer(desk.token), body: JSON.stringify(fakeAdmission(mac.fingerprint!, desk.fingerprint!)) })).status).toBe(200);
+
+    // A month on, the Mac's token opens nothing, and wsp login there starts a code under the same key; the page
+    // approves it rather than naming the row that token can no longer sign out.
+    relay.tick(31 * 24 * 60 * 60_000);
+    expect((await relay.fetch("/clients", { headers: bearer(mac.token) })).status).toBe(401);
+    const again = (await (await startFrom(relay, "client", "the Mac", "10.0.0.2", mac.fingerprint!)).json()) as { code: string; pollToken: string };
+    expect((await approveOnPage(relay, again.code, await signIn(relay, "maya", "4242"))).status).toBe(200);
+
+    const answer = (await (await poll(relay, again.pollToken)).json()) as { state: string; token: string };
+    expect(answer.state).toBe("approved");
+    const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
+    expect(claims!.subject).not.toBe(mac.id);
+    // The fresh row is the one under the key, the run-out row and the admission signed for it are gone, and the
+    // desk's row, run out under a key nobody signed in under again, stands where it was.
+    expect((await relay.db.prepare("SELECT id, name FROM clients WHERE fingerprint = ?").bind(mac.fingerprint).all()).results).toEqual([{ id: claims!.subject, name: "the Mac" }]);
+    expect(await count(relay, "clients")).toBe(2);
+    expect(await count(relay, "admissions")).toBe(0);
+    expect((await relay.fetch("/clients", { headers: bearer(answer.token) })).status).toBe(200);
+  });
 });
