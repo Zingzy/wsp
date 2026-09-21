@@ -333,16 +333,20 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
 }
 
 /** The JSON routes by the op each stands for on the socket, so the door a paired device meets here is the door it
- * meets there: a route added later names its op on this table and is held by the same list. */
+ * meets there: a route added later names its op on this table and is held by the same list, and until it does a
+ * paired device is refused it by its own name. */
 export const ROUTE_OPS: Readonly<Record<string, string>> = {
   "GET /api/workspaces": "status.list",
   "POST /api/workspaces": "workspaces.create",
 };
 
 /** What a caller is refused a route with, or nothing: a computer the person paired is held to the list of ops a
- * device may send, read by the op the route stands for, and answered in the sentence the socket answers with. */
-export function routeRefusal(op: string, caller: Caller | undefined): string | undefined {
-  return caller === "paired" && !DEVICE_OPS.includes(op) ? deviceHeldRefusal(op) : undefined;
+ * device may send, read by the op the route stands for and answered in the sentence the socket answers with. A
+ * route with no op of its own is shut to such a device, so a route added later cannot be forgotten open. */
+export function routeRefusal(route: string, caller: Caller | undefined): string | undefined {
+  if (caller !== "paired") return undefined;
+  const op = ROUTE_OPS[route];
+  return op !== undefined && DEVICE_OPS.includes(op) ? undefined : deviceHeldRefusal(op ?? route);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -462,8 +466,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       // Before dispatch, by the op the route stands for: a paired device is held to the same list on both doors.
-      const routeOp = ROUTE_OPS[`${req.method} ${path}`];
-      const held = routeOp === undefined ? undefined : routeRefusal(routeOp, who.caller);
+      const held = routeRefusal(`${req.method} ${path}`, who.caller);
       if (held !== undefined) {
         sendJson(res, 401, { error: held });
         return;

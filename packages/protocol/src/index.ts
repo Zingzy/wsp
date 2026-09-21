@@ -5224,14 +5224,17 @@ export const THREAD_OPS: readonly string[] = [
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
  * THREAD_OPS is a list: a deny list would let every op added later through by having been forgotten. Read at both
- * doors, the socket and the JSON routes, so a route added later is held by the op it stands for. What is here is
- * listing, reading, watching and the management of wsp's own machines and records, which touch no process, no
- * file of the person's outside wsp's own copies folder and no computer of the person's. What is not: every op that
- * starts or puts a hand on a process (a start, a steer, a stop, an answer, an access change, a command, a bring
- * back, a pane), every op that adds, changes, dials, sweeps or lands a binary on a computer of the person's or clones onto
- * one, every op that writes keys, builds or seals an image, runs the sign-ins or costs money, and every op that
- * reads or writes this computer's disk outside wsp's own folders. The daemon channel's send and close ride a
- * channel a refused open never gave this socket. A role of the person's is where this list widens, per device. */
+ * doors, the socket and the JSON routes, so a route added later is held by the op it stands for, and a route that
+ * names none is held outright. What is here is listing, reading, watching and the management of wsp's own machines
+ * and records, which touch no process and no computer of the person's and write this disk only where wsp's own
+ * copies land: workspaces.create on a project here runs the copy verb and puts the copy beside the person's
+ * folder, open by the owner's ruling. What is not: every op that starts or puts a hand on a process (a start, a
+ * steer, a stop, an answer, an access change, a command, a bring back, a pane, and a thread's rename, which runs a
+ * shell on the workspace's machine and writes the person's agent session file), every op that adds, changes,
+ * dials, sweeps or lands a binary on a computer of the person's or clones onto one, every op that writes keys,
+ * builds or seals an image, runs the sign-ins or costs money, and every op that reads or writes this computer's
+ * disk outside wsp's own folders. The daemon channel's send and close ride a channel a refused open never gave
+ * this socket. A role of the person's is where this list widens, per device. */
 export const DEVICE_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
@@ -5272,7 +5275,6 @@ export const DEVICE_OPS: readonly string[] = [
   "harnesses.list",
   "sessions.list",
   "sessions.history",
-  "sessions.rename",
   "sessions.forget",
   "golden.get",
   "image.get",

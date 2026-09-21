@@ -438,8 +438,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // having been forgotten, which is how the golden, the keys and the person's own init were reachable from a
         // machine. Ahead of the schema so an op that is not a thread's is refused by name whatever it carries.
         const asked = (parsed as { op?: unknown }).op;
+        const askedId = (parsed as { id?: string | number }).id ?? null;
         if (by !== undefined && (typeof asked !== "string" || !THREAD_OPS.includes(asked))) {
-          send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          send({ id: askedId, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          return;
+        }
+        // The door for a computer the person paired, read the same way and in the same place: shut, with the ops
+        // such a device may send as the openings, until a role of the person's opens more, and ahead of the schema
+        // so a held op is refused by name whatever it carries. The JSON routes read the same list by the op each
+        // route stands for, so neither door is wider than the other.
+        const asPaired = pairedRoad && stamped !== "relayed";
+        if (asPaired && (typeof asked !== "string" || !DEVICE_OPS.includes(asked))) {
+          send({ id: askedId, ok: false, error: deviceHeldRefusal(typeof asked === "string" ? asked : "that frame") });
           return;
         }
         const req2 = RuntimeRequest.safeParse(parsed);
@@ -571,14 +581,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // client's. A socket nothing stamped and no device opened carries the word its client sent, as it always did.
         // The paired word stands above the `here` a connect ticket carries, since a ticket never widens the road of
         // the socket that minted it; a relay ticket's word is stricter still and stays, whoever minted it.
-        const road = pairedRoad && stamped !== "relayed" ? "paired" : (stamped ?? msg.origin);
-        // The door for a computer the person paired, read the way the thread door above is: shut, with the ops such
-        // a device may send as the openings, until a role of the person's opens more. The JSON routes read the same
-        // list by the op each route stands for, so neither door is wider than the other.
-        if (road === "paired" && !DEVICE_OPS.includes(msg.op)) {
-          send({ id: msg.id, ok: false, error: deviceHeldRefusal(msg.op) });
-          return;
-        }
+        const road = asPaired ? "paired" : (stamped ?? msg.origin);
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {

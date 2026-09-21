@@ -2946,22 +2946,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * was one thread, so resuming into it stamps every event in place: the stamp fills an absent field once and never
    * changes a value, so it runs at most once per transcript. A new thread leaves the old events as they were.
    * The index is asked first: it keeps a thread whose start fell off the transcript cap. */
-  const threadOf = (workspaceId: string, resume: string | undefined): string => {
+  const threadOf = (workspaceId: string, resume: string | undefined): { threadId: string; unstamped: boolean } => {
     const events = transcripts.get(workspaceId) ?? [];
     if (resume !== undefined) {
       for (const s of sessions.values()) {
-        if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.threadId !== undefined) return s.view.threadId;
+        if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.threadId !== undefined) return { threadId: s.view.threadId, unstamped: false };
       }
       for (let i = events.length - 1; i >= 0; i--) {
         const e = events[i]!;
         if (e.type !== "session.start" || e.sessionId !== resume) continue;
-        if (e.threadId !== undefined) return e.threadId;
-        const id = randomUUID();
-        for (const legacy of events) legacy.threadId ??= id;
-        return id;
+        if (e.threadId !== undefined) return { threadId: e.threadId, unstamped: false };
+        // A transcript written before threads: it takes this id once the caller's reach is read, never before.
+        return { threadId: randomUUID(), unstamped: true };
       }
     }
-    return randomUUID();
+    return { threadId: randomUUID(), unstamped: false };
+  };
+  /** Gives a transcript written before threads the id its resume was given, in place, once the reach is read. */
+  const stampLegacy = (workspaceId: string, threadId: string): void => {
+    for (const legacy of transcripts.get(workspaceId) ?? []) legacy.threadId ??= threadId;
   };
 
   /** Whether the thread's last turn ended with no exit code and no result: the runtime or its transport ended the
@@ -6532,7 +6535,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (opened.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${opened.thread} on this workspace`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
       let resume = opened.resume ?? named?.claudeSessionId;
-      const threadId = named?.threadId ?? threadOf(workspaceId, resume);
+      const found = named?.threadId !== undefined ? { threadId: named.threadId, unstamped: false } : threadOf(workspaceId, resume);
+      const threadId = found.threadId;
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
       // two is what a thread's own token is capped on. Read before the machine is asked for anything.
       const opens = rowsOn(threadId).length === 0;
@@ -6543,6 +6547,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const reached = opens ? await entryOf(workspaceId, origin) : await entryOfRow({ threadId, workspaceId }, origin);
       if (reached === undefined) throw new Error(`no thread ${opened.thread ?? resume} on this workspace`);
       const entry = reached;
+      if (found.unstamped) stampLegacy(workspaceId, threadId);
       // A start that names no agent runs the one the last thread on this project used, so the command line, the
       // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
       // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is

@@ -373,13 +373,25 @@ describe("a host that listens beyond this computer", () => {
     const made = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: "from a laptop" }) });
     expect(made.status).toBe(200);
     expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["from a laptop"]);
-    // The door itself, read for a route whose op is outside the list: the socket's own sentence, and nothing for
-    // the person or for an op on the list, so a route added later is covered by naming its op and nothing more.
-    expect(routeRefusal("workspaces.exec", "paired")).toBe(deviceHeldRefusal("workspaces.exec"));
-    expect(routeRefusal("sessions.start", "paired")).toBe(deviceHeldRefusal("sessions.start"));
-    expect(routeRefusal("status.list", "paired")).toBeUndefined();
-    expect(routeRefusal("workspaces.exec", undefined)).toBeUndefined();
-    expect(routeRefusal("workspaces.exec", { origin: "relayed", by: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } })).toBeUndefined();
+    // The door itself, read by route: nothing for a route whose op is on the list, the socket's own sentence for a
+    // route with no op of its own, and nothing for the person or a thread, so a route added later is held until named.
+    expect(routeRefusal("GET /api/workspaces", "paired")).toBeUndefined();
+    expect(routeRefusal("POST /api/workspaces", "paired")).toBeUndefined();
+    expect(routeRefusal("GET /api/nothing-here", "paired")).toBe(deviceHeldRefusal("GET /api/nothing-here"));
+    expect(routeRefusal("GET /api/nothing-here", undefined)).toBeUndefined();
+    expect(routeRefusal("GET /api/nothing-here", { origin: "relayed", by: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } })).toBeUndefined();
+  });
+
+  it("a JSON route with no op of its own is shut to a paired device, so a route added later is held until it names one", async () => {
+    const { handle: h } = await up("0.0.0.0");
+    const code = await pairCode(h.wsPort, h.authToken);
+    const { deviceToken } = await redeem(h.port, code);
+    const asDevice = await fetch(`http://127.0.0.1:${h.port}/api/nothing-here`, { headers: { authorization: `Bearer ${deviceToken!}` } });
+    expect(asDevice.status).toBe(401);
+    expect(await asDevice.json()).toEqual({ error: deviceHeldRefusal("GET /api/nothing-here") });
+    // The person reads the miss the route always was.
+    const asOwner = await fetch(`http://127.0.0.1:${h.port}/api/nothing-here`, { headers: { authorization: `Bearer ${h.authToken}` } });
+    expect(asOwner.status).toBe(404);
   });
 
   it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {

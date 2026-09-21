@@ -243,7 +243,7 @@ wsp new "pricing page"                            # one project: the work is the
 wsp new spoo-landing "pricing page"               # more than one: name which project the work is on
 ```
 
-A folder here is a project only when it is the top of a git repo, since a workspace of it starts on a branch; a repo's url needs `--on <computer>`, since this computer works a folder of yours and never clones. One source on one computer is one project, so recording it twice is refused naming the one there is. `wsp new` then makes the workspace: on this computer that is a copy of the folder beside it, and on every other computer a copy of that computer's image with the repo cloned into it at `/root/<project>`.
+A folder here is a project only when it is the top of a git repo, since a workspace of it starts on a branch; a repo's url needs `--on <computer>`, since this computer copies a folder of yours and never clones. One source on one computer is one project, so recording it twice is refused naming the one there is. `wsp new` then makes the workspace: on this computer that is a copy of the folder beside it, and on every other computer a copy of that computer's image with the repo cloned into it at `/root/<project>`.
 
 ### export
 

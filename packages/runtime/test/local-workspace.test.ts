@@ -669,6 +669,9 @@ describe("local workspace", () => {
         );
       }
       held.push(["daemon.open", { placeId: "pl_box" }], ["sessions.answer", { sessionId: "s_none", askId: "a1", optionId: "yes" }], ["sessions.access", { sessionId: "s_none", permissionMode: "bypassPermissions" }]);
+      // The door is read before the frame's shape is, so a held op with a frame the schema would refuse reads the
+      // held sentence and not the names of the fields it lacks.
+      held.push(["sessions.start", { prompt: "hi" }]);
       const answered: string[] = [];
       for (const [op, frame] of held) {
         const reply = await paired.request(op, frame);
@@ -688,6 +691,32 @@ describe("local workspace", () => {
       // The rule left the runtime for the door: a start asked of the runtime itself under the paired word runs, which
       // is the road a line registered by an older host takes and the one the delivery below reads for itself.
       expect((await rt.sessions.start(mac.id, { prompt: "hi" }, "paired").then(h => h.finished)).status).toBe("completed");
+      here.close();
+    } finally {
+      await srv.close();
+      await rt.close();
+    }
+  });
+
+  it("a computer the person paired is refused a thread's rename on a workspace here, since a rename runs a shell on the machine and writes the person's agent session file", async () => {
+    const rt = runtime();
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const thread = await rt.sessions.start(mac.id, { prompt: "hi" });
+      await thread.finished;
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const code = (await here.request("pair.issue"))["code"] as string;
+      const spending = await WsClient.connect(srv.port);
+      const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
+      spending.close();
+      const paired = await WsClient.connect(srv.port, { token: deviceToken });
+      expect((await paired.request("sessions.rename", { sessionId: thread.id, title: "renamed" }))["error"]).toBe(deviceHeldRefusal("sessions.rename"));
+      expect((await rt.sessions.list(mac.id)).every(row => row.titleSource !== "person")).toBe(true);
+      // The workspace's own rename writes a record of wsp's and nothing else, so it stays that computer's to ask.
+      const renamed = await paired.request("workspaces.rename", { workspaceId: mac.id, name: "renamed" });
+      expect(renamed.ok, String(renamed["error"])).toBe(true);
+      paired.close();
       here.close();
     } finally {
       await srv.close();
