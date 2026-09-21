@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessCatalog, ProjectView, WorkspaceView } from "@wsp/protocol";
+import type { HarnessCatalog, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../ui/menu", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -93,6 +93,20 @@ const view: ChatThreadView = {
 };
 const thread = { view, hydrated: true, busy: false, sending: false, fresh: true, thread: undefined, threadKey: WS, named: null } as unknown as ChatThreadHandle;
 
+/** A thread with a turn behind it, as the person meets it when they open one from the sidebar. */
+const ran = (threadKey: string, model: string): ChatThreadHandle =>
+  ({
+    view: { ...view, entries: [{ id: "e1" } as unknown as ChatThreadView["entries"][number]], model },
+    hydrated: true,
+    busy: false,
+    sending: false,
+    fresh: false,
+    resume: "sess",
+    thread: threadKey,
+    threadKey,
+    named: null,
+  }) as unknown as ChatThreadHandle;
+
 const PROJECT = { id: "pr_1", name: "the-project", path: "/root", computer: "default" };
 
 const WORKSPACE: WorkspaceView = {
@@ -131,20 +145,26 @@ const CLAUDE: HarnessCatalog = {
   images: true,
 };
 
-const CODEX: HarnessCatalog = { ...CLAUDE, harness: "codex", label: "Codex", models: [{ value: "gpt-6-astra", label: "GPT-6 Astra", isDefault: true }] };
+const CODEX: HarnessCatalog = {
+  ...CLAUDE,
+  harness: "codex",
+  label: "Codex",
+  models: [{ value: "gpt-6-astra", label: "GPT-6 Astra", isDefault: true }],
+  permissionModes: [{ value: "read-only", label: "Read only", description: "Reads only" }, { value: "danger-full-access", label: "Full access", description: "Runs every tool without asking", isDefault: true }],
+};
 
-function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectView } = {}) {
+function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectView; sessions?: SessionView[]; thread?: ChatThreadHandle } = {}) {
   const catalogs = opts.catalogs ?? [CLAUDE];
   useStore.setState({
     conn: "closed",
     workspaces: [WORKSPACE],
     statuses: {},
-    sessions: {},
+    sessions: opts.sessions === undefined ? {} : { [WS]: opts.sessions },
     projects: opts.project === undefined ? [] : [opts.project],
     harnesses: catalogs,
     harnessesByWorkspace: { [WS]: catalogs },
   });
-  return render(<ComposerOptionPickers workspaceId={WS} thread={thread} onPickAccess={() => {}} onOtherFolder={() => {}} />);
+  return render(<ComposerOptionPickers workspaceId={WS} thread={opts.thread ?? thread} onPickAccess={() => {}} onOtherFolder={() => {}} />);
 }
 
 const defaults = () => document.querySelector<HTMLElement>('[data-composer-picker="defaults"]')!;
@@ -173,6 +193,26 @@ describe("the composer's one defaults button", () => {
     const checked = within(menu).getAllByRole("menuitemradio", { checked: true }).map(el => el.getAttribute("data-composer-option"));
     expect(checked).toEqual(["high", "1m", "bypassPermissions"]);
     expect(within(menu).getAllByText("default").length).toBe(3);
+  });
+});
+
+describe("the agent a thread that has run keeps", () => {
+  const onCodex = { id: "sC", workspaceId: WS, harness: "codex", status: "completed", model: "gpt-6-astra", effort: "high", permissionMode: "read-only", threadId: "t1" } as SessionView;
+  const onClaude = { id: "sK", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions", threadId: "t9" } as SessionView;
+
+  it("is its own rows', while a thread running beside it is the workspace's newest turn", () => {
+    // What the owner saw: a read-only Codex thread whose row of pickers read Claude Code at bypass, because a
+    // Claude thread in the same workspace had run after it.
+    draw({ catalogs: [CLAUDE, CODEX], sessions: [onCodex, onClaude], thread: ran("t1", "gpt-6-astra") });
+    expect(model().dataset["harness"]).toBe("codex");
+    expect(model().textContent).toContain("GPT-6 Astra");
+    expect(defaults().dataset["access"]).toBe("read-only");
+  });
+
+  it("is Claude's on the Claude thread beside it, read off that thread's own row", () => {
+    draw({ catalogs: [CLAUDE, CODEX], sessions: [onCodex, onClaude], thread: ran("t9", "claude-opus-5") });
+    expect(model().dataset["harness"]).toBe("claude");
+    expect(defaults().dataset["access"]).toBe("bypassPermissions");
   });
 });
 

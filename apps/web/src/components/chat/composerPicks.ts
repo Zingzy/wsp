@@ -13,7 +13,10 @@
 // at, so a send that touched no picker keeps that thread where it is: the
 // runtime runs a NEW thread on the model and the effort the catalog marks
 // when neither is picked, the same ones the pickers show; a context window
-// rides as a suffix on the model, so it brings the model along.
+// rides as a suffix on the model, so it brings the model along. Of what
+// comes out here, a send into a thread that has run carries the model and
+// the effort and leaves the agent and the access behind, those being that
+// thread's own off its rows (sendPicks).
 import { contextWindowsFor, effortsFor, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import { THREAD_SCOPED_PICKS, type ComposerOptions, type PickThreads } from "./composerOptionsStore";
 

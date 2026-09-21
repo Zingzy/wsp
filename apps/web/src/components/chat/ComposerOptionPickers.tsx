@@ -13,11 +13,11 @@
 // of about 300 px (measured 2026-09-09); the shell keeps the column wider
 // than that beside the inline panel. The one label a person writes, the
 // project's name, has no bound, so its button alone is capped at the row and
-// cuts the name; the menu row says it whole. A pick rides the next
-// sessions.start and is remembered per workspace, except that the model, its
-// window, the effort and the access, which a thread that has run keeps for
-// itself, apply to the thread they were picked on and to one that has not run;
-// a turn already running keeps its flags and shows them meanwhile. The access pick is
+// cuts the name; the menu row says it whole. A pick is remembered per
+// workspace and rides the next sessions.start, except that a thread that has
+// run keeps the agent and the access its own rows carry: the model, its
+// window and the effort a pick made on such a thread still ride its next
+// send, the agent and the access never do. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
 // here starts at it whichever client or CLI opens it, and where the harness
 // takes a mode change mid-turn it reaches the turn in front of the person too,
@@ -73,7 +73,7 @@ export interface ComposerPicks {
   /** The model the next start runs with, as the pickers show it. */
   readonly model: HarnessModel | null;
   readonly picks: ResolvedPicks | null;
-  /** What rides the next sessions.start. */
+  /** What rides a start that opens a thread; a send into a thread that has run carries the model and the effort of it. */
   readonly startOptions: ComposerStart;
   /** The thread has a turn on this harness, so the rail offers no other. */
   readonly pinned: boolean;
@@ -126,8 +126,12 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
   const picked = useMemo(() => pickedFor(kept, thread.view, pickedOn, thread.threadKey), [kept, pickedOn, thread.threadKey, thread.view]);
   const onThread = useMemo(() => threadPicks(thread.view, rows), [rows, thread.view]);
-  const pinned = latest !== null && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
-  const harness = (pinned ? latest.harness : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
+  // The agent the open thread runs on, off the newest row its own turns wrote. A workspace runs its threads side
+  // by side, so its latest session is as often another thread's: read there, a Codex thread's composer drew
+  // Claude Code's models, effort and access, and its send would have run one.
+  const own = rows.at(-1)?.harness;
+  const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
+  const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);

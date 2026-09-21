@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_PREFERENCES, type HarnessCatalog, type SessionView } from "@wsp/protocol";
 import { useStore } from "../../protocol/store";
+import { sendPicks } from "./ChatComposer";
 import { useAccessPick, useComposerPicks } from "./ComposerOptionPickers";
 import { useComposerOptionsStore } from "./composerOptionsStore";
 import type { ChatThreadHandle, ChatThreadView } from "./useChatThread";
@@ -23,6 +24,17 @@ const CLAUDE: HarnessCatalog = {
   steers: true,
   renames: true,
   images: true,
+};
+
+/** The other agent on this workspace, whose lists share none of claude's values: a pick of one is no pick of the other. */
+const CODEX: HarnessCatalog = {
+  ...CLAUDE,
+  harness: "codex",
+  label: "Codex",
+  models: [{ value: "gpt-6-astra", label: "GPT-6 Astra", isDefault: true }],
+  efforts: [{ value: "medium", label: "Medium", isDefault: true }, { value: "high", label: "High" }],
+  contextWindows: [],
+  permissionModes: [{ value: "read-only", label: "Read only" }, { value: "danger-full-access", label: "Full access", isDefault: true }],
 };
 
 const WORKSPACE = "ws_a";
@@ -54,16 +66,19 @@ const seed = (rows: SessionView[]) => useStore.setState({ harnesses: [CLAUDE], h
 
 function Picks({ thread }: { thread: ChatThreadHandle }) {
   const picks = useComposerPicks(WORKSPACE, thread);
-  return <output data-testid="picks">{JSON.stringify({ model: picks.model, start: picks.startOptions, shows: picks.picks })}</output>;
+  return <output data-testid="picks">{JSON.stringify({ harness: picks.harness, model: picks.model, start: picks.startOptions, shows: picks.picks, pinned: picks.pinned })}</output>;
 }
 
-/** What the composer shows on its buttons and what ChatComposer spreads into api.startSession for the send. */
+/** What the composer shows on its buttons, and what it resolved for a send that opens a thread; a send into a
+ * thread that has run carries none of it, which is sendPicks below. */
 const readAll = (model: string | null, threadKey = "t1", running = false) => {
   const view = render(<Picks thread={handle(model, threadKey, running)} />);
   const out = JSON.parse(view.getByTestId("picks").textContent!) as {
+    harness: string;
     model: { value: string; label: string } | null;
     start: Record<string, string>;
     shows: Record<string, string | null>;
+    pinned: boolean;
   };
   view.unmount();
   return out;
@@ -178,6 +193,29 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     pickAccess("bypassPermissions", "t1");
     expect(readAll("claude-fable-5-1").start).toEqual({ model: "claude-fable-5-1", contextWindow: "200k", effort: "high", permissionMode: "bypassPermissions" });
   });
+  it("carries the model and the effort into a thread that has run, and never its agent or its access", () => {
+    act(() => seed([OPENED]));
+    // A thread with no turn behind it is where the agent, the model, the effort and the access are all picked, and
+    // its send carries every one of them.
+    act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "model", "claude-opus-5", "t2"));
+    act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "effort", "low", "t2"));
+    pickAccess("bypassPermissions", "t2");
+    const fresh = readAll(null, "t2");
+    expect(fresh.pinned).toBe(false);
+    expect(fresh.start).toEqual({ model: "claude-opus-5", effort: "low", permissionMode: "bypassPermissions" });
+    expect(sendPicks(fresh.pinned, fresh.start)).toEqual(fresh.start);
+    // An agent picked on the rail belongs to the workspace and not to this thread, which has a turn behind it: the
+    // pickers read the thread's own agent while that pick still stands in what the composer resolved.
+    act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "harness", "codex"));
+    const ran = readAll("claude-fable-5-1");
+    expect(ran.pinned).toBe(true);
+    expect(ran.harness).toBe("claude");
+    expect(ran.start).toEqual({ harness: "codex", model: "claude-fable-5-1", effort: "high", permissionMode: "plan" });
+    // The model and the effort ride, since the agent's own command line takes both per turn and a person changing
+    // the model mid-thread is ordinary. The agent and the access do not: the thread runs on the agent its rows
+    // carry, the runtime refuses a send that names another, and the access verb is the one road to its access.
+    expect(sendPicks(ran.pinned, ran.start)).toEqual({ model: "claude-fable-5-1", effort: "high" });
+  });
   it("a second thread running in this workspace paints neither this thread's pickers nor its send", () => {
     // Two turns running at once in one workspace, which is what a person watching several threads has. The row the
     // pickers stand for is this thread's own, so the newer thread's values stay on the newer thread.
@@ -190,6 +228,20 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     const b = readAll("claude-sonnet-5", "tB", true);
     expect(b.shows).toMatchObject({ model: "claude-sonnet-5", effort: "high", permissionMode: "bypassPermissions" });
   });
+  it("reads the open thread's own agent, not the workspace's newest turn on another thread", () => {
+    // The sighting: a read-only Codex thread with Claude threads running beside it in the same workspace. The
+    // workspace's newest row is Claude's; the thread in front of the person is the Codex one, and its own rows
+    // are what its pickers and its next turn stand on.
+    const onCodex: SessionView = { id: "sC", workspaceId: WORKSPACE, harness: "codex", status: "completed", model: "gpt-6-astra", effort: "high", permissionMode: "read-only", threadId: "t1" };
+    const onClaude: SessionView = { id: "sK", workspaceId: WORKSPACE, harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions", threadId: "t9" };
+    act(() => useStore.setState({ harnesses: [CLAUDE, CODEX], harnessesByWorkspace: { [WORKSPACE]: [CLAUDE, CODEX] }, sessions: { [WORKSPACE]: [onCodex, onClaude] } }));
+    const ran = readAll("gpt-6-astra");
+    expect(ran.harness).toBe("codex");
+    expect(ran.shows).toMatchObject({ model: "gpt-6-astra", effort: "high", permissionMode: "read-only" });
+    // And the Claude thread beside it reads Claude, whichever of the two the person has open.
+    expect(readAll("claude-opus-5", "t9", true).harness).toBe("claude");
+  });
+
   it("a thread's own access stands while this workspace's catalog is still on the way, and no default paints", () => {
     // The host-wide lists are lent to a workspace whose machine has not answered, with no access modes in them,
     // since which mode a thread starts at is that machine's to decide. A thread that has run carries that machine's
