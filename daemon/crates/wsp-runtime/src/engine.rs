@@ -238,14 +238,14 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 /// fence names, since the rules that keep a workspace off the box's metadata and off its neighbours match on that
 /// name. Answers the bridge name the engine is being told to make.
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
-    // The prefix is this computer's own: a name under it is a name a sibling's own network may already hold,
-    // and a workspace taking one would refuse every plain container that sibling starts.
+    // The one shape this computer mints for itself: `default_network` of a workspace, whose id is itself under
+    // the link prefix, so the name a sibling's own default network holds or will hold reads as the prefix twice
+    // over, and a workspace taking one would refuse every plain container that sibling starts. Every other name
+    // under the prefix is the workspace's own to take, and compose names its default network after the project,
+    // which is the workspace's id.
     let asked = word(body.get("Name"));
-    if asked.starts_with(crate::net::LINK_PREFIX) {
-        return Err(format!(
-            "a name beginning {} is this computer's own; a workspace's network takes another, and {asked} is refused",
-            crate::net::LINK_PREFIX
-        ));
+    if asked.starts_with(&default_network(crate::net::LINK_PREFIX)) {
+        return Err(format!("a network named {asked} is one this computer makes for a workspace of its own, so it is refused here"));
     }
     let driver = word(body.get("Driver"));
     if !matches!(driver, "" | "bridge") {
@@ -1704,11 +1704,14 @@ mod tests {
         // Written into the body, since a box whose engine turns it on by default would hand the bridge a range
         // the table that fences a workspace never sees.
         assert_eq!(plain["EnableIPv6"], false);
-        // A name under this computer's own prefix is a name a sibling's network may hold, which would refuse
-        // every plain container that sibling starts.
+        // A name this computer makes for a workspace's own default network is a name a sibling's network holds
+        // or will hold, which would refuse every plain container that sibling starts.
         let taken = made(&mut json!({ "Name": "wsp-wsp-b" })).unwrap_err();
-        assert_eq!(taken, "a name beginning wsp- is this computer's own; a workspace's network takes another, and wsp-wsp-b is refused");
+        assert_eq!(taken, "a network named wsp-wsp-b is one this computer makes for a workspace of its own, so it is refused here");
         assert!(made(&mut json!({ "Name": "wsp" })).is_ok(), "a name that is not under the prefix passes");
+        // The name compose gives its default network, which is the workspace's own id and a prefix short of the
+        // shape above: refusing it is refusing every stack a workspace brings up without naming a project.
+        assert!(made(&mut json!({ "Name": "wsp-b_default" })).is_ok(), "the compose default network of a workspace is refused");
         // A subnet inside the workspaces' range, and one that holds the whole of it.
         for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
             let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();

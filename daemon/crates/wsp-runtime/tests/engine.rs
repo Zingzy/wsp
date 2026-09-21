@@ -99,6 +99,26 @@ fn dechunk(body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// How long a closing answer looks for a request behind it, and how long the cancelling route waits for the
+/// client's half close. Short on purpose: bytes the fence let through arrive with the request they rode behind,
+/// so a look that finds nothing in this moment finds nothing at all.
+const A_MOMENT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The bodiless 499 the engine's server writes where the request's context was cancelled under the handler.
+const CANCELLED: &[u8] = b"HTTP/1.1 499 status code 499\r\nContent-Length: 0\r\n\r\n";
+
+/// One answer, the close, and then a bounded look for a request the fence let through behind the one it judged:
+/// a keep-alive engine would read that as the next request on this connection, so the fake reads it too and the
+/// record carries it. Without the look a leak reaches no case's read. The look sits after the close of this
+/// side's writing, which is what ends the fence's copy back, so no case waits on it.
+async fn answer_then_close(stream: &mut UnixStream, head: &[u8], held: &mut Vec<u8>, record: &Record) {
+    stream.write_all(head).await.unwrap();
+    let _ = stream.shutdown().await;
+    if let Ok(Some(behind)) = tokio::time::timeout(A_MOMENT, read_request(stream, held)).await {
+        record.lock().unwrap().push(behind);
+    }
+}
+
 /// Everything the socket answered, up to the close. Bounded, since a socket this fence leaves open is a socket
 /// a client waits on for ever: a case reading one says so rather than holding the whole suite.
 async fn read_to_close(stream: &mut UnixStream) -> Vec<u8> {
@@ -241,22 +261,23 @@ fn fake_engine(dir: &Path) -> (PathBuf, Record) {
                         }
                         Answered::KeepsAlive(head) => stream.write_all(&head).await.unwrap(),
                         Answered::Closes(head) => {
-                            stream.write_all(&head).await.unwrap();
-                            let _ = stream.shutdown().await;
+                            answer_then_close(&mut stream, &head, &mut held, &record).await;
                             return;
                         }
                         Answered::CancelsOnAHalfClose(head) => {
-                            let mut probe = [0u8; 1024];
-                            let waited = tokio::time::timeout(std::time::Duration::from_millis(200), stream.read(&mut probe)).await;
-                            if let Ok(Ok(0)) = waited {
-                                stream.write_all(b"HTTP/1.1 499 status code 499\r\nContent-Length: 0\r\n\r\n").await.unwrap();
-                            } else {
-                                if let Ok(Ok(n)) = waited {
-                                    held.extend_from_slice(&probe[..n]);
+                            match tokio::time::timeout(A_MOMENT, read_request(&mut stream, &mut held)).await {
+                                // The end of the stream with the handler still running, which is the half close
+                                // the engine's server takes as the client gone.
+                                Ok(None) => {
+                                    stream.write_all(CANCELLED).await.unwrap();
+                                    let _ = stream.shutdown().await;
                                 }
-                                stream.write_all(&head).await.unwrap();
+                                Ok(Some(behind)) => {
+                                    record.lock().unwrap().push(behind);
+                                    answer_then_close(&mut stream, &head, &mut held, &record).await;
+                                }
+                                Err(_) => answer_then_close(&mut stream, &head, &mut held, &record).await,
                             }
-                            let _ = stream.shutdown().await;
                             return;
                         }
                     }
@@ -996,13 +1017,22 @@ async fn a_volume_the_engine_would_not_answer_for_fails_the_create() {
     assert!(w.engine_saw("POST", "/v1.55/containers/create").is_none(), "{:?}", w.reached());
 }
 
-/// A network named under this computer's own prefix is a name a sibling's network may already hold, and taking
-/// it would refuse every plain container that sibling starts.
+/// A network named the way this computer names a workspace's own default network is a name a sibling's network
+/// holds or will hold, and taking it would refuse every plain container that sibling starts. The name compose
+/// derives from the project, which is the workspace's own id, is not that name and passes: a workspace brings a
+/// stack up without naming a project, and its default network is the one it wants.
 #[tokio::test]
-async fn a_network_named_under_this_computers_prefix_is_refused() {
+async fn a_network_named_as_this_computer_names_its_own_is_refused_and_a_projects_default_is_not() {
     let w = world();
     let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-wsp-other" }))).await;
     assert_eq!(status, 403, "{}", World::message(&answered));
-    assert!(World::message(&answered).contains("is this computer's own"), "{}", World::message(&answered));
+    assert!(World::message(&answered).contains("this computer makes for a workspace of its own"), "{}", World::message(&answered));
     assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+    let named = format!("{WORKSPACE}_default");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": &named }))).await;
+    assert_eq!(status, 201, "{}", World::message(&answered));
+    let sent: Value = serde_json::from_str(&w.engine_saw("POST", "/v1.55/networks/create").unwrap().body).unwrap();
+    assert_eq!(sent["Name"], named);
+    assert_eq!(sent["Labels"][LABEL], WORKSPACE);
+    assert!(sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"), "{sent}");
 }

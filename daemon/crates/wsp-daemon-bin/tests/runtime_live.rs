@@ -1937,6 +1937,7 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
     for name in fs::read_dir("/root/.wsp").into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()) {
         assert!(!inside.contains(&name.as_str()), "the daemon's own {name} is readable inside: {out}");
     }
+    assert!(inside.len() >= 2, "the reads inside answered fewer lines than the case asked of them: {out}");
     assert_eq!(inside[inside.len() - 2..], ["absent", "absent"], "the box's own engine folders are inside: {out}");
     // The resolvers a workspace reads: a regular file the boot wrote, never the box's link into a /run the
     // workspace does not share, and never the box's own stub address, which inside this network namespace is
@@ -3319,7 +3320,10 @@ async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
     for port in net::gateway_drops(numbers::DEFAULT_PORT) {
         assert!(ruleset.contains(&format!("gateway port {port}")), "no drop for {port}:\n{ruleset}");
     }
-    assert!(ruleset.contains(&network.link), "the workspace's own link is in no rule:\n{ruleset}");
+    // Every rule of ours matches the workspace interfaces by the prefix they all carry rather than one link by
+    // its name, so what the ruleset names is that prefix and this workspace's own link is one of what it takes.
+    assert!(ruleset.contains(&format!("iifname \"{}", net::LINK_PREFIX)), "no rule matches the workspace links:\n{ruleset}");
+    assert!(network.link.starts_with(net::LINK_PREFIX), "the link {} sits outside the prefix the rules match", network.link);
     w.close().await;
 }
 

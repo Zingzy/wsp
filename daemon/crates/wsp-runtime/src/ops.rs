@@ -427,6 +427,7 @@ impl Ops {
             }
         };
         let watched = id.to_owned();
+        let died = init.clone();
         let task = tokio::spawn(async move {
             if dying.readable().await.is_err() {
                 return;
@@ -436,8 +437,10 @@ impl Ops {
             // itself in the middle of one would leave the workspace half torn down.
             ops.deaths.lock().unwrap_or_else(|held| held.into_inner()).remove(&watched);
             let Ok(Some(record)) = bundle::read_record(&ops.layout.record(&watched)) else { return };
-            // A record naming a live init is a workspace a wake booted again since, and not the one that died.
-            if runtime::alive(&record.init) {
+            // A record naming another init is a workspace a wake booted again since, and not the one that died.
+            // Read as the init this watch was armed on rather than as a pid still in /proc: a process that just
+            // died is a zombie until its parent reaps it, and a zombie reads alive.
+            if record.init != died {
                 return;
             }
             let _ = ops.stop(&record).await;
@@ -1864,6 +1867,38 @@ mod tests {
         let heard = Arc::new(Heard::default());
         ops.watch(Arc::clone(&heard) as Arc<dyn Watches>).unwrap();
         assert_eq!(heard.said(), [format!("booted wsp-awake {}", layout.guest_socket("wsp-awake").display())]);
+    }
+
+    /// The death of an init is heard as the death of the workspace it runs, even where the kernel still holds the
+    /// pid: a process that was killed is a zombie until its parent reaps it, and a watch that read that as a
+    /// workspace still running left the door standing inside a workspace with nothing behind it. What the rest of
+    /// the stop road does without the kernel is the live case's; the door going is what this one reads.
+    #[tokio::test]
+    async fn an_init_killed_and_not_yet_reaped_is_the_death_its_watch_was_armed_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Arc::new(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).unwrap());
+        let layout = Layout::new(dir.path());
+        let id = "wsp-watched";
+        // A child of this case, so nobody else reaps it: after the kill it stays a zombie until the line at the
+        // end of this case, which is the state the watch has to read as a death.
+        let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let mut record = awake(id, None);
+        record.init = runtime::identity_of(child.id() as i32).unwrap();
+        fs::create_dir_all(layout.wsp_home(id)).unwrap();
+        bundle::write_json(&layout.record(id), &record).unwrap();
+        let door = layout.guest_socket(id);
+        fs::write(&door, b"").unwrap();
+
+        ops.watch(Arc::new(Heard::default()) as Arc<dyn Watches>).unwrap();
+        assert!(ops.deaths.lock().unwrap().contains_key(id), "the running workspace's init is watched by nothing");
+        // SAFETY: kill takes two plain integers and touches no memory of ours.
+        assert_eq!(unsafe { libc::kill(record.init.pid, libc::SIGKILL) }, 0, "the child could not be killed");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while door.exists() {
+            assert!(std::time::Instant::now() < deadline, "the door stands on a workspace whose init is gone");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        child.wait().unwrap();
     }
 
     /// A workspace record whose init is a process of the case's own, running, with the door's socket file in the

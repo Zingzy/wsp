@@ -52,14 +52,12 @@
 //! jump at the head of FORWARD: on forward `iifname "wsp-*" accept` and `oifname "wsp-*" accept`, and on input two,
 //! `iifname "wsp-*" ip daddr 10.65.0.0/16 accept` for the way to the box at `host.wsp.internal`, which a workspace
 //! reaches by design, and `iifname "wsp-*" ct state established,related accept` for the answers a container's
-//! published port sends back, whose address is the box's loopback and not the range. The ports a workspace holds
-//! no business with are closed ahead of both in our own input chain, whose lower priority puts its drops before
-//! any of this and ends the packet there whatever a foreign chain accepts. The conntrack accept is written as the
-//! match iptables itself writes rather than the kernel's own expression, since iptables refuses to render a chain
-//! holding one of those and the box's own tooling reads these chains; a kernel that will not take it gets the
-//! native expression instead. A chain whose marked rules are not the accepts this daemon writes has them replaced
-//! in the same batch, so a box that ran an earlier daemon does not keep the old shape until its last workspace
-//! stops. They go with the last workspace.
+//! published port sends back. The ports a workspace holds no business with are closed ahead of both in our own
+//! input chain, whose lower priority puts its drops before any of this and ends the packet there whatever a
+//! foreign chain accepts. The conntrack accept is written as the match iptables itself writes rather than the
+//! kernel's own expression, since iptables refuses to render a chain holding one of those and the box's own
+//! tooling reads these chains; a kernel that will not take it gets the native expression instead. They go with
+//! the last workspace.
 
 use std::collections::BTreeMap;
 use std::fmt;
