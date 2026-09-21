@@ -211,7 +211,8 @@ pub fn default_network(workspace: &str) -> String {
 }
 
 /// What compose adds to a project's name for the network a stack that named none of its own runs on. The project
-/// is the workspace's own id, so `<id>_default` is the one network a workspace's stack derives for itself.
+/// is `compose_project` of the workspace's id, so that word and this suffix are the one network a workspace's
+/// own stack derives for itself.
 const COMPOSE_DEFAULT: &str = "_default";
 
 /// The name the box's link for one of a workspace's networks wears: under the prefix every rule of the
