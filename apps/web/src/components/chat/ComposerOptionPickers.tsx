@@ -19,9 +19,11 @@
 // window and the effort a pick made on such a thread still ride its next
 // send, the agent and the access never do. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
-// here starts at it whichever client or CLI opens it, and where the harness
-// takes a mode change mid-turn it reaches the turn in front of the person too,
-// the prompt it is stopped on included; the menu says which of the two a pick
+// here starts at it whichever client or CLI opens it, and on a thread that has
+// run it goes through the access verb, the one road that changes a thread's
+// access, so that thread's next turn runs at it; where the harness takes a
+// mode change mid-turn it reaches the turn in front of the person too, the
+// prompt it is stopped on included, and the menu says which of the two a pick
 // will do while a turn runs, over the list, before the pick is made.
 // The project pick exists only on a workspace holding projects and only while
 // the thread is still to be opened: it reads the runtime's default folder rule
@@ -126,10 +128,9 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
   const picked = useMemo(() => pickedFor(kept, thread.view, pickedOn, thread.threadKey), [kept, pickedOn, thread.threadKey, thread.view]);
   const onThread = useMemo(() => threadPicks(thread.view, rows), [rows, thread.view]);
-  // The agent the open thread runs on, off the newest row its own turns wrote. A workspace runs its threads side
-  // by side, so its latest session is as often another thread's: read there, a Codex thread's composer drew
-  // Claude Code's models, effort and access, and its send would have run one.
-  const own = rows.at(-1)?.harness;
+  // The agent the open thread runs on, off its own record and then its own rows: a workspace's latest session is
+  // as often another thread's.
+  const own = thread.view.agent ?? rows.at(-1)?.harness;
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
@@ -273,20 +274,23 @@ function DefaultsPicker({
   );
 }
 
-/** One turn of this workspace's, as a pick made while it runs needs it: the runtime's id for the session, which is
- * what sessions.access takes, and the turn the note belongs to. */
-export interface RunningTurn {
+/** The thread an access pick is put to through the access verb, once it has run: the runtime's id for one of its
+ * rows, which is what sessions.access takes, and the turn running now where one is, which the refusal note belongs
+ * to; null on a thread that has not run, whose pick only decides what it opens at. */
+export interface AccessTarget {
   readonly sessionId: string;
-  readonly turnId: string;
+  readonly turnId: string | null;
 }
 
 /** The one road an access pick takes. It goes onto the host's record, where the next thread in this workspace reads
- * it whoever opens it, and into the turn in front of the person when one runs, where the harness's own row says it
- * takes a mode change mid-turn (`movesAccess`, which is what the menu says over its list before the pick). `line`
- * is the refusal that stands under the box when a row saying so came back refused all the same: nothing is said for
- * a harness whose row already said the pick waits, since the person read that before they picked, and nothing for a
- * turn that simply ended. It stands only while the turn it is about is still the running one. */
-export function useAccessPick(workspaceId: string, running: RunningTurn | null, threadKey: string, movesRunningTurn: boolean): { pick: (mode: string) => void; line: string | null } {
+ * it whoever opens it, and, on a thread that has run, through the access verb, the one road that changes a thread's
+ * access: the thread's next turn runs at it, and the turn in front of the person moves too where the harness's own
+ * row says it takes a mode change mid-turn (`movesAccess`, which is what the menu says over its list before the
+ * pick). `line` is the refusal that stands under the box when a row saying so came back refused all the same:
+ * nothing is said for a harness whose row already said the pick waits, since the person read that before they
+ * picked, and nothing for a turn that simply ended. It stands only while the turn it is about is still the running
+ * one. */
+export function useAccessPick(workspaceId: string, target: AccessTarget | null, threadKey: string, movesRunningTurn: boolean): { pick: (mode: string) => void; line: string | null } {
   const api = useStore(s => s.api);
   const setPreferences = useStore(s => s.setPreferences);
   const stamp = useComposerOptionsStore(s => s.pick);
@@ -295,17 +299,18 @@ export function useAccessPick(workspaceId: string, running: RunningTurn | null, 
     (mode: string) => {
       setNote(null);
       void setPreferences({ access: { [workspaceId]: mode } });
-      // The mode itself lives on the host's record, which holds one per workspace; the thread it was picked on is
-      // kept in the browser beside the other picks, so it paints this thread rather than every thread here.
+      // The thread it was picked on is kept in the browser beside the other picks, so the button paints this
+      // thread's pick before the thread's row comes round with it, and not every thread here.
       stamp(workspaceId, "permissionMode", mode, threadKey);
-      if (running === null || !movesRunningTurn || api?.setSessionAccess === undefined) return;
-      void api.setSessionAccess(running.sessionId, mode).then(outcome => {
-        if (outcome === "unsupported") setNote({ turnId: running.turnId });
+      if (target === null || api?.setSessionAccess === undefined) return;
+      const turnId = target.turnId;
+      void api.setSessionAccess(target.sessionId, mode).then(outcome => {
+        if (outcome === "unsupported" && movesRunningTurn && turnId !== null) setNote({ turnId });
       }, () => {});
     },
-    [api, movesRunningTurn, running, setPreferences, stamp, threadKey, workspaceId],
+    [api, movesRunningTurn, setPreferences, stamp, target, threadKey, workspaceId],
   );
-  return { pick, line: note !== null && note.turnId === running?.turnId ? ACCESS_REFUSED_LINE : null };
+  return { pick, line: note !== null && note.turnId === target?.turnId ? ACCESS_REFUSED_LINE : null };
 }
 
 /** The word other folder wears in the project menu and, once one is chosen, the folder's own name on the trigger. */

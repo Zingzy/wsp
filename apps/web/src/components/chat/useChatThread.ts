@@ -37,6 +37,11 @@ export interface ChatThreadView {
   /** What the last session.start announced about the CLI; the composer's catalog reads it. */
   readonly harness: SessionHarness | null;
   readonly model: string | null;
+  /** The thread's own record off its transcript: the agent it runs on and the access its last turn started at,
+   * which the composer reads before the thread's rows, since the rows are capped and the transcript keeps a
+   * thread longer. Null before a start carried them. */
+  readonly agent: string | null;
+  readonly permissionMode: string | null;
 }
 
 export interface ChatThreadHandle {
@@ -503,6 +508,8 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     shellCwd,
     harness: model.harness,
     model: model.model,
+    agent: model.agent,
+    permissionMode: model.permissionMode,
   };
 }
 

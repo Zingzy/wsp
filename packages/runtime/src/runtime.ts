@@ -209,7 +209,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1429,10 +1429,11 @@ export interface Runtime {
      * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
      * answer rather than throw, since two clients may reach one prompt. */
     answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: Caller): Promise<SessionAnswerResult>;
-    /** Puts the session's running turn into another access mode, from its next tool call on: the person picked while
-     * a turn was under way, and where the harness takes such a change the turn in front of them follows it. The row
-     * then carries the new mode, so the thread's next turn resumes at it. unsupported is a harness that takes none
-     * mid-turn, and the pick reaches the agent with the person's next message instead. */
+    /** Puts the session's thread at another access mode: the one road that changes a thread's access, since a send
+     * into a thread names none. The thread's record takes the mode and its next turn runs at it; where a turn is
+     * running and its harness takes such a change, the turn in front of the person follows it from its next tool
+     * call on. unsupported is a running turn that takes none mid-turn and keeps its mode, the next turn taking the
+     * pick. The session named is any row of the thread; a thread between turns answers set. */
     access(sessionId: string, permissionMode: string, origin?: Caller): Promise<SessionAccessResult>;
     /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
@@ -1692,6 +1693,15 @@ function readRoad(raw: unknown): WorkspaceOrigin | undefined {
   return read.success ? read.data : undefined;
 }
 
+/** A thread's own record: the agent it runs on and the access it is at, written at its first turn and moved by the
+ * access verb alone. The rows are capped at SESSION_INDEX_CAP per workspace and the transcript at TRANSCRIPT_CAP
+ * events, while a thread keeps its agent and its access for its whole life, so both are read here first and off
+ * the rows only for a thread from before the record existed. */
+interface ThreadRecord {
+  harness: string;
+  permissionMode?: string;
+}
+
 interface SessionIndexRecord {
   workspaceId: string;
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
@@ -1699,6 +1709,8 @@ interface SessionIndexRecord {
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
    * for it. All three are written for a running row alone. */
   sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
+  /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
+  threads?: Record<string, ThreadRecord>;
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -2858,6 +2870,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     else copyRows.set(e.place, e.stage === "failed" ? copyStoppedLine(e.detail) : copyBuildingLine(e.stage));
   });
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
+  /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
+  const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
@@ -2942,7 +2956,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // that re-opens the turn has to know which one to take away when it ends.
         ...(s.view.status === "running" && s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
       }));
-    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
+    const threads: Record<string, ThreadRecord> = {};
+    for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
+    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows, threads };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
       .then(() => store.put(SESSIONS, workspaceId, snapshot))
       .catch(() => {});
@@ -2976,21 +2992,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * changes a value, so it runs at most once per transcript. A new thread leaves the old events as they were.
    * The index is asked first: it keeps a thread whose start fell off the transcript cap. */
   const threadOf = (workspaceId: string, resume: string | undefined): string => {
-    const events = transcripts.get(workspaceId) ?? [];
     if (resume !== undefined) {
-      for (const s of sessions.values()) {
-        if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.threadId !== undefined) return s.view.threadId;
-      }
-      for (let i = events.length - 1; i >= 0; i--) {
-        const e = events[i]!;
-        if (e.type !== "session.start" || e.sessionId !== resume) continue;
-        if (e.threadId !== undefined) return e.threadId;
+      const holding = threadHolding(workspaceId, resume);
+      if (holding !== undefined) return holding;
+      const events = transcripts.get(workspaceId) ?? [];
+      if (events.some(e => e.type === "session.start" && e.sessionId === resume)) {
         const id = randomUUID();
         for (const legacy of events) legacy.threadId ??= id;
         return id;
       }
     }
     return randomUUID();
+  };
+
+  /** The thread a harness session is a turn of, off the rows and then the start events; undefined for a session no
+   * thread here ran and for one from before threads existed. Reads only, so a refusal built on it changes nothing. */
+  const threadHolding = (workspaceId: string, resume: string): string | undefined => {
+    for (const s of sessions.values()) {
+      if (s.view.workspaceId === workspaceId && s.view.claudeSessionId === resume && s.view.threadId !== undefined) return s.view.threadId;
+    }
+    const events = transcripts.get(workspaceId) ?? [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "session.start" && e.sessionId === resume && e.threadId !== undefined) return e.threadId;
+    }
+    return undefined;
   };
 
   /** Whether the thread's last turn ended with no exit code and no result: the runtime or its transport ended the
@@ -3027,11 +3053,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * else opens nothing. */
   const folderOf = (workspaceId: string, resume: string): string | undefined => resumedFact(workspaceId, resume, "cwd");
 
-  /** The access a resumed thread's turns run at: what its latest turn recorded. A send that names none keeps the
-   * thread's own rather than falling back to the adapter's unnamed default, which is bypass on every harness here;
-   * without this a second turn on a thread the person opened at its harness's prompts would quietly skip them. */
-  const accessOf = (workspaceId: string, resume: string | undefined): string | undefined =>
-    resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode");
+  /** The access a thread's turns run at: its own record, then what its latest turn recorded for a thread from
+   * before the record. A send that names none keeps the thread's own rather than falling back to the adapter's
+   * unnamed default, which is bypass on every harness here; without this a second turn on a thread the person
+   * opened at its harness's prompts would quietly skip them. */
+  const accessOf = (workspaceId: string, threadId: string, resume: string | undefined): string | undefined =>
+    threadRecords.get(threadId)?.permissionMode ?? (resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode"));
 
   /** The access a thread a send opens runs at when nothing named one: the last access picked in that workspace,
    * kept on the preferences record rather than in one browser, so the next thread starts where the person left the
@@ -4138,6 +4165,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     transcripts.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
+    for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
     cancelFlush(id);
     await transcriptFlushes.get(id);
     transcriptFlushes.delete(id);
@@ -4591,6 +4619,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
+        for (const [threadId, held] of Object.entries(index.threads ?? {})) {
+          if (typeof held?.harness !== "string") continue;
+          threadRecords.set(threadId, { workspaceId: index.workspaceId, harness: held.harness, ...(typeof held.permissionMode === "string" ? { permissionMode: held.permissionMode } : {}) });
+        }
         if (!Array.isArray(index.sessions)) {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
@@ -6215,6 +6247,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
             ...(view.permissionMode !== undefined ? { permissionMode: view.permissionMode } : {}),
+            agent: view.harness,
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
             ...(event.harness !== undefined ? { harness: event.harness } : {}),
           });
@@ -6354,13 +6387,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (resumed.costUsd !== undefined) view.costUsd = resumed.costUsd;
     }
 
-    /** A pick made while this turn runs, taken by the harness: the row carries the mode the turn is now at, so the
-     * thread's next turn resumes at it rather than at the one the start named. */
+    /** A pick made while this turn runs, taken by the harness: the row carries the mode the turn is now at. */
     const setAccess = async (mode: string): Promise<"set" | "refused" | "gone"> => {
       const outcome = await started.setAccess!(mode);
-      if (outcome !== "set") return outcome;
-      view.permissionMode = mode;
-      void persistSessions(workspaceId);
+      if (outcome === "set") view.permissionMode = mode;
       return outcome;
     };
 
@@ -6538,24 +6568,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       const named = opened.thread === undefined ? undefined : latestOn(opened.thread);
       if (opened.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${opened.thread} on this workspace`);
-      // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
-      let resume = opened.resume ?? named?.claudeSessionId;
+      // Read again where the thread becomes this send's to run: the id it must resume may not exist yet. A send that
+      // names a thread resumes that thread's own session, so a session named beside the thread is checked against
+      // it below, once the caller is known to drive the thread, and never taken in its place.
+      let resume = opened.thread !== undefined ? named?.claudeSessionId : opened.resume;
       const threadId = named?.threadId ?? threadOf(workspaceId, resume);
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
-      // two is what a thread's own token is capped on. Read before the machine is asked for anything.
-      const opens = rowsOn(threadId).length === 0;
+      // two is what a thread's own token is capped on. Read before the machine is asked for anything. The thread's
+      // record answers before its rows, since the rows are capped and the record is not.
+      const opens = !threadRecords.has(threadId) && rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in rather than on how it was
       // named, so a harness session id given as resume reaches no more than the thread id would. The sentence says
       // back what the caller said and never the thread behind it, since a refusal that named it would hand a
       // guest the thread id of every session id it tried.
       if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${opened.thread ?? resume} on this workspace`);
-      // The rows a thread already carries decide two of this send's picks, and they are read after the reading
-      // above, so a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn
-      // runs on the harness its rows ran on, and a request naming another is refused rather than resuming that
-      // thread's harness session under an agent that never wrote it. Its access is its own the same way, so a mode
-      // named on a send is dropped and sessions.access is the one road that changes what a thread may touch; the
-      // access the thread runs at is then read off its rows below, as a send that named none has always read it.
-      const carried = opens ? undefined : latestOn(threadId);
+      if (opened.thread !== undefined && opened.resume !== undefined && threadHolding(workspaceId, opened.resume) !== threadId) throw new Error(resumeNotOfThreadLine(opened.resume, opened.thread));
+      // What a thread already carries decides two of this send's picks, and it is read after the reading above, so
+      // a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn runs on
+      // the harness its record names, and a request naming another is refused rather than resuming that thread's
+      // harness session under an agent that never wrote it. Its access is its own the same way, so a mode named on
+      // a send is dropped and sessions.access is the one road that changes what a thread may touch; the access the
+      // thread runs at is then read off its record below, as a send that named none has always read it.
+      const carried: Pick<ThreadRecord, "harness"> | undefined = opens ? undefined : (threadRecords.get(threadId) ?? latestOn(threadId));
       if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
       // A start that names no agent runs the one the last thread on this project used, so the command line, the
       // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
@@ -6565,6 +6599,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const remembered = heldProject.lastAgent !== undefined && adapters[heldProject.lastAgent] !== undefined ? heldProject.lastAgent : undefined;
       const o = { ...opened, ...(carried !== undefined ? { harness: carried.harness } : opened.harness === undefined && remembered !== undefined ? { harness: remembered } : {}) };
       if (carried !== undefined) delete o.permissionMode;
+      if (opened.thread !== undefined) delete o.resume;
       spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
@@ -6725,7 +6760,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // startPicks, in the same words.
         const picked = o.permissionMode === undefined && catalog !== undefined ? await pickedAccess(workspaceId) : undefined;
         const picksFor = (session: string | undefined): StartPicks => {
-          const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, session) ?? picked));
+          const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session) ?? picked));
           return startPicks(catalog, { ...o, permissionMode: access }, session === undefined);
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
@@ -6807,6 +6842,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             }),
         });
         handedOver = true;
+        // The thread's record, written at its first turn from what that turn runs at, once the turn is under way so a
+        // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
+        // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
+        // announces itself and at its end.
+        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
         await rememberAgent(heldProject, harness).catch((e: unknown) => console.warn(`the agent for ${heldProject.name} was not remembered: ${e instanceof Error ? e.message : String(e)}`));
@@ -6925,18 +6965,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(s.view.workspaceId, origin);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
-      if (s.view.status !== "running" || s.handle?.setAccess === undefined) {
-        return { outcome: s.view.status === "running" && s.handle !== undefined ? "unsupported" : "not-running" };
-      }
       const { harness, adapter } = adapterFor(entry, s.view.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
       if (table !== undefined) startPicks(await catalogOn(table, entry, adapter), { permissionMode }, false);
-      const outcome = await s.handle.setAccess(permissionMode);
+      // The pick lands on the thread's record whatever the turn running now does with it: this is the one road that
+      // changes a thread's access, and the thread's next turn runs at it. The thread's latest row says the same, as
+      // every client folds the access off that row; a running turn's row moves only where the harness took it.
+      const threadId = s.view.threadId;
+      const running = threadId === undefined ? (s.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : runningOn(threadId);
+      const latest = threadId === undefined ? s.view : (latestOn(threadId) ?? s.view);
+      const landed = (): void => {
+        if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: s.view.workspaceId, harness: s.view.harness }), permissionMode });
+        if (latest.status !== "running") latest.permissionMode = permissionMode;
+        void persistSessions(s.view.workspaceId);
+      };
+      if (latest.status !== "running") {
+        landed();
+        return { outcome: "set" };
+      }
       // A CLI that refused a mode its own list carries is one that will not take it on a turn already under way and
-      // whose adapter had no way to stand in for it: the pick stands and the person's next message carries it, which
-      // is what unsupported tells the composer to say.
+      // whose adapter had no way to stand in for it, as is one that takes none at all: the turn keeps its mode and
+      // the pick stands for the next turn, which is what unsupported tells the composer to say. A turn whose process
+      // this host does not hold, still launching or re-opened without one, is one the pick cannot reach.
+      const outcome = running === undefined ? "gone" : running.handle.setAccess === undefined ? "refused" : await running.handle.setAccess(permissionMode);
+      landed();
       return { outcome: outcome === "set" ? "set" : outcome === "refused" ? "unsupported" : "not-running" };
     },
 
@@ -6974,11 +7028,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async forget(threadId, origin) {
       await ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
-      const workspaceId = held[0]?.[1].view.workspaceId;
+      const workspaceId = held[0]?.[1].view.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       await entryOf(workspaceId, origin);
       if (threadRan(held.map(([, s]) => s.view))) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       for (const [id] of held) sessions.delete(id);
+      threadRecords.delete(threadId);
       // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its
       // rows would go to a copy nothing reads.
       const events = transcripts.get(workspaceId) ?? [];

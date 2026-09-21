@@ -61,7 +61,7 @@ import { ImageIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
@@ -76,7 +76,7 @@ import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
-import { ComposerOptionPickers, useAccessPick, useComposerPicks } from "./ComposerOptionPickers";
+import { ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -252,12 +252,16 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     return row?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
   // The same row sessions.interrupt is keyed by: a pick made while this turn runs goes to the runtime by that id.
-  const pickTarget = useMemo(
-    () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
-    [runningTurn, stopTarget],
-  );
-  // The harness's own row decides whether the pick is put to the running turn at all, and it is the same row the
-  // menu reads to say so before the pick.
+  // Between turns, a thread that has run is named by its latest row, so the pick still goes through the access
+  // verb and the thread's next turn runs at it; a thread that has not run names nothing, its pick opens it.
+  const rows = useThreadSessions(workspaceId, thread.threadKey);
+  const pickTarget = useMemo<AccessTarget | null>(() => {
+    if (stopTarget !== null && runningTurn !== null) return { sessionId: stopTarget, turnId: runningTurn.turnId };
+    const latest = rows.at(-1);
+    return pinned && latest !== undefined ? { sessionId: latest.id, turnId: null } : null;
+  }, [pinned, rows, runningTurn, stopTarget]);
+  // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
+  // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;

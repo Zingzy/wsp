@@ -90,13 +90,16 @@ const view: ChatThreadView = {
   shellCwd: null,
   harness: null,
   model: null,
+  agent: null,
+  permissionMode: null,
 };
 const thread = { view, hydrated: true, busy: false, sending: false, fresh: true, thread: undefined, threadKey: WS, named: null } as unknown as ChatThreadHandle;
 
-/** A thread with a turn behind it, as the person meets it when they open one from the sidebar. */
-const ran = (threadKey: string, model: string): ChatThreadHandle =>
+/** A thread with a turn behind it, as the person meets it when they open one from the sidebar; `recorded` is the
+ * thread's record as its transcript carries it, which a thread with no row left still has. */
+const ran = (threadKey: string, model: string, recorded: Pick<ChatThreadView, "agent" | "permissionMode"> = { agent: null, permissionMode: null }): ChatThreadHandle =>
   ({
-    view: { ...view, entries: [{ id: "e1" } as unknown as ChatThreadView["entries"][number]], model },
+    view: { ...view, entries: [{ id: "e1" } as unknown as ChatThreadView["entries"][number]], model, ...recorded },
     hydrated: true,
     busy: false,
     sending: false,
@@ -213,6 +216,15 @@ describe("the agent a thread that has run keeps", () => {
     draw({ catalogs: [CLAUDE, CODEX], sessions: [onCodex, onClaude], thread: ran("t9", "claude-opus-5") });
     expect(model().dataset["harness"]).toBe("claude");
     expect(defaults().dataset["access"]).toBe("bypassPermissions");
+  });
+
+  it("is its own record's where no row of it is left, past the runtime's cap on rows", () => {
+    // The runtime's index drops a thread's rows once the workspace holds more than its cap; the transcript keeps the
+    // thread and stamps its record on every start. The pickers read that record before any row.
+    draw({ catalogs: [CLAUDE, CODEX], sessions: [onClaude], thread: ran("t1", "gpt-6-astra", { agent: "codex", permissionMode: "read-only" }) });
+    expect(model().dataset["harness"]).toBe("codex");
+    expect(model().textContent).toContain("GPT-6 Astra");
+    expect(defaults().dataset["access"]).toBe("read-only");
   });
 });
 

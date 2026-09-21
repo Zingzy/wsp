@@ -43,7 +43,11 @@ const ROW: SessionView = { id: "s1", workspaceId: WORKSPACE, harness: "claude", 
 /** The same thread's row as the runtime writes it for a turn that opened one: the marks it filled in are recorded. */
 const OPENED: SessionView = { ...ROW, effort: "high", permissionMode: "plan" };
 
-const view = (model: string | null, running = false): ChatThreadView => ({
+/** The thread's own record as its transcript carries it; null where the start events named neither. */
+type Recorded = Pick<ChatThreadView, "agent" | "permissionMode">;
+const UNRECORDED: Recorded = { agent: null, permissionMode: null };
+
+const view = (model: string | null, running = false, recorded: Recorded = UNRECORDED): ChatThreadView => ({
   entries: [{ id: "e1" } as unknown as ChatThreadView["entries"][number]],
   turns: [],
   latestTurn: null,
@@ -54,10 +58,11 @@ const view = (model: string | null, running = false): ChatThreadView => ({
   shellCwd: null,
   harness: null,
   model,
+  ...recorded,
 });
 
-const handle = (model: string | null, threadKey = "t1", running = false): ChatThreadHandle =>
-  ({ view: view(model, running), hydrated: true, busy: false, sending: false, fresh: false, resume: "sess", thread: threadKey, threadKey, named: null }) as unknown as ChatThreadHandle;
+const handle = (model: string | null, threadKey = "t1", running = false, recorded: Recorded = UNRECORDED): ChatThreadHandle =>
+  ({ view: view(model, running, recorded), hydrated: true, busy: false, sending: false, fresh: false, resume: "sess", thread: threadKey, threadKey, named: null }) as unknown as ChatThreadHandle;
 
 /** The store as the composer meets it once this workspace's own machine has answered. Its catalog is what says which
  * access modes the workspace takes: a workspace still waiting for one is lent the host-wide lists with none, so the
@@ -71,8 +76,8 @@ function Picks({ thread }: { thread: ChatThreadHandle }) {
 
 /** What the composer shows on its buttons, and what it resolved for a send that opens a thread; a send into a
  * thread that has run carries none of it, which is sendPicks below. */
-const readAll = (model: string | null, threadKey = "t1", running = false) => {
-  const view = render(<Picks thread={handle(model, threadKey, running)} />);
+const readAll = (model: string | null, threadKey = "t1", running = false, recorded: Recorded = UNRECORDED) => {
+  const view = render(<Picks thread={handle(model, threadKey, running, recorded)} />);
   const out = JSON.parse(view.getByTestId("picks").textContent!) as {
     harness: string;
     model: { value: string; label: string } | null;
@@ -240,6 +245,26 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     expect(ran.shows).toMatchObject({ model: "gpt-6-astra", effort: "high", permissionMode: "read-only" });
     // And the Claude thread beside it reads Claude, whichever of the two the person has open.
     expect(readAll("claude-opus-5", "t9", true).harness).toBe("claude");
+  });
+
+  it("reads the thread's own record before its rows, so a thread whose rows fell off the runtime's cap keeps its agent and its access", () => {
+    // The runtime keeps a bounded number of rows per workspace and drops the oldest finished ones, while the
+    // transcript keeps the thread and every start of it carries the thread's record. The Codex thread here has no
+    // row left; the workspace's newest row is a Claude thread's.
+    const onClaude: SessionView = { id: "sK", workspaceId: WORKSPACE, harness: "claude", status: "running", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions", threadId: "t9" };
+    act(() => useStore.setState({ harnesses: [CLAUDE, CODEX], harnessesByWorkspace: { [WORKSPACE]: [CLAUDE, CODEX] }, sessions: { [WORKSPACE]: [onClaude] } }));
+    const capped = readAll("gpt-6-astra", "t1", false, { agent: "codex", permissionMode: "read-only" });
+    expect(capped.pinned).toBe(true);
+    expect(capped.harness).toBe("codex");
+    expect(capped.shows).toMatchObject({ model: "gpt-6-astra", permissionMode: "read-only" });
+    // And its send carries neither the agent nor the access, as into any thread that has run.
+    expect(sendPicks(capped.pinned, capped.start)).not.toHaveProperty("harness");
+    expect(sendPicks(capped.pinned, capped.start)).not.toHaveProperty("permissionMode");
+    // Where a row is left, the row is the fresher reading of the access: an access pick moves the row along with
+    // the record, while the transcript says what the last turn started at.
+    const moved: SessionView = { id: "sC", workspaceId: WORKSPACE, harness: "codex", status: "completed", model: "gpt-6-astra", permissionMode: "danger-full-access", threadId: "t1" };
+    act(() => useStore.setState({ sessions: { [WORKSPACE]: [moved, onClaude] } }));
+    expect(readAll("gpt-6-astra", "t1", false, { agent: "codex", permissionMode: "read-only" }).shows).toMatchObject({ permissionMode: "danger-full-access" });
   });
 
   it("a thread's own access stands while this workspace's catalog is still on the way, and no default paints", () => {

@@ -105,6 +105,16 @@ describe("threadPicks", () => {
     expect(startOptionsFrom(CLAUDE, {}, {})).toEqual({});
   });
 
+  it("the access the transcript's record carries stands under the rows, and alone where the rows are gone", () => {
+    // A thread whose rows fell off the runtime's cap has its record on its transcript and nothing else.
+    expect(threadPicks({ running: false, model: "claude-opus-5", permissionMode: "plan" }, [])).toEqual({ model: "claude-opus-5", permissionMode: "plan" });
+    // A row left is the fresher reading: an access pick moves the row along with the record, while the transcript
+    // says what the last turn started at.
+    const moved: SessionView = { ...opened, model: undefined, permissionMode: "bypassPermissions" };
+    expect(threadPicks({ running: false, model: "claude-opus-5", permissionMode: "plan" }, [moved])).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
+    expect(threadPicks({ running: false, model: "claude-opus-5", permissionMode: null }, [])).toEqual({ model: "claude-opus-5" });
+  });
+
   it("between turns the effort and the access come off the thread's own rows, and the send carries them", () => {
     // The turn that opened this thread ran at high and plan; nothing has been picked anywhere, so those, and not the
     // catalog's marks, are what the pickers read and what the next send carries.
