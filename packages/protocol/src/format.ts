@@ -1519,6 +1519,14 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
+/** What a landing is refused with when the agents' state a machine answered with holds something that is neither a
+ * folder nor a regular file, or a path that reaches out of the folder it was opened in: the entry as it sits in the
+ * archive and what it is. The bytes are the machine's, the landing is the person's, and one such entry is a road
+ * into the agents' own files on this computer, so nothing of that archive lands. */
+export function stateEntryRefusal(entry: string, what: string): string {
+  return `the agents' state from the machine holds ${entry}, which is ${what}; nothing of it was landed`;
+}
+
 /** The verdict when a nap could not store a fresh backup, said once with whatever the machine answered on the
  * line's title: the machine's own words name folders and commands nobody asked for, and a person reading this
  * needs to know where their files stand. The second clause is what is true of this workspace: an earlier nap's
@@ -2572,6 +2580,73 @@ export const KNOWN_HOSTS = "~/.ssh/known_hosts";
  * than the default above it. */
 export function hostKeyKeptNote(hostKey: string, file?: string): string {
   return file === undefined || file.endsWith(KNOWN_HOSTS.slice(1)) ? hostKey : `${hostKey} in ${file}`;
+}
+
+/** The login shells a computer's root may run for wsp to work it. sshd hands every command the host sends to
+ * root's own shell with -c before wsp's own `bash -c` inside it, and on a computer wsp joins root's home is the
+ * one every workspace on it writes, so a shell that reads a file under that home runs a workspace's file as that
+ * computer's root, outside every namespace, on each dial.
+ *
+ * What the list stands on and what it does not: `env -i HOME=<home> <shell> -c true` against a home whose every
+ * startup file writes a marker wrote none for bash, sh, dash and ksh and wrote one for zsh. dash and ksh are off
+ * the list all the same, since the list is the owner's ruling and not the measurement. And the measurement has a
+ * hole this end cannot close: a bash built with SSH_SOURCE_BASHRC reads `~/.bashrc` under -c when the environment
+ * carries SSH_CLIENT, which sshd sets for every session, and the bash on the computer this was measured on (3.2.57,
+ * Apple's) is such a build. Which build a given box carries is not something the host can read before it dials,
+ * and the shell sshd runs takes no flags from this end, so bash stays on the list by the ruling. */
+export const PLACE_ROOT_SHELLS: readonly string[] = ["bash", "sh"];
+
+/** The file a shell reads under the home before running a command, where wsp has read one: the measurement above.
+ * fish is not on the computer that measurement was made on, and its own documentation names the other. A shell in
+ * neither list is refused for not having been read, and the sentence says so rather than claiming a file it has
+ * not seen. */
+const SHELL_STARTUP_FILE: Readonly<Record<string, string>> = { zsh: "~/.zshenv", fish: "config.fish" };
+
+/** What a computer is refused with for running a shell that is not on the list: the shell, why it is a road, and
+ * the one command that changes it. Said before anything of wsp's lands there. */
+export function placeRootShellRefusal(address: string, shell: string): string {
+  const file = SHELL_STARTUP_FILE[shell];
+  const why =
+    file === undefined
+      ? `${shell} is not a shell wsp has read as opening no file of that computer's, and root's home there is the one every workspace on it writes, so a file read under it would run as root`
+      : `${shell} reads ${file} before running anything, and root's home there is the one every workspace on it writes, so a dial would run a workspace's file as root`;
+  return `${address} runs ${shell} as its root's login shell, and sshd hands every command wsp sends to that shell: ${why}; run chsh -s /bin/bash root on it and add it again`;
+}
+
+/** Whether the key a dial read is the one the person pinned. A person passes either the whole known_hosts word
+ * (`ssh-ed25519 SHA256:...`) or the fingerprint on its own, which is what ssh-keygen prints beside the size and the
+ * comment, so both sides are read down to the fingerprint where they carry one. */
+export function hostKeyMatches(pinned: string, read: string): boolean {
+  const mark = (word: string): string => word.trim().split(/\s+/).find(w => w.startsWith("SHA256:")) ?? word.trim();
+  return mark(pinned) !== "" && mark(pinned) === mark(read);
+}
+
+/** What a computer this computer's ssh client has never met is asked before the first dial: the key it answered a
+ * scan with, for the person to check against the computer in front of them. What the first dial writes is the
+ * identity every later dial of that computer trusts, so it is confirmed before anything is sent there. */
+export function hostKeyAsk(address: string, hostKey: string): string {
+  return `${address} answers with the key ${hostKey}; trust it and continue?`;
+}
+
+/** What the add is refused with for such a computer where nobody confirmed that key: the key whole, so it can be
+ * read against the computer itself, and the line that pins it. Said before anything is dialled. */
+export function hostKeyUnconfirmedRefusal(address: string, hostKey: string): string {
+  return `${address} has never been reached from this computer and answers with the key ${hostKey}; check it against the computer itself, then run wsp add ${address} --host-key '${hostKey}'`;
+}
+
+/** The same refusal where the key could not be asked for at all: a jump host or a proxy command in the person's own
+ * ssh config, which a scan cannot follow, or a computer that answered no scan. The key is theirs to read on the
+ * computer and pass here. */
+export function hostKeyUnscannableRefusal(address: string, stoppedBy?: string): string {
+  const why = stoppedBy === undefined ? "answered no key to a scan" : `is reached through ${stoppedBy} in your ssh config, which a key scan cannot follow`;
+  return `${address} has never been reached from this computer and ${why}; read its host key on the computer itself and run wsp add ${address} --host-key '<type> <fingerprint>'`;
+}
+
+/** What an install is refused with when the computer that answered the first dial holds a key other than the one
+ * the person pinned: what it answered with, the file ssh wrote that into on its way in, and the line that takes it
+ * out again. Nothing of wsp's has left this computer at that point. */
+export function hostKeyMismatchRefusal(o: { address: string; pinned: string; wrote?: string; target: string; file: string }): string {
+  return `${o.address} answered with ${o.wrote ?? "a key this computer could not read"}, not the ${o.pinned} you pinned; ssh wrote it into ${o.file}, and ssh-keygen -R ${o.target} -f ${o.file} takes it out`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare

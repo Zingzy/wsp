@@ -692,6 +692,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                   ...(msg.name !== undefined ? { name: msg.name } : {}),
                   ...(msg.sshPort !== undefined ? { sshPort: msg.sshPort } : {}),
                   ...(msg.keyPath !== undefined ? { keyPath: msg.keyPath } : {}),
+                  ...(msg.hostKey !== undefined ? { hostKey: msg.hostKey } : {}),
                   hostUrls: [...at.addresses, ...(at.relay === undefined ? [] : [at.relay])],
                 },
                 now(),

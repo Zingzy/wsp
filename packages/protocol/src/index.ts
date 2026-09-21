@@ -3753,6 +3753,7 @@ const DAEMON_CONTENTS = [
   "e6eb64e2466dfa2eca9448ea2aabfe82223c2897276663698a1184a16774145d",
   "361aa8997cc132755f0835ada745b05c7eee7faf20e67d14fa606971c5157441",
   "2c9896b832aebaccaf1b4f2c69ffba662e0a8b7f5748fc359313f8aff46a3b2a",
+  "673d1f56aa3159a41d1b55b3b17c306628912a793cabc7d0208d2a4b937f07af",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3947,7 +3948,9 @@ const DAEMON_CONTENTS = [
  * Version 66 makes every bind under a workspace's rootfs receive-only through a descriptor reopened after the bind,
  * so a workspace on a box boots again: versions 64 and 65 refused every create with EINVAL at the shared home's bind.
  * Version 67 gives a workspace's pty and exec on a box the recipe's knobs and a PATH with the prefix's bin ahead of
- * the home's, so a thread runs the tools the recipe put under the prefix rather than the old copies under the home. */
+ * the home's, so a thread runs the tools the recipe put under the prefix rather than the old copies under the home.
+ * Version 68 names, in a pane's create reply, the process its pid is, so a reader of the workspace's pty knows which
+ * environment that pid carries; the pane's shell starts from the workspace's own environment as before. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4755,6 +4758,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     name: z.string().max(200).optional(),
     sshPort: z.number().int().min(1).max(65535).optional(),
     keyPath: z.string().max(1024).optional(),
+    /** The host key the person confirmed or pinned for a computer this one has never dialled. The install refuses
+     * before a byte of wsp's leaves this computer where it is absent and the client holds no key of its own, so a
+     * caller that sends none meets the same wall as one that sends a wrong one. */
+    hostKey: z.string().max(200).optional(),
   }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is

@@ -2959,8 +2959,8 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
 
 /// What a workspace on this computer carries into a thread, a command and a pane: the order the host asked for
 /// and the recipe's knobs beside it, one environment for all three. The boot's is the spec's, an exec and the
-/// pty broker are tenants that start from it, and the login shell in a pane reads the file the boot wrote in the
-/// workspace's own /etc after the box's own profile has set root's PATH.
+/// pty broker are tenants that start from it, and the login shell in a pane holds that order too, whether its
+/// /etc/profile leaves PATH alone or resets it and the file the boot wrote under /etc/profile.d puts it back.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_and_a_pane() {
@@ -2984,22 +2984,26 @@ async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_an
     let made = pane.ok("pty.create", json!({ "machineId": &id, "cols": 100, "rows": 40, "cwd": "/root" })).await;
     let pty = made["ptyId"].as_str().unwrap().to_owned();
     let pid = made["pid"].as_u64().unwrap();
-    // The pid the reply carries is the broker's on the box, so its own environment is what the shell in that
-    // pane was started from: read off the box rather than out of the shell, whose login files run after it.
-    let environ = fs::read(format!("/proc/{pid}/environ")).unwrap();
-    let held: Vec<&str> = std::str::from_utf8(&environ).unwrap().split('\0').filter(|e| !e.is_empty()).collect();
-    assert!(held.contains(&format!("WSP_KNOB={knob}").as_str()), "the pty broker carries no knob: {held:?}");
-    assert!(
-        held.contains(&format!("PATH={}", wsp_frames::numbers::PLACE_WORKSPACE_PATH).as_str()),
-        "the pty broker carries another PATH: {held:?}"
-    );
 
-    // And the pane's own shell, which is a login shell: the box's /etc/profile resets root's PATH and then reads
-    // the workspace's own file under /etc/profile.d, so what a person types there runs the prefix's copy first.
+    // What a person's pane reads, printed by the pane's own shell, which is the only reading of this road that
+    // is a person's: the knob, which nothing on the daemon's side of a pty names, so it can only have come from
+    // the workspace's own environment through the broker, and the order, whole. It reaches a pane by one of two
+    // roads, the broker's own environment where the box's /etc/profile leaves PATH alone and the file the boot
+    // wrote under /etc/profile.d where it resets it, and the line is matched whole because the first folders of
+    // this order are the first of a distribution's own reset list too, so a line cut short reads the same on a
+    // pane that got neither.
     pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
-    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane-%s\\n' \"$PATH\"\n" })).await;
-    let opens = format!("pane-{}", wsp_frames::numbers::PLACE_WORKSPACE_PATH.split(':').take(2).collect::<Vec<_>>().join(":"));
-    assert!(pane.printed_within(&pty, &opens, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane %s %s\\n' \"$WSP_KNOB\" \"$PATH\"\n" })).await;
+    let whole = format!("pane {knob} {}", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
+    assert!(pane.printed_within(&pty, &whole, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+
+    // And which process the reply's number names, read now the pane has answered and the exec is certainly
+    // done: the broker, as the box numbers it, told from the helper that started it by the line it runs.
+    let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+    let args: Vec<&str> = std::str::from_utf8(&cmdline).unwrap().split('\0').filter(|a| !a.is_empty()).collect();
+    assert_eq!(args.first().copied(), Some(wsp_runtime::profile::INIT_PATH), "the pid is not the pane's broker: {args:?}");
+    assert_eq!(args.get(1..3), Some(["runtime", "pty"].as_slice()), "{args:?}");
+
     pane.ok("pty.kill", json!({ "ptyId": &pty, "machineId": &id })).await;
     w.close().await;
 }

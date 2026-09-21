@@ -41,6 +41,8 @@ describe("the wsp skill", () => {
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
     expect(WSP_SKILL).toContain(`\`${notifyLine("1a2b3c4d-0000", { status: "completed", durationMs: 724_000, costUsd: 0.41, text: "first line\n<last line of the reply>" })}\``);
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
+    // A target is a thread this caller drives, so the flag's own paragraph says which threads it takes.
+    expect(WSP_SKILL).toContain("`--notify <thread>` names another thread outright, one you started or one under it");
   });
 
   it("tells an orchestrating agent to start its builders with notify me and end its turn, and hands the blocking wait to a shell script", () => {
@@ -103,8 +105,14 @@ describe("the wsp skill", () => {
     expect(section).toContain("`wsp threads` (the `threads` tool) is where you find that id");
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
+    // Which threads that road reaches: the ones this caller started and the ones under those, and the person for
+    // anything else, so the sentence an agent reads is the one the host keeps.
+    expect(section).toContain("one you started or one under it");
+    expect(section).not.toContain("whoever opened it");
+    expect(section).toContain("goes to the person");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
     expect(INSTRUCTIONS).toContain("how one thread talks to another");
+    expect(INSTRUCTIONS).toContain("A thread reaches the threads it started and the threads under those, and nothing else");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {

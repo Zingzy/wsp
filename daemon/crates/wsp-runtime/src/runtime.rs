@@ -315,8 +315,8 @@ impl Runtime {
     /// A shell inside the workspace, on a pty the workspace itself opens. The exec is a plain exec in every way
     /// the library sees: a tenant with no terminal and no console socket, running this binary's own pty broker
     /// inside, which opens the pair from the workspace's own /dev/ptmx and is the wire between that master and
-    /// this exec's pipes. What comes back is those pipes, the broker's pid on this computer, which a resize is
-    /// signalled to, and the helper to wait on for the exit.
+    /// this exec's pipes. What comes back is those pipes, this computer's own pid for the process that runs the
+    /// broker, which a resize is signalled to, and the helper to wait on for the exit.
     pub async fn pty(&self, id: &str, opts: &PtyInside) -> Result<PtyInsideRunning, Error> {
         let at = self.ptys.fetch_add(1, Ordering::Relaxed);
         // The size is read inside, so the file is written in the folder of the workspace's own that is mounted
@@ -359,10 +359,12 @@ impl Runtime {
         }
     }
 
-    /// The broker's pid on this computer, off the file the library writes the moment the tenant is made. Three
-    /// things are raced: that file, the helper's own end, and the wait. A helper that ended before a terminal
-    /// stood is the whole of the answer, since an exec the kernel or the library refuses is refused before the
-    /// command runs, and the refusal names what the helper said.
+    /// The pid the broker runs under on this computer, off the file the library writes the moment the tenant is
+    /// made. That is before the process has exec'd the broker, so what /proc says of its environment until then
+    /// is the one it was forked with, this daemon's own, and not the workspace's. Three things are raced: that
+    /// file, the helper's own end, and the wait. A helper that ended before a terminal stood is the whole of the
+    /// answer, since an exec the kernel or the library refuses is refused before the command runs, and the
+    /// refusal names what the helper said.
     async fn broker_pid(&self, pid_file: &Path, helper: &mut tokio::process::Child) -> Result<u32, Error> {
         let named = async {
             loop {
