@@ -7,7 +7,7 @@
 // keeps them for the boxes to verify and holds no key that could make one.
 import { admissionOf, jsonBody } from "./body.js";
 import { admissionsByClient, clientOf, clientsOf, deleteClient, insertAdmission, type ClientRow } from "./db.js";
-import { clientFor } from "./hosts.js";
+import { clientFor, signedByBearer } from "./hosts.js";
 import { newId } from "./ids.js";
 import type { Ctx } from "./index.js";
 import { refuse } from "./refusal.js";
@@ -55,7 +55,7 @@ export async function clientDelete(ctx: Ctx): Promise<Response> {
 export async function clientAdmit(ctx: Ctx): Promise<Response> {
   const who = await clientFor(ctx);
   const row = await clientOn(ctx, who.account);
-  const admission = admissionOf(await jsonBody(ctx));
+  const admission = signedByBearer(who, admissionOf(await jsonBody(ctx)));
   if (row.fingerprint === null) {
     throw refuse(400, `${row.name} signed in with no device key, so no box can admit it; sign it out with wsp logout ${row.id} and sign it in again with wsp login there`);
   }

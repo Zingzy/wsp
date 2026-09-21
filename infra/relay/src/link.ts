@@ -9,7 +9,7 @@
 import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
 import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
-import { boxNamedRefusal, clientFor } from "./hosts.js";
+import { boxNamedRefusal, clientFor, signedByBearer } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
 import { approvePage, approvedPage, codePage, gonePage } from "./page.js";
@@ -178,13 +178,14 @@ export async function linkApprove(ctx: Ctx): Promise<Response> {
 
 /** A wsp on a computer already in says yes for a computer waiting on a code: its own client token names the
  * account the code lands on, and the admission it signed for that computer's key rides the row to the poll. The
- * relay checks that the admission is for the key the code was started with and keeps the bytes; whether the
- * signer is one a box trusts is the box's own reading, made with a key the relay never holds. */
+ * relay checks that the admission is for the key the code was started with and signed by the key the bearer signed
+ * in with, and keeps the bytes; whether the signer is one a box trusts is the box's own reading, made with a key
+ * the relay never holds. */
 async function approveFromWsp(ctx: Ctx): Promise<Response> {
   const who = await clientFor(ctx);
   const body = await jsonBody(ctx);
   const code = typeof body["code"] === "string" ? body["code"].trim().toUpperCase() : "";
-  const admission = admissionOf(body["admission"]);
+  const admission = signedByBearer(who, admissionOf(body["admission"]));
   const row = await linkByCode(ctx.env, code);
   if (row === undefined || isExpired(row, ctx.deps.now())) throw refuse(410, "that code is gone; run wsp login again there for a fresh one");
   if (row.state !== "pending") throw refuse(409, "that code was already approved");

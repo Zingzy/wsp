@@ -9,7 +9,7 @@
 // host id. The heartbeat's answer is the account's computers and the
 // admissions signed for them, which the box verifies with keys it holds and
 // the relay does not.
-import { fingerprintField, jsonBody, nameOf } from "./body.js";
+import { fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
 import { createCname, createTunnel, deleteCname, deleteTunnel, setIngress, tunnelToken } from "./cloudflare.js";
 import { accountOf, admissionsByClient, clientOf, clientsOf, deleteHost, hostNamed, hostOf, hostsOf, insertHost, seenClient, seenHost, setHostHostname, setHostKey, setHostTunnel, type HostRow } from "./db.js";
 import { NO_ZONE_LINE, isQuickTunnel, managedHostname, zoneOf } from "./env.js";
@@ -42,18 +42,35 @@ async function hostFor(ctx: Ctx): Promise<HostRow> {
   return row;
 }
 
+/** The computer a client token names: the account it is on, the sign-in the token holds, and the key that computer
+ * signed in with, which is the one key an admission it posts may be signed by. */
+export interface SignedIn {
+  account: string;
+  subject: string;
+  fingerprint: string | null;
+}
+
 /** The person a client token names: a box's own token is refused, a sign-in this account took away opens nothing,
  * and one older than a month has run out. The one reading of a client token, which every route that takes one
  * comes through, so a check cannot be spelled twice and drift. Callers that already read the bearer hand in what
  * they read rather than reading it again. */
-export async function clientFor(ctx: Ctx, read?: TokenClaims): Promise<TokenClaims> {
+export async function clientFor(ctx: Ctx, read?: TokenClaims): Promise<SignedIn> {
   const claims = read ?? (await claimsOf(ctx));
   if (claims.kind !== "client") throw refuse(403, "that is a host's own token; this route is for the token wsp login holds on a person's computer");
   const row = await clientOf(ctx.env, claims.subject);
   if (row === undefined || row.account_id !== claims.account) throw refuse(401, "this computer's sign-in was taken away; run wsp login <url> to sign in again");
   if (ctx.deps.now() - claims.issuedAt > CLIENT_TOKEN_MS) throw refuse(401, "this computer's sign-in has run out; run wsp login <url> to sign in again");
   await seenClient(ctx.env, row.id, new Date(ctx.deps.now()).toISOString());
-  return claims;
+  return { account: claims.account, subject: claims.subject, fingerprint: row.fingerprint };
+}
+
+/** An admission is signed with the bearer's own device key and no other: its signer has one legal value, the key
+ * this computer signed in with, so no client token on the account can post bytes under another computer's name and
+ * take the place of what that computer signed. */
+export function signedByBearer(who: SignedIn, admission: Admission): Admission {
+  if (who.fingerprint === null) throw refuse(400, "this computer signed in with no device key, so it can sign no admission; sign out with wsp logout and sign in again with wsp login");
+  if (admission.by !== who.fingerprint) throw refuse(400, `that admission is signed by ${admission.by}, and this computer signed in as ${who.fingerprint}`);
+  return admission;
 }
 
 /** The tunnel a box sits behind. With no zone the relay makes nothing at all, and the box runs a quick tunnel instead. */
@@ -101,7 +118,9 @@ export async function hostHeartbeat(ctx: Ctx): Promise<Response> {
   }
   const hostKey = fingerprintField(body, "hostKey");
   if (hostKey !== undefined && !(await setHostKey(ctx.env, row.id, hostKey))) {
-    throw refuse(409, `${row.name} is on this account under the key ${row.host_key}, and this beat proves ${hostKey}; take it off with wsp host unlink there and put it back on with wsp host link`);
+    // The row above was read before the write, so the key a racing beat landed is read again rather than named off it.
+    const { host_key: held } = await hostFor(ctx);
+    throw refuse(409, `${row.name} is on this account under the key ${held}, and this beat proves ${hostKey}; take it off with wsp host unlink there and put it back on with wsp host link`);
   }
   const version = typeof body["version"] === "string" && body["version"] !== "" ? body["version"] : undefined;
   const zone = zoneOf(ctx.env);
@@ -136,8 +155,8 @@ async function devicesOf(ctx: Ctx, accountId: string): Promise<{ id: string; nam
 /** One row per box on this person's account, and nobody else's. The key is the one a computer pins before its
  * first dial there, and null until the box has said it. */
 export async function hostList(ctx: Ctx): Promise<Response> {
-  const claims = await clientFor(ctx);
-  const rows = await hostsOf(ctx.env, claims.account);
+  const who = await clientFor(ctx);
+  const rows = await hostsOf(ctx.env, who.account);
   return Response.json({
     hosts: rows.map(row => ({
       id: row.id,

@@ -378,6 +378,23 @@ describe("the key a box proves", () => {
     expect(((await relay.db.prepare("SELECT host_key FROM hosts WHERE id = ?").bind(box.hostId).first()) as { host_key: string }).host_key).toBe(first);
   });
 
+  it("names the key that stands when two first beats race, never the empty one it read before the write", async () => {
+    const relay = await relayHarness();
+    const box = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    const keys = [fingerprintFor("first start"), fingerprintFor("second start")];
+
+    // Both beats read a row holding no key; one write lands, and the other is refused against the key it never read.
+    const answers = await Promise.all(keys.map(key => beat(relay, box.hostId!, box.token, { hostKey: key })));
+    expect(answers.map(a => a.status).sort()).toEqual([200, 409]);
+    const stored = ((await relay.db.prepare("SELECT host_key FROM hosts WHERE id = ?").bind(box.hostId).first()) as { host_key: string }).host_key;
+    const lost = answers.findIndex(a => a.status === 409);
+    expect(keys[lost]).not.toBe(stored);
+    const said = ((await answers[lost]!.json()) as { error: string }).error;
+    expect(said).toContain(stored);
+    expect(said).toContain(keys[lost]!);
+    expect(said).not.toContain("null");
+  });
+
   it("puts a box on the account from a signed-in computer, under its key, and answers the token that box keeps", async () => {
     const relay = await relayHarness();
     const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
@@ -447,6 +464,39 @@ describe("the admissions a box reads off its heartbeat", () => {
     expect(await count(relay, "admissions")).toBe(1);
     const kept = (await relay.db.prepare("SELECT issued_at FROM admissions").first()) as { issued_at: string };
     expect(kept.issued_at).toBe("2026-09-11T12:10:00.000Z");
+  });
+
+  it("takes an admission signed by the bearer alone, so another computer's token cannot stand in for the Mac's", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const laptop = await linkedVia(relay, "client", "the laptop", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    const real = fakeAdmission(laptop.fingerprint!, mac.fingerprint!);
+    expect((await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(mac.token), body: JSON.stringify(real) })).status).toBe(200);
+
+    // The desk's token posts bytes naming the Mac as their signer, which would replace the Mac's own row for the laptop.
+    const forged = { ...fakeAdmission(laptop.fingerprint!, mac.fingerprint!, "2026-09-11T13:00:00.000Z"), signature: "Z2FyYmFnZQ==" };
+    const refused = await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(desk.token), body: JSON.stringify(forged) });
+    expect(refused.status).toBe(400);
+    const said = ((await refused.json()) as { error: string }).error;
+    expect(said).toContain(mac.fingerprint!);
+    expect(said).toContain(desk.fingerprint!);
+    const kept = (await relay.db.prepare("SELECT signer, issued_at, signature FROM admissions WHERE client_id = ?").bind(laptop.id).first()) as Record<string, string>;
+    expect(kept).toEqual({ signer: mac.fingerprint, issued_at: real.issuedAt, signature: real.signature });
+    expect(await count(relay, "admissions")).toBe(1);
+
+    // Signed as itself, the desk's admission stands beside the Mac's.
+    expect((await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(desk.token), body: JSON.stringify(fakeAdmission(laptop.fingerprint!, desk.fingerprint!)) })).status).toBe(200);
+    expect(await count(relay, "admissions")).toBe(2);
+
+    // A computer signed in before device keys holds none, and can sign for nobody.
+    await relay.db.prepare("UPDATE clients SET fingerprint = NULL WHERE id = ?").bind(desk.id).run();
+    const keyless = await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(desk.token), body: JSON.stringify(fakeAdmission(laptop.fingerprint!, desk.fingerprint!)) });
+    expect(keyless.status).toBe(400);
+    const told = ((await keyless.json()) as { error: string }).error;
+    expect(told).toContain("wsp logout");
+    expect(told).toContain("wsp login");
+    expect(await count(relay, "admissions")).toBe(2);
   });
 
   it("hands a box the account's devices with their admissions, and none of another account's", async () => {

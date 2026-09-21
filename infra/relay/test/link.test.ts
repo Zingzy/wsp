@@ -640,4 +640,26 @@ describe("an approval from a signed-in wsp, carrying the admission it signed", (
     expect(claims?.account).toBe(samClaims?.account);
     expect(claims?.account).not.toBe((await readToken(relay.env.RELAY_SIGNING_KEY, mac.token))?.account);
   });
+
+  it("refuses an approval whose admission names another computer as its signer, and leaves the code waiting", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    const laptop = await started(relay, "client", "the laptop", "10.0.0.2");
+    const laptopKey = fingerprintFor("the laptop");
+
+    const refused = await approveFromWsp(relay, desk.token, laptop.code, fakeAdmission(laptopKey, mac.fingerprint!));
+    expect(refused.status).toBe(400);
+    const said = ((await refused.json()) as { error: string }).error;
+    expect(said).toContain(mac.fingerprint!);
+    expect(said).toContain(desk.fingerprint!);
+    expect(((await relay.db.prepare("SELECT state, admission FROM link_codes WHERE code = ?").bind(laptop.code).first()) as { state: string; admission: string | null })).toEqual({ state: "pending", admission: null });
+
+    // Signed as itself, the same token approves it, and the poll keeps the desk as the signer.
+    expect((await approveFromWsp(relay, desk.token, laptop.code, fakeAdmission(laptopKey, desk.fingerprint!))).status).toBe(200);
+    const answer = (await (await poll(relay, laptop.pollToken)).json()) as { token: string };
+    const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
+    const kept = (await relay.db.prepare("SELECT signer FROM admissions WHERE client_id = ?").bind(claims!.subject).first()) as { signer: string };
+    expect(kept.signer).toBe(desk.fingerprint);
+  });
 });
