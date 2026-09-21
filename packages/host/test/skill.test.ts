@@ -41,8 +41,8 @@ describe("the wsp skill", () => {
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
     expect(WSP_SKILL).toContain(`\`${notifyLine("1a2b3c4d-0000", { status: "completed", durationMs: 724_000, costUsd: 0.41, text: "first line\n<last line of the reply>" })}\``);
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
-    // A target is a thread this caller drives, so the flag's own paragraph says which threads it takes.
-    expect(WSP_SKILL).toContain("`--notify <thread>` names another thread outright, one you started or one under it");
+    // A target is a thread this caller drives, so the flag's own paragraph says which threads its tree holds.
+    expect(WSP_SKILL).toContain("`--notify <thread>` names another thread outright, one of your own tree: the lead that started you, a thread beside you under it, or one you started");
   });
 
   it("tells an orchestrating agent to start its builders with notify me and end its turn, and hands the blocking wait to a shell script", () => {
@@ -105,14 +105,28 @@ describe("the wsp skill", () => {
     expect(section).toContain("`wsp threads` (the `threads` tool) is where you find that id");
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
-    // Which threads that road reaches: the ones this caller started and the ones under those, and the person for
-    // anything else, so the sentence an agent reads is the one the host keeps.
-    expect(section).toContain("one you started or one under it");
+    // Which threads that road reaches: every thread of this caller's own tree, its lead, its siblings and its
+    // children, wherever each runs, and the person for anything else, so the sentence an agent reads is the one
+    // the host keeps.
+    expect(section).toContain("one of your own tree, the lead that started you, a thread beside you under it or one you started, on whatever workspace it runs");
     expect(section).not.toContain("whoever opened it");
+    expect(section).not.toContain("one you started or one under it");
     expect(section).toContain("goes to the person");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
     expect(INSTRUCTIONS).toContain("how one thread talks to another");
-    expect(INSTRUCTIONS).toContain("A thread reaches the threads it started and the threads under those, and nothing else");
+    expect(INSTRUCTIONS).toContain("A thread reaches every thread of its own tree, the lead that started it, the threads beside it under that lead and the threads it started, on whatever workspace each runs, and nothing else");
+  });
+
+  it("says a thread reaches its whole tree on whatever workspace, the lead that started it included, and that stopping the lead stops the tree", () => {
+    const opening = WSP_SKILL.slice(0, WSP_SKILL.indexOf(SETUP_HEADING));
+    expect(opening).toContain("the lead that started it, the threads beside it under that lead and the threads it started, on whatever workspace each runs");
+    expect(opening).toContain("the person's own thread and another lead's tree on the same workspace are left out of `threads`");
+    expect(opening).toContain("Stopping a thread stops every thread under it, so a child that stops its lead stops its siblings and itself with it.");
+    // The old rule, downward only, is taught nowhere: a paragraph that kept it would send a child's report to the person.
+    expect(WSP_SKILL).not.toContain("the threads it started and the threads under those, and nothing else");
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### threads wait"));
+    expect(section).toContain("A stop cascades: stopping your lead stops every thread under it, your siblings and you among them.");
+    expect(INSTRUCTIONS).toContain("Stopping a thread stops every thread under it");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
