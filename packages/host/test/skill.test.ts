@@ -106,7 +106,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
     // Which threads that road reaches: the ones this caller started and the ones under those, and the person for
-    // anything else. A reader who takes the old promise still sends into a thread the host refuses.
+    // anything else, so the sentence an agent reads is the one the host keeps.
     expect(section).toContain("one you started or one under it");
     expect(section).not.toContain("whoever opened it");
     expect(section).toContain("goes to the person");

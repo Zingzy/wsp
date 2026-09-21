@@ -5472,7 +5472,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (asked !== undefined) return asked.threadId === scope.threadId || asked.rootThreadId === scope.rootThreadId;
       const id = workspaceIdOf(event);
       const record = id === undefined ? undefined : live.get(id)?.record;
-      return record !== undefined && refusalFor(record, origin) === undefined;
+      if (record === undefined || refusalFor(record, origin) !== undefined) return false;
+      // An event about a thread is that thread's tree's, whoever else stands on the workspace it names: the stream
+      // hides exactly what the listing and the transcript hide, so a row cannot be read going by.
+      const thread = (event as { threadId?: unknown }).threadId;
+      return typeof thread !== "string" || drivesThread(thread, origin);
     },
   };
 
@@ -5851,16 +5855,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** Lines for a parent whose workspace could not take a start when the child ended (napping, or the nap that ended
    * the child), sent when that workspace wakes; in memory only, so a host restart during the nap drops them. */
-  const heldLines = new Map<string, { from: string; notify: string; text: string; by?: ThreadScope }[]>();
+  const heldLines = new Map<string, { from: string; notify: string; text: string; by?: ThreadScope; fell?: () => void }[]>();
   /** The line into the parent thread as a send would go: steered into its running turn, or queued behind it, which
    * is what a parent still in its own reply tail gets, since the send road waits for that process rather than
    * refusing. It goes under the thread that named the target, so the switch on that thread's workspace and the
    * tree rule are read at delivery and not at registration alone; a line a person registered goes as the person's,
    * which is what every row written before the scope rode beside the targets carries. A parent with no session to
-   * resume, and a start that door refuses, drop the line with a warning and say so through `fell`; the child's end
-   * must not fail on either. */
-  const deliver = (line: { from: string; notify: string; text: string; by?: ThreadScope }, fell: () => void = () => {}): void => {
-    const { from, notify, text, by } = line;
+   * resume, and a start that door refuses, drop the line with a warning and call the line's own `fell`, which tells
+   * the person the report is there; the child's end must not fail on either. */
+  const deliver = (line: { from: string; notify: string; text: string; by?: ThreadScope; fell?: () => void }): void => {
+    const { from, notify, text, by, fell = () => {} } = line;
     const parent = latestOn(notify);
     if (!tellable(parent)) {
       console.warn(`thread ${from.slice(0, 8)} ended, but thread ${notify.slice(0, 8)} has no session to tell`);
@@ -5869,6 +5873,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     const phase = live.get(parent.workspaceId)?.record.phase;
     if (phase !== undefined && sendRefusal(workspaceState({ phase })) !== null) {
+      // The line keeps the road that tells the person: a wake is minutes or hours later, and one the door refuses
+      // then falls away exactly as one refused now does, once for the turn that ended.
       heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), line]);
       return;
     }
@@ -5887,7 +5893,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
   }
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
-   * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there. */
+   * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there; the person's
+   * own row for a line the target's door refused is the exception, since that answer comes after the start it made. */
   const notifyEnd = (s: { view: SessionView; turnId: string }, notify: readonly string[], by: ThreadScope | undefined, result: TurnResult): void => {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
@@ -5908,7 +5915,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // it as a row beside every other, so theirs stays one line.
       const text = notifyLine(threadId, result, target === NOTIFY_ME ? "tail" : "whole");
       record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
-      if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...(by !== undefined ? { by } : {}) }, fell);
+      if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...(by !== undefined ? { by } : {}), fell });
     }
   };
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
@@ -6472,8 +6479,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // two is what a thread's own token is capped on. Read before the machine is asked for anything.
       const opens = rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in rather than on how it was
-      // named, so a harness session id given as resume reaches no more than the thread id would.
-      if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${threadId} on this workspace`);
+      // named, so a harness session id given as resume reaches no more than the thread id would. The sentence says
+      // back what the caller said and never the thread behind it, since a refusal that named it would hand a
+      // guest the thread id of every session id it tried.
+      if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${o.thread ?? resume} on this workspace`);
       spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
@@ -6773,8 +6782,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      await entryOf(s.view.workspaceId, origin);
+      // Before the workspace is read, so a session outside the caller's tree answers the same absence wherever it
+      // stands: a sentence about the workspace would tell a thread which of the two hid the row.
       if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
+      await entryOf(s.view.workspaceId, origin);
       // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
       // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
       // itself may already be over, which is an answer and not a reason to leave its builders running.
@@ -6791,8 +6802,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      const entry = await entryOf(s.view.workspaceId, origin);
       if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
+      const entry = await entryOf(s.view.workspaceId, origin);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
@@ -6842,9 +6853,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (named === "") throw new Error(EMPTY_TITLE_LINE);
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
+      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       const harnessSessionId = s.view.claudeSessionId;
       const entry = await entryOf(s.view.workspaceId, origin);
-      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const write = adapterFor(entry, s.view.harness).adapter.renameSession;

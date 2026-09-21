@@ -950,9 +950,21 @@ describe("agents spawning agents", () => {
       expect(await rt.sessions.steer(foreign.id, { prompt: "do this instead" }, asThread(scope))).toEqual({ outcome: "not-found" });
       expect(await rt.sessions.rename(foreign.id, "mine now", asThread(scope))).toEqual({ outcome: "not-found" });
     }
-    // A send into either is refused whether it names the thread or names the harness session that thread resumes.
+    // A session on a workspace outside the tree reads that same absence and never the workspace's own sentence,
+    // since the thread rule is read before the workspace is: one answer for every session a thread cannot see.
+    const elsewhere = await createOn(rt, { golden: "snap_g", name: "elsewhere" });
+    const theirs = await rt.sessions.start(elsewhere.id, { prompt: "not yours" });
+    expect(await rt.sessions.interrupt(theirs.id, asThread(scope))).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.steer(theirs.id, { prompt: "do this instead" }, asThread(scope))).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.rename(theirs.id, "mine now", asThread(scope))).toEqual({ outcome: "not-found" });
+
+    // A send into either is refused whether it names the thread or names the harness session that thread resumes,
+    // and the sentence says back what the caller gave: a session id probed this way never comes back as a thread id.
     await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: mineThread }, asThread(scope))).rejects.toThrow(`no thread ${mineThread} on this workspace`);
-    await expect(rt.sessions.start(ws.id, { prompt: "hi", resume: other.view().claudeSessionId }, asThread(scope))).rejects.toThrow(`no thread ${otherThread} on this workspace`);
+    const sessionOfOther = other.view().claudeSessionId!;
+    const refused = await rt.sessions.start(ws.id, { prompt: "hi", resume: sessionOfOther }, asThread(scope)).catch((e: unknown) => (e as Error).message);
+    expect(refused).toBe(`no thread ${sessionOfOther} on this workspace`);
+    expect(refused).not.toContain(otherThread);
     expect((await rt.sessions.list(ws.id)).filter(v => v.threadId === mineThread || v.threadId === otherThread).every(v => v.status !== "running")).toBe(true);
 
     // Its own tree it drives, by thread id and by the session id a resume carries alike.
@@ -1033,8 +1045,8 @@ describe("agents spawning agents", () => {
 
     const rows = async (): Promise<number> => (await rt.sessions.list(ws.id)).length;
     const before = await rows();
-    // The lead that opened this caller and a thread beside it under the same root are both refused, though the root
-    // they share would have taken either; the person's own thread reads the same.
+    // A target is a thread this caller drives: the lead that opened it, a thread beside it under the same root and
+    // the person's own thread are none of them under it, so each reads as no thread to notify.
     for (const target of [rootThread, siblingThread, mineThread]) {
       await expect(rt.sessions.start(ws.id, { prompt: "out", notify: [target] }, asThread(childScope))).rejects.toThrow(`no thread ${target} to notify`);
     }
@@ -1066,6 +1078,35 @@ describe("agents spawning agents", () => {
     const before = (await rt.sessions.list(ws.id)).length;
     held.end(held.launches.length - 1);
     const told = async (): Promise<string[]> => (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).map(e => (e as { notify: string }).notify);
+    await until(async () => (await told()).length === 2);
+    expect((await told()).sort()).toEqual([NOTIFY_ME, rootThread].sort());
+    expect((await rt.sessions.list(ws.id)).length).toBe(before);
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
+  it("a line held for a napping workspace keeps the road that tells the person, and falls away to them on the wake", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    // The lead's own turn is over, so it has a session for its line to resume.
+    held.end(0);
+    await opener.finished;
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [rootThread] }, asThread(scope));
+    const kidThread = kid.view().threadId!;
+    await rt.workspaces.agents(ws.id, { spawn: false });
+    // The nap ends the kid's turn and the workspace takes no start while it sleeps, so the line waits for the wake.
+    await rt.workspaces.nap(ws.id);
+    const told = async (): Promise<string[]> => (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify" && e.threadId === kidThread).map(e => (e as { notify: string }).notify);
+    expect(await told()).toEqual([rootThread]);
+    const before = (await rt.sessions.list(ws.id)).length;
+
+    await rt.workspaces.wake(ws.id);
+    // The door reads the switch when the line finally goes, hours later as far as this road knows, and the person
+    // is told the report is there rather than the line going quiet.
     await until(async () => (await told()).length === 2);
     expect((await told()).sort()).toEqual([NOTIFY_ME, rootThread].sort());
     expect((await rt.sessions.list(ws.id)).length).toBe(before);
@@ -1121,6 +1162,42 @@ describe("agents spawning agents", () => {
     await expect(createOn(rt, { name: "deeper" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childScope.threadId, 1, 1));
     held.end(0);
     await rt.close();
+  });
+
+  it("a thread's socket is pushed its own tree's session events and none of a sibling tree's", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const client = await WsClient.connect(srv.port, { token });
+      await client.request("events.subscribe", {});
+      const mine = await WsClient.connect(srv.port, { token: "secret" });
+      await mine.request("events.subscribe", {});
+      // One workspace, two trees: a thread the lead opens under itself, and a second lead the person opens beside it.
+      const child = await rt.sessions.start(ws.id, { prompt: "child" }, asThread(scope));
+      const childThread = child.view().threadId!;
+      const other = await rt.sessions.start(ws.id, { prompt: "second lead" });
+      const otherThread = other.view().threadId!;
+      for (let nth = held.launches.length - 1; nth >= 1; nth--) held.end(nth);
+      const threadsOn = (c: WsClient): Set<string> => new Set(c.events.map(e => e["threadId"]).filter((id): id is string => typeof id === "string"));
+      // The person's own socket reads every tree's rows, so the run is over when both ends have landed there. The
+      // lead's own turn is the one holding the token and it started before either socket subscribed, so neither
+      // list holds its rows; what the two lists differ by is the sibling tree.
+      await until(async () => mine.events.some(e => e.type === "session.end" && e["threadId"] === otherThread) && mine.events.some(e => e.type === "session.end" && e["threadId"] === childThread));
+      expect([...threadsOn(mine)].sort()).toEqual([childThread, otherThread].sort());
+      expect([...threadsOn(client)]).toEqual([childThread]);
+      mine.close();
+      client.close();
+    } finally {
+      await srv.close();
+      for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+      await rt.close();
+    }
   });
 
   it("the init job's own events reach no thread's socket either, since they are about this host", async () => {
