@@ -499,10 +499,12 @@ export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
 export const DaemonKind = z.enum([...WorkspaceKind.options, "place"]);
 export type DaemonKind = z.infer<typeof DaemonKind>;
 
-/** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP, or relayed from a
- * machine wsp runs. A local workspace answers only `here`; today no machine has a road into the host, so nothing
- * relays yet, and the rule is written and tested so it holds when one appears. */
-export const WorkspaceOrigin = z.enum(["here", "relayed"]);
+/** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP; relayed from a
+ * machine wsp runs; or paired, a computer of the person's own that holds a device token of this host. A local
+ * workspace is driven by `here` alone and starts a process for nothing else, since a command, a thread or a shell
+ * pane on it runs under the person's own login on this computer. The host stamps the word off the road a request
+ * arrived on, so nothing a client sends decides it. */
+export const WorkspaceOrigin = z.enum(["here", "relayed", "paired"]);
 export type WorkspaceOrigin = z.infer<typeof WorkspaceOrigin>;
 
 /** What a token scoped to one thread names: the thread whose turn holds it, the workspace that thread runs on, and
@@ -523,7 +525,7 @@ export const EventAsker = ThreadScope.pick({ threadId: true, rootThreadId: true 
 export type EventAsker = z.infer<typeof EventAsker>;
 
 /** Where a request reached the host from, as every verb takes it: the road alone, or the road with the thread a
- * machine's turn sent it out of. A bare word is `here` or `relayed` and says nothing about who; the object is a
+ * machine's turn sent it out of. A bare word is one of the three roads and says nothing about who; the object is a
  * socket the host authed on a thread scoped token, and the scope is the host's own reading of that token, never
  * the client's. Read it through `roadOf` and `scopeOf` so no verb decides for itself what the shape means. */
 export type Caller = WorkspaceOrigin | { origin: WorkspaceOrigin; by: ThreadScope };

@@ -200,7 +200,6 @@ import type {
   WorkspaceAgents,
   WorkspaceKind,
   WorkspaceLook,
-  WorkspaceOrigin,
   WorkspacePhase,
   WorkspaceProject,
   WorkspaceSize,
@@ -209,8 +208,8 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadScope, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1684,13 +1683,22 @@ function readScope(raw: unknown): ThreadScope | undefined {
   return read.success ? read.data : undefined;
 }
 
+/** The road those targets were registered from, read back the same way and for the same reason: a document
+ * written before the road rode beside them carries none, and one carrying a word this protocol does not know
+ * carries nothing, so a line delivered after a restart starts under no road nobody wrote. */
+function readRoad(raw: unknown): WorkspaceOrigin | undefined {
+  if (raw === undefined) return undefined;
+  const read = WorkspaceOrigin.safeParse(raw);
+  return read.success ? read.data : undefined;
+}
+
 interface SessionIndexRecord {
   workspaceId: string;
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
    * for it. All three are written for a running row alone. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -1982,6 +1990,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
     relayed: (machineId: string | undefined) => boolean;
+    /** Whether a computer the person paired may start a process on this kind's workspaces: a machine somewhere else
+     * runs that process on its own disk, and a workspace of this computer runs it under the person's own login,
+     * where it reads the host's token, the other computers' tokens and every key on this disk. Read by the three
+     * verbs that start one and by nothing else, so listing, reading and waking are unchanged. The machine id for
+     * the same reason the relayed rule takes it: a dial that names this computer is this computer. */
+    pairedRuns: (machineId: string | undefined) => boolean;
     /** How wsp itself is run on this kind's machine, for the tools a turn's own agent is given: a fork runs the
      * binary the daemon deploy lands, this computer runs the command the host itself was started as, and a kind wsp
      * puts nothing on answers none, which leaves that kind's turns without the tools. The address a turn reaches
@@ -2236,6 +2250,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * lets go and leaves them running, and whoever opens them next reads their logs from the first byte. Each
    * kind's wiring holds its own set; this one is for the kinds whose runs live on a machine. */
   const machineReading = new Set<() => void>();
+  /** Whether a machine reached over ssh is somewhere else: a dial that names the computer wsp runs on is this
+   * computer under another kind's name, and both rules about who may drive a workspace of that kind read it here
+   * rather than each spelling it. The machine id is absent on the one road that asks before a machine exists. */
+  const sshElsewhere = (machineId: string | undefined): boolean => {
+    const reach = machineId === undefined ? undefined : parseSshMachineId(machineId);
+    return reach !== undefined && !sshDialsThisComputer(reach, [hostname()]);
+  };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
       // A fork lands either at this host's own provider or on a computer somebody joined; the record says which,
@@ -2256,6 +2277,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // and the word for each is the one its row carries.
       loginStands: (entry, id) => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in",
       relayed: () => true,
+      pairedRuns: () => true,
       // The word, not a path: the deploy writes the shim onto the machine's PATH and the binary under it carries the
       // chip in its own path, so the one stable name for a fork's wsp is the word a turn's own shell runs. It dials
       // no host of its own, it opens a session on this machine's daemon and the daemon carries it up the socket
@@ -2305,6 +2327,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
             env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
             relayed: () => false,
+            pairedRuns: () => false,
             // This computer's own command, told which host to drive: a thread here runs the node wsp, which dials
             // rather than riding a machine's daemon. No thread gets this today, since the kind table lets no agent
             // on this computer drive this host; it is the kind's own answer for the day that changes.
@@ -2364,10 +2387,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // A machine wsp reaches is a machine, so a request relayed from one drives it as it drives a fork. The
             // one exception is a dial that names the computer wsp runs on: that is this computer under another
             // kind's name, and the local kind's refusal is the whole reason the rule exists.
-            relayed: machineId => {
-              const reach = machineId === undefined ? undefined : parseSshMachineId(machineId);
-              return reach !== undefined && !sshDialsThisComputer(reach, [hostname()]);
-            },
+            relayed: machineId => sshElsewhere(machineId),
+            // The same reading, for the same reason: a process started on a machine whose dial names this computer
+            // runs under the person's own login here, whatever kind the record it sits on carries.
+            pairedRuns: machineId => sshElsewhere(machineId),
             // The bundle a deploy lands on a machine over ssh carries the wsp command like every other, but which
             // node runs it there is the place's to say and no turn on this kind is handed a token yet: the tools
             // wait for the round that answers both.
@@ -2554,6 +2577,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const line = refusalFor(record, caller);
     if (line === undefined) return;
     throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
+  };
+  /** The one rule about what a computer the person paired may start, read by the three verbs that start a process
+   * on a workspace and by nothing else: a process on a workspace of this computer runs under the person's own
+   * login here and reads every file this computer holds, which a computer paired from somewhere else does not get
+   * to ask for. The kind answers, so a machine wsp runs elsewhere takes that computer's commands, threads and
+   * panes as it always has, and what a paired computer lists, reads and wakes is unchanged. */
+  const refusePairedRun = (record: { kind: WorkspaceKind; name: string; machineId?: string }, caller: Caller | undefined): void => {
+    if (roadOf(caller) !== "paired" || moduleOf(record.kind).pairedRuns(record.machineId)) return;
+    throw new Error(pairedRunRefusal(record.name));
   };
   /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
    * sentence for an id this host does not hold and for one outside its tree alike, since telling the two apart is
@@ -2829,7 +2861,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -2902,6 +2934,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),
         ...(s.notifyBy !== undefined ? { notifyBy: s.notifyBy } : {}),
+        ...(s.notifyRoad !== undefined ? { notifyRoad: s.notifyRoad } : {}),
         ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
         ...(s.view.status === "running" && s.run !== undefined ? { run: s.run } : {}),
         ...(s.view.status === "running" && s.turnToken !== undefined ? { turnToken: s.turnToken } : {}),
@@ -4554,7 +4587,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -4562,13 +4595,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, reply, run, turnToken, scopeDeviceId, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, turnToken, scopeDeviceId, ...view } of index.sessions) {
           const by = readScope(notifyBy);
+          const road = readRoad(notifyRoad);
           const row: {
             view: SessionView;
             turnId: string;
             notify?: readonly string[];
             notifyBy?: ThreadScope;
+            notifyRoad?: WorkspaceOrigin;
             turnLive?: TurnLive;
             run?: string;
             turnToken?: string;
@@ -4583,6 +4618,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // A document written before the scope rode beside the targets carries none, and its lines go as they
             // went then, as the person's; one that does not read as a scope is no scope at all.
             ...(by !== undefined ? { notifyBy: by } : {}),
+            ...(road !== undefined ? { notifyRoad: road } : {}),
             ...(reply !== undefined ? { turnLive: { reply } } : {}),
             ...(run !== undefined ? { run } : {}),
             ...(turnToken !== undefined ? { turnToken } : {}),
@@ -5377,6 +5413,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async execStream(id, argv, cwd, origin) {
       const entry = await entryOf(id, origin);
+      refusePairedRun(entry.record, origin);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await threadFolder(entry, { cwd });
@@ -5444,6 +5481,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
+      refusePairedRun(entry.record, origin);
       const served = servedByItsComputer(entry);
       return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent);
     },
@@ -5845,10 +5883,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return stopped;
   };
-  /** What the thread's start registered, kept by every turn on it: the targets and the thread that named them. */
-  const notifyOn = (threadId: string): { notify: readonly string[]; by?: ThreadScope } | undefined => {
+  /** What the thread's start registered, kept by every turn on it: the targets, the thread that named them and the
+   * road it named them from. */
+  const notifyOn = (threadId: string): { notify: readonly string[]; by?: ThreadScope; road?: WorkspaceOrigin } | undefined => {
     for (const s of sessions.values()) {
-      if (s.view.threadId === threadId && s.notify !== undefined) return { notify: s.notify, ...(s.notifyBy !== undefined ? { by: s.notifyBy } : {}) };
+      if (s.view.threadId === threadId && s.notify !== undefined) {
+        return { notify: s.notify, ...(s.notifyBy !== undefined ? { by: s.notifyBy } : {}), ...(s.notifyRoad !== undefined ? { road: s.notifyRoad } : {}) };
+      }
     }
     return undefined;
   };
@@ -5871,7 +5912,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** Lines for a parent whose workspace could not take a start when the child ended (napping, or the nap that ended
    * the child), sent when that workspace wakes; in memory only, so a host restart during the nap drops them. */
-  const heldLines = new Map<string, { from: string; notify: string; text: string; by?: ThreadScope; fell?: () => void }[]>();
+  const heldLines = new Map<string, { from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; fell?: () => void }[]>();
+  /** Who the lines off a row are delivered as: the thread that registered its targets and the road it registered
+   * them from, read off the row that holds both so the two never drift apart. */
+  const tellAs = (s: { notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin }): { by?: ThreadScope; road?: WorkspaceOrigin } => ({
+    ...(s.notifyBy !== undefined ? { by: s.notifyBy } : {}),
+    ...(s.notifyRoad !== undefined ? { road: s.notifyRoad } : {}),
+  });
   /** The line into the parent thread as a send would go: steered into its running turn, or queued behind it, which
    * is what a parent still in its own reply tail gets, since the send road waits for that process rather than
    * refusing. It goes under the thread that named the target, so the switch on that thread's workspace and the
@@ -5879,8 +5926,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * which is what every row written before the scope rode beside the targets carries. A parent with no session to
    * resume, and a start that door refuses, drop the line with a warning and call the line's own `fell`, which tells
    * the person the report is there; the child's end must not fail on either. */
-  const deliver = (line: { from: string; notify: string; text: string; by?: ThreadScope; fell?: () => void }): void => {
-    const { from, notify, text, by, fell = () => {} } = line;
+  const deliver = (line: { from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin; fell?: () => void }): void => {
+    const { from, notify, text, by, road, fell = () => {} } = line;
     const parent = latestOn(notify);
     if (!tellable(parent)) {
       console.warn(`thread ${from.slice(0, 8)} ended, but thread ${notify.slice(0, 8)} has no session to tell`);
@@ -5894,7 +5941,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), line]);
       return;
     }
-    sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, resume: parent.claudeSessionId, startedBy: "agent" }, by === undefined ? undefined : { origin: "here", by }).catch((e: unknown) => {
+    // The caller this start runs under: the thread that registered the targets where one did, and the road it
+    // registered them from, so the door that read what this caller may start reads it again here. A line nobody
+    // but the person registered carries neither and goes as theirs, which is what every row written before the
+    // road rode beside the targets holds.
+    const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
+    sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, resume: parent.claudeSessionId, startedBy: "agent" }, asWho).catch((e: unknown) => {
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
       fell();
     });
@@ -5911,7 +5963,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The one line an ending turn sends where its thread's start said: into a thread, or nowhere further for me, whom
    * the recorded event reaches. Recorded before the turn's session.done, since a follower ends there; the person's
    * own row for a line the target's door refused is the exception, since that answer comes after the start it made. */
-  const notifyEnd = (s: { view: SessionView; turnId: string }, notify: readonly string[], by: ThreadScope | undefined, result: TurnResult): void => {
+  const notifyEnd = (s: { view: SessionView; turnId: string }, notify: readonly string[], named: { by?: ThreadScope; road?: WorkspaceOrigin }, result: TurnResult): void => {
     const threadId = s.view.threadId;
     if (threadId === undefined) return;
     // A target whose thread has gone by now cannot be told, and its report must not go with it: the person is told
@@ -5931,13 +5983,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // it as a row beside every other, so theirs stays one line.
       const text = notifyLine(threadId, result, target === NOTIFY_ME ? "tail" : "whole");
       record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
-      if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...(by !== undefined ? { by } : {}), fell });
+      if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...named, fell });
     }
   };
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
    * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
-  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; turnLive?: TurnLive }, reason: string, cutLine: (endedAt: number) => string): void => {
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive }, reason: string, cutLine: (endedAt: number) => string): void => {
     const reply = s.turnLive?.reply;
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
@@ -5946,7 +5998,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
-    if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, s.notifyBy, { status: "failed", error: cutLine(endedAt) });
+    if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
     record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
@@ -5979,6 +6031,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The thread that named those targets, where a thread named them: the line their end delivers starts the
      * target's turn under it, so the rules that let it name them are read again when the line goes. */
     notifyBy?: ThreadScope;
+    /** And the road they were named from, read at delivery beside the thread, so a caller that may start no
+     * process on the target's workspace gets none started for it a turn later. */
+    notifyRoad?: WorkspaceOrigin;
     /** The token this turn was launched with, kept on its row while the turn runs so a request out of it can name
      * this thread. */
     turnToken?: string;
@@ -6003,7 +6058,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     waiting?: { on: boolean };
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
-    const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, turnToken, scopeDeviceId } = t;
+    const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
     const written = transcripts.get(workspaceId) ?? [];
     /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
@@ -6223,7 +6278,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // row it resumes, and a listing has to answer what a thread spent without reading anyone's transcript.
           if (result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + result.costUsd;
           void persistSessions(workspaceId);
-          if (notify !== undefined) notifyEnd({ view, turnId }, notify, notifyBy, result);
+          if (notify !== undefined) notifyEnd({ view, turnId }, notify, tellAs(t), result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           return;
         }
@@ -6327,13 +6382,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // be dropped, so the rows and the waits are ended here.
       closeOpenAsks();
       ended = true;
-      settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), turnLive }, reason, () => reason);
+      settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
@@ -6400,7 +6455,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -6447,6 +6502,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),
         ...(s.notifyBy !== undefined ? { notifyBy: s.notifyBy } : {}),
+        ...(s.notifyRoad !== undefined ? { notifyRoad: s.notifyRoad } : {}),
         // The token this turn was launched with is still in the process this attach reached, so the row that answers
         // for it takes it back; a token this host had never minted would be one nobody can answer for.
         ...(s.turnToken !== undefined ? { turnToken: s.turnToken } : {}),
@@ -6472,6 +6528,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       const entry = await entryOf(workspaceId, origin);
+      refusePairedRun(entry.record, origin);
       // A start that names no agent runs the one the last thread on this project used, so the command line, the
       // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
       // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
@@ -6521,8 +6578,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // none. The one crossing this keeps is the shim's own `--notify me`, which is the caller itself.
       for (const target of asked ?? []) {
         if (target === NOTIFY_ME) continue;
-        if (latestOn(target) === undefined || !drivesThread(target, origin)) throw new Error(`no thread ${target} to notify`);
+        const on = latestOn(target);
+        if (on === undefined || !drivesThread(target, origin)) throw new Error(`no thread ${target} to notify`);
         if (target === threadId) throw new Error("a thread cannot notify itself");
+        // The line a target is told starts a turn on that target's own workspace, so what this caller may start
+        // there is read where the target is named, and again at delivery: a target is a start this caller asked
+        // for, one turn later and on another workspace.
+        const held = live.get(on.workspaceId)?.record;
+        if (held !== undefined) refusePairedRun(held, origin);
         // Each end would start the next turn on the other thread with no one sending anything, so the chain is
         // walked whole; it is a lead and its builders, so it is short.
         if (notifyReach(notifyOn(target)?.notify ?? []).has(threadId)) {
@@ -6535,6 +6598,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // its end delivers starts the target's turn under it; one the person made carries none and goes as theirs. A
       // send into a thread takes what the thread's opener registered, this beside the targets themselves.
       const notifyBy = asked === undefined ? registered?.by : scopeOf(origin);
+      // And the road they were named from, beside the thread: the line's own start reads the same rules the
+      // registration did, so a road that may not start a process on the target's workspace does not get one
+      // started for it a turn later.
+      const notifyRoad = asked === undefined ? registered?.road : roadOf(origin);
       const turnToken = randomBytes(16).toString("hex");
       // The token this turn's own agent drives this host with, and the address it dials: a device of this host's,
       // scoped to this thread and taken away when the turn's process exits, so a token read out of a machine after
@@ -6621,7 +6688,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         held = true;
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
-        sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}) });
+        sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
       };
       hold();
       let outcome: SessionStartOutcome = "started";
@@ -6709,6 +6776,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           turnId,
           ...(notify !== undefined ? { notify } : {}),
           ...(notifyBy !== undefined ? { notifyBy } : {}),
+          ...(notifyRoad !== undefined ? { notifyRoad } : {}),
           turnToken,
           outcome,
           ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
