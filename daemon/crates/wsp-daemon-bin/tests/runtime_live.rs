@@ -2951,8 +2951,8 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
 
 /// What a workspace on this computer carries into a thread, a command and a pane: the order the host asked for
 /// and the recipe's knobs beside it, one environment for all three. The boot's is the spec's, an exec and the
-/// pty broker are tenants that start from it, and the login shell in a pane reads the file the boot wrote in the
-/// workspace's own /etc after the box's own profile has set root's PATH.
+/// pty broker are tenants that start from it, and the login shell in a pane holds that order too, whether its
+/// /etc/profile leaves PATH alone or resets it and the file the boot wrote under /etc/profile.d puts it back.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_and_a_pane() {
@@ -2979,19 +2979,18 @@ async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_an
 
     // What a person's pane reads, printed by the pane's own shell, which is the only reading of this road that
     // is a person's: the knob, which nothing on the daemon's side of a pty names, so it can only have come from
-    // the workspace's own environment through the broker; and the PATH, which the box's /etc/profile resets to
-    // the distribution's list for root before it reads the file the boot wrote under /etc/profile.d, so a pane
-    // opening on the prefix's own folders is that file standing.
+    // the workspace's own environment through the broker, and the order, whole. It reaches a pane by one of two
+    // roads, the broker's own environment where the box's /etc/profile leaves PATH alone and the file the boot
+    // wrote under /etc/profile.d where it resets it, and the line is matched whole because the first folders of
+    // this order are the first of a distribution's own reset list too, so a line cut short reads the same on a
+    // pane that got neither.
     pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
     pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane %s %s\\n' \"$WSP_KNOB\" \"$PATH\"\n" })).await;
-    let opens = wsp_frames::numbers::PLACE_WORKSPACE_PATH.split(':').take(2).collect::<Vec<_>>().join(":");
-    assert!(pane.printed_within(&pty, &format!("pane {knob} {opens}"), Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    let whole = format!("pane {knob} {}", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
+    assert!(pane.printed_within(&pty, &whole, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
 
-    // And which process the reply's pid is, read now that the pane has answered: the box's own pid for the
-    // process the exec made inside this workspace, which is the pane's broker. The workspace numbers its own
-    // processes, so this is not the pid one inside reads for itself; and the number is answered the moment that
-    // process is made, which is before it has exec'd the broker, so its environment read any earlier is the one
-    // it was forked with and not the workspace's.
+    // And which process the reply's number names, read now the pane has answered and the exec is certainly
+    // done: the broker, as the box numbers it, told from the helper that started it by the line it runs.
     let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap();
     let args: Vec<&str> = std::str::from_utf8(&cmdline).unwrap().split('\0').filter(|a| !a.is_empty()).collect();
     assert_eq!(args.first().copied(), Some(wsp_runtime::profile::INIT_PATH), "the pid is not the pane's broker: {args:?}");

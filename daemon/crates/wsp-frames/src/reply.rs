@@ -111,6 +111,7 @@ pub struct PtyAttachReply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PtyListEntry {
     pub id: String,
+    /// The same number `PtyCreateReply` answered for this terminal, and the same reading.
     pub pid: u32,
     pub cols: u16,
     pub rows: u16,
