@@ -11,8 +11,8 @@ import { homedir, arch as osArch, platform, release, type as osType, uptime as u
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
-import { dirname, join } from "node:path";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import { dirname, join, relative, sep } from "node:path";
 import { sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
@@ -278,6 +278,10 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   for (const rel of own) {
     const path = join(home, rel);
     if (!there(path)) continue;
+    if (!foldersAreTheirOwn(home, path)) {
+      removed.push(placeKeptForLinkLine(path));
+      continue;
+    }
     rmSync(path, { force: true });
     removed.push(path);
     prunedEmpty(home, dirname(path));
@@ -289,6 +293,10 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     // lstat, not exists: the browser name is a symlink to the shim beside it, and once the shim has gone the link
     // is dangling, which every following-the-link read calls absent while the person is still left holding it.
     if (!there(path)) continue;
+    if (!foldersAreTheirOwn(home, path)) {
+      removed.push(placeKeptForLinkLine(path));
+      continue;
+    }
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
@@ -354,6 +362,26 @@ function prunedEmpty(home: string, from: string): void {
     }
     at = dirname(at);
   }
+}
+
+/** Whether every folder on the way to a path under the home is a folder of this computer's own. A workspace on a
+ * computer somebody owns writes in that home, so the shared .local/bin can be a link it planted, and a removal by
+ * name would follow that link and take the computer's own file of the name at the end. lstat, so a link reads as a
+ * link and not as what it points at; the check and the removal are two calls here, where the daemon's road makes
+ * them one by holding the folder open. */
+function foldersAreTheirOwn(home: string, path: string): boolean {
+  const parts = relative(home, path).split(sep);
+  if (parts[0] === "" || parts.includes("..")) return false;
+  let at = home;
+  for (const part of parts.slice(0, -1)) {
+    at = join(at, part);
+    try {
+      if (!lstatSync(at).isDirectory()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Whether a path is there at all, link or file. */

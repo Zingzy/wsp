@@ -116,11 +116,19 @@ impl Guests {
     }
 
     /// One session per socket: a second open on the same socket is the client's own mistake, not a second session.
+    /// Past its workspace's cap no session is opened at all: the cap is read on the rows this daemon is holding
+    /// for that workspace, before a name is taken or the socket is bound to one.
     pub(crate) fn open(self: &Arc<Self>, conn: &Conn, open: GuestOpen) -> Result<String, OpError> {
+        let machine = conn.workspace();
+        let mut state = lock(&self.state);
+        // A session whose socket went and whose close is waiting for a watcher is still a row this daemon holds,
+        // so it counts: what a workspace may fill is what the daemon carries for it.
+        if state.sessions.values().filter(|held| held.machine == machine).count() >= numbers::GUEST_SESSIONS_PER_WORKSPACE_CAP {
+            return Err(OpError::coded(DaemonErrorCode::BadRequest, words::GUEST_WORKSPACE_FULL));
+        }
         let at = self.ids.fetch_add(1, Ordering::Relaxed);
         let session = format!("g{at}");
         conn.take_guest(session.clone())?;
-        let machine = conn.workspace();
         let opened = DaemonEvent::GuestOpened {
             session: session.clone(),
             machine_id: machine.clone(),
@@ -131,7 +139,6 @@ impl Guests {
             argv: open.argv,
             cwd: open.cwd,
         };
-        let mut state = lock(&self.state);
         let unwatched_since = state.watching().is_none().then(Instant::now);
         let row = Session {
             key: conn.key,
@@ -414,5 +421,33 @@ mod tests {
         }
         assert_eq!(refusal.as_deref(), Some(words::GUEST_IN_FLIGHT_FULL), "wsp-a filled its own cap");
         assert!(guests.send(&b, fat()).is_ok(), "wsp-b has its own count");
+    }
+
+    /// The sessions are counted the same way and for the same reason: a process inside a workspace opens them on
+    /// a door that takes no token, and the rows collect in the daemon every co-tenant workspace shares.
+    #[tokio::test]
+    async fn a_workspace_opens_as_many_sessions_as_the_cap_and_the_one_beside_it_opens_its_own() {
+        let guests = Arc::new(Guests::new(Duration::from_secs(600)));
+        let mut held = Vec::new();
+        for key in 0..numbers::GUEST_SESSIONS_PER_WORKSPACE_CAP {
+            let (conn, rx) = inside("wsp-a", key as u64);
+            guests.open(&conn, opening()).expect("a session under the cap is opened");
+            held.push((conn, rx));
+        }
+        let (over, _over_rx) = inside("wsp-a", 900);
+        let refused = guests.open(&over, opening()).expect_err("the session past the cap was opened");
+        assert_eq!(refused.message, words::GUEST_WORKSPACE_FULL);
+        let (beside, _beside_rx) = inside("wsp-b", 901);
+        assert!(guests.open(&beside, opening()).is_ok(), "wsp-b has its own count");
+
+        // A session whose socket went with nobody watching stands until a watcher has been handed its close, and
+        // what the daemon is still holding is what the cap reads.
+        let (gone, _gone_rx) = held.remove(0);
+        guests.socket_closed(gone.key);
+        let (again, _again_rx) = inside("wsp-a", 902);
+        assert_eq!(
+            guests.open(&again, opening()).expect_err("the row left behind counted for nothing").message,
+            words::GUEST_WORKSPACE_FULL
+        );
     }
 }

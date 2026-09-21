@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -247,9 +247,11 @@ pub(crate) struct Ctx {
     keys: AtomicU64,
 }
 
-/// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends.
+/// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends, and the
+/// sockets that door is serving right now, which is what the cap on it is read against.
 pub(crate) struct WorkspaceDoor {
     task: tokio::task::JoinHandle<()>,
+    sockets: Arc<AtomicUsize>,
 }
 
 impl Ctx {
@@ -335,9 +337,12 @@ impl Ctx {
         }
         let ctx = Arc::clone(self);
         let workspace = id.to_owned();
-        let task = tokio::spawn(door::serve_workspace(listener, ctx, workspace));
-        let held = WorkspaceDoor { task };
-        if let Some(old) = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), held) {
+        let mut doors = self.workspace_doors.lock().unwrap_or_else(|e| e.into_inner());
+        // The count is the workspace's own and not one door's: a door replaced after this daemon restarted takes
+        // the count on, since the sockets the one before it is serving are still that workspace's sockets.
+        let sockets = doors.get(id).map_or_else(|| Arc::new(AtomicUsize::new(0)), |held| Arc::clone(&held.sockets));
+        let task = tokio::spawn(door::serve_workspace(listener, ctx, workspace, Arc::clone(&sockets)));
+        if let Some(old) = doors.insert(id.to_owned(), WorkspaceDoor { task, sockets }) {
             old.task.abort();
         }
     }

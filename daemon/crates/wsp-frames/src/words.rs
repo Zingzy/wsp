@@ -46,9 +46,20 @@ pub const GUEST_QUEUE_FULL: &str = "the host has not read this session for too l
 /// Why a guest message is refused where its workspace already has the cap's worth of bytes waiting to be read:
 /// the frame is turned away and the session stands, so a sender whose host is reading slowly goes on.
 pub const GUEST_IN_FLIGHT_FULL: &str = "too many guest bytes are waiting to be read here; send this one again";
+/// Why an open is refused where this workspace already holds as many sessions as it may: the sessions standing
+/// are the ones a host is still reading, so the one asking is told to end one of its own rather than the
+/// workspace losing them all.
+pub const GUEST_WORKSPACE_FULL: &str = "this workspace already holds as many guest sessions as it may; end one and run it again";
 /// Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
 /// agent that ran the line can run it again against a host that is there.
 pub const GUEST_UNWATCHED: &str = "the host stopped watching; run it again";
+
+/// Why one path a leave would have taken is still there: a folder on the way to it under the home is a link, and
+/// a workspace on a computer somebody owns writes in that home, so following it would take the computer's own
+/// file of that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_kept_for_link(path: impl std::fmt::Display) -> String {
+    format!("nothing was removed at {path}: a folder on the way to it is a link")
+}
 
 pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")

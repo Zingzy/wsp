@@ -14,10 +14,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
+import { OWN_MARK, SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -807,6 +807,36 @@ describe("taking wsp off the computer it is typed on", () => {
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: shWithSha256sum() });
     expect(swept.removed.filter(line => line.startsWith("/"))).toEqual([]);
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
+  });
+
+  it("removes nothing through a folder a workspace replaced with a link, and says which paths stayed", async () => {
+    const home = tmp("leave-linked-parent");
+    const at = placeDaemonPaths(home);
+    mkdirSync(at.wsp, { recursive: true });
+    // The computer's own bin, holding the two names the fixed list ends on, and the shared bin a workspace
+    // replaced with a link to it.
+    const theirs = tmp("leave-linked-theirs");
+    for (const name of ["wsp-open", "xdg-open"]) writeFileSync(join(theirs, name), "the computer's own\n");
+    mkdirSync(join(home, ".local"), { recursive: true });
+    symlinkSync(theirs, at.binDir);
+    // And a row of the ledger whose folder is a link the same way, pointing at a file of the computer's own.
+    const planted = tmp("leave-linked-planted");
+    writeFileSync(join(planted, "settings.json"), "the computer's own\n");
+    symlinkSync(planted, join(home, ".claude"));
+
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => `${OWN_MARK}\t.claude/settings.json\n` });
+
+    for (const name of ["wsp-open", "xdg-open"]) expect(readFileSync(join(theirs, name), "utf8"), name).toBe("the computer's own\n");
+    expect(readFileSync(join(planted, "settings.json"), "utf8")).toBe("the computer's own\n");
+    // The links are the workspace's own doing and stay; what the leave says is that it took nothing at those
+    // three paths and why.
+    for (const path of [join(at.binDir, "wsp-open"), join(at.binDir, "xdg-open"), join(home, ".claude", "settings.json")]) {
+      expect(swept.removed, path).toContain(placeKeptForLinkLine(path));
+      expect(swept.removed, path).not.toContain(path);
+    }
+    // Wsp's own folder is under no link and goes as it always did.
+    expect(existsSync(at.wsp)).toBe(false);
+    expect(swept.removed).toContain(at.wsp);
   });
 
   it("says this computer is no place when there is nothing to leave", async () => {

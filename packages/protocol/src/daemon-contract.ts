@@ -103,6 +103,17 @@ export const GUEST_QUEUE_CAP_FRAMES = 256;
  * message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is refused
  * and its session stands. */
 export const GUEST_IN_FLIGHT_CAP_BYTES = 4 * GUEST_MESSAGE_CAP_BYTES;
+/** Guest sockets one workspace's door serves at once, and guest sessions one workspace holds at once, a session
+ * whose socket went and whose close is waiting for a watcher counted among them. The door of a workspace on a
+ * computer somebody owns needs no token, so what a process inside opens is what this bounds: past the cap a socket
+ * is closed with no hello and an open is refused, while the workspaces beside it and the host link stand. One
+ * count per workspace, and one for the daemon inside a machine, where a session names no workspace. */
+export const GUEST_SESSIONS_PER_WORKSPACE_CAP = 64;
+/** The largest frame a workspace's door reads, in place of the ceiling every other socket is opened with: one
+ * guest message's cap and room for the envelope around it. A frame past this is refused by the framing before a
+ * byte of it is held or parsed, which is what makes the cap above worth having, since a frame becomes a message
+ * before any guest cap is read. */
+export const GUEST_FRAME_CAP_BYTES = GUEST_MESSAGE_CAP_BYTES + 64 * 1024;
 /** How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions the
  * machine holds, so a host that restarted picks them back up; past this span nobody is coming and the session ends
  * to its guest, rather than leaving the process inside the machine waiting for the life of the workspace. */
@@ -164,9 +175,17 @@ export const GUEST_QUEUE_FULL = "the host has not read this session for too long
 /** Why a guest message is refused where its workspace already has the cap's worth of bytes waiting to be read: the
  * frame is turned away and the session stands, so a sender whose host is reading slowly goes on. */
 export const GUEST_IN_FLIGHT_FULL = "too many guest bytes are waiting to be read here; send this one again";
+/** Why an open is refused where this workspace already holds as many sessions as it may: the sessions standing are
+ * the ones a host is still reading, so the one asking is told to end one of its own rather than the workspace
+ * losing them all. */
+export const GUEST_WORKSPACE_FULL = "this workspace already holds as many guest sessions as it may; end one and run it again";
 /** Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
  * agent that ran the line can run it again against a host that is there. */
 export const GUEST_UNWATCHED = "the host stopped watching; run it again";
+/** Why one path a leave would have taken is still there: a folder on the way to it under the home is a link, and a
+ * workspace on a computer somebody owns writes in that home, so following it would take the computer's own file of
+ * that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
+export const placeKeptForLinkLine = (path: string): string => `nothing was removed at ${path}: a folder on the way to it is a link`;
 /** What a guest process prints when nothing answers on its own machine's daemon port. */
 export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;
 

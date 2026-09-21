@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 69;
+pub const DAEMON_VERSION: u32 = 70;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -105,6 +105,17 @@ pub const GUEST_QUEUE_CAP_FRAMES: usize = 256;
 /// of one message's cap, so the largest honest thing on this road is never what fills it; a send past the cap is
 /// refused and its session stands.
 pub const GUEST_IN_FLIGHT_CAP_BYTES: usize = 4 * GUEST_MESSAGE_CAP_BYTES;
+/// Guest sockets one workspace's door serves at once, and guest sessions one workspace holds at once, a session
+/// whose socket went and whose close is waiting for a watcher counted among them. The door of a workspace on a
+/// computer somebody owns needs no token, so what a process inside opens is what this bounds: past the cap a
+/// socket is closed with no hello and an open is refused, while the workspaces beside it and the host link stand.
+/// One count per workspace, and one for the daemon inside a machine, where a session names no workspace.
+pub const GUEST_SESSIONS_PER_WORKSPACE_CAP: usize = 64;
+/// The largest frame a workspace's door reads, in place of the ceiling every other socket is opened with: one
+/// guest message's cap and room for the envelope around it. A frame past this is refused by the framing before a
+/// byte of it is held or parsed, which is what makes the cap above worth having, since a frame becomes a message
+/// before any guest cap is read.
+pub const GUEST_FRAME_CAP_BYTES: usize = GUEST_MESSAGE_CAP_BYTES + 64 * 1024;
 /// How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions this
 /// machine holds, so a host that restarted picks them back up; past this span nobody is coming, and the session
 /// ends to its guest rather than leaving the process inside the machine waiting for the life of the workspace.

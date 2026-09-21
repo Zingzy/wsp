@@ -5,7 +5,7 @@
 
 use std::io;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -206,23 +206,52 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
     serve_authed(ws, &ctx, conn, rx, None, None).await;
 }
 
+/// One socket's place on a workspace's door, given back the moment that socket's task ends however it ends. The
+/// count it is taken from is that workspace's own, so a process flooding inside one workspace never takes a place
+/// from the workspace beside it.
+struct DoorSlot(Arc<AtomicUsize>);
+
+impl DoorSlot {
+    /// A place where the cap leaves one; none past it, where nothing is taken.
+    fn take(door: &Arc<AtomicUsize>) -> Option<DoorSlot> {
+        let taken = door.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+            (held < numbers::GUEST_SESSIONS_PER_WORKSPACE_CAP).then_some(held + 1)
+        });
+        taken.ok().map(|_| DoorSlot(Arc::clone(door)))
+    }
+}
+
+impl Drop for DoorSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// The door inside one workspace: every socket accepted on that workspace's own unix socket, each served with no
 /// auth frame and no token. The file is the gate, and what the socket may ask for is the roads table's, which
-/// answers a process inside its own two guest ops and refuses it everything else.
-pub(crate) async fn serve_workspace(listener: tokio::net::UnixListener, ctx: Arc<Ctx>, workspace: String) {
+/// answers a process inside its own two guest ops and refuses it everything else. The count is the other half of
+/// the gate: this door takes no token, so a socket accepted past the cap is dropped here, closed with no hello and
+/// no task of its own, and the daemon every co-tenant workspace shares stands.
+pub(crate) async fn serve_workspace(listener: tokio::net::UnixListener, ctx: Arc<Ctx>, workspace: String, door: Arc<AtomicUsize>) {
     loop {
         let Ok((stream, _)) = listener.accept().await else { return };
+        let Some(slot) = DoorSlot::take(&door) else { continue };
         let (ctx, workspace) = (Arc::clone(&ctx), workspace.clone());
-        tokio::spawn(serve_inside(stream, ctx, workspace));
+        tokio::spawn(serve_inside(stream, ctx, workspace, slot));
     }
 }
 
 /// One socket inside a workspace: the handshake, then the same loop every authed socket runs. Nothing is checked
 /// at this door, since nothing but that workspace can see the file it was opened on; the socket is never added to
 /// the authed list, so what the daemon pushes to every authed socket, the URLs it reads off this computer's own
-/// ptys among it, reaches nothing inside a workspace.
-async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: String) {
-    let config = WebSocketConfig::default().max_message_size(Some(MESSAGE_MAX_BYTES)).max_frame_size(Some(MESSAGE_MAX_BYTES));
+/// ptys among it, reaches nothing inside a workspace. The framing here is opened at the guest frame cap rather
+/// than the ceiling every other socket gets, so a frame larger than a guest message may be is refused by the
+/// framing before the daemon holds it or reads it as a message. The place on the door is held for the life of
+/// this task.
+async fn serve_inside(stream: tokio::net::UnixStream, ctx: Arc<Ctx>, workspace: String, _slot: DoorSlot) {
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(numbers::GUEST_FRAME_CAP_BYTES))
+        .max_frame_size(Some(numbers::GUEST_FRAME_CAP_BYTES));
     let deadline = Instant::now() + ctx.auth_deadline;
     let Ok(Ok(ws)) = timeout_at(deadline, tokio_tungstenite::accept_async_with_config(stream, Some(config))).await else {
         return;
@@ -402,13 +431,153 @@ mod tests {
     use tokio::net::UnixStream;
 
     const WAIT: Duration = Duration::from_secs(5);
+    const TOKEN: &str = "test-token-123";
 
     /// The next text frame, or nothing within the wait.
-    async fn frame(ws: &mut WebSocketStream<UnixStream>) -> Option<Value> {
+    async fn frame<S>(ws: &mut WebSocketStream<S>) -> Option<Value>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         match timeout(WAIT, ws.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => serde_json::from_str(&t).ok(),
             _ => None,
         }
+    }
+
+    /// One ping and its reply: the op every road answers, so what a case reads is the door and not the switch.
+    async fn ping<S>(ws: &mut WebSocketStream<S>, id: u64) -> Option<Value>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        ws.send(Message::text(json!({ "id": id, "op": "ping" }).to_string())).await.ok()?;
+        frame(ws).await
+    }
+
+    /// A daemon's own state with its token, root and manifest under fresh directories; the two handles come back
+    /// with it, since dropping either takes the file the ctx was built on.
+    fn running() -> (Arc<Ctx>, tempfile::NamedTempFile, tempfile::TempDir) {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "{TOKEN}").unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.root = Some(home.path().to_path_buf());
+        options.manifest_path = Some(home.path().join("manifest.json"));
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
+        (ctx, token, home)
+    }
+
+    /// One socket on a workspace's door, through the handshake and past the hello, or nothing where the door
+    /// closed it instead.
+    async fn inside(at: &std::path::Path) -> Option<WebSocketStream<UnixStream>> {
+        let stream = UnixStream::connect(at).await.ok()?;
+        let (mut ws, _) = timeout(WAIT, tokio_tungstenite::client_async("ws://workspace/", stream)).await.ok()?.ok()?;
+        let hello = frame(&mut ws).await?;
+        assert_eq!(hello["type"], "daemon.hello");
+        Some(ws)
+    }
+
+    /// The daemon's own inbound door on the loopback, serving the same state: a socket there is inside no
+    /// workspace, so neither of the two caps is read for it.
+    async fn inbound(ctx: &Arc<Ctx>) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ctx = Arc::clone(ctx);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(serve(stream, Arc::clone(&ctx)));
+            }
+        });
+        addr
+    }
+
+    /// One socket on that door, through the auth frame and past the hello.
+    async fn authed(addr: std::net::SocketAddr) -> WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>> {
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/")).await.unwrap();
+        ws.send(Message::text(json!({"id": 1, "op": "auth", "token": TOKEN}).to_string())).await.unwrap();
+        for _ in 0..2 {
+            let read = timeout(WAIT, ws.next()).await.expect("the door answers the auth frame");
+            if let Some(Ok(Message::Text(t))) = read {
+                let frame: Value = serde_json::from_str(&t).unwrap();
+                if frame["type"] == "daemon.hello" {
+                    return ws;
+                }
+                assert_eq!(frame["ok"], json!(true), "{frame}");
+            }
+        }
+        panic!("no hello arrived on the inbound door");
+    }
+
+    /// A ping frame with as much padding as the caller asks for: the bytes are the point, and the op is one every
+    /// road answers, so what differs between two doors is the framing and nothing else.
+    fn padded_ping(id: u64, bytes: usize) -> String {
+        json!({ "id": id, "op": "ping", "pad": "x".repeat(bytes) }).to_string()
+    }
+
+    /// The door inside a workspace takes no token and no auth frame, so the count is the whole of the gate on it:
+    /// a process inside opens as many sockets as the cap and no more, the workspace beside it and this computer's
+    /// own door answer through the flood, and a socket that ends gives its place straight back.
+    #[tokio::test]
+    async fn a_workspace_door_serves_the_cap_and_closes_what_comes_past_it_with_no_hello() {
+        let (ctx, _token, home) = running();
+        let a = home.path().join("a.sock");
+        let b = home.path().join("b.sock");
+        ctx.open_workspace_door("wsp-a", &a);
+        ctx.open_workspace_door("wsp-b", &b);
+        let addr = inbound(&ctx).await;
+
+        let mut held = Vec::new();
+        for _ in 0..numbers::GUEST_SESSIONS_PER_WORKSPACE_CAP {
+            held.push(inside(&a).await.expect("a socket under the cap is served"));
+        }
+        assert!(inside(&a).await.is_none(), "a socket past the cap was served");
+
+        // What the flood must not reach: the workspace beside it, which counts its own, and this computer's own
+        // door, which the host's link and every client of the person's come through.
+        let mut beside = inside(&b).await.expect("the workspace beside it has a count of its own");
+        assert_eq!(ping(&mut beside, 7).await.expect("the door beside it answers")["ok"], json!(true));
+        let mut own = authed(addr).await;
+        assert_eq!(ping(&mut own, 8).await.expect("the daemon's own door answers")["ok"], json!(true));
+
+        // And a socket that ends gives its place back at once, so a workspace working inside the cap never meets it.
+        drop(held.pop().unwrap());
+        let room = async {
+            loop {
+                if let Some(ws) = inside(&a).await {
+                    break ws;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        assert!(timeout(WAIT, room).await.is_ok(), "the place a closed socket held never came back");
+    }
+
+    /// A frame larger than a guest message may be is refused by the framing on a workspace's door, before the
+    /// daemon holds it or reads it as a message; the same bytes on this computer's own door are read as they
+    /// always were, since the cap is the workspace door's alone.
+    #[tokio::test]
+    async fn a_frame_past_the_guest_cap_ends_a_workspace_socket_and_still_rides_the_daemons_own_door() {
+        let (ctx, _token, home) = running();
+        let at = home.path().join("a.sock");
+        ctx.open_workspace_door("wsp-a", &at);
+        let addr = inbound(&ctx).await;
+        let over = padded_ping(2, numbers::GUEST_FRAME_CAP_BYTES + 1);
+        assert!(over.len() > numbers::GUEST_FRAME_CAP_BYTES);
+
+        let mut ws = inside(&at).await.expect("the door serves the socket");
+        // The write itself may not finish: the framing reads the length and closes while the rest is still
+        // arriving, which the sender meets as a broken pipe. Either way nothing comes back and the socket is done.
+        let _ = ws.send(Message::text(over.clone())).await;
+        assert_eq!(frame(&mut ws).await, None, "a frame past the cap was read and answered");
+
+        let mut own = authed(addr).await;
+        own.send(Message::text(over)).await.unwrap();
+        let answered = frame(&mut own).await.expect("the daemon's own door reads it under the ceiling every socket gets");
+        assert_eq!(answered["id"], json!(2));
+        assert_eq!(answered["ok"], json!(true), "{answered}");
+
+        // One socket's frame ended one socket: the door is still there for the next process inside that workspace.
+        let mut next = inside(&at).await.expect("the door answers after a frame past the cap");
+        assert_eq!(ping(&mut next, 3).await.expect("the door still answers")["ok"], json!(true));
     }
 
     /// The budget before auth is one: the upgrade request costs the peer nothing, and what it wrote behind the

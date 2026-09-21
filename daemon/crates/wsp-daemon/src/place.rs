@@ -393,29 +393,117 @@ pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Ve
     let mut removed = Vec::new();
     for rel in own_marks(&read(&landed_files_script(home))) {
         let path = home.join(&rel);
-        if std::fs::remove_file(&path).is_ok() {
-            removed.push(path.to_string_lossy().into_owned());
-            if let Some(parent) = path.parent() {
-                prune_empty(home, parent);
+        match remove_under_home(home, Path::new(&rel)) {
+            Removed::Gone => {
+                removed.push(path.to_string_lossy().into_owned());
+                if let Some(parent) = path.parent() {
+                    prune_empty(home, parent);
+                }
             }
+            Removed::Linked => removed.push(words::place_kept_for_link(path.to_string_lossy())),
+            Removed::Absent => {}
         }
     }
     for path in place_owned_paths(home) {
-        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-        let gone = if meta.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
-        if gone.is_ok() {
-            removed.push(path.to_string_lossy().into_owned());
+        let Ok(rel) = path.strip_prefix(home) else { continue };
+        match remove_under_home(home, rel) {
+            Removed::Gone => removed.push(path.to_string_lossy().into_owned()),
+            Removed::Linked => removed.push(words::place_kept_for_link(path.to_string_lossy())),
+            Removed::Absent => {}
         }
     }
     removed
 }
 
-/// The folders wsp's own files left empty, taken from the file's own upwards. Never the first folder under the
-/// home: ~/.claude-cfg and ~/.codex are the agents' own to make and to keep, whatever wsp put inside them.
+/// What one removal under the home did, which is what the leave's lines say.
+enum Removed {
+    Gone,
+    /// Nothing of that name is there, which is most of the list on most computers, or the path is one the walk
+    /// does not take, a `..` or a leading `.` in it: either way nothing goes and nothing is said of it.
+    Absent,
+    /// A folder on the way to it is a link, or is no folder at all: nothing was removed and the path is named as
+    /// one that stayed.
+    Linked,
+}
+
+/// One path under the home, removed through the home's own descriptor: each folder on the way is opened with no
+/// link followed, and the leaf is unlinked on the descriptor of the folder holding it. A workspace on a computer
+/// somebody owns writes in that computer's home, so the shared `/root/.local/bin` can be a link it planted, and a
+/// removal by name would follow it and take the box's own file of that name; here the walk stops instead.
+fn remove_under_home(home: &Path, rel: &Path) -> Removed {
+    let (parent, name) = match walk_under_home(home, rel) {
+        Under::At(parent, name) => (parent, name),
+        Under::Absent => return Removed::Absent,
+        Under::Linked => return Removed::Linked,
+    };
+    let Ok(meta) = nix::sys::stat::fstatat(&parent, name.as_os_str(), nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) else {
+        return Removed::Absent;
+    };
+    let directory = nix::sys::stat::SFlag::from_bits_truncate(meta.st_mode).contains(nix::sys::stat::SFlag::S_IFDIR);
+    let flag = if directory { nix::unistd::UnlinkatFlags::RemoveDir } else { nix::unistd::UnlinkatFlags::NoRemoveDir };
+    match nix::unistd::unlinkat(&parent, name.as_os_str(), flag) {
+        Ok(()) => Removed::Gone,
+        // A folder with something in it is the one removal the standard library does by path alone, and it runs
+        // only after the walk above stood: every folder on the way to it is a folder of this computer's own.
+        Err(_) if directory => {
+            if std::fs::remove_dir_all(home.join(rel)).is_ok() {
+                Removed::Gone
+            } else {
+                Removed::Absent
+            }
+        }
+        Err(_) => Removed::Absent,
+    }
+}
+
+/// Where a path under the home is, opened one folder at a time.
+enum Under {
+    /// The folder holding it, and its name inside that folder.
+    At(std::os::fd::OwnedFd, std::ffi::OsString),
+    /// Nothing of that name is there, which is most of the list on most computers, or the path is not one this
+    /// walk takes at all: either way nothing goes and nothing is said of it.
+    Absent,
+    /// A folder on the way to it is a link, or is no folder at all: nothing was removed and the path is named as
+    /// one that stayed.
+    Linked,
+}
+
+/// The walk itself: the home is opened as it stands, since it is what the daemon was pointed at, and every folder
+/// under it with O_NOFOLLOW, so a link left where a folder was ends the walk rather than pointing what follows at
+/// whatever it names. A path that is not plainly under the home, one naming `..` or opening with `.` among them,
+/// is no path of wsp's and reads as absent rather than as one a link kept: the sentence for a path left standing
+/// names a link, and such a path holds none.
+fn walk_under_home(home: &Path, rel: &Path) -> Under {
+    use std::path::Component;
+    let mut parts = Vec::new();
+    for part in rel.components() {
+        match part {
+            Component::Normal(name) => parts.push(name),
+            _ => return Under::Absent,
+        }
+    }
+    let Some((leaf, folders)) = parts.split_last() else { return Under::Absent };
+    let flags = nix::fcntl::OFlag::O_DIRECTORY | nix::fcntl::OFlag::O_CLOEXEC;
+    let Ok(mut at) = nix::fcntl::open(home, flags, nix::sys::stat::Mode::empty()) else { return Under::Absent };
+    for folder in folders {
+        at = match nix::fcntl::openat(&at, *folder, flags | nix::fcntl::OFlag::O_NOFOLLOW, nix::sys::stat::Mode::empty()) {
+            Ok(next) => next,
+            Err(nix::errno::Errno::ENOENT) => return Under::Absent,
+            Err(_) => return Under::Linked,
+        };
+    }
+    Under::At(at, leaf.to_os_string())
+}
+
+/// The folders wsp's own files left empty, taken from the file's own upwards, each through the same walk and
+/// removed on its parent's descriptor. Never the first folder under the home: ~/.claude-cfg and ~/.codex are the
+/// agents' own to make and to keep, whatever wsp put inside them.
 fn prune_empty(home: &Path, from: &Path) {
     let mut at = from;
     while at != home && at.starts_with(home) && at.parent() != Some(home) {
-        if std::fs::remove_dir(at).is_err() {
+        let Ok(rel) = at.strip_prefix(home) else { return };
+        let Under::At(parent, name) = walk_under_home(home, rel) else { return };
+        if nix::unistd::unlinkat(&parent, name.as_os_str(), nix::unistd::UnlinkatFlags::RemoveDir).is_err() {
             return;
         }
         match at.parent() {
@@ -1080,6 +1168,62 @@ mod tests {
             "wsp-own\t.claude/settings.json\n"
         );
         assert_eq!(sh_stdout_within("exit 7", Duration::from_secs(5)), "");
+    }
+
+    /// A workspace on a computer somebody owns writes in that computer's home, so a folder wsp's list names there
+    /// can be a link it planted. The leave removes through the folders themselves, so a link where a folder was
+    /// ends the walk: the file the link points at is the computer's own and is still there afterwards.
+    #[test]
+    fn a_link_where_a_folder_was_leaves_what_it_points_at_standing_and_is_said() {
+        let home = tempfile::tempdir().unwrap();
+        let at = place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        // The box's own bin, with the two names the fixed list ends on, and the shared bin a workspace replaced
+        // with a link to it.
+        let theirs = tempfile::tempdir().unwrap();
+        for name in ["wsp-open", "xdg-open"] {
+            std::fs::write(theirs.path().join(name), "the computer's own\n").unwrap();
+        }
+        std::fs::create_dir_all(home.path().join(".local")).unwrap();
+        std::os::unix::fs::symlink(theirs.path(), &at.bin_dir).unwrap();
+        // And a row of the ledger whose folder is a link the same way, pointing at a file of the computer's own.
+        let planted = tempfile::tempdir().unwrap();
+        std::fs::write(planted.path().join("settings.json"), "the computer's own\n").unwrap();
+        std::os::unix::fs::symlink(planted.path(), home.path().join(".claude")).unwrap();
+        let read = |_: &str| format!("{}\t.claude/settings.json\n", wsp_frames::OWN_MARK);
+
+        let swept = sweep_place_home(home.path(), &read);
+
+        for name in ["wsp-open", "xdg-open"] {
+            assert_eq!(std::fs::read_to_string(theirs.path().join(name)).unwrap(), "the computer's own\n", "{name}");
+        }
+        assert_eq!(std::fs::read_to_string(planted.path().join("settings.json")).unwrap(), "the computer's own\n");
+        // The links themselves are the workspace's doing and are left alone; what the leave says is that it took
+        // nothing at those three paths and why.
+        for path in [at.bin_dir.join("wsp-open"), at.bin_dir.join("xdg-open"), home.path().join(".claude/settings.json")] {
+            let said = words::place_kept_for_link(path.to_string_lossy());
+            assert!(swept.contains(&said), "{swept:?} does not say {said}");
+            assert!(!swept.contains(&path.to_string_lossy().into_owned()), "{swept:?} took a path through a link");
+        }
+        // Wsp's own folder is under no link and goes as it always did.
+        assert!(!at.wsp.exists());
+        assert!(swept.contains(&at.wsp.to_string_lossy().into_owned()));
+    }
+
+    /// A path this walk will not take is no path of wsp's, and the leave says nothing of it: the sentence for a
+    /// path left standing names a link, and a path reaching out of the home holds none.
+    #[test]
+    fn a_path_that_is_not_plainly_under_the_home_is_absent_and_nothing_is_said_of_it() {
+        let home = tempfile::tempdir().unwrap();
+        // A folder beside the home, so the path below would answer with a real file of somebody's if the walk
+        // took it: both sit under the same temporary folder.
+        let beside = tempfile::tempdir().unwrap();
+        std::fs::write(beside.path().join("keep"), "not wsp's\n").unwrap();
+        let out = Path::new("..").join(beside.path().file_name().unwrap()).join("keep");
+
+        assert!(matches!(remove_under_home(home.path(), &out), Removed::Absent));
+        assert!(matches!(remove_under_home(home.path(), Path::new("./settings.json")), Removed::Absent));
+        assert!(beside.path().join("keep").exists(), "a path out of the home was taken");
     }
 
     #[test]
