@@ -425,8 +425,8 @@ const BOX_RESOLV: &str = "/etc/resolv.conf";
 /// Where systemd-resolved keeps the resolvers it forwards to, when the box's own file names only its stub.
 const UPSTREAM_RESOLV: &str = "/run/systemd/resolve/resolv.conf";
 /// Where a workspace reads its resolvers, which is where the box has a link on every computer that runs
-/// systemd-resolved.
-const RESOLV_INSIDE: &str = "etc/resolv.conf";
+/// systemd-resolved: the box's own path, read here as a path inside a workspace.
+const RESOLV_INSIDE: &str = BOX_RESOLV;
 /// The resolvers Docker hands a container when the box names none it can use.
 const DEFAULT_NAMESERVERS: [&str; 2] = ["8.8.8.8", "8.8.4.4"];
 
@@ -589,7 +589,7 @@ pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<
     }
     // The overlays are up, so this lands in the workspace's own upper: a regular resolv.conf where the box has a
     // link into a /run the workspace does not share.
-    write_resolv_inside(&rootfs)?;
+    write_resolv_inside(&place)?;
     // And the one line that puts the workspace's own order in front of a login shell there, in the same upper:
     // the box's own /etc/profile sets PATH to the distribution's list for root before it reads this folder.
     write_workspace_profile_inside(&place)?;
@@ -1009,17 +1009,11 @@ const BOX_ROOT: &str = "/root";
 ///
 /// So: the link in the upper goes, a regular file takes its place, and what it holds is the resolvers the box
 /// forwards to, read by `resolv_text` from the upstream file where systemd-resolved keeps them and from the
-/// box's own file where that is a file of its own.
-fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
-    let path = rootfs.join(RESOLV_INSIDE);
-    match fs::symlink_metadata(&path) {
-        // A link, whatever it points at: removed through the merged view, which leaves the box's own alone.
-        Ok(held) if held.file_type().is_symlink() => fs::remove_file(&path).map_err(at(&path))?,
-        Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(at(&path)(e)),
-    }
-    fs::write(&path, resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV))).map_err(at(&path))
+/// box's own file where that is a file of its own. The mode is the one a write of this file lands with on every
+/// box, and what takes the link off is the one writer below rather than a rule of this function's own.
+fn write_resolv_inside(place: &Inside) -> Result<(), Error> {
+    let text = resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV));
+    write_file_inside(place, RESOLV_INSIDE, text.as_bytes(), 0o644)
 }
 
 /// The wsp a process inside a workspace runs, written into the workspace's own upper at `GUEST_WSP_PATH`: two
@@ -1850,26 +1844,29 @@ mod tests {
     fn the_workspaces_own_resolv_conf_is_a_file_where_the_box_keeps_a_link() {
         let dir = tempfile::tempdir().unwrap();
         let rootfs = dir.path().join("rootfs");
+        let at = rootfs.join(RESOLV_INSIDE.trim_start_matches('/'));
         fs::create_dir_all(rootfs.join("etc")).unwrap();
         fs::create_dir_all(rootfs.join("run")).unwrap();
         // The link every stock Ubuntu keeps, pointing into a /run the workspace's own is empty of.
-        std::os::unix::fs::symlink("../run/systemd/resolve/stub-resolv.conf", rootfs.join(RESOLV_INSIDE)).unwrap();
-        assert!(fs::read_to_string(rootfs.join(RESOLV_INSIDE)).is_err(), "the link resolves inside this rootfs");
+        std::os::unix::fs::symlink("../run/systemd/resolve/stub-resolv.conf", &at).unwrap();
+        assert!(fs::read_to_string(&at).is_err(), "the link resolves inside this rootfs");
 
-        write_resolv_inside(&rootfs).unwrap();
-        let held = fs::symlink_metadata(rootfs.join(RESOLV_INSIDE)).unwrap();
+        let place = place_at(dir.path(), "wsp-resolv");
+        write_resolv_inside(&place).unwrap();
+        let held = fs::symlink_metadata(&at).unwrap();
         assert!(held.file_type().is_file(), "the workspace's resolv.conf is not a regular file");
-        let text = fs::read_to_string(rootfs.join(RESOLV_INSIDE)).unwrap();
+        assert_eq!(held.permissions().mode() & 0o777, 0o644);
+        let text = fs::read_to_string(&at).unwrap();
         assert!(text.lines().any(|line| line.starts_with("nameserver ")), "{text}");
         assert!(!text.contains("127.0.0.53"), "{text}");
         // Written again, as a wake writes it, over the file the last boot left.
-        write_resolv_inside(&rootfs).unwrap();
-        assert_eq!(fs::read_to_string(rootfs.join(RESOLV_INSIDE)).unwrap(), text);
+        write_resolv_inside(&place).unwrap();
+        assert_eq!(fs::read_to_string(&at).unwrap(), text);
         // And on a rootfs whose /etc has nothing there at all, which is a box with no resolv.conf of its own.
         let bare = dir.path().join("bare");
-        fs::create_dir_all(bare.join("etc")).unwrap();
-        write_resolv_inside(&bare).unwrap();
-        assert!(fs::read_to_string(bare.join(RESOLV_INSIDE)).unwrap().contains("nameserver "));
+        fs::create_dir_all(bare.join("rootfs/etc")).unwrap();
+        write_resolv_inside(&place_at(&bare, "wsp-bare-resolv")).unwrap();
+        assert!(fs::read_to_string(bare.join("rootfs").join(RESOLV_INSIDE.trim_start_matches('/'))).unwrap().contains("nameserver "));
     }
 
     /// The word a process inside runs, written on a rootfs made by hand: two lines onto the init already bound
@@ -2225,7 +2222,7 @@ mod tests {
         // The one file in the box's /etc a workspace may not take as it is: the boot writes a regular
         // resolv.conf in the workspace's own upper, whatever the box keeps there, and the box's own is
         // untouched. Without it the runtime's bind of that file resolves inside the root to nothing.
-        let inside_resolv = rootfs.join(RESOLV_INSIDE);
+        let inside_resolv = rootfs.join(RESOLV_INSIDE.trim_start_matches('/'));
         assert!(fs::symlink_metadata(&inside_resolv).unwrap().file_type().is_file(), "the workspace's resolv.conf is not a file");
         let text = fs::read_to_string(&inside_resolv).unwrap();
         assert!(text.lines().any(|line| line.starts_with("nameserver ")) && !text.contains("127.0.0.53"), "{text}");
