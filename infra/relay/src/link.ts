@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The device code flow, which is the only way anything is added to a person's
-// relay account. A box asks for a code, a person opens the page and approves
-// it as themselves, and the box collects a token of its own once. The code is
-// spent by the approval and the token by the first poll that takes it.
-import { bodyText, jsonBody } from "./body.js";
-import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+// The device code flow, which is how a box and a person's computer are added
+// to a relay account. A box asks for a code, a person opens the page and
+// approves it as themselves, and the box collects a token of its own once. A
+// computer signing in names the key it will prove to the boxes, and is approved
+// either on the page, which signs it in and admits it to no box, or from a wsp
+// on a computer already in, whose approval carries the admission it signed. The
+// code is spent by the approval and the token by the first poll that takes it.
+import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
+import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
+import { boxNamedRefusal, clientFor } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
 import { approvePage, approvedPage, codePage, gonePage } from "./page.js";
@@ -25,8 +29,6 @@ const STARTS_WINDOW_MS = 60_000;
 const LINK_KINDS = ["host", "client"] as const;
 type LinkKind = (typeof LINK_KINDS)[number];
 
-const NAME_MAX = 64;
-
 /** What the sign-in stamp carries: the page the person came from and goes back to, whose address holds no code. */
 const VERIFY_PAGE = "verify";
 
@@ -41,8 +43,13 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
   const body = await jsonBody(ctx);
   const kind = body["kind"];
   if (typeof kind !== "string" || !LINK_KINDS.includes(kind as LinkKind)) throw refuse(400, `a link is for ${LINK_KINDS.join(" or ")}, not ${JSON.stringify(kind)}`);
-  const name = typeof body["name"] === "string" ? body["name"].trim().slice(0, NAME_MAX) : "";
+  const name = nameOf(body);
   if (name === "") throw refuse(400, "a link needs the name to show the person on the page");
+  // A computer signing in names the key it will prove to every box, so the page can show it and an approval can be
+  // signed for it; a box names its key on its heartbeat, where its own token stands for it.
+  const fingerprint = fingerprintField(body, "fingerprint");
+  if (kind === "client" && fingerprint === undefined) throw refuse(400, "a sign-in starts with the fingerprint of this computer's device key, which wsp login sends; this wsp sent none");
+  if (kind === "host" && fingerprint !== undefined) throw refuse(400, "a box's link carries no fingerprint: a box names its key on its heartbeat, and a person's computer names its own with wsp login");
   const now = ctx.deps.now();
   // A Worker has no clock of its own, so the one road anybody takes before a code exists is where the dead ones go.
   await sweepLinks(ctx.env, now);
@@ -60,6 +67,8 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
     created_at: new Date(now).toISOString(),
     expires_at: new Date(now + LINK_MS).toISOString(),
     source,
+    fingerprint: fingerprint ?? null,
+    admission: null,
   };
   // The caps are counted in the statement that writes the row, so starts racing from one address land as many
   // rows as the caps allow and no more; the counts are read again only to say which cap refused this one.
@@ -114,7 +123,7 @@ export async function linkTyped(ctx: Ctx): Promise<Response> {
   const row = await linkByCode(ctx.env, code);
   if (row === undefined || isExpired(row, ctx.deps.now()) || row.state !== "pending") return gonePage();
   const stamp = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "approve", code, ctx.deps.now(), who.id);
-  return approvePage(row.name, who.login, code, stamp, row.kind);
+  return approvePage(row.name, who.login, code, stamp, row.kind, row.fingerprint);
 }
 
 /** GitHub sends the person back here. The state is one this relay signed, so a callback nobody started goes nowhere. */
@@ -143,8 +152,10 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   return new Response(null, { status: 302, headers });
 }
 
-/** The person says yes. The code is spent here, once, whichever browser gets there first. */
+/** The person says yes, on the page or from a wsp already in. The code is spent here, once, whichever gets there
+ * first. A request carrying a bearer is a wsp's, since the page's form carries none. */
 export async function linkApprove(ctx: Ctx): Promise<Response> {
+  if (ctx.req.headers.has("authorization")) return approveFromWsp(ctx);
   const form = new URLSearchParams(await bodyText(ctx));
   const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
   const who = account === undefined ? undefined : await accountOf(ctx.env, account);
@@ -158,13 +169,29 @@ export async function linkApprove(ctx: Ctx): Promise<Response> {
   if (row.state !== "pending") throw refuse(409, "that code was already approved");
   // One name, one box, per account: a client asks for a box by the name on this page, so two of them would be a
   // line that could go to either.
-  if (row.kind === "host" && (await hostNamed(ctx.env, who.id, row.name)) !== undefined) {
-    throw refuse(409, `you already have a box called ${row.name}; take it off with wsp host unlink there, or link this one under another name with wsp host link <url> --name <name>`);
-  }
+  if (row.kind === "host" && (await hostNamed(ctx.env, who.id, row.name)) !== undefined) throw boxNamedRefusal(row.name);
   const hostId = row.kind === "host" ? newId("h", ctx.deps.random) : null;
   if (!(await approveLink(ctx.env, code, who.id, hostId))) throw refuse(409, "that code was already approved");
   if (hostId !== null) await insertHost(ctx.env, { id: hostId, account_id: who.id, name: row.name, created_at: new Date(ctx.deps.now()).toISOString() });
-  return approvedPage(row.name);
+  return approvedPage(row.name, row.kind);
+}
+
+/** A wsp on a computer already in says yes for a computer waiting on a code: its own client token names the
+ * account the code lands on, and the admission it signed for that computer's key rides the row to the poll. The
+ * relay checks that the admission is for the key the code was started with and keeps the bytes; whether the
+ * signer is one a box trusts is the box's own reading, made with a key the relay never holds. */
+async function approveFromWsp(ctx: Ctx): Promise<Response> {
+  const who = await clientFor(ctx);
+  const body = await jsonBody(ctx);
+  const code = typeof body["code"] === "string" ? body["code"].trim().toUpperCase() : "";
+  const admission = admissionOf(body["admission"]);
+  const row = await linkByCode(ctx.env, code);
+  if (row === undefined || isExpired(row, ctx.deps.now())) throw refuse(410, "that code is gone; run wsp login again there for a fresh one");
+  if (row.state !== "pending") throw refuse(409, "that code was already approved");
+  if (row.kind !== "client") throw refuse(400, "that code is a box's, and a box is approved on the page or put on the account with wsp host link from a signed-in computer; an admission is for a computer signing in");
+  if (admission.device !== row.fingerprint) throw refuse(400, `that admission is for ${admission.device}, and the code was started by ${row.fingerprint ?? "a wsp that named no key"}`);
+  if (!(await approveLink(ctx.env, code, who.account, null, JSON.stringify(admission)))) throw refuse(409, "that code was already approved");
+  return Response.json({ approved: true, name: row.name });
 }
 
 /** The box collects the answer. A token is handed over once and the row goes with it. */
@@ -187,7 +214,13 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
   let subject = row.host_id;
   if (row.kind === "client") {
     subject = newId("c", ctx.deps.random);
-    await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, created_at: new Date(ctx.deps.now()).toISOString() });
+    const at = new Date(ctx.deps.now()).toISOString();
+    await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, fingerprint: row.fingerprint, created_at: at });
+    // The admission waited on the code for the id this row has now; the poll is where it becomes the computer's.
+    if (row.admission !== null) {
+      const admission = JSON.parse(row.admission) as Admission;
+      await insertAdmission(ctx.env, { id: newId("m", ctx.deps.random), account_id: row.account_id!, client_id: subject, signer: admission.by, issued_at: admission.issuedAt, signature: admission.signature, created_at: at });
+    }
   }
   const token = await mintToken(ctx.env.RELAY_SIGNING_KEY, { kind: row.kind, subject: subject!, account: row.account_id!, issuedAt: ctx.deps.now() });
   // Who approved it, so the box can say whose account it is on without holding a token that reads this relay back.

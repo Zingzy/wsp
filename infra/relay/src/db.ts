@@ -20,6 +20,9 @@ export interface HostRow {
   connector_version: string | null;
   created_at: string;
   last_seen: string | null;
+  /** The fingerprint of the key the box proves at every dial, written once off its first beat that names it or at
+   * the add from a signed-in computer; a computer pins it off the listing before its first dial. */
+  host_key: string | null;
 }
 
 export type LinkState = "pending" | "approved";
@@ -36,6 +39,11 @@ export interface LinkRow {
   expires_at: string;
   /** The address the start came from, empty where the connector named none; what the caps on the start are counted under. */
   source: string;
+  /** The fingerprint of the device key a computer signed in with; a box's link carries none. */
+  fingerprint: string | null;
+  /** The admission a signed-in wsp's approval carried, as JSON, moved onto the admissions table by the poll that
+   * mints the client; an approval on the page leaves none. */
+  admission: string | null;
 }
 
 export async function accountOf(env: Env, id: string): Promise<AccountRow | undefined> {
@@ -71,8 +79,15 @@ export async function hostNamed(env: Env, accountId: string, name: string): Prom
   return (await env.DB.prepare("SELECT * FROM hosts WHERE account_id = ? AND name = ?").bind(accountId, name).first<HostRow>()) ?? undefined;
 }
 
-export async function insertHost(env: Env, row: Pick<HostRow, "id" | "account_id" | "name" | "created_at">): Promise<void> {
-  await env.DB.prepare("INSERT INTO hosts (id, account_id, name, created_at) VALUES (?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at).run();
+export async function insertHost(env: Env, row: Pick<HostRow, "id" | "account_id" | "name" | "created_at"> & Partial<Pick<HostRow, "host_key">>): Promise<void> {
+  await env.DB.prepare("INSERT INTO hosts (id, account_id, name, created_at, host_key) VALUES (?, ?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at, row.host_key ?? null).run();
+}
+
+/** The key a box proves is written once: the update takes a row holding none or holding this same key, so two beats
+ * racing to name it land one key between them, and a beat naming another changes nothing and reads as refused. */
+export async function setHostKey(env: Env, id: string, hostKey: string): Promise<boolean> {
+  const { meta } = await env.DB.prepare("UPDATE hosts SET host_key = ? WHERE id = ? AND (host_key IS NULL OR host_key = ?)").bind(hostKey, id, hostKey).run();
+  return (meta.changes ?? 0) > 0;
 }
 
 /** Written the moment the tunnel exists, before anything else can fail: a tunnel no row points at is one nothing
@@ -101,6 +116,9 @@ export interface ClientRow {
   name: string;
   created_at: string;
   last_seen: string | null;
+  /** The fingerprint of the device key this computer signed in with; a computer signed in before device keys holds
+   * none, and no box can admit it. */
+  fingerprint: string | null;
 }
 
 export async function clientOf(env: Env, id: string): Promise<ClientRow | undefined> {
@@ -112,16 +130,50 @@ export async function clientsOf(env: Env, accountId: string): Promise<ClientRow[
   return results;
 }
 
-export async function insertClient(env: Env, row: Pick<ClientRow, "id" | "account_id" | "name" | "created_at">): Promise<void> {
-  await env.DB.prepare("INSERT INTO clients (id, account_id, name, created_at) VALUES (?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at).run();
+export async function insertClient(env: Env, row: Pick<ClientRow, "id" | "account_id" | "name" | "created_at" | "fingerprint">): Promise<void> {
+  await env.DB.prepare("INSERT INTO clients (id, account_id, name, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at, row.fingerprint).run();
 }
 
 export async function seenClient(env: Env, id: string, at: string): Promise<void> {
   await env.DB.prepare("UPDATE clients SET last_seen = ? WHERE id = ?").bind(at, id).run();
 }
 
+/** A computer's admissions go with it: a box reading the next beat sees neither, and revokes what it admitted. */
 export async function deleteClient(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM admissions WHERE client_id = ?").bind(id).run();
   await env.DB.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
+}
+
+/** Bytes a computer already in signed to let another onto the account's boxes. The relay stores and forwards them:
+ * it verifies no signature and holds no key that could make one, so a row here admits nobody on its own. */
+export interface AdmissionRow {
+  id: string;
+  account_id: string;
+  client_id: string;
+  /** The fingerprint of the key that signed it, which the box resolves to a public key it already holds. */
+  signer: string;
+  issued_at: string;
+  signature: string;
+  created_at: string;
+}
+
+/** One admission per signer per computer, the latest bytes standing: what one client token can grow here is bounded
+ * by the account's own computers, not by how often it posts. */
+export async function insertAdmission(env: Env, row: AdmissionRow): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO admissions (id, account_id, client_id, signer, issued_at, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)" +
+      " ON CONFLICT (client_id, signer) DO UPDATE SET issued_at = excluded.issued_at, signature = excluded.signature, created_at = excluded.created_at",
+  )
+    .bind(row.id, row.account_id, row.client_id, row.signer, row.issued_at, row.signature, row.created_at)
+    .run();
+}
+
+/** Every admission on the account, grouped under the computer it admits, oldest first. */
+export async function admissionsByClient(env: Env, accountId: string): Promise<Map<string, AdmissionRow[]>> {
+  const { results } = await env.DB.prepare("SELECT * FROM admissions WHERE account_id = ? ORDER BY created_at").bind(accountId).all<AdmissionRow>();
+  const grouped = new Map<string, AdmissionRow[]>();
+  for (const row of results) grouped.set(row.client_id, [...(grouped.get(row.client_id) ?? []), row]);
+  return grouped;
 }
 
 /** The one write that makes a link code, and the one reading of what its source already holds: both caps are
@@ -129,12 +181,12 @@ export async function deleteClient(env: Env, id: string): Promise<void> {
  * allow and no more, the shape approveLink and spendLink below hold a race to. Answers whether this row landed. */
 export async function insertLink(env: Env, row: LinkRow, caps: { pending: number; recent: number; since: string }): Promise<boolean> {
   const { meta } = await env.DB.prepare(
-    "INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at, source)" +
-      " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" +
+    "INSERT INTO link_codes (code, poll_hash, kind, name, state, account_id, host_id, created_at, expires_at, source, fingerprint)" +
+      " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" +
       " WHERE (SELECT COUNT(*) FROM link_codes WHERE source = ? AND state = 'pending') < ?" +
       " AND (SELECT COUNT(*) FROM link_codes WHERE source = ? AND created_at > ?) < ?",
   )
-    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at, row.source, row.source, caps.pending, row.source, caps.since, caps.recent)
+    .bind(row.code, row.poll_hash, row.kind, row.name, row.state, row.account_id, row.host_id, row.created_at, row.expires_at, row.source, row.fingerprint, row.source, caps.pending, row.source, caps.since, caps.recent)
     .run();
   return (meta.changes ?? 0) > 0;
 }
@@ -159,10 +211,11 @@ export async function linkByPoll(env: Env, pollHash: string): Promise<LinkRow | 
 }
 
 /** Approval is the one write that turns a pending code into a token waiting to be collected, and it happens once:
- * the update names the state it expects, so two browsers racing on one code make one host between them. */
-export async function approveLink(env: Env, code: string, accountId: string, hostId: string | null): Promise<boolean> {
-  const { meta } = await env.DB.prepare("UPDATE link_codes SET state = 'approved', account_id = ?, host_id = ? WHERE code = ? AND state = 'pending'")
-    .bind(accountId, hostId, code)
+ * the update names the state it expects, so two browsers racing on one code make one host between them. The
+ * admission rides the row to the poll, which is where the client it is for gets an id. */
+export async function approveLink(env: Env, code: string, accountId: string, hostId: string | null, admission: string | null = null): Promise<boolean> {
+  const { meta } = await env.DB.prepare("UPDATE link_codes SET state = 'approved', account_id = ?, host_id = ?, admission = ? WHERE code = ? AND state = 'pending'")
+    .bind(accountId, hostId, admission, code)
     .run();
   return (meta.changes ?? 0) > 0;
 }
