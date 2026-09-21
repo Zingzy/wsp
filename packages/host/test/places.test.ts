@@ -1647,6 +1647,17 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       expect(box.landed).toEqual([]);
       expect(box.ran).toEqual([]);
     }
+    // A shell wsp has read no file for is refused for that, not for a file it has never seen: ash on an Alpine
+    // root reads nothing under -c, and the sentence must not say it does.
+    const ash = fakeBox("x86_64", "ash");
+    await expect(placeInstaller({ backend: ash.backend as never, ...assets(tmp("shell-ash"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, ash.stage)).rejects.toThrow(
+      placeRootShellRefusal("maya@box", "ash"),
+    );
+    expect(placeRootShellRefusal("maya@box", "ash")).not.toContain("reads ");
+    expect(placeRootShellRefusal("maya@box", "zsh")).toContain("reads ~/.zshenv");
+    expect(placeRootShellRefusal("maya@box", "fish")).toContain("reads config.fish");
+    expect(ash.landed).toEqual([]);
+
     // The two that read nothing there install as they always did, and so does a box that named no shell at all.
     for (const shell of [...PLACE_ROOT_SHELLS, undefined]) {
       const box = fakeBox("x86_64", shell as string);

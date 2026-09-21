@@ -46,11 +46,13 @@ export const HOME_READ = `printf "home %s\\n" "$HOME"`;
  * of the computer doing the sending. */
 export const ARCH_READ = `printf "arch %s\\n" "$(uname -m)"`;
 
-/** The lines that ask which login shell the machine's own passwd entry names, by its name alone. getent runs no
- * shell of the machine's, which is what lets this be asked of a computer before anything is run in its login's
- * shell; a machine whose passwd cannot be read answers bash, which is what every reader of `shell` then takes it
- * for. Left in `shell` for the line after it to print in whichever shape its own read speaks. */
-export const SHELL_READ = 'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}';
+/** The lines that ask which login shell this login runs, by its name alone. The passwd entry is the truth and
+ * getent runs no shell of the machine's, which is what lets the question be asked before anything is run in that
+ * shell. Behind it `$SHELL`, which is the same truth by another road: sshd sets it to the login's shell for every
+ * session it opens, and bash fills it from the passwd database where it was unset, so a machine carrying no getent
+ * still names its own shell rather than a word this end guessed. Behind that bash, which is what every reader then
+ * takes the answer for. Left in `shell` for the line after it to print in whichever shape its own read speaks. */
+export const SHELL_READ = 'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-${SHELL##*/}}; shell=${shell:-bash}';
 
 /** What the machine said its chip is, or nothing where it answered none; the word is the machine's own and is
  * matched against a table rather than read apart here. */

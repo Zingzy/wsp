@@ -2583,16 +2583,34 @@ export function hostKeyKeptNote(hostKey: string, file?: string): string {
 }
 
 /** The login shells a computer's root may run for wsp to work it. sshd hands every command the host sends to
- * root's own shell with -c before wsp's own `bash -c` inside it, and these two read no file of the machine's on
- * that road, while zsh reads ~/.zshenv and fish reads config.fish. On a computer wsp joins, root's home is the
- * one every workspace on it writes, so either of those would run a workspace's file as that computer's root,
- * outside every namespace, on each dial. */
+ * root's own shell with -c before wsp's own `bash -c` inside it, and on a computer wsp joins root's home is the
+ * one every workspace on it writes, so a shell that reads a file under that home runs a workspace's file as that
+ * computer's root, outside every namespace, on each dial.
+ *
+ * What the list stands on and what it does not: `env -i HOME=<home> <shell> -c true` against a home whose every
+ * startup file writes a marker wrote none for bash, sh, dash and ksh and wrote one for zsh. dash and ksh are off
+ * the list all the same, since the list is the owner's ruling and not the measurement. And the measurement has a
+ * hole this end cannot close: a bash built with SSH_SOURCE_BASHRC reads `~/.bashrc` under -c when the environment
+ * carries SSH_CLIENT, which sshd sets for every session, and the bash on the computer this was measured on (3.2.57,
+ * Apple's) is such a build. Which build a given box carries is not something the host can read before it dials,
+ * and the shell sshd runs takes no flags from this end, so bash stays on the list by the ruling. */
 export const PLACE_ROOT_SHELLS: readonly string[] = ["bash", "sh"];
 
-/** What a computer is refused with for running one of the others: the shell it runs, why that shell is a road, and
+/** The file a shell reads under the home before running a command, where wsp has read one: the measurement above.
+ * fish is not on the computer that measurement was made on, and its own documentation names the other. A shell in
+ * neither list is refused for not having been read, and the sentence says so rather than claiming a file it has
+ * not seen. */
+const SHELL_STARTUP_FILE: Readonly<Record<string, string>> = { zsh: "~/.zshenv", fish: "config.fish" };
+
+/** What a computer is refused with for running a shell that is not on the list: the shell, why it is a road, and
  * the one command that changes it. Said before anything of wsp's lands there. */
 export function placeRootShellRefusal(address: string, shell: string): string {
-  return `${address} runs ${shell} as its root's login shell, and sshd hands every command wsp sends to that shell: ${shell} reads a file under /root before running anything, and on a computer wsp joins that folder is the one every workspace on it writes, so a dial would run a workspace's file as root; run chsh -s /bin/bash root on it and add it again`;
+  const file = SHELL_STARTUP_FILE[shell];
+  const why =
+    file === undefined
+      ? `${shell} is not a shell wsp has read as opening no file of that computer's, and root's home there is the one every workspace on it writes, so a file read under it would run as root`
+      : `${shell} reads ${file} before running anything, and root's home there is the one every workspace on it writes, so a dial would run a workspace's file as root`;
+  return `${address} runs ${shell} as its root's login shell, and sshd hands every command wsp sends to that shell: ${why}; run chsh -s /bin/bash root on it and add it again`;
 }
 
 /** Whether the key a dial read is the one the person pinned. A person passes either the whole known_hosts word

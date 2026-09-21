@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -236,10 +236,28 @@ describe("ssh backend", () => {
     try {
       const marker = join(home, "sourced");
       for (const rc of [".profile", ".bash_profile", ".bashrc", ".zshenv"]) writeFileSync(join(home, rc), `echo ${rc} >> ${marker}\n`);
-      const out = spawnSync("bash", ["-c", `export HOME=${home}\n${SHELL_READ}\nprintf "shell %s\\n" "$shell"`], { encoding: "utf8" });
-      expect(out.status).toBe(0);
-      expect(readValues(out.stdout)["shell"]).toMatch(/^[A-Za-z0-9._-]+$/);
-      expect(existsSync(marker)).toBe(false);
+      // A folder holding this computer's bash and nothing else, so the read finds no getent whichever system this
+      // runs on: that is the shape of a machine whose passwd cannot be read, which is what the fallbacks are for.
+      const bin = join(home, "bin");
+      mkdirSync(bin);
+      symlinkSync(spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim(), join(bin, "bash"));
+      const answers = (env: Record<string, string>): string => {
+        const out = spawnSync("bash", ["-c", `${SHELL_READ}\nprintf "shell %s\\n" "$shell"`], { encoding: "utf8", env: { HOME: home, PATH: bin, ...env } });
+        expect(out.status).toBe(0);
+        return readValues(out.stdout)["shell"]!;
+      };
+      expect(answers({ PATH: process.env["PATH"]! })).toMatch(/^[A-Za-z0-9._-]+$/);
+      // What this line reads is a passwd entry and two variables, never a file; that the whole read opens none of
+      // the machine's own is the case below, which runs the script the way a dial runs it. Pointing a shell's own
+      // HOME at this home before it starts would measure that shell's startup, which is not this line's.
+      // Behind the passwd entry, the login's own SHELL, which sshd sets for every session it opens: a machine
+      // carrying no getent names its own shell rather than the word that would let it through. PATH holds nothing
+      // here, so getent is missing whether or not this computer has one.
+      expect(answers({ SHELL: "/usr/bin/zsh" })).toBe("zsh");
+      expect(answers({ SHELL: "/usr/local/bin/fish" })).toBe("fish");
+      // And behind that bash, which is what every reader takes an answer of nothing for. bash fills SHELL from the
+      // passwd database where it is unset, so the word has to be emptied rather than left out to reach this.
+      expect(answers({ SHELL: "" })).toBe("bash");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

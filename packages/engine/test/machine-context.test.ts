@@ -479,9 +479,9 @@ describe("the guest scripts on a local bash", () => {
   it("opens no shell of the machine's own where it may open none, and reads every other fact just the same", async () => {
     const roots = fakeGuest();
     const marker = join(roots.home, "sourced");
-    // The three files a login and interactive bash reads under the home it is pointed at, each writing its own
+    // Every startup file a login shell of any family reads under the home it is pointed at, each writing its own
     // name: a box's root home is the one every workspace on it writes, so a line in any of them is a workspace's.
-    for (const rc of [".profile", ".bash_profile", ".bashrc"]) writeFileSync(join(roots.home, rc), `echo ${rc} >> ${marker}\n`);
+    for (const rc of [".profile", ".bash_profile", ".bashrc", ".zshenv", ".zprofile", ".zshrc"]) writeFileSync(join(roots.home, rc), `echo ${rc} >> ${marker}\n`);
 
     const none = probeCommand(roots, TOOLS_PATH, "none");
     expect(none).not.toContain("-lic");
@@ -499,8 +499,11 @@ describe("the guest scripts on a local bash", () => {
     expect(login).toContain("-lic");
     const read = parseProbe((await run(`export HOME=${roots.home}\n${login}`)).stdout)!;
     expect(read.aliasesRead).toBe(true);
-    // What a login bash reads first under a home holding all three, which is the file a workspace would have written.
-    expect(readFileSync(marker, "utf8")).toContain(".bash_profile");
+    // Which shell was opened is this computer's own, so what it reads first is read off the word the probe named
+    // rather than off one written here: the file differs by family and the platform decides which family runs.
+    expect(readFileSync(marker, "utf8").trim()).not.toBe("");
+    const first: Record<string, string> = { bash: ".bash_profile", sh: ".profile", zsh: ".zshenv" };
+    if (first[read.shell] !== undefined) expect(readFileSync(marker, "utf8")).toContain(first[read.shell]!);
   }, 30_000);
 
   const shellOf = (name: string): string | undefined => ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].map(d => join(d, name)).find(p => existsSync(p));
