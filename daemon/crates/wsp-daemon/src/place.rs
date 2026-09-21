@@ -418,7 +418,8 @@ pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Ve
 /// What one removal under the home did, which is what the leave's lines say.
 enum Removed {
     Gone,
-    /// Nothing of that name is there, which is most of the list on most computers.
+    /// Nothing of that name is there, which is most of the list on most computers, or the path is one the walk
+    /// does not take, a `..` or a leading `.` in it: either way nothing goes and nothing is said of it.
     Absent,
     /// A folder on the way to it is a link, or is no folder at all: nothing was removed and the path is named as
     /// one that stayed.
