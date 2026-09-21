@@ -204,13 +204,17 @@ export type PlaceDialler = (login: PlaceLogin) => Promise<void>;
  * there is no log to read, which is a fact about that computer and not a reason to stop. */
 export type PlaceLogReader = (login: PlaceLogin) => Promise<readonly string[]>;
 
-/** What one update is told: which computer, what it last said about itself (its chip picks the binary), the link
- * this host is holding where it holds one, and the login it was installed over where the record holds one. Which
- * of the two roads it takes is the updater's own reading, since only it knows what each can carry. */
+/** What one update is told: which computer, what it last said about itself (its chip picks the binary), whether
+ * this one carries a binary, the link this host is holding where it holds one, and the login it was installed
+ * over where the record holds one. Which of the two roads it takes is the updater's own reading, since only it
+ * knows what each can carry. */
 export interface PlaceUpdateRequest {
   placeId: string;
   name: string;
   report: PlaceReport;
+  /** Whether a daemon goes with this update: false on a computer already running this wsp's daemon, where the
+   * login files are written all the same, since their spelling moves with the host and not with the daemon. */
+  daemon: boolean;
   link?: DaemonReach;
   ssh?: PlaceLogin;
 }
@@ -223,9 +227,10 @@ export interface PlaceUpdateLanded {
   kept?: string;
 }
 
-/** How the daemon this host deploys is put on a computer already joined. Absent on a runtime served without it,
- * where a place stays on the daemon it has. */
-export type PlaceUpdater = (req: PlaceUpdateRequest) => Promise<PlaceUpdateLanded>;
+/** How the daemon this host deploys is put on a computer already joined, and how wsp's login files there are
+ * written on every update. Nothing is answered where no binary was asked for. Absent on a runtime served without
+ * it, where a place stays on the daemon it has and its login files stay as the join wrote them. */
+export type PlaceUpdater = (req: PlaceUpdateRequest) => Promise<PlaceUpdateLanded | undefined>;
 
 /** What one leave over the ssh road is told: which computer, what it last said about itself (its own line for
  * running wsp there is in that report), and the login it was installed over. */
@@ -1764,33 +1769,42 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const busy = provisioningNow(held);
       if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
       const from = held.report.daemonVersion;
-      // The daemon half runs only where that computer is behind: a computer already running this wsp's daemon is
-      // the common case for a recipe that changed, and the recipe half below is what the person asked for.
+      // A binary goes only where that computer is behind: a computer already running this wsp's daemon is the
+      // common case for a recipe that changed, and the recipe half below is what the person asked for.
+      const moving = from < DAEMON_VERSION;
       let daemon: PlaceUpdateReply["daemon"];
-      if (from < DAEMON_VERSION) {
-        if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
+      if (wiring.update === undefined) {
+        // A runtime outside the app and the host wires none, so nothing there writes the login files either; a
+        // computer that needs a daemon it cannot be given is the one refusal.
+        if (moving) throw new Error(NO_PLACE_UPDATER);
+      } else {
         const link = live.get(placeId)?.reach;
         const ssh = loginOf(held);
+        // Asked on every update, behind or not: wsp's login files on that computer are spelled by this host, so a
+        // host that moved alone writes them here and a computer joined under an older spelling takes this one.
         const landed = await wiring.update({
           placeId,
           name: held.name,
           report: held.report,
+          daemon: moving,
           ...(link === undefined ? {} : { link }),
           ...(ssh === undefined ? {} : { ssh }),
         });
-        // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
-        // about itself then is the only reading that proves the new daemon is the one running there.
-        const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
-        // The attach on the new daemon dropped what the old one said it forks with and asked again; this waits for
-        // that answer, so the row after an update carries the new daemon's facts rather than nothing while they are
-        // still in flight. It joins the read behind the attach instead of sending a second frame.
-        if (to !== from) await factsOn(placeId, held);
-        daemon = {
-          ...landed,
-          from,
-          to,
-          ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
-        };
+        if (landed !== undefined) {
+          // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
+          // about itself then is the only reading that proves the new daemon is the one running there.
+          const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
+          // The attach on the new daemon dropped what the old one said it forks with and asked again; this waits for
+          // that answer, so the row after an update carries the new daemon's facts rather than nothing while they are
+          // still in flight. It joins the read behind the attach instead of sending a second frame.
+          if (to !== from) await factsOn(placeId, held);
+          daemon = {
+            ...landed,
+            from,
+            to,
+            ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
+          };
+        }
       }
       // A stream of its own: this is not an install, and the rows ride it the way a join's steps ride the add's.
       const started = await startedOrSaid(placeId, addId ?? `a_${randomBytes(6).toString("hex")}`);
