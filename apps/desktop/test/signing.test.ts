@@ -4,12 +4,12 @@
 // for. One bundle carries both chips, so every check here runs against both slices. These hold the config both roads
 // read and what the packaged bundle carries.
 import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { hostTarget, MAC_TARGETS } from "../scripts/targets.mjs";
-import { daemonIn, executableIn, packaged, resourcesIn } from "./packaged.js";
+import { daemonIn, daemonSourceFor, executableIn, packaged, resourcesIn } from "./packaged.js";
 
 const desktop = fileURLToPath(new URL("..", import.meta.url));
 const config = readFileSync(join(desktop, "electron-builder.yml"), "utf8");
@@ -70,6 +70,14 @@ describe("the mac signing config", () => {
 });
 
 const HARDENED = /^CodeDirectory .*\((?:[a-z,]*,)?runtime[,)]/m;
+/** The mac slices this checkout has no daemon binary for. A bundle carries what the checkout held when it was
+ * packaged, and a checkout holds only the slices packages/wspx/scripts/daemon-binary.mjs placed, so a bundle built
+ * on a Mac that never fetched the Intel binary carries one slice's daemon and lipo cannot open the other. */
+const unstaged = MAC_TARGETS.filter(target => !existsSync(daemonSourceFor(target)));
+/** A case's own name where every slice's daemon is staged, and that name carrying why it did not run where one is
+ * not: a skipped case says nothing else, so the reason rides the one line vitest prints for it. */
+const withEveryDaemon = (name: string): string =>
+  unstaged.length === 0 ? name : `${name} (skipped: no daemon staged at ${unstaged.map(daemonSourceFor).join(", ")}; packages/wspx/scripts/daemon-binary.mjs places one)`;
 const macTree = packaged().find(tree => tree.targets.every(target => target.startsWith("darwin")));
 const macApp = macTree === undefined ? "" : dirname(dirname(resourcesIn(macTree)));
 const signedByIdentity = Boolean(process.env["CSC_LINK"]);
@@ -119,7 +127,7 @@ describe.skipIf(!onMac || macTree === undefined)("the packaged mac bundle", () =
     }
   });
 
-  it("carries the daemon for each slice, thin for the chip that runs it, signed the way the app is", () => {
+  it.skipIf(unstaged.length > 0)(withEveryDaemon("carries the daemon for each slice, thin for the chip that runs it, signed the way the app is"), () => {
     for (const target of MAC_TARGETS as MacTarget[]) {
       const bin = daemonIn(macTree!, target);
       expect(archsOf(bin)).toEqual([SLICE[target]]);
@@ -127,7 +135,7 @@ describe.skipIf(!onMac || macTree === undefined)("the packaged mac bundle", () =
     }
   });
 
-  it("starts as node, and runs the daemon it carries, on every slice this machine can start", () => {
+  it.skipIf(unstaged.length > 0)(withEveryDaemon("starts as node, and runs the daemon it carries, on every slice this machine can start"), () => {
     const slices = startable(macTree!.targets);
     expect(slices).toContain(hostTarget());
     for (const target of slices) {

@@ -18,6 +18,7 @@ import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { SETTINGS_WORDS, versionFact } from "../../web/src/settings/format.js";
 import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
+import { FIRST_RUN_WORDS } from "../../web/src/sidebar/words.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
@@ -79,6 +80,12 @@ function seedLocalWorkspace(home: string): void {
   };
   const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
   writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
+}
+
+/** The project a fixture host's workspaces are copies of: a repo on the provider computer that host serves, which
+ * is what wsp add records. A workspace is one project's copy, so a host holding none refuses to make one. */
+async function seedProject(host: HostHandle): Promise<void> {
+  await host.addProject("https://github.com/dev/first.git", "default");
 }
 
 /** A saved host record under the launch's own wsp home, as wsp host connect leaves one: the list the shell reads
@@ -469,6 +476,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // draw. The app attaches to it rather than starting its own, so nothing here needs a provider key or a golden
     // on disk, and the workspaces are made through the runtime's own road instead of written into the store.
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    await seedProject(existing);
     const api = await existing.createWorkspace("api");
     const web = await existing.createWorkspace("web");
     launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
@@ -502,9 +510,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.keyboard.up("Control");
   });
 
-  it("first launch with no key: the one screen with the agents found here ticked, Open wsp records this computer and the sidebar's first row is it, with the cloud row under it, and the shim runs", async () => {
-    // Labs on, since the settings page that picks the light side for the photograph is a labs surface. The PATH is
-    // launchd's own, what a Finder or Dock launch is handed, so this run is the one a tester's Mac makes.
+  it("first launch with no key: the one screen with the agents found here ticked, Open wsp gives them the tools and opens the app on the screen that asks for the first workspace, with the door to another computer beside it, and the shim runs", async () => {
+    // Labs on, since the settings page the door to another computer opens is a labs surface. The PATH is launchd's
+    // own, what a Finder or Dock launch is handed, so this run is the one a tester's Mac makes.
     launched = await launch({ PATH: LAUNCHD_PATH.join(":"), WSP_LABS: "1" }, twoAgents);
     const { app, home } = launched;
     const shim = shimPath(home);
@@ -535,12 +543,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.textContent("#slot")).toBe(here.map(a => a.id).join(" · "));
     expect(await page.textContent("#line")).toBe(`Lets ${here.map(a => a.name).join(" and ")} open threads and workspaces on this Mac.`);
     expect(await page.isChecked("#tools")).toBe(true);
-    // The one screen that stands carries its keycap and its quiet link; the join screen behind that link and the
-    // joined screen behind it stand in the page with it, each hidden until it is reached.
-    expect(await page.$$eval("#welcome button", els => els.map(el => el.id))).toEqual(["open", "join"]);
-    expect(await page.$$eval(".setup", els => els.map(el => `${el.id}:${(el as HTMLElement).hidden}`))).toEqual(["welcome:false", "joining:true", "joined:true"]);
+    // One screen with one keycap, and nothing behind it: a Mac is never a place, so the join screen this page once
+    // carried has no road and is gone.
+    expect(await page.$$eval("#welcome button", els => els.map(el => el.id))).toEqual(["open"]);
+    expect(await page.$$eval(".setup", els => els.map(el => `${el.id}:${(el as HTMLElement).hidden}`))).toEqual(["welcome:false"]);
     expect(await page.textContent("#open")).toContain("Open wsp");
-    expect(await page.textContent("#join")).toBe("This Mac joins another wsp");
     // The column is the SetupScreen's, and nothing scrolls.
     expect(await page.$eval("#welcome", el => el.getBoundingClientRect().width)).toBe(560);
     expect(await fits()).toBe(true);
@@ -558,29 +565,28 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(boot.token).toMatch(TOKEN);
     await closed;
     await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
-    // The window opening and the record reaching the state file are two events, and the file is read once. The row is
-    // the second of them said on screen: the app draws it from what the host read back, so the file holds it by then.
-    await win.waitForSelector("[data-row-id^='ws:']");
-    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string; name?: string }> };
-    const recorded = Object.values(state.workspaces ?? {}).filter(w => w.kind === "local");
-    expect(recorded).toHaveLength(1);
+    // A workspace is one project's copy, so this press records neither: the app opens on the screen that asks for a
+    // folder and the work it is for, which is the one road that records a project. The screen standing is what says
+    // the host read the state back, so the file holds everything the launch wrote by then.
+    await win.waitForSelector("[data-k=first-run]");
+    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, unknown>; projects?: Record<string, unknown> };
+    expect(Object.keys(state.workspaces ?? {})).toEqual([]);
+    expect(Object.keys(state.projects ?? {})).toEqual([]);
     expect(existsSync(join(home, ".env"))).toBe(false);
-    // The sidebar's first row is this computer: the one workspace the first run recorded, under the name it was given.
-    const names = win.locator("[data-workspace-name]");
-    await names.first().waitFor();
-    expect(await names.count()).toBe(1);
-    expect(await names.first().textContent()).toBe(recorded[0]!.name);
+    expect(await win.locator("[data-workspace-name]").count()).toBe(0);
     // The tick was live, so both agents found here carry the wsp server and its skill, with the shim as the command.
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
 
-    // The app opens on this computer, and the keycap that adds another waits at the sidebar's bottom.
-    const row = win.locator("[data-cloud-setup-row]");
+    // Beside the keycap is the quiet door for the person who came for a box.
+    const row = win.locator("[data-k=add-computer]");
     await row.waitFor();
-    expect(await row.textContent()).toBe(PLACES_WORDS.addComputer);
+    expect(await row.textContent()).toBe(FIRST_RUN_WORDS.addComputer);
     const shots: string[] = [];
-    // The shots show the shell at rest: no focus ring from the click that just happened, and the theme painted.
+    // The shots show the shell at rest: no focus ring from the click that just happened, and the theme painted. One
+    // side only: the page says system and nothing else, so the app draws the side this computer is set to and a shot
+    // of the other one is this Mac's appearance to change, not this run's.
     const rest = async (): Promise<void> => {
       await win.evaluate(() => {
         (document.activeElement as HTMLElement | null)?.blur();
@@ -588,28 +594,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       });
     };
     await rest();
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-row-dark.png"), "#101010"));
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-first-run.png"), "#101010"));
     await row.click();
     const dialog = win.getByRole("dialog");
     await dialog.waitFor();
     expect(await dialog.textContent()).toContain(PLACES_WORDS.sheet.description);
     expect(await dialog.textContent()).not.toMatch(/wsp init|terminal/i);
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-sheet-dark.png"), "#101010"));
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-sheet.png"), "#101010"));
     await win.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
-    // The page draws the side this computer is set to, so the light side comes from the computer's own scheme and
-    // from no pick on any screen. The inset's colour changing is the paint; the class alone is not.
-    const insetColour = (): Promise<string> => win.evaluate(() => getComputedStyle(document.querySelector("[data-slot=sidebar-inset]")!).backgroundColor);
-    const darkInset = await insetColour();
-    await app.evaluate(({ nativeTheme }) => {
-      nativeTheme.themeSource = "light";
-    });
-    await win.waitForFunction(() => !document.documentElement.classList.contains("dark"));
-    await vi.waitFor(async () => expect(await insetColour()).not.toBe(darkInset));
-    await win.waitForTimeout(500);
-    await rest();
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-row-light.png"), "#ffffff"));
-    console.info(`cloud row: ${shots.join(" ")}`);
+    // The sheet took the settings page with it on the way in, and Escape leaves that page too.
+    await win.keyboard.press("Escape");
+    await win.locator("[data-k=first-run]").waitFor();
+    console.info(`the app on first launch: ${shots.join(" ")}`);
 
     // The shim is the wsp command: it runs the bundled host as node, and an install through it writes the shim too.
     const env = { ...process.env, HOME: home, WSP_HOME: home };
@@ -623,7 +620,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(report.installed.map(p => p.id)).toEqual(["codex"]);
   });
 
-  it("the tick taken off leaves every agent's config alone, and Open wsp still records this computer and opens the app on it", async () => {
+  it("the tick taken off leaves every agent's config alone, and Open wsp still opens the app on the screen that asks for the first workspace", async () => {
     launched = await launch({ PATH: "/usr/bin:/bin" }, twoAgents);
     const { app, home } = launched;
     const page = await windowAt(app, ONBOARDING_URL);
@@ -633,13 +630,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.isChecked("#tools")).toBe(false);
     await page.click("#open");
     const win = await windowAt(app, APP_URL);
-    await win.waitForSelector("[data-row-id^='ws:']");
+    await win.waitForSelector("[data-k=first-run]");
     // The fixture's own files are what the scan found the two agents by; neither gained the wsp server.
     expect(existsSync(join(home, ".claude.json"))).toBe(false);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe("");
     expect(existsSync(join(home, ".claude", "skills", "wsp"))).toBe(false);
-    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string }> };
-    expect(Object.values(state.workspaces ?? {}).filter(w => w.kind === "local")).toHaveLength(1);
+    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, unknown> };
+    expect(Object.keys(state.workspaces ?? {})).toEqual([]);
   });
 
   it("with no provider key the welcome opens while nothing is recorded, and a recorded local workspace opens the app on it instead", async () => {
@@ -776,6 +773,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   it("a right-click on a workspace row builds the native menu from the workspace registry through the bridge", async () => {
     // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    await seedProject(existing);
     const first = await existing.createWorkspace("first");
     launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
@@ -984,8 +982,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           foreground: text("text-sidebar-foreground"),
           muted: text("text-sidebar-muted-foreground"),
           quiet: text("text-muted-foreground"),
+          // One icon ink for the sidebar: the search glyph and a section row's chevron both draw in
+          // --sidebar-icon-color, and a section row stands only over a project, which this launch records none of.
           icon: colorOf("[data-sidebar-search] button svg"),
-          chevron: colorOf("button[aria-label='Workspaces'] svg"),
           sidebarWidth: document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect().width,
         };
       }, LOCKUP_OPTICAL_CENTRE);
@@ -1155,7 +1154,6 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           muted: contrast(page.muted, shot.glass),
           quiet: contrast(page.quiet, shot.glass),
           icon: contrast(page.icon, shot.glass),
-          chevron: contrast(page.chevron, shot.glass),
           search: contrast(page.searchText, shot.searchRow),
         };
         console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);

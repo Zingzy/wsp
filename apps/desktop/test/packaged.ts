@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { daemonBinaryIn, DAEMON_TARGETS, stagedAsset } from "@wsp/host";
+import { daemonBinaryIn, DAEMON_TARGETS, stagedAsset, workspaceAsset } from "@wsp/host";
 import { hostTarget, MAC_TARGETS } from "../scripts/targets.mjs";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
@@ -41,11 +41,24 @@ export function resourcesIn(tree: PackagedTree): string {
   return join(dist, tree.dir, tree.resources);
 }
 
-/** Where a tree carries the daemon binary for one of the targets it runs: among the staged assets, under the
- * triple the host's table gives that platform and chip. */
-export function daemonIn(tree: PackagedTree, target: string): string {
+/** The triple the host's table gives a target's platform and chip, which names the daemon's folder wherever one
+ * is kept. */
+function tripleFor(target: string): string {
   const [platform, arch] = target.split("-");
   const row = DAEMON_TARGETS.find(t => t.platform === platform && t.arch === arch);
   if (row === undefined) throw new Error(`wsp builds no daemon for ${target}`);
-  return daemonBinaryIn(stagedAsset(join(resourcesIn(tree), "app"), "daemon"), row.triple);
+  return row.triple;
+}
+
+/** Where a tree carries the daemon binary for one of the targets it runs: among the staged assets, under the
+ * triple the host's table gives that platform and chip. */
+export function daemonIn(tree: PackagedTree, target: string): string {
+  return daemonBinaryIn(stagedAsset(join(resourcesIn(tree), "app"), "daemon"), tripleFor(target));
+}
+
+/** Where this checkout keeps a target's daemon binary, which a build stages into the bundle. Nothing in a node
+ * build makes one: packages/wspx/scripts/daemon-binary.mjs places each, out of a cargo build or out of the release
+ * job's artifacts, so a checkout holds only the slices somebody put there. */
+export function daemonSourceFor(target: string): string {
+  return daemonBinaryIn(workspaceAsset("daemon"), tripleFor(target));
 }
