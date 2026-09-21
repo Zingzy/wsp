@@ -209,7 +209,7 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
 /// One socket's place on a workspace's door, given back the moment that socket's task ends however it ends. The
 /// count it is taken from is that workspace's own, so a process flooding inside one workspace never takes a place
 /// from the workspace beside it.
-pub(crate) struct DoorSlot(Arc<AtomicUsize>);
+struct DoorSlot(Arc<AtomicUsize>);
 
 impl DoorSlot {
     /// A place where the cap leaves one; none past it, where nothing is taken.
@@ -477,7 +477,7 @@ mod tests {
     }
 
     /// The daemon's own inbound door on the loopback, serving the same state: a socket there is inside no
-    /// workspace, so neither cap is its.
+    /// workspace, so neither of the two caps is read for it.
     async fn inbound(ctx: &Arc<Ctx>) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

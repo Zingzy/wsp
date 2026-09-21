@@ -54,6 +54,13 @@ pub const GUEST_WORKSPACE_FULL: &str = "this workspace already holds as many gue
 /// agent that ran the line can run it again against a host that is there.
 pub const GUEST_UNWATCHED: &str = "the host stopped watching; run it again";
 
+/// Why one path a leave would have taken is still there: a folder on the way to it under the home is a link, and
+/// a workspace on a computer somebody owns writes in that home, so following it would take the computer's own
+/// file of that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_kept_for_link(path: impl std::fmt::Display) -> String {
+    format!("nothing was removed at {path}: a folder on the way to it is a link")
+}
+
 pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
 }

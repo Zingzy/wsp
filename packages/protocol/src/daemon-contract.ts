@@ -173,6 +173,10 @@ export const GUEST_WORKSPACE_FULL = "this workspace already holds as many guest 
 /** Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
  * agent that ran the line can run it again against a host that is there. */
 export const GUEST_UNWATCHED = "the host stopped watching; run it again";
+/** Why one path a leave would have taken is still there: a folder on the way to it under the home is a link, and a
+ * workspace on a computer somebody owns writes in that home, so following it would take the computer's own file of
+ * that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
+export const placeKeptForLinkLine = (path: string): string => `nothing was removed at ${path}: a folder on the way to it is a link`;
 /** What a guest process prints when nothing answers on its own machine's daemon port. */
 export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;
 
