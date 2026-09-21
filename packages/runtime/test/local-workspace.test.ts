@@ -132,6 +132,25 @@ function tokenAdapter(): { factory: HarnessAdapterFactory; said: string[]; steer
   return { factory, said, steered, end: (nth: number) => ends[nth]!() };
 }
 
+/** An adapter that writes down every launch it was handed and finishes the turn at once, so a case reads which
+ * turns ran, on which prompt and on which thread's session. */
+function notingAdapter(): { factory: HarnessAdapterFactory; starts: { prompt: string; resume?: string }[] } {
+  const starts: { prompt: string; resume?: string }[] = [];
+  const factory: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: ({ prompt, resume, onEvent }) => {
+      const sessionId = resume ?? randomUUID();
+      starts.push({ prompt, ...(resume !== undefined ? { resume } : {}) });
+      const result: TurnResult = { status: "completed", text: "done" };
+      onEvent({ type: "session.start", sessionId });
+      onEvent({ type: "turn.done", sessionId, result });
+      onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+      return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+    },
+  });
+  return { factory, starts };
+}
+
 /** A git repo inside the test's own root, so a project here is a real one and the folder a thread opens in is a
  * folder the test can name. */
 function repoIn(root: string, name = "work"): string {
@@ -656,6 +675,83 @@ describe("local workspace", () => {
     expect((await rt.workspaces.list("paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
     expect((await rt.status.list(undefined, "paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
     expect((await rt.workspaces.get(mac.id, "paired")).name).toBe("mac");
+    await rt.close();
+  });
+
+  it("a ticket a paired computer minted opens a paired socket, so a second frame is no way around the rule", async () => {
+    const rt = runtime();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const code = (await here.request("pair.issue"))["code"] as string;
+      const spending = await WsClient.connect(srv.port);
+      const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
+      spending.close();
+
+      const paired = await WsClient.connect(srv.port, { token: deviceToken });
+      const ticket = (await paired.request("ticket.issue", { purpose: "connect" }))["ticket"] as string;
+      paired.close();
+      // A ticket carries the road of the socket that minted it, so the socket it lets in is that computer too.
+      const second = await WsClient.connect(srv.port, { ticket });
+      expect((await second.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await second.request("sessions.start", { workspaceId: ws.id, prompt: "hi" }))["error"]).toBe(pairedRunRefusal("mac"));
+      // What that socket reads is unchanged, as it is on the device's own.
+      expect(((await second.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["mac"]);
+      second.close();
+
+      // A relay ticket a paired computer mints is stricter still: that word says the request came from a machine.
+      const pairedAgain = await WsClient.connect(srv.port, { token: deviceToken });
+      const relay = (await pairedAgain.request("ticket.issue", { purpose: "relay" }))["ticket"] as string;
+      pairedAgain.close();
+      const asMachine = await WsClient.connect(srv.port, { ticket: relay });
+      expect((await asMachine.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(relayedRefusal("mac"));
+      asMachine.close();
+
+      // The person's own connect ticket is what it always was: a socket on one starts a command here.
+      const mine = (await here.request("ticket.issue", { purpose: "connect" }))["ticket"] as string;
+      const own = await WsClient.connect(srv.port, { ticket: mine });
+      const ran = await own.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] });
+      expect(ran.ok).toBe(true);
+      await until(() => own.events.some(e => e.type === "exec.exit" && e["execId"] === ran["execId"]));
+      own.close();
+      here.close();
+    } finally {
+      await srv.close();
+      await rt.close();
+    }
+  });
+
+  it("a paired computer names no thread on this computer as a target, and the road it named one from rides to the delivery", async () => {
+    const noting = notingAdapter();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: noting.factory }, local: localWiring });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
+    // The owner's own thread on this computer, idle, which is the session a line would resume under their login.
+    const own = await rt.sessions.start(mac.id, { prompt: "coordinate" });
+    await own.finished;
+    const onThisComputer = own.view().threadId!;
+    // A fork takes a paired computer's turn; naming the owner's thread here as its target is the road it cannot
+    // take, since the line's own start would run a process on this computer.
+    await expect(rt.sessions.start(cloud.id, { prompt: "reply", notify: [onThisComputer] }, "paired")).rejects.toThrow(pairedRunRefusal("mac"));
+    // Refused before anything ran: no turn on the fork, so no line is waiting behind one.
+    const startsHere = async (): Promise<number> => (await rt.sessions.history(mac.id)).filter(e => e.type === "session.start").length;
+    expect(noting.starts).toEqual([{ prompt: "coordinate" }]);
+    expect(await startsHere()).toBe(1);
+
+    // A target on the fork itself is that computer's to name, and the road it named it from is kept beside the
+    // thread, so the line's own start is read against the same rule a turn later.
+    const mate = await rt.sessions.start(cloud.id, { prompt: "mate" }, "paired");
+    await mate.finished;
+    const onTheFork = mate.view().threadId!;
+    const lead = await rt.sessions.start(cloud.id, { prompt: "lead", notify: [onTheFork] }, "paired");
+    await lead.finished;
+    await until(() => noting.starts.length === 4);
+    expect(noting.starts[3]!.prompt).toContain("finished");
+    const kept = (await store.get("sessions", cloud.id)) as { sessions: { notifyRoad?: string }[] };
+    expect(kept.sessions.filter(row => row.notifyRoad !== undefined).map(row => row.notifyRoad)).toEqual(["paired"]);
+    // And the owner's thread on this computer never ran again.
+    expect(await startsHere()).toBe(1);
     await rt.close();
   });
 

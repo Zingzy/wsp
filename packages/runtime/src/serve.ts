@@ -179,6 +179,9 @@ export interface RuntimeServer {
 interface Ticket {
   purpose: keyof typeof TICKET_ORIGIN;
   expiresAt: number;
+  /** Whether the socket that minted this one was a computer the person paired: a ticket carries the road of the
+   * socket that asked for it, since a second socket is no way around what the first one's road may do. */
+  paired: boolean;
 }
 
 /** How long a stopping host waits for a client to answer its close frame before the socket is cut. A client that is
@@ -310,6 +313,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     // it would drive what only this computer may; the host stamps the road's own answer over what arrives. A ticket
     // whose purpose the table does not answer for is refused at the door rather than let in on the client's word.
     let stamped: WorkspaceOrigin | undefined;
+    /** Set when this socket is a computer the person paired: its own token opened it, or the ticket it redeemed
+     * was minted by one. The road every verb below is handed, so what a paired computer may start here is the
+     * runtime's one rule and never this client's word. Beside `stamped` rather than in it, since a paired computer
+     * is still one of the person's own for the doors `ownRoad` guards and only what it starts changes. */
+    let pairedRoad = false;
     if (ticketParam !== null) {
       const ticket = tickets.get(ticketParam);
       tickets.delete(ticketParam); // single-use, spent even when expired
@@ -319,6 +327,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         return;
       }
       stamped = origin;
+      pairedRoad = ticket.paired;
       authed = true;
     }
 
@@ -327,11 +336,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let me: Authed | undefined = authed ? { kind: "host" } : undefined;
     /** The thread this socket is, when its token was one the host minted into a turn's launch. */
     let by: ThreadScope | undefined;
-    /** Set when the token that opened this socket is a computer the person paired, scoped to no thread: the road
-     * every verb below is handed, so what a paired computer may start here is the runtime's one rule and never
-     * this client's word. Beside `stamped` rather than in it, since a paired computer is still one of the person's
-     * own for the doors `ownRoad` guards and only what it starts on a workspace of this computer changes. */
-    let pairedRoad = false;
     // Whether this socket is one of the person's own rather than the road a machine's requests arrive by. Who may
     // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is. A
     // function rather than a constant: a thread scoped token is read at the auth frame, after this socket was let
@@ -563,7 +567,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // What every verb below is handed as where this request came from: the road the door stamped over the wire,
         // and beside it the thread whose token opened this socket, which is the host's own reading and never the
         // client's. A socket nothing stamped and no device opened carries the word its client sent, as it always did.
-        const road = stamped ?? (pairedRoad ? "paired" : msg.origin);
+        // The paired word stands above the `here` a connect ticket carries, since a ticket never widens the road of
+        // the socket that minted it; a relay ticket's word is stricter still and stays, whoever minted it.
+        const road = pairedRoad && stamped !== "relayed" ? "paired" : (stamped ?? msg.origin);
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {
@@ -749,7 +755,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               const ticket = randomBytes(24).toString("base64url");
               const expiresAt = now() + ticketTtlMs;
-              tickets.set(ticket, { purpose: msg.purpose, expiresAt });
+              tickets.set(ticket, { purpose: msg.purpose, expiresAt, paired: pairedRoad });
               send({ id: msg.id, ok: true, ticket, expiresAt });
               return;
             }
