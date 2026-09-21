@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two commands a person runs on the computer the host runs on to let
-// another computer in and to take it back out. Both dial the host at the
-// address its lock names, with the token it wrote beside its state file, so
-// neither is a road a paired client or an agent can reach: a code hands out
-// access, and only somebody at the host's own terminal hands it out.
+// The two commands that let another computer in and take it back out. wsp
+// host pair runs on the computer the host runs on and dials it at the address
+// its lock names, with the token it wrote beside its state file: a code hands
+// out access, and only somebody at the host's own terminal hands it out. wsp
+// host devices runs from any computer paired with that host, aimed the way
+// every other verb is, since the laptop is where a person looks to see who
+// holds a token to their box and to take one away.
 import { networkInterfaces } from "node:os";
 import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, pairToken, relayUrlOf, SEAL_UNSERVED, usageRefusal, type DeviceView } from "@wsp/protocol";
 import type { HostReach } from "@wsp/runtime";
@@ -91,10 +93,16 @@ export function pairLines(token: string, expiresAt: number, now: number, address
   ];
 }
 
+/** What a device's token is read as: the owner, for the browser wsp init let in; a thread, for a token the host
+ * minted into one turn; a paired device for everything that took a code from wsp host pair. */
+export function deviceRoleWord(device: Pick<DeviceView, "here" | "scope">): string {
+  return device.here === true ? "owner" : device.scope !== undefined ? "thread" : "device";
+}
+
 /** The rows wsp host devices prints, oldest pairing first. */
 export function deviceLines(devices: readonly DeviceView[]): string[] {
   if (devices.length === 0) return ["No computer is paired with this host. Run wsp host pair for a code."];
-  return table([["DEVICE", "ID", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, d.createdAt, d.lastSeenAt])]);
+  return table([["DEVICE", "ID", "AS", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, deviceRoleWord(d), d.createdAt, d.lastSeenAt])]);
 }
 
 /** The line a host that binds this computer alone answers wsp host pair with: nothing outside can reach it, so the
@@ -111,9 +119,9 @@ interface PairDeps {
 const systemDeps: PairDeps = { dial: dialHost, now: Date.now };
 
 /** What the two commands work on: the state file the host on this computer serves, and where this run would aim a
- * line, which is the flag it was given, the environment it runs in and the home holding the hosts folder. They read
- * the aim to refuse anywhere but here, and hand it to the dial so the hosts folder is read once and the dial cannot
- * fall back to a different environment than the refusal was decided from. */
+ * line, which is the flag it was given, the environment it runs in and the home holding the hosts folder. wsp host
+ * pair reads the aim to refuse anywhere but here, wsp host devices dials it, and both hand it to the dial so the
+ * hosts folder is read once and the dial cannot fall back to a different environment than the aim was read from. */
 export interface PairOpts extends HostPick {
   statePath: string;
 }
@@ -150,13 +158,13 @@ export async function devicesCommand(io: CliIO, opts: PairOpts, args: readonly s
   if (word !== undefined && (word !== "revoke" || id === undefined || args.length !== 2)) {
     throw usageRefusal("wsp host devices takes nothing, or revoke and one device id.", "usage: wsp host devices\n       wsp host devices revoke <id>");
   }
-  const aim = aimHere("host devices", opts);
+  const aim = aimedHost(opts.statePath, opts);
   const client = await deps.dial(opts.statePath, { aim });
   try {
     if (word === "revoke") {
       const { revoked } = await client.request<{ revoked: boolean }>("devices.revoke", { deviceId: id });
       if (!revoked) {
-        io.error(`wsp host devices revoke: no device ${id!} is paired with this host.`);
+        io.error(`wsp host devices revoke: no device ${id!} is paired with ${aim.kind === "here" ? "this host" : aimName(aim)}.`);
         return 1;
       }
       io.log(`device ${id!} revoked; its token opens nothing and the sockets it held are cut`);

@@ -19,7 +19,6 @@ import {
   DAEMON_PRE_AUTH_BYTES_EXCEEDED,
   PRE_AUTH_MAX_BYTES,
   DEVICES_TICKET_REFUSAL,
-  DEVICE_REVOKE_REFUSAL,
   DOCTOR_UNSERVED,
   doctorRowRefusal,
   doctorRunningLine,
@@ -735,12 +734,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, devices: await devices().list() });
               return;
             case "devices.revoke": {
+              // A paired computer takes any device's token away, its own included: the laptop is where a person
+              // looks to see who holds a token to their box. A ticket's socket still cannot, whoever minted it.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
-                return;
-              }
-              if (me?.kind === "device" && msg.deviceId !== me.device.id) {
-                send({ id: msg.id, ok: false, error: DEVICE_REVOKE_REFUSAL });
                 return;
               }
               const revoked = await devices().revoke(msg.deviceId);

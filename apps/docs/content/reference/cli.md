@@ -195,7 +195,9 @@ exit codes; every failure is one line on stderr, the failure object with --json:
       a one time code another computer redeems for a token of its own, when the
       host listens beyond this computer
   wsp host devices [revoke <id>]
-      the computers paired with this host; revoke takes one back out
+      the computers paired with a host and what each token is read as; revoke
+      takes one back out. --host reads a host on another computer this one is
+      paired with
   wsp host connect <url> --code <code> [--name <alias>] [--relay <host>]
       redeem a code from a host on another computer for a token of this one's
       own; --name is what every later line calls that host, and --relay reaches
@@ -222,11 +224,12 @@ exit codes; every failure is one line on stderr, the failure object with --json:
       sign one computer out of your relay account
 
 You need these only for a host serving on a computer that is not the one you are
-sitting at, or for one outside your own account: pair and devices hand out and
-take back the codes that let another computer drive a host, and they run at that
-host's own terminal; connect, list, default and forget hold the hosts this
-computer drives; link, unlink, linked and clients put a computer on your relay,
-so it is reachable with no port open to the world.
+sitting at, or for one outside your own account: pair hands out the code that
+lets another computer drive a host, and it runs at that host's own terminal;
+devices lists the computers that took one and takes one back out, from that
+terminal or from any computer paired with the host; connect, list, default and
+forget hold the hosts this computer drives; link, unlink, linked and clients put
+a computer on your relay, so it is reachable with no port open to the world.
 ```
 
 ## wsp --help dev

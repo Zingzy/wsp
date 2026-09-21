@@ -1852,10 +1852,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   "host devices": {
     page: "host",
     usage: "wsp host devices [revoke <id>]",
-    about: "the computers paired with this host; revoke takes one back out",
+    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on another computer this one is paired with",
     json: false,
-    host: "hostSide",
-    cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
+    host: "aimed",
+    cliOnly: "lists and takes away the computers that may drive a host, from that host's terminal or from a computer paired with it; which computers hold a token is the person's to read and cut, never a thread's",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
   },
   "host connect": {
@@ -2301,7 +2301,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, usage: command.usage, about: command.about, page: command.page, options: optionsFor(words), cliOnly: command.cliOnly })),
   // The two lines a word of the host page opens: they print inside their parent's usage, so they carry no page of
   // their own to print on, and they are here for the parity table and for the flags they take.
-  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's" },
   { words: "host clients revoke", options: optionsFor("host clients revoke"), page: "host" as const, usage: "wsp host clients revoke <id>", about: "sign one computer out of your relay account", cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
 ];
 
@@ -2337,7 +2337,7 @@ export function hostPage(): string {
     pageLines("host"),
     "",
     ...wrap(
-      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair and devices hand out and take back the codes that let another computer drive a host, and they run at that host's own terminal; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
+      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair hands out the code that lets another computer drive a host, and it runs at that host's own terminal; devices lists the computers that took one and takes one back out, from that terminal or from any computer paired with the host; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
       HELP_WIDTH,
       "",
     ),

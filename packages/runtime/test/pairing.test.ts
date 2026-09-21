@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
+import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -316,19 +316,30 @@ describe("the device listing", () => {
     host.close();
   });
 
-  it("lets a device revoke itself and refuses it another device", async () => {
+  it("lets a paired device revoke another device and cuts that device's socket, as it lets it revoke itself", async () => {
     await serving();
     const one = await WsClient.connect(srv!.port);
     const { deviceId: oneId } = (await one.request("pair.redeem", { code: await codeFrom(), name: "one" })) as { deviceId: string };
     const two = await WsClient.connect(srv!.port);
     const { deviceId: twoId } = (await two.request("pair.redeem", { code: await codeFrom(), name: "two" })) as { deviceId: string };
+    const three = await WsClient.connect(srv!.port);
+    const { deviceId: threeId } = (await three.request("pair.redeem", { code: await codeFrom(), name: "three" })) as { deviceId: string };
 
-    expect(await one.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: false, error: DEVICE_REVOKE_REFUSAL });
-    expect(await two.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: true, revoked: true });
+    // The laptop a person holds is where they cut a token they lost elsewhere: another device's revoke lands, and
+    // the socket that device held is cut with it.
+    const twoCut = two.closed();
+    expect(await one.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: true, revoked: true });
+    expect(await twoCut).toBe(4401);
+    // A device still hands its own back.
+    expect(await three.request("devices.revoke", { deviceId: threeId })).toMatchObject({ ok: true, revoked: true });
+    // An id nothing is paired under reads as nothing to take, whoever asks.
+    expect(await one.request("devices.revoke", { deviceId: "d_nope" })).toMatchObject({ ok: true, revoked: false });
 
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
     const { devices } = (await host.request("devices.list")) as { devices: { id: string }[] };
     expect(devices.map(d => d.id)).toEqual([oneId]);
+    // A paired device reads the list too, and the browser wsp init let in reads and cuts like any other.
+    expect(((await one.request("devices.list")) as { devices: { id: string }[] }).devices.map(d => d.id)).toEqual([oneId]);
     host.close();
     one.close();
   });

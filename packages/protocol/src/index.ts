@@ -4303,10 +4303,6 @@ export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is wait
  * taken away at the terminal of the computer it runs on, and nowhere else. */
 export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
-/** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
- * the host takes anyone else's away. */
-export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
-
 /** The refusal the JSON routes answer with when a request carries no token this host takes: reaching the port,
  * the loopback one included, names nobody, since another login on the same computer reaches it too. */
 export const API_UNAUTHORIZED = "this route needs a token in an Authorization header, the host's own from the token file beside its state or a paired device's; run wsp host pair on the computer the host runs on for one";
@@ -4744,8 +4740,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("account.get") }),
   /** Every paired device, for the host token and for a device's own socket alike. */
   z.object({ id: reqId, op: z.literal("devices.list") }),
-  /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token
-   * names any. */
+  /** Takes a device's token away and cuts the sockets holding it, for the host token and for a paired device's
+   * own socket alike, whichever device is named. */
   z.object({ id: reqId, op: z.literal("devices.revoke"), deviceId: z.string() }),
   /** The first frame of a computer joining as a place: spends a join code for a record holding its key. Answered
    * with a PlaceJoinReply, and the socket then sends place.prove as an authed one would. */
