@@ -459,23 +459,29 @@ fn remove_under_home(home: &Path, rel: &Path) -> Removed {
 enum Under {
     /// The folder holding it, and its name inside that folder.
     At(std::os::fd::OwnedFd, std::ffi::OsString),
+    /// Nothing of that name is there, which is most of the list on most computers, or the path is not one this
+    /// walk takes at all: either way nothing goes and nothing is said of it.
     Absent,
+    /// A folder on the way to it is a link, or is no folder at all: nothing was removed and the path is named as
+    /// one that stayed.
     Linked,
 }
 
 /// The walk itself: the home is opened as it stands, since it is what the daemon was pointed at, and every folder
 /// under it with O_NOFOLLOW, so a link left where a folder was ends the walk rather than pointing what follows at
-/// whatever it names. A path that is not plainly under the home, one naming `..` among them, is no path of wsp's.
+/// whatever it names. A path that is not plainly under the home, one naming `..` or opening with `.` among them,
+/// is no path of wsp's and reads as absent rather than as one a link kept: the sentence for a path left standing
+/// names a link, and such a path holds none.
 fn walk_under_home(home: &Path, rel: &Path) -> Under {
     use std::path::Component;
     let mut parts = Vec::new();
     for part in rel.components() {
         match part {
             Component::Normal(name) => parts.push(name),
-            _ => return Under::Linked,
+            _ => return Under::Absent,
         }
     }
-    let Some((leaf, folders)) = parts.split_last() else { return Under::Linked };
+    let Some((leaf, folders)) = parts.split_last() else { return Under::Absent };
     let flags = nix::fcntl::OFlag::O_DIRECTORY | nix::fcntl::OFlag::O_CLOEXEC;
     let Ok(mut at) = nix::fcntl::open(home, flags, nix::sys::stat::Mode::empty()) else { return Under::Absent };
     for folder in folders {
@@ -1201,6 +1207,22 @@ mod tests {
         // Wsp's own folder is under no link and goes as it always did.
         assert!(!at.wsp.exists());
         assert!(swept.contains(&at.wsp.to_string_lossy().into_owned()));
+    }
+
+    /// A path this walk will not take is no path of wsp's, and the leave says nothing of it: the sentence for a
+    /// path left standing names a link, and a path reaching out of the home holds none.
+    #[test]
+    fn a_path_that_is_not_plainly_under_the_home_is_absent_and_nothing_is_said_of_it() {
+        let home = tempfile::tempdir().unwrap();
+        // A folder beside the home, so the path below would answer with a real file of somebody's if the walk
+        // took it: both sit under the same temporary folder.
+        let beside = tempfile::tempdir().unwrap();
+        std::fs::write(beside.path().join("keep"), "not wsp's\n").unwrap();
+        let out = Path::new("..").join(beside.path().file_name().unwrap()).join("keep");
+
+        assert!(matches!(remove_under_home(home.path(), &out), Removed::Absent));
+        assert!(matches!(remove_under_home(home.path(), Path::new("./settings.json")), Removed::Absent));
+        assert!(beside.path().join("keep").exists(), "a path out of the home was taken");
     }
 
     #[test]
