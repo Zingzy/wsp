@@ -61,7 +61,7 @@ import { ImageIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
@@ -172,7 +172,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
   const [folderPicker, setFolderPicker] = useState(false);
   const openFolderPicker = useCallback(() => setFolderPicker(true), []);
-  const { harness: harnessId, startOptions, pinned, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -252,14 +252,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     return row?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
   // The same row sessions.interrupt is keyed by: a pick made while this turn runs goes to the runtime by that id.
-  // Between turns, a thread that has run is named by its latest row, so the pick still goes through the access
-  // verb and the thread's next turn runs at it; a thread that has not run names nothing, its pick opens it.
-  const rows = useThreadSessions(workspaceId, thread.threadKey);
+  // Between turns, a thread that has run is named by its latest row, the one the pickers stand on, so the pick still
+  // goes through the access verb and the thread's next turn runs at it; a thread that has not run names nothing,
+  // its pick opens it.
   const pickTarget = useMemo<AccessTarget | null>(() => {
     if (stopTarget !== null && runningTurn !== null) return { sessionId: stopTarget, turnId: runningTurn.turnId };
-    const latest = rows.at(-1);
-    return pinned && latest !== undefined ? { sessionId: latest.id, turnId: null } : null;
-  }, [pinned, rows, runningTurn, stopTarget]);
+    return latestRow !== null ? { sessionId: latestRow.id, turnId: null } : null;
+  }, [latestRow, runningTurn, stopTarget]);
   // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
   // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));

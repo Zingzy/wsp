@@ -33,7 +33,7 @@
 import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
@@ -79,6 +79,9 @@ export interface ComposerPicks {
   readonly startOptions: ComposerStart;
   /** The thread has a turn on this harness, so the rail offers no other. */
   readonly pinned: boolean;
+  /** The pinned thread's latest own row, which an access pick between turns is put to through the access verb; null
+   * on a thread that has not run, and on one whose rows fell off the runtime's cap. */
+  readonly latestRow: SessionView | null;
   /** Nothing here says which agent to run: no turn has run in this workspace, nobody picked, the project
    * remembers none, more than one agent answers and nothing is typed yet. Read as one offer per workspace and
    * never again, since the list stands over the box the ask is typed in. */
@@ -132,6 +135,7 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   // as often another thread's.
   const own = thread.view.agent ?? rows.at(-1)?.harness;
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
+  const latestRow = pinned ? rows.at(-1) ?? null : null;
   const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
@@ -144,7 +148,7 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const typing = useComposerDraftStore(s => (s.drafts[workspaceId]?.prompt ?? "") !== "");
   const nothingSaysWhich = project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
   const offerAgents = useRailOffer(workspaceId, !typing && nothingSaysWhich, typing);
-  return { harness, catalog, model, picks, startOptions, pinned, offerAgents };
+  return { harness, catalog, model, picks, startOptions, pinned, latestRow, offerAgents };
 }
 
 /** Asks the workspace's machine for its catalogs once it runs; the table shows until then and stays when it does not answer. */

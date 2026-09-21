@@ -6432,6 +6432,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       if (!ended) view.status = status;
       view.endedAt ??= Date.now();
+      // A pick this turn did not take landed on the thread's record alone; the row says it from here on, since
+      // every client folds the thread's access off the row and the next turn runs at the record's.
+      const kept = threadRecords.get(threadId)?.permissionMode;
+      if (kept !== undefined) view.permissionMode = kept;
       // The turn is over: its own calls follow nobody now, and nobody waiting behind it is waiting any more.
       calls.clear();
       leadAsks.delete(threadId);
@@ -6962,6 +6966,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
+      if (!drivesThread(s.view.threadId, origin)) return { outcome: "not-found" };
       const entry = await entryOf(s.view.workspaceId, origin);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
@@ -6972,7 +6977,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (table !== undefined) startPicks(await catalogOn(table, entry, adapter), { permissionMode }, false);
       // The pick lands on the thread's record whatever the turn running now does with it: this is the one road that
       // changes a thread's access, and the thread's next turn runs at it. The thread's latest row says the same, as
-      // every client folds the access off that row; a running turn's row moves only where the harness took it.
+      // every client folds the access off that row; a running turn's row moves where the harness took the pick,
+      // and otherwise as the turn ends, so no row says a mode the thread's next turn will not run at.
       const threadId = s.view.threadId;
       const running = threadId === undefined ? (s.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : runningOn(threadId);
       const latest = threadId === undefined ? s.view : (latestOn(threadId) ?? s.view);
@@ -7028,10 +7034,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async forget(threadId, origin) {
       await ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
-      const workspaceId = held[0]?.[1].view.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      const record = threadRecords.get(threadId);
+      const workspaceId = held[0]?.[1].view.workspaceId ?? record?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       await entryOf(workspaceId, origin);
-      if (threadRan(held.map(([, s]) => s.view))) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
+      // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
+      if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
       // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its

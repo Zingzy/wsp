@@ -71,7 +71,7 @@ const seed = (rows: SessionView[]) => useStore.setState({ harnesses: [CLAUDE], h
 
 function Picks({ thread }: { thread: ChatThreadHandle }) {
   const picks = useComposerPicks(WORKSPACE, thread);
-  return <output data-testid="picks">{JSON.stringify({ harness: picks.harness, model: picks.model, start: picks.startOptions, shows: picks.picks, pinned: picks.pinned })}</output>;
+  return <output data-testid="picks">{JSON.stringify({ harness: picks.harness, model: picks.model, start: picks.startOptions, shows: picks.picks, pinned: picks.pinned, latestRow: picks.latestRow?.id ?? null })}</output>;
 }
 
 /** What the composer shows on its buttons, and what it resolved for a send that opens a thread; a send into a
@@ -84,6 +84,7 @@ const readAll = (model: string | null, threadKey = "t1", running = false, record
     start: Record<string, string>;
     shows: Record<string, string | null>;
     pinned: boolean;
+    latestRow: string | null;
   };
   view.unmount();
   return out;
@@ -257,6 +258,9 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     expect(capped.pinned).toBe(true);
     expect(capped.harness).toBe("codex");
     expect(capped.shows).toMatchObject({ model: "gpt-6-astra", permissionMode: "read-only" });
+    // No row is left to put an access pick to, so the composer names none; a fresh thread names none either.
+    expect(capped.latestRow).toBeNull();
+    expect(readAll(null, "t2").latestRow).toBeNull();
     // And its send carries neither the agent nor the access, as into any thread that has run.
     expect(sendPicks(capped.pinned, capped.start)).not.toHaveProperty("harness");
     expect(sendPicks(capped.pinned, capped.start)).not.toHaveProperty("permissionMode");
@@ -264,7 +268,10 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     // the record, while the transcript says what the last turn started at.
     const moved: SessionView = { id: "sC", workspaceId: WORKSPACE, harness: "codex", status: "completed", model: "gpt-6-astra", permissionMode: "danger-full-access", threadId: "t1" };
     act(() => useStore.setState({ sessions: { [WORKSPACE]: [moved, onClaude] } }));
-    expect(readAll("gpt-6-astra", "t1", false, { agent: "codex", permissionMode: "read-only" }).shows).toMatchObject({ permissionMode: "danger-full-access" });
+    const withRow = readAll("gpt-6-astra", "t1", false, { agent: "codex", permissionMode: "read-only" });
+    expect(withRow.shows).toMatchObject({ permissionMode: "danger-full-access" });
+    // And that row is the one an access pick between turns is put to.
+    expect(withRow.latestRow).toBe("sC");
   });
 
   it("a thread's own access stands while this workspace's catalog is still on the way, and no default paints", () => {

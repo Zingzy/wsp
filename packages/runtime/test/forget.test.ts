@@ -180,6 +180,32 @@ describe("sessions.forget", () => {
     await expect(rt.sessions.forget("thr_nobody")).rejects.toMatchObject({ message: "no thread thr_nobo", kind: "not-found" });
     await rt.close();
   });
+
+  it("refuses a thread whose rows fell off the index cap while its record stands, and leaves its transcript whole", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: { claude: working } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await handle.finished;
+    const thread = handle.view().threadId!;
+    await rt.close();
+    // The state the cap leaves: the index holds no row of the thread, while the workspace's document keeps the
+    // thread's record and the transcript keeps its events. The rows are dropped here the way the cap drops them.
+    const doc = (await store.get("sessions", ws.id)) as { sessions: unknown[] };
+    await store.put("sessions", ws.id, { ...doc, sessions: [] });
+    const after = createRuntime({ backend, store, adapters: { claude: working } });
+    expect(await after.sessions.list(ws.id)).toEqual([]);
+
+    // The record is written once a turn was handed over, so a thread with a record and no row is one that ran: the
+    // forget is refused in the one sentence, as it is for a thread whose row still says so.
+    await expect(after.sessions.forget(thread)).rejects.toMatchObject({ message: threadForgetRefusal(thread), kind: "conflict" });
+
+    expect((await after.sessions.history(ws.id)).map(e => [e.threadId, e.type])).toEqual([[thread, "session.start"], [thread, "session.done"], [thread, "session.end"]]);
+    await after.close();
+    const transcript = (await store.get("transcripts", ws.id)) as { events: unknown[] };
+    expect(transcript.events).toHaveLength(3);
+  });
 });
 
 /** Each CLI's own announce-then-refuse sequence, in the shapes its adapter's tests pin: both announce their session

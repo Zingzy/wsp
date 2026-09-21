@@ -6,6 +6,7 @@
 // person keeps, and an access picked while a turn runs. The harness here is a
 // fake that raises the prompt on command, so nothing on a machine is needed
 // and the runtime's own bookkeeping is what is under test.
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -482,28 +483,30 @@ describe("an access picked while a turn runs", () => {
   });
 
   /** A turn that stays open until the test replies. `moves` is what its harness answers a mode change with, and null
-   * is a harness that takes none mid-turn, as codex exec does. */
+   * is a harness that takes none mid-turn, as codex exec does. A send resumes its thread's session and a thread the
+   * send opens gets one of its own, as a CLI's would, so two threads on one workspace hold two rows. */
   const held = (moves: "set" | "refused" | null): { rt: Runtime; turns: { modes: string[]; reply: () => void }[]; picks: (string | undefined)[] } => {
     const turns: { modes: string[]; reply: () => void }[] = [];
     const picks: (string | undefined)[] = [];
     const adapter: HarnessAdapterFactory = () => ({
       steers: false,
-      start: ({ onEvent, permissionMode }) => {
+      start: ({ onEvent, permissionMode, resume }) => {
         picks.push(permissionMode);
+        const session = resume ?? randomUUID();
         const modes: string[] = [];
         let settle: (() => void) | undefined;
         const finished = new Promise<{ status: "completed"; text: string }>(resolve => {
           settle = () => {
             const result = { status: "completed", text: "done" } as const;
-            onEvent({ type: "turn.done", sessionId: SESSION, result });
-            onEvent({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+            onEvent({ type: "turn.done", sessionId: session, result });
+            onEvent({ type: "session.end", sessionId: session, exitCode: 0, sawResult: true });
             resolve(result);
           };
         });
-        onEvent({ type: "session.start", sessionId: SESSION, cwd: "/root" });
+        onEvent({ type: "session.start", sessionId: session, cwd: "/root" });
         turns.push({ modes, reply: () => settle?.() });
         return {
-          localId: SESSION,
+          localId: session,
           finished,
           interrupt: async () => settle?.(),
           ...(moves === null
@@ -578,6 +581,55 @@ describe("an access picked while a turn runs", () => {
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
+    // The turn kept its mode to its end; over, its row says the pick its thread's next turn runs at.
+    expect(handle.view().permissionMode).toBe("plan");
+  });
+
+  it("a pick the running turn did not take reaches its row as the turn ends, so no row says a mode the next turn will not run at", async () => {
+    const { rt, turns, picks } = held(null);
+    const { handle, workspaceId } = await running(rt, turns);
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    // While the turn runs, its row says what it is running at: the harness took no change.
+    expect(handle.view().permissionMode).toBe("bypassPermissions");
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions"]);
+    turns[0]!.reply();
+    await handle.finished;
+    // Between turns every client folds the thread's access off this row, and the composer reads the row over the
+    // transcript's start stamp, so the row says the mode the record holds and the next turn runs at.
+    expect(handle.view().permissionMode).toBe("plan");
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["plan"]);
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "plan"]);
+  });
+
+  it("a thread of another tree on the workspace is told not-found, as the interrupt tells it, and moves nothing", async () => {
+    const { rt, turns, picks } = held("set");
+    const { handle, workspaceId } = await running(rt, turns);
+    turns[0]!.reply();
+    await handle.finished;
+    // A second thread the person opened on the same workspace is its own root: the first thread is outside its tree.
+    const beside = await rt.sessions.start(workspaceId, { prompt: "beside it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await beside.finished;
+    const besideThread = beside.view().threadId!;
+    const scoped = { origin: "here", by: { kind: "thread", threadId: besideThread, workspaceId, rootThreadId: besideThread } } as const;
+    // The same absence the sibling verbs answer, before the workspace is read, so a thread learns nothing of a row
+    // it may not drive; and the one road that changes a thread's access is shut to it.
+    expect(await rt.sessions.interrupt(handle.id, scoped)).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.access(handle.id, "plan", scoped)).toEqual({ outcome: "not-found" });
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions", "bypassPermissions"]);
+    // A thread's own row is still its own to move.
+    expect(await rt.sessions.access(beside.id, "plan", scoped)).toEqual({ outcome: "set" });
+    // The first thread's next turn runs at what it ran at.
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(3));
+    turns[2]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
   it("a mode the harness's own list does not carry is refused in the words a start refuses it with", async () => {
