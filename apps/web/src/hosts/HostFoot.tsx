@@ -13,9 +13,6 @@ import { useStore } from "../protocol/store.js";
 import { FOOT_ROW_CLASS } from "../sidebar/rowGrammar.js";
 import { ConnectHostSheet } from "./ConnectHostSheet.js";
 
-/** The hash a page is loaded with to open on the connect sheet. */
-export const CONNECT_HASH = "#connect";
-
 export function HostFoot() {
   const bridge = desktopBridge();
   const open = useStore(s => s.connectOpen);
@@ -30,7 +27,7 @@ export function HostFoot() {
   const onOpen = bridge?.onConnectHostOpen;
   useEffect(() => onOpen?.(() => openConnect()), [onOpen, openConnect]);
   useEffect(() => {
-    if (hosts === undefined || window.location.hash !== CONNECT_HASH) return;
+    if (hosts === undefined || window.location.hash !== HOST_WORDS.connectHash) return;
     openConnect();
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   }, [hosts, openConnect]);

@@ -3498,6 +3498,9 @@ export function shellVersionNotice(shell: string | undefined, host: string, labe
 export const HOST_WORDS = {
   hosts: "Hosts",
   connectMenu: "Connect to a host…",
+  /** The fragment a page is loaded with to open on the connect sheet, which is how the shell asks for it on a page
+   * it is loading rather than one already up. */
+  connectHash: "#connect",
   disconnect: (label: string): string => `Disconnect ${label}`,
   /** Why the disconnect row is dimmed while the window is on the app's own computer. */
   hereStays: (here: string): string => `${here} is the app's own host`,

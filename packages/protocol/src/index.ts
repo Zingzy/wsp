@@ -1994,8 +1994,9 @@ export interface DesktopBridge {
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
-  /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot read. */
-  droppedPath(file: File): string;
+  /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot
+   * read; nothing on a page served by a host somewhere else, which is handed no path from this computer. */
+  droppedPath(file: File): string | undefined;
   /** The native context menu at the pointer, built from the items; resolves with the chosen item's id, or null when it was dismissed. */
   contextMenu(items: ContextMenuItem[]): Promise<string | null>;
   /** Photographs the page as it is now and keeps it under this workspace, replacing what that workspace held. Asked

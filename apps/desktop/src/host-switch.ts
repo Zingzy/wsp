@@ -22,8 +22,8 @@ export interface SwitcherDeps {
   statePath: string;
   /** What this computer is called in the list. */
   here: string;
-  /** Puts the window on a session. */
-  load(session: HostSession): Promise<void>;
+  /** Puts the window on a session, at the fragment the caller names; the page opens on what that fragment says. */
+  load(session: HostSession, hash?: string): Promise<void>;
   log(line: string): void;
   connect?: typeof connectCommand;
   disconnect?: typeof disconnectCommand;
@@ -36,7 +36,8 @@ export interface HostSwitcher {
   /** What the page opens the host the window is on with: the device token for a host somewhere else, and for the
    * host here its own token, which a page served beyond loopback carries no more than a relayed one does. */
   token(): string | undefined;
-  to(alias: string | null): Promise<HostOutcome>;
+  /** Puts the window on a saved host, or on this computer for null, loaded at the fragment where one is named. */
+  to(alias: string | null, hash?: string): Promise<HostOutcome>;
   connect(ask: HostConnectAsk): Promise<HostOutcome>;
   disconnect(alias: string): Promise<HostOutcome>;
   /** Closes what the roads hold open: the ssh forwards. */
@@ -155,10 +156,10 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
   const roadOf = (record: HostRecord): Road => ROADS[record.road ?? "direct"] as Road;
 
   const sessionOf = (alias: string, record: HostRecord, url: string): HostSession => ({ url, port: portOf(url), owned: false, remote: true, alias, label: record.label ?? alias, deviceToken: record.deviceToken, close: async () => {} });
-  const moveTo = async (session: HostSession): Promise<void> => {
+  const moveTo = async (session: HostSession, hash?: string): Promise<void> => {
     current = session;
     deps.log(`on ${session.label} at ${session.url}`);
-    await deps.load(session);
+    await deps.load(session, hash);
   };
 
   return {
@@ -169,15 +170,15 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
     }),
     token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
-    async to(alias) {
+    async to(alias, hash) {
       try {
         if (alias === null) {
-          await moveTo(deps.local);
+          await moveTo(deps.local, hash);
           return { ok: true };
         }
         const record = readHost(deps.home, alias);
         if (record === undefined) throw new Error(noSuchHostLine(alias, deps.home));
-        await moveTo(sessionOf(alias, record, await roadOf(record).reach(alias, record)));
+        await moveTo(sessionOf(alias, record, await roadOf(record).reach(alias, record)), hash);
         return { ok: true };
       } catch (e) {
         return failed("url", e);

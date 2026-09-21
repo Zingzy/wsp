@@ -21,6 +21,7 @@ import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
+import { notForThisPage } from "../src/origin.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -78,6 +79,13 @@ function seedLocalWorkspace(home: string): void {
   };
   const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
   writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
+}
+
+/** A saved host record under the launch's own wsp home, as wsp host connect leaves one: the list the shell reads
+ * has a host in it the window is not on, which is what a page on a host somewhere else may not learn. */
+function seedSavedHost(home: string, alias: string, label: string): void {
+  mkdirSync(join(home, "hosts"), { recursive: true });
+  writeFileSync(join(home, "hosts", `${alias}.json`), JSON.stringify({ url: `http://${label}`, deviceId: "d_seed", deviceToken: "tok-seed", pairedAt: "2026-09-01T00:00:00.000Z", label, road: "direct" }));
 }
 
 interface Launched {
@@ -794,7 +802,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("connects to a second host by its address and a code, the Hosts menu lists both with the current one marked, and This Mac takes the window back", async () => {
     existing = await fixtureHost();
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, home => {
+      seedGolden(home);
+      seedSavedHost(home, "attic", "attic.example:4400");
+    });
     const win = await windowAt(launched.app, APP_URL);
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
@@ -814,20 +825,70 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await dialog.locator("#connect-code").inputValue()).toBe(code);
     await dialog.locator("[data-k=primary]").click();
     await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
-    const away = await hostsMenuRows(launched.app);
-    expect(away).toEqual([
-      { label: here, checked: false, enabled: true },
-      { label: `127.0.0.1:${existing.port}`, checked: true, enabled: true },
-      { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
-      { label: HOST_WORDS.disconnect(`127.0.0.1:${existing.port}`), checked: false, enabled: true },
-    ]);
+    // The shell's own menu lists every saved host, so the owner still moves from one to another while the window
+    // stands on a host somewhere else. It is rebuilt once the page is up, which is a beat after the window moved.
+    await vi.waitFor(async () => {
+      expect(await hostsMenuRows(launched!.app)).toEqual([
+        { label: here, checked: false, enabled: true },
+        { label: `127.0.0.1:${existing!.port}`, checked: true, enabled: true },
+        { label: "attic.example:4400", checked: false, enabled: true },
+        { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
+        { label: HOST_WORDS.disconnect(`127.0.0.1:${existing!.port}`), checked: false, enabled: true },
+      ]);
+    }, { timeout: 30_000, interval: 100 });
+    // The page that host serves is shown this computer and that host alone, and what it asks of this computer is
+    // refused in one sentence naming the channel, before anything on this computer is read or written.
+    const asked = await win.evaluate(async () => {
+      const wsp = (
+        window as unknown as {
+          wsp: {
+            hosts(): Promise<{ here: string; current: string | null; hosts: { label: string }[] }>;
+            localFonts(family: string): Promise<unknown>;
+            connectHost(ask: unknown): Promise<unknown>;
+            disconnectHost(alias: string): Promise<unknown>;
+            switchHost(alias: string | null): Promise<unknown>;
+          };
+        }
+      ).wsp;
+      const said = async (call: () => Promise<unknown>): Promise<string> => {
+        try {
+          await call();
+          return "answered";
+        } catch (e) {
+          return (e as Error).message;
+        }
+      };
+      return {
+        hosts: await wsp.hosts(),
+        fonts: await said(() => wsp.localFonts("Menlo")),
+        connect: await said(() => wsp.connectHost({ road: "direct", url: "http://127.0.0.1:1", code: "AAAAAAAA.k" })),
+        disconnect: await said(() => wsp.disconnectHost("attic")),
+        elsewhere: await said(() => wsp.switchHost("attic")),
+      };
+    });
+    expect(asked.hosts.hosts.map(h => h.label)).toEqual([`127.0.0.1:${existing.port}`]);
+    expect(asked.hosts.here).toBe(here);
+    expect(asked.fonts).toContain(notForThisPage("fonts:local"));
+    expect(asked.connect).toContain(notForThisPage("hosts:connect"));
+    expect(asked.disconnect).toContain(notForThisPage("hosts:disconnect"));
+    expect(asked.elsewhere).toContain(notForThisPage("hosts:switch"));
+    // The move home is the one move that page may ask for, and the record it could not read still stands after it.
+    await win.evaluate(() => {
+      void (window as unknown as { wsp: { switchHost(alias: string | null): Promise<unknown> } }).wsp.switchHost(null);
+    });
+    await win.waitForURL(home);
+    expect(existsSync(join(launched.home, "hosts", "attic.json"))).toBe(true);
+    await hostsMenu(launched.app, `127.0.0.1:${existing.port}`);
+    await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
     // The record is the one wsp host connect writes, under the launch's own wsp home, with what the desktop adds.
     const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
     expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
     expect(typeof record["deviceToken"]).toBe("string");
     await hostsMenu(launched.app, here);
     await win.waitForURL(home);
-    expect((await hostsMenuRows(launched.app)).map(r => r.checked)).toEqual([true, false, false, false]);
+    await vi.waitFor(async () => {
+      expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false, false, false]);
+    }, { timeout: 30_000, interval: 100 });
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
     // The app's own host was never stopped by the move.
     await launched.app.close();
