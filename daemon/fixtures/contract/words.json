@@ -14,6 +14,7 @@
   "guestNotWatcher": "only the socket that sent guest.watch may answer or close a guest session",
   "guestQueueFull": "the host has not read this session for too long",
   "guestInFlightFull": "too many guest bytes are waiting to be read here; send this one again",
+  "guestWorkspaceFull": "this workspace already holds as many guest sessions as it may; end one and run it again",
   "guestUnwatched": "the host stopped watching; run it again",
   "guestNoDaemon": "this machine's wsp daemon is not answering on 127.0.0.1:{port}",
   "onBase": "this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again",

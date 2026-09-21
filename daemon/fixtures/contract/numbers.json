@@ -4,6 +4,8 @@
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
   "guestInFlightCapBytes": 16777216,
+  "guestSessionsPerWorkspaceCap": 64,
+  "guestFrameCapBytes": 4259840,
   "guestUnwatchedMs": 600000,
   "guestTokenMax": 512,
   "guestArgvMax": 256,

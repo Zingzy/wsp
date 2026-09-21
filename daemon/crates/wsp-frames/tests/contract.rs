@@ -268,6 +268,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("guestNotWatcher", words::GUEST_NOT_WATCHER.to_owned());
     m.insert("guestQueueFull", words::GUEST_QUEUE_FULL.to_owned());
     m.insert("guestInFlightFull", words::GUEST_IN_FLIGHT_FULL.to_owned());
+    m.insert("guestWorkspaceFull", words::GUEST_WORKSPACE_FULL.to_owned());
     m.insert("guestUnwatched", words::GUEST_UNWATCHED.to_owned());
     m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
     m.insert("onBase", words::on_base_refusal("{base}"));
@@ -306,6 +307,8 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("guestMessageCapBytes", Value::from(numbers::GUEST_MESSAGE_CAP_BYTES));
     m.insert("guestQueueCapFrames", Value::from(numbers::GUEST_QUEUE_CAP_FRAMES));
     m.insert("guestInFlightCapBytes", Value::from(numbers::GUEST_IN_FLIGHT_CAP_BYTES));
+    m.insert("guestSessionsPerWorkspaceCap", Value::from(numbers::GUEST_SESSIONS_PER_WORKSPACE_CAP));
+    m.insert("guestFrameCapBytes", Value::from(numbers::GUEST_FRAME_CAP_BYTES));
     m.insert("guestUnwatchedMs", Value::from(numbers::GUEST_UNWATCHED_MS));
     m.insert("guestTokenMax", Value::from(numbers::GUEST_TOKEN_MAX));
     m.insert("guestArgvMax", Value::from(numbers::GUEST_ARGV_MAX));
