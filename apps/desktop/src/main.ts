@@ -12,6 +12,7 @@ import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
+import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, openThisComputer } from "./setup.js";
 import { installShim, shimText } from "./shim.js";
@@ -227,6 +228,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   nativeTheme.themeSource = "dark";
   win = newWindow(PRELOAD);
   const page = win;
+  guardWorkers(page.webContents.session);
   switcher = hostSwitcher({
     local,
     home: wspHome(),
@@ -234,7 +236,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     here: hereWord(process.platform === "darwin"),
     load: async next => {
       session = next;
-      await page.loadURL(next.url);
+      await loadHostPage(page, next.url);
     },
     log: io.log,
     ssh: sshRoad(systemSshDeps()),
@@ -262,7 +264,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await page.loadURL(session.url);
+  await loadHostPage(page, session.url);
   return true;
 }
 

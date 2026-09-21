@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, fmtSize, hereWord, kindWords, pairToken } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, madeOfWord, pairToken } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { _electron as electron, type ElectronApplication, type Page } from "playwright";
+import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
@@ -46,8 +46,9 @@ function seedGolden(home: string): void {
   writeFileSync(join(home, "state.json"), JSON.stringify({ goldens: { default: GOLDEN } }));
 }
 
-/** One local workspace record as the first launch and wsp new --local leave it, in the store's on-disk shape: the
- * whole of what a computer that never held a provider key has. */
+/** One local workspace record as wsp add and wsp new --local leave it, in the store's on-disk shape: a project of
+ * this computer and the workspace working it in place, which is the whole of what a computer that never held a
+ * provider key has. */
 const LOCAL_WORKSPACE = {
   id: "ws_1",
   name: "seeded-mac",
@@ -56,6 +57,7 @@ const LOCAL_WORKSPACE = {
   phase: "running",
   golden: "",
   createdAt: "2026-09-01T00:00:00.000Z",
+  project: "pr_1",
   spec: {},
   size: { cpu: 8, memMb: 16384 },
   firstLife: false,
@@ -63,7 +65,19 @@ const LOCAL_WORKSPACE = {
 };
 
 function seedLocalWorkspace(home: string): void {
-  writeFileSync(join(home, "state.json"), JSON.stringify({ workspaces: { [LOCAL_WORKSPACE.id]: LOCAL_WORKSPACE } }));
+  const folder = join(home, "work", LOCAL_WORKSPACE.name);
+  mkdirSync(folder, { recursive: true });
+  const project = {
+    id: LOCAL_WORKSPACE.project,
+    name: LOCAL_WORKSPACE.name,
+    computer: "here",
+    source: { kind: "folder", path: folder },
+    path: folder,
+    defaultBranch: "main",
+    createdAt: LOCAL_WORKSPACE.createdAt,
+  };
+  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
+  writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
 interface Launched {
@@ -212,6 +226,39 @@ function listenOn(server: Server): Promise<number> {
     });
   });
 }
+
+/** A page served on a loopback port the way a process inside a workspace serves one: it asks for a service worker on
+ * its own origin when the test says so, and answers on either spelling of loopback, so the frame on one holds a
+ * frame on the other. */
+function workerPage(): Promise<{ port: number; server: Server }> {
+  const server = createServer((req, res) => {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/sw.js") {
+      res.writeHead(200, { "content-type": "text/javascript" }).end("self.addEventListener('fetch', () => {});");
+      return;
+    }
+    const port = Number((req.headers.host ?? "").split(":")[1] ?? 0);
+    const nested = path === "/nested" ? "" : `<iframe src="http://127.0.0.1:${port}/nested"></iframe>`;
+    const asks = '<script>window.registerWorker = () => navigator.serviceWorker.register("/sw.js").then(() => "registered", e => "refused: " + e.name);</script>';
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(`<!doctype html><html><body>${nested}${asks}</body></html>`);
+  });
+  return listenOn(server).then(port => ({ port, server }));
+}
+
+/** A frame the window holds, by the url it is on. */
+function frameAt(win: Page, url: string): Promise<Frame> {
+  return vi.waitFor(
+    () => {
+      const frame = win.frames().find(f => f.url() === url);
+      if (frame === undefined) throw new Error(`no frame at ${url}, saw ${JSON.stringify(win.frames().map(f => f.url()))}`);
+      return frame;
+    },
+    { timeout: 30_000, interval: 50 },
+  );
+}
+
+/** What the page inside a frame made of the worker it asked for. */
+const registerWorker = (frame: Frame): Promise<string> => frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 
 async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
   await page.waitForLoadState("domcontentloaded");
@@ -596,12 +643,41 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is the seeded record's size in the local kind's word for a cpu, as every row reads its machine.
-    expect(await row.locator("[data-workspace-machine]").textContent()).toBe(fmtSize(LOCAL_WORKSPACE.size, kindWords("local").cpu));
+    // Line two is what the workspace is made of, in the protocol's own word for the folder worked where it sits.
+    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("in-place"));
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
+  });
+
+  it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
+    const served = await workerPage();
+    standIn = served.server;
+    launched = await launch({}, seedLocalWorkspace);
+    const win = await windowAt(launched.app, APP_URL);
+    const row = `[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`;
+    await win.click(row);
+    // The preview pane on this computer's own workspace frames this computer's port, which is the pane a person types one into.
+    await win.keyboard.press("Meta+k");
+    await win.locator("[data-command-palette]").getByText(WORKSPACE_WORDS.openBrowser, { exact: true }).click();
+    await win.fill("[data-preview-url-input]", `localhost:${served.port}`);
+    await win.press("[data-preview-url-input]", "Enter");
+    const framed = await frameAt(win, `http://localhost:${served.port}/`);
+    const nested = await frameAt(win, `http://127.0.0.1:${served.port}/nested`);
+    // The road the finding names is the 127.0.0.1 frame, which is the nested one; the localhost frame is the same
+    // rule read on the other spelling, and neither may plant a worker on a port the kernel hands out again.
+    expect(await registerWorker(framed)).toMatch(/^refused/);
+    expect(await registerWorker(nested)).toMatch(/^refused/);
+    // The rule is the worker's alone: the framed page keeps its own storage, which a sandbox attribute would have taken.
+    expect(await framed.evaluate(() => {
+      localStorage.setItem("wsp-smoke", "kept");
+      return localStorage.getItem("wsp-smoke");
+    })).toBe("kept");
+    // And the move a person makes through the Hosts menu loads the host page with the session swept first.
+    await hostsMenu(launched.app, hereWord(process.platform === "darwin"));
+    await win.waitForURL(APP_URL);
+    expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
   });
 
   it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
