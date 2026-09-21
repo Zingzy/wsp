@@ -41,6 +41,7 @@ import {
   SEAL_CLIENT,
   SEAL_UNSERVED,
   THREAD_OPS,
+  DEVICE_OPS,
   peerAddress,
   SCOPED_TOKEN_ROAD_REFUSAL,
   TICKET_ORIGIN,
@@ -49,6 +50,7 @@ import {
   WorkspaceListing,
   WorkspaceOut,
   threadOpRefusal,
+  deviceHeldRefusal,
   type AccountView,
   type DeviceView,
   type DoctorLineEvent,
@@ -570,6 +572,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // The paired word stands above the `here` a connect ticket carries, since a ticket never widens the road of
         // the socket that minted it; a relay ticket's word is stricter still and stays, whoever minted it.
         const road = pairedRoad && stamped !== "relayed" ? "paired" : (stamped ?? msg.origin);
+        // The door for a computer the person paired, read the way the thread door above is: shut, with the ops such
+        // a device may send as the openings, until a role of the person's opens more. The JSON routes read the same
+        // list by the op each route stands for, so neither door is wider than the other.
+        if (road === "paired" && !DEVICE_OPS.includes(msg.op)) {
+          send({ id: msg.id, ok: false, error: deviceHeldRefusal(msg.op) });
+          return;
+        }
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, listenBeyondLoopbackLine, LOOPBACK, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -20,7 +20,7 @@ import { spawn } from "node:child_process";
 import { addressLines } from "../src/host-lock.js";
 import { httpProbe } from "../src/service.js";
 import { hostAddress } from "../src/verbs.js";
-import { startHost, type HostHandle } from "../src/server.js";
+import { ROUTE_OPS, routeRefusal, startHost, type HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
@@ -358,6 +358,28 @@ describe("a host that listens beyond this computer", () => {
     });
     expect((await fetch(`http://127.0.0.1:${mine.port}/api/workspaces`)).status).toBe(200);
     expect(own).toEqual([undefined]);
+  });
+
+  it("a paired device is held to the device list on the JSON routes by the op each route stands for, and both routes today are on it", async () => {
+    const { handle: h, runtime } = await up("0.0.0.0");
+    await projectOn(runtime);
+    const code = await pairCode(h.wsPort, h.authToken);
+    const { deviceToken } = await redeem(h.port, code);
+    const auth = { authorization: `Bearer ${deviceToken!}` };
+    // Both routes stand for an op a paired device may send, so both answer it.
+    expect(Object.values(ROUTE_OPS).every(op => DEVICE_OPS.includes(op))).toBe(true);
+    expect(ROUTE_OPS).toEqual({ "GET /api/workspaces": "status.list", "POST /api/workspaces": "workspaces.create" });
+    expect((await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: auth })).status).toBe(200);
+    const made = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: "from a laptop" }) });
+    expect(made.status).toBe(200);
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["from a laptop"]);
+    // The door itself, read for a route whose op is outside the list: the socket's own sentence, and nothing for
+    // the person or for an op on the list, so a route added later is covered by naming its op and nothing more.
+    expect(routeRefusal("workspaces.exec", "paired")).toBe(deviceHeldRefusal("workspaces.exec"));
+    expect(routeRefusal("sessions.start", "paired")).toBe(deviceHeldRefusal("sessions.start"));
+    expect(routeRefusal("status.list", "paired")).toBeUndefined();
+    expect(routeRefusal("workspaces.exec", undefined)).toBeUndefined();
+    expect(routeRefusal("workspaces.exec", { origin: "relayed", by: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } })).toBeUndefined();
   });
 
   it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {

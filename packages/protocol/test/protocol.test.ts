@@ -874,6 +874,26 @@ describe("runtime wire types", () => {
     for (const op of ["daemon.open", "daemon.send", "daemon.close", "workspaces.daemonReach"]) expect(THREAD_OPS).not.toContain(op);
   });
 
+  it("the device list holds only ops the host serves, none of the ops that start a process, touch a computer, write keys or read this disk, and both route ops", () => {
+    for (const op of wire.DEVICE_OPS) expect(wire.RUNTIME_OPS, op).toContain(op);
+    expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
+    const held = [
+      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.answer", "sessions.access", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
+      "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "projects.add",
+      "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
+      "image.export", "host.folders", "project.seed.plan", "project.plan", "project.import", "project.export",
+      "pair.issue", "pair.redeem", "seal.open", "place.join", "place.auth", "place.prove",
+    ];
+    for (const op of held) {
+      expect(wire.RUNTIME_OPS, op).toContain(op);
+      expect(wire.DEVICE_OPS, op).not.toContain(op);
+    }
+    // Every op the host serves is on one side or the other, so an op added later is placed on purpose.
+    for (const op of wire.RUNTIME_OPS) expect(wire.DEVICE_OPS.includes(op) || held.includes(op), op).toBe(true);
+    for (const op of ["status.list", "workspaces.create"]) expect(wire.DEVICE_OPS).toContain(op);
+    expect(wire.deviceHeldRefusal("workspaces.exec")).toBe("workspaces.exec is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on");
+  });
+
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
     const picked = { id: 22, op: "sessions.start", workspaceId: "ws_1", prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits", contextWindow: "1m" };
     expect(RuntimeRequest.parse(picked)).toEqual(picked);

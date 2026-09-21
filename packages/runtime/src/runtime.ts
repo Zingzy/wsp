@@ -209,7 +209,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1990,12 +1990,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
     relayed: (machineId: string | undefined) => boolean;
-    /** Whether a computer the person paired may start a process on this kind's workspaces: a machine somewhere else
-     * runs that process on its own disk, and a workspace of this computer runs it under the person's own login,
-     * where it reads the host's token, the other computers' tokens and every key on this disk. Read by the three
-     * verbs that start one and by nothing else, so listing, reading and waking are unchanged. The machine id for
-     * the same reason the relayed rule takes it: a dial that names this computer is this computer. */
-    pairedRuns: (machineId: string | undefined) => boolean;
     /** How wsp itself is run on this kind's machine, for the tools a turn's own agent is given: a fork runs the
      * binary the daemon deploy lands, this computer runs the command the host itself was started as, and a kind wsp
      * puts nothing on answers none, which leaves that kind's turns without the tools. The address a turn reaches
@@ -2277,7 +2271,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // and the word for each is the one its row carries.
       loginStands: (entry, id) => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in",
       relayed: () => true,
-      pairedRuns: () => true,
       // The word, not a path: the deploy writes the shim onto the machine's PATH and the binary under it carries the
       // chip in its own path, so the one stable name for a fork's wsp is the word a turn's own shell runs. It dials
       // no host of its own, it opens a session on this machine's daemon and the daemon carries it up the socket
@@ -2327,7 +2320,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
             env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
             relayed: () => false,
-            pairedRuns: () => false,
             // This computer's own command, told which host to drive: a thread here runs the node wsp, which dials
             // rather than riding a machine's daemon. No thread gets this today, since the kind table lets no agent
             // on this computer drive this host; it is the kind's own answer for the day that changes.
@@ -2388,9 +2380,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // one exception is a dial that names the computer wsp runs on: that is this computer under another
             // kind's name, and the local kind's refusal is the whole reason the rule exists.
             relayed: machineId => sshElsewhere(machineId),
-            // The same reading, for the same reason: a process started on a machine whose dial names this computer
-            // runs under the person's own login here, whatever kind the record it sits on carries.
-            pairedRuns: machineId => sshElsewhere(machineId),
             // The bundle a deploy lands on a machine over ssh carries the wsp command like every other, but which
             // node runs it there is the place's to say and no turn on this kind is handed a token yet: the tools
             // wait for the round that answers both.
@@ -2577,15 +2566,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const line = refusalFor(record, caller);
     if (line === undefined) return;
     throw scopeOf(caller) === undefined ? new Error(line) : notFoundRefusal(noWorkspaceRefusal());
-  };
-  /** The one rule about what a computer the person paired may start, read by the three verbs that start a process
-   * on a workspace and by nothing else: a process on a workspace of this computer runs under the person's own
-   * login here and reads every file this computer holds, which a computer paired from somewhere else does not get
-   * to ask for. The kind answers, so a machine wsp runs elsewhere takes that computer's commands, threads and
-   * panes as it always has, and what a paired computer lists, reads and wakes is unchanged. */
-  const refusePairedRun = (record: { kind: WorkspaceKind; name: string; machineId?: string }, caller: Caller | undefined): void => {
-    if (roadOf(caller) !== "paired" || moduleOf(record.kind).pairedRuns(record.machineId)) return;
-    throw new Error(pairedRunRefusal(record.name));
   };
   /** The rule for a workspace a caller named by id rather than one a verb found for itself: a thread reads one
    * sentence for an id this host does not hold and for one outside its tree alike, since telling the two apart is
@@ -5435,7 +5415,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async execStream(id, argv, cwd, origin) {
       const entry = await entryOf(id, origin);
-      refusePairedRun(entry.record, origin);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await threadFolder(entry, { cwd });
@@ -5503,7 +5482,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
-      refusePairedRun(entry.record, origin);
       const served = servedByItsComputer(entry);
       return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent);
     },
@@ -5966,10 +5944,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       heldLines.set(parent.workspaceId, [...(heldLines.get(parent.workspaceId) ?? []), line]);
       return;
     }
+    // The road the targets were named from is read again here, where the line starts a turn: a device the person
+    // paired may not start one, by the same list both doors read, so a row an older host wrote under that road
+    // falls away to the person rather than starting a turn a paired socket could not.
+    if (road === "paired" && !DEVICE_OPS.includes("sessions.start")) {
+      console.warn(`thread ${from.slice(0, 8)} ended, but its line was registered from a paired computer, which starts no turn on thread ${notify.slice(0, 8)}`);
+      fell();
+      return;
+    }
     // The caller this start runs under: the thread that registered the targets where one did, and the road it
-    // registered them from, so the door that read what this caller may start reads it again here. A line nobody
-    // but the person registered carries neither and goes as theirs, which is what every row written before the
-    // road rode beside the targets holds.
+    // registered them from. A line nobody but the person registered carries neither and goes as theirs, which is
+    // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
     sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, resume: parent.claudeSessionId, startedBy: "agent" }, asWho).catch((e: unknown) => {
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
@@ -6570,7 +6555,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const reached = opens ? await entryOf(workspaceId, origin) : await entryOfRow({ threadId, workspaceId }, origin);
       if (reached === undefined) throw new Error(`no thread ${opened.thread ?? resume} on this workspace`);
       const entry = reached;
-      refusePairedRun(entry.record, origin);
       // A start that names no agent runs the one the last thread on this project used, so the command line, the
       // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
       // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
@@ -6610,11 +6594,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const on = latestOn(target);
         if (on === undefined || !reachesRow(on, origin)) throw new Error(`no thread ${target} to notify`);
         if (target === threadId) throw new Error("a thread cannot notify itself");
-        // The line a target is told starts a turn on that target's own workspace, so what this caller may start
-        // there is read where the target is named, and again at delivery: a target is a start this caller asked
-        // for, one turn later and on another workspace.
-        const held = live.get(on.workspaceId)?.record;
-        if (held !== undefined) refusePairedRun(held, origin);
         // Each end would start the next turn on the other thread with no one sending anything, so the chain is
         // walked whole; it is a lead and its builders, so it is short.
         if (notifyReach(notifyOn(target)?.notify ?? []).has(threadId)) {

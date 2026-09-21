@@ -5215,6 +5215,73 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.rename",
 ];
 
+/** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
+ * THREAD_OPS is a list: a deny list would let every op added later through by having been forgotten. Read at both
+ * doors, the socket and the JSON routes, so a route added later is held by the op it stands for. What is here is
+ * listing, reading, watching and the management of wsp's own machines and records, which touch no process, no
+ * file of the person's outside wsp's own copies folder and no computer of the person's. What is not: every op that
+ * starts or puts a hand on a process (a start, a steer, a stop, an answer, an access change, a command, a bring
+ * back, a pane), every op that adds, changes, dials, sweeps or lands a binary on a computer of the person's or clones onto
+ * one, every op that writes keys, builds or seals an image, runs the sign-ins or costs money, and every op that
+ * reads or writes this computer's disk outside wsp's own folders. The daemon channel's send and close ride a
+ * channel a refused open never gave this socket. A role of the person's is where this list widens, per device. */
+export const DEVICE_OPS: readonly string[] = [
+  "auth",
+  "events.subscribe",
+  "status.subscribe",
+  "status.list",
+  "capabilities.get",
+  "ticket.issue",
+  "places.list",
+  "account.get",
+  "devices.list",
+  "devices.revoke",
+  "workspaces.landing",
+  "workspaces.create",
+  "workspaces.list",
+  "workspaces.resolve",
+  "workspaces.get",
+  "workspaces.nap",
+  "workspaces.wake",
+  "workspaces.stopWake",
+  "workspaces.restartDaemon",
+  "workspaces.upgrade",
+  "workspaces.updateImage",
+  "workspaces.rename",
+  "workspaces.look",
+  "workspaces.agents",
+  "workspaces.delete",
+  "workspaces.forget",
+  "workspaces.snapshot",
+  "workspaces.touch",
+  "workspaces.portReach",
+  "workspaces.portProbe",
+  "workspaces.rebuild",
+  "projects.list",
+  "projects.resolve",
+  "projects.remove",
+  "projectGoldens.list",
+  "sys.subscribe",
+  "harnesses.list",
+  "sessions.list",
+  "sessions.history",
+  "sessions.rename",
+  "sessions.forget",
+  "golden.get",
+  "image.get",
+  "snapshots.list",
+  "snapshots.storage",
+  "snapshots.rollback",
+  "cost.history",
+  "cost.spend",
+  "forwards.list",
+  "forwards.stop",
+  "preferences.get",
+  "preferences.set",
+  "host.terminalConfig",
+  "init.get",
+];
+
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
  * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. */
 export function threadOpRefusal(op: string, threadId: string): string {

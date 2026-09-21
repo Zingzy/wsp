@@ -2401,12 +2401,12 @@ export function relayedRefusal(name: string): string {
   return `${name} is ${THIS_COMPUTER}; it answers only requests from ${THIS_COMPUTER}, never one relayed from a machine`;
 }
 
-/** The one sentence a computer the person paired with this host reads when it would start a process on one of this
- * computer's own workspaces. A command, a thread and a shell pane there all run under the person's own login on
- * this computer and read every file it holds, which is the one thing a device paired from somewhere else cannot
- * ask for; reading, listing and everything else that computer does here is unchanged. */
-export function pairedRunRefusal(name: string): string {
-  return `${name} is ${THIS_COMPUTER}; a computer paired with this host reads it but starts no process on it`;
+/** The one sentence a computer the person paired with this host is refused an op with, at the socket and on the
+ * JSON routes alike. It names the op and not a reason: the door is shut until the person gives the device a role,
+ * and what the device may still do is the list the door reads, listing, reading, watching and managing wsp's own
+ * machines and records. */
+export function deviceHeldRefusal(op: string): string {
+  return `${op} is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on`;
 }
 
 /** The one sentence a request relayed from a machine is refused with when it would record a machine that already
