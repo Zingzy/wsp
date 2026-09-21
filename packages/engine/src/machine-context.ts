@@ -10,6 +10,7 @@
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
 import { TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
@@ -209,7 +210,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS, path: string = TOO
     BASE_VERSION_LINES,
     ...CONTEXT_AGENTS.map(a => `if command -v ${shellQuote(a.bin)} >/dev/null 2>&1; then echo "AGENT ${a.id}"; fi`),
     `sed -n 's/^export \\([A-Za-z_][A-Za-z0-9_]*\\)=.*/SECRET \\1/p' ${e}/profile.d/wsp-secrets.sh 2>/dev/null`,
-    'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7); shell=${shell##*/}; shell=${shell:-bash}',
+    SHELL_READ,
     'echo "SHELL $shell"',
     ...(shells === "none"
       ? [`echo "ALIASES ${ALIASES_UNREAD}"`]

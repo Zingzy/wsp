@@ -7,7 +7,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, moveProjectState, type UnreadStore } from "@wsp/engine";
+import { PROJECT_STATE_RESOLVERS, countProjectState, destExists, insideFolder, moveProjectState, type UnreadStore } from "@wsp/engine";
 import { stateEntryRefusal, storeUnreadLine, type ProjectAgentResult } from "@wsp/protocol";
 import type { LandRequest, LandedAgent, LandedProject, ProjectLander } from "@wsp/runtime";
 import { CACHE_RULE, outcomeOf } from "./project-bundle.js";
@@ -66,8 +66,11 @@ const under = (real: string, root: string): boolean => real === root || real.sta
 /** Every entry the state archive put in the scratch folder, refused whole where any of it is neither a folder nor a
  * regular file. The archive's bytes are a machine's and a link, a fifo or a device in it is a road out of the folder
  * it was opened in for every resolver that runs after, so nothing of it lands rather than the entry being skipped.
- * A hard link entry reads as a regular file here and this computer's archiver holds its target under the extraction
- * folder as it drops a dot-dot segment, so it names nothing outside and needs no rule of its own. */
+ * A hard link entry reads as a regular file here and needs no rule of its own: measured on this computer's bsdtar
+ * 3.5.3 (libarchive 3.7.4), a hard link whose target carries `..` is refused outright (`Path contains '..'`, exit
+ * 1, so `extract` throws before this runs) and one whose target is absolute loses its leading slash and then names
+ * nothing that exists (exit 1 as well); a hard link to a file inside the archive lands as a second name for it,
+ * under the folder. */
 function refuseUnlandableEntries(scratch: string): void {
   const stack = [scratch];
   while (stack.length > 0) {
@@ -129,7 +132,7 @@ async function landState(state: NonNullable<LandRequest["state"]>, source: strin
         const st = lstatSync(f);
         const rel = relative(skeleton, f);
         if (!st.isFile()) refusal = stateEntryRefusal(rel, entryWord(st));
-        else if (rel === "" || rel.startsWith("..") || isAbsolute(rel) || !under(realpathSync(f), realSkeleton)) refusal = stateEntryRefusal(f, "a path out of the folder it was opened in");
+        else if (!insideFolder(rel) || !under(realpathSync(f), realSkeleton)) refusal = stateEntryRefusal(f, "a path out of the folder it was opened in");
         if (refusal !== undefined) break;
         copies.push({ from: f, to: join(home, rel), bytes: st.size });
       }

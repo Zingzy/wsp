@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -1301,7 +1301,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash"): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1321,12 +1321,12 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       },
     };
     const backend = {
-      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, ...(arch === undefined ? {} : { arch }) }),
+      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) }),
       // A computer this computer's ssh client has already met: every case below is about what the install does
       // after that, so none of them stands on the first dial of a stranger.
       keyFor: async () => BOX_KEY,
       offeredKeyFor: async () => ({ key: BOX_KEY }),
-      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+      knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
     return { backend, ran, landed, stages, stage: (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`) };
   }
@@ -1421,7 +1421,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
         for (const line of [WSP_READY_LINE, PLACE_JOINED_LINE]) opts.onLine?.(line);
         return { exitCode: 0, stdout: `${WSP_READY_LINE}\n${PLACE_JOINED_LINE}\nDAEMON_UP\n`, stderr: "" };
       };
-      const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => undefined });
+      const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => ({}) });
       const target = GUEST_DAEMON_TARGETS.find(t => t.uname === said)!;
       const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`), [target]) });
       expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toMatchObject({ name: "box" });
@@ -1439,7 +1439,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
         script === SSH_READ_SCRIPT
           ? { exitCode: 0, stdout: `home /home/maya\narch ${said}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" }
           : { exitCode: 0, stdout: "", stderr: "" };
-      const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => undefined });
+      const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => ({}) });
       const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`)) });
       await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).rejects.toThrow(noGuestDaemonLine(said));
     }
@@ -1541,7 +1541,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const backend = {
       adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64", hostKey: BOX_KEY }),
       keyFor: async () => BOX_KEY,
-      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+      knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
     const stages: string[] = [];
     const installed = await placeInstaller({ backend: backend as never, ...assets(root) })(
@@ -1578,7 +1578,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       keyFor: async () => "ssh-ed25519 SHA256:abc",
       // This computer's config points the file somewhere other than the default the plan line names, so the step
       // says which file was written rather than leaving a person to read the default as the truth.
-      knownHostsFile: async () => "/Users/lena/.ssh/known_hosts_work",
+      knownHostsEntry: async () => ({ file: "/Users/lena/.ssh/known_hosts_work", target: "box" }),
     };
     const stages: string[] = [];
     const install = placeInstaller({ backend: backend as never, ...assets(root) });
@@ -1615,10 +1615,16 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   it("refuses a computer that answered with a key other than the one pinned, before the bundle and the code leave", async () => {
     const box = fakeBox("x86_64");
-    const other = { ...(box.backend as Record<string, unknown>), adopt: async () => ({ ...(await (box.backend as { adopt: () => Promise<object> }).adopt()), hostKey: "ssh-ed25519 SHA256:somebody-else" }) };
+    // The client dials a name behind the word that was typed and writes the entry under the address: the line that
+    // removes it is the client's own reading, never one built here from maya@box, which would remove nothing.
+    const other = {
+      ...(box.backend as Record<string, unknown>),
+      adopt: async () => ({ ...(await (box.backend as { adopt: () => Promise<object> }).adopt()), hostKey: "ssh-ed25519 SHA256:somebody-else" }),
+      knownHostsEntry: async () => ({ file: "/Users/lena/.ssh/known_hosts_work", target: "[10.0.0.5]:2222" }),
+    };
     const install = placeInstaller({ backend: other as never, ...assets(tmp("wrong-key"), [X86]) });
     await expect(install({ address: "maya@box", hostKey: BOX_KEY, code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage)).rejects.toThrow(
-      hostKeyMismatchRefusal({ address: "maya@box", pinned: BOX_KEY, wrote: "ssh-ed25519 SHA256:somebody-else", target: "box", file: "/home/maya/.ssh/known_hosts" }),
+      hostKeyMismatchRefusal({ address: "maya@box", pinned: BOX_KEY, wrote: "ssh-ed25519 SHA256:somebody-else", target: "[10.0.0.5]:2222", file: "/Users/lena/.ssh/known_hosts_work" }),
     );
     expect(box.landed).toEqual([]);
     // The read that adopted it ran, since the key ssh writes is read after the dial; nothing of wsp's followed it.
@@ -1630,12 +1636,31 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(await placeInstaller({ backend: matching as never, ...assets(tmp("right-key"), [X86]) })({ address: "maya@box", hostKey: BOX_KEY.split(" ")[1]!, code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, pinned.stage)).toMatchObject({ name: "box" });
   });
 
+  it("refuses a computer whose root shell reads a file of the shared home, before anything of wsp's lands", async () => {
+    // sshd hands every command the host sends to root's own shell with -c, and on a box that home is the one every
+    // workspace on it writes: zsh would read ~/.zshenv there and fish config.fish, as that computer's root.
+    for (const shell of ["zsh", "fish"]) {
+      const box = fakeBox("x86_64", shell);
+      const install = placeInstaller({ backend: box.backend as never, ...assets(tmp(`shell-${shell}`), [X86]) });
+      await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage)).rejects.toThrow(placeRootShellRefusal("maya@box", shell));
+      // The read that adopted it has run, since sshd chose the shell before wsp could ask; nothing of wsp's did.
+      expect(box.landed).toEqual([]);
+      expect(box.ran).toEqual([]);
+    }
+    // The two that read nothing there install as they always did, and so does a box that named no shell at all.
+    for (const shell of [...PLACE_ROOT_SHELLS, undefined]) {
+      const box = fakeBox("x86_64", shell as string);
+      const install = placeInstaller({ backend: box.backend as never, ...assets(tmp(`shell-ok-${shell ?? "unsaid"}`), [X86]) });
+      expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage), shell).toMatchObject({ name: "box" });
+    }
+  });
+
   it("leaves the known_hosts step alone where the dial never got far enough to exchange a key", async () => {
     const root = tmp("install-nokey");
     const backend = {
       adopt: async () => Promise.reject(new Error("ssh: connect to host box port 22: Connection refused")),
       keyFor: async () => undefined,
-      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+      knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
     const stages: string[] = [];
     const install = placeInstaller({ backend: backend as never, ...assets(root) });

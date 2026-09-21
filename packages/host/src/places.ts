@@ -63,6 +63,8 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   hostKeyUnconfirmedRefusal,
   hostKeyUnscannableRefusal,
   KNOWN_HOSTS,
+  PLACE_ROOT_SHELLS,
+  placeRootShellRefusal,
   hostKeyRefusal,
   isLoopback,
   joinAddressOf,
@@ -73,7 +75,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { SshBackend, SSH_DEFAULT_PORT, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
@@ -446,7 +448,8 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
     // read out. A dial that never got far enough to exchange a key leaves the step where it was: nothing was written.
     const sayKey = async (key: string | undefined): Promise<void> => {
       if (key === undefined) return;
-      stage("host-key", "done", hostKeyKeptNote(key, await backend.knownHostsFile(reach).catch(() => undefined)));
+      const entry = await backend.knownHostsEntry(reach).catch((): { file?: string; target?: string } => ({}));
+      stage("host-key", "done", hostKeyKeptNote(key, entry.file));
     };
     let adopted: Awaited<ReturnType<SshBackend["adopt"]>>;
     try {
@@ -455,15 +458,32 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
       await sayKey(await backend.keyFor(reach).catch(() => undefined));
       throw e;
     }
-    const { machine, login, arch, hostKey } = adopted;
+    const { machine, login, arch, shell, hostKey } = adopted;
     // What answered is held against what the person pinned before anything else is asked of it. The read that has
     // already run sent nothing of the person's beyond the ssh identity every dial offers and printed the machine's
     // own facts; accept-new wrote its key here on the way in, so the refusal names that key, the file it went into
     // and the line that takes it out again. Nothing of wsp's has left this computer yet.
     if (req.hostKey !== undefined && !hostKeyMatches(req.hostKey, hostKey ?? "")) {
-      const file = (await backend.knownHostsFile(reach).catch(() => undefined)) ?? KNOWN_HOSTS;
-      throw new Error(hostKeyMismatchRefusal({ address: req.address, pinned: req.hostKey, ...(hostKey !== undefined ? { wrote: hostKey } : {}), target: reach.port === SSH_DEFAULT_PORT ? reach.host : `[${reach.host}]:${reach.port}`, file }));
+      // The file and the name the entry was written under come off the client's own one reading of the dial, never
+      // off the word that was typed: a config naming a HostName or a HostKeyAlias writes the entry somewhere else,
+      // and a line built here from the address would tell the person to remove an entry that is not there.
+      const entry = await backend.knownHostsEntry(reach).catch((): { file?: string; target?: string } => ({}));
+      throw new Error(
+        hostKeyMismatchRefusal({
+          address: req.address,
+          pinned: req.hostKey,
+          ...(hostKey !== undefined ? { wrote: hostKey } : {}),
+          target: entry.target ?? reach.host,
+          file: entry.file ?? KNOWN_HOSTS,
+        }),
+      );
     }
+    // Which shell root runs, read off the box's own passwd entry with nothing of root's run to read it. sshd hands
+    // every command the host sends to that shell with -c before wsp's own bash -c inside it, so a root running zsh
+    // or fish reads a file under the /root every workspace on that box writes, as root, on every dial wsp makes.
+    // The read that has just run already went through it once; what this stops is the deploy and every dial after.
+    // A box that named no shell at all is one this rule says nothing about, and is taken as it always was.
+    if (shell !== undefined && !PLACE_ROOT_SHELLS.includes(shell)) throw new Error(placeRootShellRefusal(req.address, shell));
     // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
     // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
     // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.

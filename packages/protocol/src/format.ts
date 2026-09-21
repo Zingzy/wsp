@@ -2582,6 +2582,19 @@ export function hostKeyKeptNote(hostKey: string, file?: string): string {
   return file === undefined || file.endsWith(KNOWN_HOSTS.slice(1)) ? hostKey : `${hostKey} in ${file}`;
 }
 
+/** The login shells a computer's root may run for wsp to work it. sshd hands every command the host sends to
+ * root's own shell with -c before wsp's own `bash -c` inside it, and these two read no file of the machine's on
+ * that road, while zsh reads ~/.zshenv and fish reads config.fish. On a computer wsp joins, root's home is the
+ * one every workspace on it writes, so either of those would run a workspace's file as that computer's root,
+ * outside every namespace, on each dial. */
+export const PLACE_ROOT_SHELLS: readonly string[] = ["bash", "sh"];
+
+/** What a computer is refused with for running one of the others: the shell it runs, why that shell is a road, and
+ * the one command that changes it. Said before anything of wsp's lands there. */
+export function placeRootShellRefusal(address: string, shell: string): string {
+  return `${address} runs ${shell} as its root's login shell, and sshd hands every command wsp sends to that shell: ${shell} reads a file under /root before running anything, and on a computer wsp joins that folder is the one every workspace on it writes, so a dial would run a workspace's file as root; run chsh -s /bin/bash root on it and add it again`;
+}
+
 /** Whether the key a dial read is the one the person pinned. A person passes either the whole known_hosts word
  * (`ssh-ed25519 SHA256:...`) or the fingerprint on its own, which is what ssh-keygen prints beside the size and the
  * comment, so both sides are read down to the fingerprint where they carry one. */

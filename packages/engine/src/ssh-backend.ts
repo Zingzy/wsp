@@ -17,7 +17,7 @@ import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
-import { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+import { ARCH_READ, HOME_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -322,13 +322,20 @@ export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun)
   return hostKeyFound(await offeredHostKeys(values, run), algorithms);
 }
 
-/** The file accept-new writes a machine's key into on this computer, off the same `ssh -G` the key is read
- * through: the first the client names, which is the person's own where a config points `UserKnownHostsFile`
- * somewhere other than the default. Nothing where the client answers nothing or writes no file at all, which
- * leaves a screen to name the default rather than a path this computer did not confirm. */
-export async function knownHostsWritten(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
+/** The entry accept-new writes on this computer, both halves off the one `ssh -G` the key is read through: the
+ * file, the first the client names, which is the person's own where a config points `UserKnownHostsFile` somewhere
+ * other than the default, and the name that entry is written under, which is the client's own reading of the dial
+ * and not the word that was typed. Both are wanted by the same screens, and a second reading of either rule would
+ * name a file or a line a person cannot act on: under a `Host box` / `HostName 10.0.0.5` config the entry is
+ * written under the address, so a line built from the typed word would remove nothing. Empty where the client
+ * answers nothing, which leaves a screen to name the default rather than a path this computer did not confirm. */
+export async function knownHostsWritten(reach: SshReach, run: SshLocalRun = localRun): Promise<{ file?: string; target?: string }> {
   const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
-  return config.exitCode === 0 ? knownHostFiles(readValues(config.stdout))[0] : undefined;
+  if (config.exitCode !== 0) return {};
+  const values = readValues(config.stdout);
+  const file = knownHostFiles(values)[0];
+  const target = knownHostTarget(values);
+  return { ...(file !== undefined ? { file } : {}), ...(target !== undefined ? { target } : {}) };
 }
 
 /** What a machine over ssh is, as the machine itself answers: the key it holds and the login a turn runs as. Two
@@ -399,6 +406,11 @@ export const SSH_READ_SCRIPT = [
   HOME_READ,
   ARCH_READ,
   'printf "user %s\\n" "$(id -un)"',
+  // sshd hands every command wsp sends to this login's own shell with -c before the bash -c above it, so which
+  // shell that is decides whether a file under the login's home runs first. Read the same way the context probe
+  // reads it, off a passwd entry and never by running that shell.
+  SHELL_READ,
+  'printf "shell %s\\n" "$shell"',
   `env -u BASH_ENV bash --noprofile --norc -c ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
   'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
@@ -411,7 +423,7 @@ export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n
 
 /** One dial that both proves the machine answers and records what wsp needs of it. A dial that fails carries the
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
-export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string }> {
+export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string; shell?: string }> {
   const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000 });
   if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
   const values = readValues(res.stdout);
@@ -427,10 +439,13 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
   const arch = archOf(values);
+  // A name and nothing else: which shells a road may work through is that road's rule, not this reading's.
+  const shell = values["shell"];
   return {
     login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
     ...(arch !== undefined ? { arch } : {}),
+    ...(shell !== undefined && shell !== "" ? { shell } : {}),
   };
 }
 
@@ -584,8 +599,9 @@ export interface SshBackendOptions {
   transport?: SshTransport;
   /** How the key a machine holds is read; the one road above unless a test hands its own. */
   hostKey?: SshHostKeyReader;
-  /** Which file on this computer that entry was written into; the client's own answer unless a test hands its own. */
-  knownHosts?: (reach: SshReach) => Promise<string | undefined>;
+  /** The file that entry was written into on this computer and the name it was written under; the client's own
+   * answer unless a test hands its own. */
+  knownHosts?: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
   /** What the machine itself answers a scan with; the read above unless a test hands its own. */
   offeredKey?: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 }
@@ -623,7 +639,7 @@ export class SshBackend implements MachineBackend {
 
   private readonly transport: SshTransport;
   private readonly hostKey: SshHostKeyReader;
-  private readonly knownHosts: (reach: SshReach) => Promise<string | undefined>;
+  private readonly knownHosts: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
   private readonly offered: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 
   constructor(opts: SshBackendOptions = {}) {
@@ -656,10 +672,10 @@ export class SshBackend implements MachineBackend {
    * workspace is also the one that proves the dial works. The key it answers with is read after that dial and not
    * out of it: accept-new wrote the entry as the connection was made, while a dial riding a master the last minute
    * left open exchanges no key at all, and a record with no identity is a machine that can be recorded twice. */
-  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; arch?: string; hostKey?: string }> {
-    const { login, shape, arch } = await readSshMachine(reach, this.transport);
+  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; arch?: string; shell?: string; hostKey?: string }> {
+    const { login, shape, arch, shell } = await readSshMachine(reach, this.transport);
     const hostKey = await this.keyFor(reach);
-    return { machine: new SshMachine(reach, this.transport), login, shape, ...(arch !== undefined ? { arch } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
+    return { machine: new SshMachine(reach, this.transport), login, shape, ...(arch !== undefined ? { arch } : {}), ...(shell !== undefined ? { shell } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
   }
 
   /** The key this computer's ssh client holds for a machine, read with nothing dialled, or nothing where it holds
@@ -669,10 +685,11 @@ export class SshBackend implements MachineBackend {
     return this.hostKey(reach);
   }
 
-  /** The file that key was written into on this computer, as the client itself answers rather than as a default:
-   * a config pointing UserKnownHostsFile somewhere else is read out, so a screen naming the file names the true
-   * one. Nothing where the client answers nothing, which leaves that screen its default to name. */
-  async knownHostsFile(reach: SshReach): Promise<string | undefined> {
+  /** The entry that key was written into on this computer, as the client itself answers rather than as a default:
+   * a config pointing UserKnownHostsFile somewhere else is read out and so is a HostName or a HostKeyAlias, so a
+   * screen naming the file and the line that removes the entry names the true ones. Empty where the client
+   * answers nothing, which leaves that screen its default to name. */
+  async knownHostsEntry(reach: SshReach): Promise<{ file?: string; target?: string }> {
     return this.knownHosts(reach);
   }
 
