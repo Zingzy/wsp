@@ -94,6 +94,10 @@ pub struct Empty {}
 #[serde(rename_all = "camelCase")]
 pub struct PtyCreateReply {
     pub pty_id: String,
+    /// The process this terminal's shell runs under, numbered as the computer the daemon runs on numbers it: the
+    /// shell itself for a pty on that computer, and for one inside a workspace the process the exec made there,
+    /// which is the pane's broker and which the daemon signals a resize to. A workspace numbers its own
+    /// processes, so this is not the number one inside reads for itself.
     pub pid: u32,
 }
 
@@ -107,6 +111,7 @@ pub struct PtyAttachReply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PtyListEntry {
     pub id: String,
+    /// The same number `PtyCreateReply` answered for this terminal, and the same reading.
     pub pid: u32,
     pub cols: u16,
     pub rows: u16,

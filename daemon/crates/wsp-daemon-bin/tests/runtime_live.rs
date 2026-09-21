@@ -597,7 +597,9 @@ async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() 
 ///
 /// /home reads empty here for a second reason as well as the cover: today's rootfs overlays /usr, /etc, /opt,
 /// /var and /srv, so the box's own /home is not inside one at all. The case reads it all the same, since what
-/// it asks is that no other person's home on the box shows through, however the rootfs comes to be made.
+/// it asks is that no other person's home on the box shows through, however the rootfs comes to be made. The
+/// password files are read for their presence rather than their size: the /etc a workspace holds is built from
+/// the names the allowlist carries, which does not name them, so they are not in it at all.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
@@ -609,7 +611,10 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
     let (code, out, err) = w
-        .exec(&id, "wc -c < /etc/shadow; wc -c < /etc/gshadow; ls -A /home | wc -l; ls -A /root/.ssh | wc -l; cat /etc/ssh/ssh_host_* 2>/dev/null | wc -c")
+        .exec(
+            &id,
+            "test -e /etc/shadow && echo present || echo absent; test -e /etc/gshadow && echo present || echo absent; ls -A /home | wc -l; ls -A /root/.ssh | wc -l; cat /etc/ssh/ssh_host_* 2>/dev/null | wc -c",
+        )
         .await;
     show("what the box keeps of its own, from inside a workspace", code, &out, &err);
     assert_eq!(code, 0);
@@ -617,7 +622,7 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
     // Homebrew prefix on a box the recipe's formula rows ran on, nothing on a box with none, and no other home
     // on the box either way.
     let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS).len().to_string();
-    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", roots.as_str(), "0", "0"], "{out}");
+    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["absent", "absent", roots.as_str(), "0", "0"], "{out}");
     // And what is not covered: the box's sudo rules are read as they are, so a script inside that types sudo
     // gets what root gets rather than a refusal from a file granting nobody anything.
     let (code, sudo, err) = w.exec(&id, "sudo -n true && echo sudo works").await;
@@ -1301,7 +1306,8 @@ async fn a_firewall_that_ends_its_chains_in_a_reject_gets_the_accepts_at_its_hea
     let input = lab.comments("filter_INPUT");
     assert_eq!(&forward[..2], [net::RULE_COMMENT, net::RULE_COMMENT], "{forward:?}");
     assert_eq!(forward[2..], ["lab: not a workspace's", "lab: the final reject"], "{forward:?}");
-    assert_eq!(input, [net::RULE_COMMENT, "lab: not a workspace's", "lab: the final reject"], "{input:?}");
+    assert_eq!(&input[..2], [net::RULE_COMMENT, net::RULE_COMMENT], "{input:?}");
+    assert_eq!(input[2..], ["lab: not a workspace's", "lab: the final reject"], "{input:?}");
     let (code, out, err) = w.exec(&id, &get_from_inside("registry-1.docker.io", 80, "/v2/")).await;
     assert_eq!((code, err.as_str()), (0, ""), "{out}");
     assert!(out.starts_with("HTTP/1.1 301"), "{out}");
@@ -1907,7 +1913,8 @@ fn checkout(at: &Path) {
 }
 
 /// A workspace of this computer and nothing else: no image named, no project handed in. What it holds is what
-/// the box holds, read through an overlay of its own; what the box keeps to itself is an empty directory inside.
+/// the box holds, read through an overlay of its own; what the box keeps to itself, its own engine's state
+/// included, is not in that view at all rather than empty inside it.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
@@ -1920,7 +1927,7 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
     let (code, out, err) = w
         .exec(
             &id,
-            "command -v sh; command -v git || echo no-git-on-this-box; head -1 /etc/os-release; ls -A /root/.wsp; find /var/lib/docker /var/lib/containerd -mindepth 1 | wc -l",
+            "command -v sh; command -v git || echo no-git-on-this-box; head -1 /etc/os-release; ls -A /root/.wsp; test -e /var/lib/docker && echo present || echo absent; test -e /var/lib/containerd && echo present || echo absent",
         )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
@@ -1931,7 +1938,8 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
     for name in fs::read_dir("/root/.wsp").into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()) {
         assert!(!inside.contains(&name.as_str()), "the daemon's own {name} is readable inside: {out}");
     }
-    assert_eq!(inside.last(), Some(&"0"), "the engine's own folders are not empty inside: {out}");
+    assert!(inside.len() >= 2, "the reads inside answered fewer lines than the case asked of them: {out}");
+    assert_eq!(inside[inside.len() - 2..], ["absent", "absent"], "the box's own engine folders are inside: {out}");
     // The resolvers a workspace reads: a regular file the boot wrote, never the box's link into a /run the
     // workspace does not share, and never the box's own stub address, which inside this network namespace is
     // the workspace's own loopback. A name resolved from inside is the proof the file is usable.
@@ -2951,8 +2959,8 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
 
 /// What a workspace on this computer carries into a thread, a command and a pane: the order the host asked for
 /// and the recipe's knobs beside it, one environment for all three. The boot's is the spec's, an exec and the
-/// pty broker are tenants that start from it, and the login shell in a pane reads the file the boot wrote in the
-/// workspace's own /etc after the box's own profile has set root's PATH.
+/// pty broker are tenants that start from it, and the login shell in a pane holds that order too, whether its
+/// /etc/profile leaves PATH alone or resets it and the file the boot wrote under /etc/profile.d puts it back.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_and_a_pane() {
@@ -2976,22 +2984,26 @@ async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_an
     let made = pane.ok("pty.create", json!({ "machineId": &id, "cols": 100, "rows": 40, "cwd": "/root" })).await;
     let pty = made["ptyId"].as_str().unwrap().to_owned();
     let pid = made["pid"].as_u64().unwrap();
-    // The pid the reply carries is the broker's on the box, so its own environment is what the shell in that
-    // pane was started from: read off the box rather than out of the shell, whose login files run after it.
-    let environ = fs::read(format!("/proc/{pid}/environ")).unwrap();
-    let held: Vec<&str> = std::str::from_utf8(&environ).unwrap().split('\0').filter(|e| !e.is_empty()).collect();
-    assert!(held.contains(&format!("WSP_KNOB={knob}").as_str()), "the pty broker carries no knob: {held:?}");
-    assert!(
-        held.contains(&format!("PATH={}", wsp_frames::numbers::PLACE_WORKSPACE_PATH).as_str()),
-        "the pty broker carries another PATH: {held:?}"
-    );
 
-    // And the pane's own shell, which is a login shell: the box's /etc/profile resets root's PATH and then reads
-    // the workspace's own file under /etc/profile.d, so what a person types there runs the prefix's copy first.
+    // What a person's pane reads, printed by the pane's own shell, which is the only reading of this road that
+    // is a person's: the knob, which nothing on the daemon's side of a pty names, so it can only have come from
+    // the workspace's own environment through the broker, and the order, whole. It reaches a pane by one of two
+    // roads, the broker's own environment where the box's /etc/profile leaves PATH alone and the file the boot
+    // wrote under /etc/profile.d where it resets it, and the line is matched whole because the first folders of
+    // this order are the first of a distribution's own reset list too, so a line cut short reads the same on a
+    // pane that got neither.
     pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
-    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane-%s\\n' \"$PATH\"\n" })).await;
-    let opens = format!("pane-{}", wsp_frames::numbers::PLACE_WORKSPACE_PATH.split(':').take(2).collect::<Vec<_>>().join(":"));
-    assert!(pane.printed_within(&pty, &opens, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane %s %s\\n' \"$WSP_KNOB\" \"$PATH\"\n" })).await;
+    let whole = format!("pane {knob} {}", wsp_frames::numbers::PLACE_WORKSPACE_PATH);
+    assert!(pane.printed_within(&pty, &whole, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+
+    // And which process the reply's number names, read now the pane has answered and the exec is certainly
+    // done: the broker, as the box numbers it, told from the helper that started it by the line it runs.
+    let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+    let args: Vec<&str> = std::str::from_utf8(&cmdline).unwrap().split('\0').filter(|a| !a.is_empty()).collect();
+    assert_eq!(args.first().copied(), Some(wsp_runtime::profile::INIT_PATH), "the pid is not the pane's broker: {args:?}");
+    assert_eq!(args.get(1..3), Some(["runtime", "pty"].as_slice()), "{args:?}");
+
     pane.ok("pty.kill", json!({ "ptyId": &pty, "machineId": &id })).await;
     w.close().await;
 }
@@ -3363,7 +3375,8 @@ fn nft_ruleset() -> (i32, String, String) {
 
 /// The box at host.wsp.internal stays the reach the threat model names, less the ports its own daemon and its own
 /// engine serve: a service the box binds on every address answers a workspace on a high port and on neither of
-/// those. A refusing input chain of the box's own gets the return path and nothing wider.
+/// those. The drops are in our own chain at a lower priority, so they end the packet whatever accept a refusing
+/// chain of the box's own carries at its head.
 #[tokio::test]
 #[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
 async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
@@ -3396,7 +3409,10 @@ async fn the_daemons_own_port_and_the_engines_close_at_the_gateway() {
     for port in net::gateway_drops(numbers::DEFAULT_PORT) {
         assert!(ruleset.contains(&format!("gateway port {port}")), "no drop for {port}:\n{ruleset}");
     }
-    assert!(ruleset.contains(&network.link), "the workspace's own link is in no rule:\n{ruleset}");
+    // Every rule of ours matches the workspace interfaces by the prefix they all carry rather than one link by
+    // its name, so what the ruleset names is that prefix and this workspace's own link is one of what it takes.
+    assert!(ruleset.contains(&format!("iifname \"{}", net::LINK_PREFIX)), "no rule matches the workspace links:\n{ruleset}");
+    assert!(network.link.starts_with(net::LINK_PREFIX), "the link {} sits outside the prefix the rules match", network.link);
     w.close().await;
 }
 
