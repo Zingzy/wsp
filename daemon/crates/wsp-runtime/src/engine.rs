@@ -14,10 +14,12 @@
 //! One engine connection per client request, both sides told to close: the Docker client pools connections and
 //! sends its next request on an idle one, and the head of every request has to be read here, so keep-alive is
 //! turned off rather than framed. What the client sends after the head is copied on within the request's own
-//! framing, its Content-Length or its chunks, and the connection to the engine is closed there: a second request
-//! pipelined behind the body reaches nothing. The two routes the engine may hand a connection over on, an attach
-//! and an exec start, keep their connection headers and are copied raw once the engine has taken them; an upgrade
-//! asked for on any other route is dropped from the head before it goes.
+//! framing, its Content-Length or its chunks, and not one byte past it: a second request pipelined behind the
+//! body reaches nothing. Nothing on this side is closed toward the engine before the engine has answered, since
+//! its server reads a half closed request as the client gone and cancels the handler under it; the close forced
+//! on the forwarded head is what ends the answer and the connection. The two routes the engine may hand a
+//! connection over on, an attach and an exec start, keep their connection headers and are copied raw once the
+//! engine has taken them; an upgrade asked for on any other route is dropped from the head before it goes.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -208,6 +210,11 @@ pub fn default_network(workspace: &str) -> String {
     format!("wsp-{workspace}")
 }
 
+/// What compose adds to a project's name for the network a stack that named none of its own runs on. The project
+/// is `compose_project` of the workspace's id, so that word and this suffix are the one network a workspace's
+/// own stack derives for itself.
+const COMPOSE_DEFAULT: &str = "_default";
+
 /// The name the box's link for one of a workspace's networks wears: under the prefix every rule of the
 /// workspace table matches, so a container on it meets the same drops the workspace does, and short enough for
 /// an interface name. Off the workspace and the network's own name, so one network asked for twice is one
@@ -236,14 +243,25 @@ fn overlaps_workspaces(subnet: &str) -> Option<bool> {
 /// fence names, since the rules that keep a workspace off the box's metadata and off its neighbours match on that
 /// name. Answers the bridge name the engine is being told to make.
 pub fn fence_network_create(body: &mut Value, workspace: &str) -> Result<String, String> {
-    // The prefix is this computer's own: a name under it is a name a sibling's own network may already hold,
-    // and a workspace taking one would refuse every plain container that sibling starts.
+    // Two names belong to a workspace on this box and to nobody else: the one this computer mints for its own
+    // default network, `default_network`, which reads as the link prefix twice over since every id is itself
+    // under the prefix; and the one its `compose up` derives, which is the project compose was handed and this
+    // suffix. The project is `compose_project` of the workspace's id and not the id itself, since an id may
+    // carry a character compose does not take, so the stem is read against that one function. A workspace
+    // holding either of a sibling's would refuse that sibling every plain container it starts, or its whole
+    // stack at the network step. What the rule leaves: every other name under the prefix is this workspace's to
+    // take, and two workspaces reaching for one such name meet the engine's own refusal of a name already held
+    // rather than anything here.
     let asked = word(body.get("Name"));
-    if asked.starts_with(crate::net::LINK_PREFIX) {
-        return Err(format!(
-            "a name beginning {} is this computer's own; a workspace's network takes another, and {asked} is refused",
-            crate::net::LINK_PREFIX
-        ));
+    let derived = asked.strip_suffix(COMPOSE_DEFAULT).filter(|stem| stem.starts_with(crate::net::LINK_PREFIX));
+    if let Some(stem) = derived {
+        if stem != crate::ops::compose_project(workspace) {
+            return Err(format!(
+                "a network named {asked} is the one the workspace whose compose project is {stem} brings its own stack up on, so it is refused here"
+            ));
+        }
+    } else if asked.starts_with(&default_network(crate::net::LINK_PREFIX)) {
+        return Err(format!("a network named {asked} is one this computer makes for a workspace of its own, so it is refused here"));
     }
     let driver = word(body.get("Driver"));
     if !matches!(driver, "" | "bridge") {
@@ -1392,11 +1410,6 @@ async fn handle(fence: Arc<Fence>, mut client: UnixStream) -> Result<(), Error> 
             }
         }
     }
-    // The request ends here for every route but the two the engine hands a connection over on, so what the client
-    // sent behind the body reaches nothing.
-    if !hijacks {
-        let _ = engine.shutdown().await;
-    }
     let (answer_head, answer_rest) = read_head(&mut engine).await?;
     let answer = match response_head(&answer_head) {
         Ok(parsed) => parsed,
@@ -1707,11 +1720,25 @@ mod tests {
         // Written into the body, since a box whose engine turns it on by default would hand the bridge a range
         // the table that fences a workspace never sees.
         assert_eq!(plain["EnableIPv6"], false);
-        // A name under this computer's own prefix is a name a sibling's network may hold, which would refuse
-        // every plain container that sibling starts.
+        // A name this computer makes for a workspace's own default network is a name a sibling's network holds
+        // or will hold, which would refuse every plain container that sibling starts.
         let taken = made(&mut json!({ "Name": "wsp-wsp-b" })).unwrap_err();
-        assert_eq!(taken, "a name beginning wsp- is this computer's own; a workspace's network takes another, and wsp-wsp-b is refused");
+        assert_eq!(taken, "a network named wsp-wsp-b is one this computer makes for a workspace of its own, so it is refused here");
+        let siblings = made(&mut json!({ "Name": "wsp-b_default" })).unwrap_err();
+        assert_eq!(
+            siblings,
+            "a network named wsp-b_default is the one the workspace whose compose project is wsp-b brings its own stack up on, so it is refused here"
+        );
         assert!(made(&mut json!({ "Name": "wsp" })).is_ok(), "a name that is not under the prefix passes");
+        // The name compose gives this workspace's own default network, which is its project and the suffix:
+        // refusing it is refusing every stack a workspace brings up without naming a project.
+        assert!(made(&mut json!({ "Name": "wsp-a_default" })).is_ok(), "the compose default network of a workspace is refused");
+        // And where the id carries a character compose does not take, the project is the id rewritten, which is
+        // the name the workspace's own stack asks for.
+        assert!(
+            fence_network_create(&mut json!({ "Name": "wsp-spoo-landing_default" }), "wsp-spoo.landing").is_ok(),
+            "a workspace whose id is rewritten for compose is refused its own network"
+        );
         // A subnet inside the workspaces' range, and one that holds the whole of it.
         for subnet in ["10.65.4.0/24", "10.0.0.0/8", "10.65.0.0/16"] {
             let refused = made(&mut json!({ "Name": "n", "IPAM": { "Config": [{ "Subnet": subnet }] } })).unwrap_err();

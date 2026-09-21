@@ -99,6 +99,26 @@ fn dechunk(body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// How long a closing answer looks for a request behind it, and how long the cancelling route waits for the
+/// client's half close. Short on purpose: bytes the fence let through arrive with the request they rode behind,
+/// so a look that finds nothing in this moment finds nothing at all.
+const A_MOMENT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The bodiless 499 the engine's server writes where the request's context was cancelled under the handler.
+const CANCELLED: &[u8] = b"HTTP/1.1 499 status code 499\r\nContent-Length: 0\r\n\r\n";
+
+/// One answer, the close, and then a bounded look for a request the fence let through behind the one it judged:
+/// a keep-alive engine would read that as the next request on this connection, so the fake reads it too and the
+/// record carries it. Without the look a leak reaches no case's read. The look sits after the close of this
+/// side's writing, which is what ends the fence's copy back, so no case waits on it.
+async fn answer_then_close(stream: &mut UnixStream, head: &[u8], held: &mut Vec<u8>, record: &Record) {
+    stream.write_all(head).await.unwrap();
+    let _ = stream.shutdown().await;
+    if let Ok(Some(behind)) = tokio::time::timeout(A_MOMENT, read_request(stream, held)).await {
+        record.lock().unwrap().push(behind);
+    }
+}
+
 /// Everything the socket answered, up to the close. Bounded, since a socket this fence leaves open is a socket
 /// a client waits on for ever: a case reading one says so rather than holding the whole suite.
 async fn read_to_close(stream: &mut UnixStream) -> Vec<u8> {
@@ -187,6 +207,10 @@ enum Answered {
     KeepsAlive(Vec<u8>),
     /// One answer and the connection closed.
     Closes(Vec<u8>),
+    /// The answer of a route whose handler works on the request's own context: where the client half closes its
+    /// write side first, the engine's server takes the client as gone, cancels that context under the handler
+    /// and writes a bodiless 499 in place of the answer.
+    CancelsOnAHalfClose(Vec<u8>),
 }
 
 fn answered(seen: &Seen) -> Answered {
@@ -198,6 +222,7 @@ fn answered(seen: &Seen) -> Answered {
     let bare = seen.path.split('?').next().unwrap();
     let segments: Vec<&str> = bare.trim_start_matches("/v1.55").split('/').filter(|s| !s.is_empty()).collect();
     match segments.as_slice() {
+        ["version"] => Answered::CancelsOnAHalfClose(answer(&seen.method, &seen.path)),
         ["exec", _, "start"] if seen.body.contains("\"Detach\":true") => Answered::KeepsAlive(json_response(200, &json!({ "ok": true }))),
         ["exec", _, "start"] => Answered::HandsOver(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.multiplexed-stream\r\n\r\n"),
         _ => Answered::Closes(answer(&seen.method, &seen.path)),
@@ -236,8 +261,23 @@ fn fake_engine(dir: &Path) -> (PathBuf, Record) {
                         }
                         Answered::KeepsAlive(head) => stream.write_all(&head).await.unwrap(),
                         Answered::Closes(head) => {
-                            stream.write_all(&head).await.unwrap();
-                            let _ = stream.shutdown().await;
+                            answer_then_close(&mut stream, &head, &mut held, &record).await;
+                            return;
+                        }
+                        Answered::CancelsOnAHalfClose(head) => {
+                            match tokio::time::timeout(A_MOMENT, read_request(&mut stream, &mut held)).await {
+                                // The end of the stream with the handler still running, which is the half close
+                                // the engine's server takes as the client gone.
+                                Ok(None) => {
+                                    stream.write_all(CANCELLED).await.unwrap();
+                                    let _ = stream.shutdown().await;
+                                }
+                                Ok(Some(behind)) => {
+                                    record.lock().unwrap().push(behind);
+                                    answer_then_close(&mut stream, &head, &mut held, &record).await;
+                                }
+                                Err(_) => answer_then_close(&mut stream, &head, &mut held, &record).await,
+                            }
                             return;
                         }
                     }
@@ -283,10 +323,15 @@ struct World {
 /// The proxy over the fake engine, its record naming one project folder `/root/demo`, the copy behind it on the
 /// box side, and the staging directory the fence binds a source into.
 fn world() -> World {
+    world_of(WORKSPACE)
+}
+
+/// The same for a workspace of another id, which the cases that read what the fence makes of an id need.
+fn world_of(workspace: &str) -> World {
     let dir = tempfile::tempdir().unwrap();
     let (engine, seen) = fake_engine(dir.path());
     let rootfs = dir.path().join("rootfs");
-    let on_box = dir.path().join("copies/wsp-a");
+    let on_box = dir.path().join("copies").join(workspace);
     let binds = dir.path().join("binds");
     for made in [rootfs.join("root/demo/html"), rootfs.join("root/.wsp"), rootfs.join("etc"), on_box.join("html"), binds.clone()] {
         std::fs::create_dir_all(made).unwrap();
@@ -297,7 +342,7 @@ fn world() -> World {
     let bridged = Arc::new(Bridged(Mutex::new(Vec::new())));
     let listener = engine::bind(&dir.path().join("ws")).unwrap();
     let fence = Fence::new(
-        WORKSPACE.into(),
+        workspace.to_owned(),
         rootfs.clone(),
         vec![("/root/demo".to_owned(), on_box)],
         binds,
@@ -358,6 +403,21 @@ async fn ping_and_version_pass_and_the_answer_closes_the_connection() {
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["path"], "/v1.55/version");
     assert_eq!(w.engine_saw("GET", "/v1.55/version").unwrap().path, "/v1.55/version");
+}
+
+/// A route the engine answers off the request's own context: nothing is closed toward it before it has answered,
+/// so the handler runs to its end and the client reads the engine's own answer rather than the bodiless 499 a
+/// cancelled handler leaves. What ends the engine's answer instead is the close forced on the forwarded head.
+#[tokio::test]
+async fn a_route_the_engine_cancels_under_a_half_close_answers_its_own_words() {
+    let w = world();
+    let (status, head, body) = w.call("GET", "/v1.55/version", None).await;
+    assert_eq!(status, 200, "{head}");
+    assert!(head.starts_with("HTTP/1.1 200 X\r\n"), "the engine's own status words ride back: {head}");
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["path"], "/v1.55/version");
+    let reached = w.reached();
+    assert_eq!(reached.len(), 1, "one request reached the engine: {reached:?}");
+    assert_eq!(reached[0].header("connection"), Some("close"));
 }
 
 #[tokio::test]
@@ -962,13 +1022,52 @@ async fn a_volume_the_engine_would_not_answer_for_fails_the_create() {
     assert!(w.engine_saw("POST", "/v1.55/containers/create").is_none(), "{:?}", w.reached());
 }
 
-/// A network named under this computer's own prefix is a name a sibling's network may already hold, and taking
-/// it would refuse every plain container that sibling starts.
+/// A network named the way this computer names a workspace's own default network is a name a sibling's network
+/// holds or will hold, and taking it would refuse every plain container that sibling starts. The name compose
+/// derives from the project, which is the workspace's own id, is not that name and passes: a workspace brings a
+/// stack up without naming a project, and its default network is the one it wants.
 #[tokio::test]
-async fn a_network_named_under_this_computers_prefix_is_refused() {
+async fn a_network_named_as_this_computer_names_its_own_is_refused_and_a_projects_default_is_not() {
     let w = world();
     let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-wsp-other" }))).await;
     assert_eq!(status, 403, "{}", World::message(&answered));
-    assert!(World::message(&answered).contains("is this computer's own"), "{}", World::message(&answered));
+    assert!(World::message(&answered).contains("this computer makes for a workspace of its own"), "{}", World::message(&answered));
     assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+    let named = format!("{WORKSPACE}_default");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": &named }))).await;
+    assert_eq!(status, 201, "{}", World::message(&answered));
+    let sent: Value = serde_json::from_str(&w.engine_saw("POST", "/v1.55/networks/create").unwrap().body).unwrap();
+    assert_eq!(sent["Name"], named);
+    assert_eq!(sent["Labels"][LABEL], WORKSPACE);
+    assert!(sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"), "{sent}");
+}
+
+/// The network a sibling's own stack will derive: its project is that sibling's id and compose adds the suffix,
+/// so a workspace holding the name first would refuse that sibling's stack the network it asks for at its first
+/// step. The name is the stem's, whoever asks for it.
+#[tokio::test]
+async fn a_network_named_for_a_siblings_own_stack_is_refused() {
+    let w = world();
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-b_default" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&answered));
+    assert_eq!(
+        World::message(&answered),
+        "a network named wsp-b_default is the one the workspace whose compose project is wsp-b brings its own stack up on, so it is refused here"
+    );
+    assert!(w.engine_saw("POST", "/v1.55/networks/create").is_none(), "{:?}", w.reached());
+}
+
+/// A workspace whose id carries a character compose does not take: the project compose is handed is that id
+/// rewritten, so the network its own stack derives is named after the project and never after the id. The fence
+/// reads the stem the same way, so this workspace gets its own network and a sibling's is still refused.
+#[tokio::test]
+async fn a_workspace_whose_id_compose_rewrites_still_gets_the_network_its_stack_derives() {
+    let w = world_of("wsp-spoo.landing");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-spoo-landing_default" }))).await;
+    assert_eq!(status, 201, "{}", World::message(&answered));
+    let sent: Value = serde_json::from_str(&w.engine_saw("POST", "/v1.55/networks/create").unwrap().body).unwrap();
+    assert_eq!(sent["Labels"][LABEL], "wsp-spoo.landing");
+    assert!(sent["Options"]["com.docker.network.bridge.name"].as_str().unwrap().starts_with("wsp-e"), "{sent}");
+    let (status, _, answered) = w.call("POST", "/v1.55/networks/create", Some(&json!({ "Name": "wsp-b_default" }))).await;
+    assert_eq!(status, 403, "{}", World::message(&answered));
 }

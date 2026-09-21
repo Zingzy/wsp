@@ -3754,6 +3754,7 @@ const DAEMON_CONTENTS = [
   "361aa8997cc132755f0835ada745b05c7eee7faf20e67d14fa606971c5157441",
   "2c9896b832aebaccaf1b4f2c69ffba662e0a8b7f5748fc359313f8aff46a3b2a",
   "673d1f56aa3159a41d1b55b3b17c306628912a793cabc7d0208d2a4b937f07af",
+  "311811170de5296b4e25d8b3bc6e46035a9c5fc13f6430d8ae9314be8d9815f9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3950,7 +3951,9 @@ const DAEMON_CONTENTS = [
  * Version 67 gives a workspace's pty and exec on a box the recipe's knobs and a PATH with the prefix's bin ahead of
  * the home's, so a thread runs the tools the recipe put under the prefix rather than the old copies under the home.
  * Version 68 names, in a pane's create reply, the process its pid is, so a reader of the workspace's pty knows which
- * environment that pid carries; the pane's shell starts from the workspace's own environment as before. */
+ * environment that pid carries; the pane's shell starts from the workspace's own environment as before.
+ * Version 69 keeps the fence's connection to the engine open until the engine answers, so a forwarded request is
+ * never cancelled into a bodiless 499, and lets a workspace on a box with a refusing input chain dial its own box. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
