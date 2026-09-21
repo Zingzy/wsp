@@ -1391,6 +1391,13 @@ export function noAdapterLine(harness: string, agents: readonly string[]): strin
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
 }
 
+/** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on
+ * and the harness session those turns wrote, which another agent would open as a transcript of its own, at its own
+ * access; the agent is picked where a thread is opened, so a second one is a second thread. */
+export function threadRunsOnLine(agent: string, asked: string): string {
+  return `this thread runs on ${agent}; open a new thread to run ${asked}`;
+}
+
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
 export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
 

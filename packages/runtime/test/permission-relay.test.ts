@@ -373,9 +373,10 @@ describe("the access a thread starts at", () => {
     // whose person picked another one keeps it instead of falling to the adapter's own flag.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
-    // A pick still wins over the thread's own.
+    // A mode named on a send is dropped: a thread's access is the thread's own, and sessions.access is the one
+    // road that changes what it may touch.
     await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "plan" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
   it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {

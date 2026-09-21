@@ -209,7 +209,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, worksInPlace, worksInPlaceTakesNone, kindForComputer, pairedRunRefusal, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -6529,24 +6529,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async start(workspaceId, opened, origin) {
       const entry = await entryOf(workspaceId, origin);
       refusePairedRun(entry.record, origin);
-      // A start that names no agent runs the one the last thread on this project used, so the command line, the
-      // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
-      // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
-      // the project's and the adapters are this host's.
-      const heldProject = projectHeld(entry.record.project);
-      const remembered = heldProject.lastAgent !== undefined && adapters[heldProject.lastAgent] !== undefined ? heldProject.lastAgent : undefined;
-      const o = opened.harness === undefined && remembered !== undefined ? { ...opened, harness: remembered } : opened;
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
-      const title = o.title === undefined ? undefined : titleLine(o.title);
+      const title = opened.title === undefined ? undefined : titleLine(opened.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
-      const named = o.thread === undefined ? undefined : latestOn(o.thread);
-      if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
+      const named = opened.thread === undefined ? undefined : latestOn(opened.thread);
+      if (opened.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${opened.thread} on this workspace`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
-      let resume = o.resume ?? named?.claudeSessionId;
+      let resume = opened.resume ?? named?.claudeSessionId;
       const threadId = named?.threadId ?? threadOf(workspaceId, resume);
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
       // two is what a thread's own token is capped on. Read before the machine is asked for anything.
@@ -6555,7 +6548,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // named, so a harness session id given as resume reaches no more than the thread id would. The sentence says
       // back what the caller said and never the thread behind it, since a refusal that named it would hand a
       // guest the thread id of every session id it tried.
-      if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${o.thread ?? resume} on this workspace`);
+      if (!opens && !drivesThread(threadId, origin)) throw new Error(`no thread ${opened.thread ?? resume} on this workspace`);
+      // The rows a thread already carries decide two of this send's picks, and they are read after the reading
+      // above, so a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn
+      // runs on the harness its rows ran on, and a request naming another is refused rather than resuming that
+      // thread's harness session under an agent that never wrote it. Its access is its own the same way, so a mode
+      // named on a send is dropped and sessions.access is the one road that changes what a thread may touch; the
+      // access the thread runs at is then read off its rows below, as a send that named none has always read it.
+      const carried = opens ? undefined : latestOn(threadId);
+      if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
+      // A start that names no agent runs the one the last thread on this project used, so the command line, the
+      // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
+      // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
+      // the project's and the adapters are this host's.
+      const heldProject = projectHeld(entry.record.project);
+      const remembered = heldProject.lastAgent !== undefined && adapters[heldProject.lastAgent] !== undefined ? heldProject.lastAgent : undefined;
+      const o = { ...opened, ...(carried !== undefined ? { harness: carried.harness } : opened.harness === undefined && remembered !== undefined ? { harness: remembered } : {}) };
+      if (carried !== undefined) delete o.permissionMode;
       spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
