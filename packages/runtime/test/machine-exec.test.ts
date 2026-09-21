@@ -134,7 +134,7 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     const launch = launchCalls(guest.calls);
     expect(launch).toHaveLength(1);
-    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nmkdir '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d' >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
+    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\numask 077\nmkdir '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d' >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
     expect(solariBody(launch[0]!)).toBeLessThanOrEqual(EXEC_BODY_MAX);
   });
 
@@ -151,8 +151,28 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
+    // Every piece is written under the mask too: it holds the same bytes as the script it is cut from, the turn's
+    // provider key among them, and it waits on disk until the last exec joins the pieces and removes them.
+    for (const piece of launch.filter(c => c.endsWith("echo WSP_PIECE"))) {
+      const lines = piece.split("\n");
+      expect(lines[1]).toBe("umask 077");
+      expect(lines[2]!.startsWith("printf %s ")).toBe(true);
+    }
     // The exit file is written under the same base as the script, and its path is quoted like every other.
     expect(guest.getScript()).toBe(`${workScoreLine()}\nexport CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > '${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}'.exit\n`);
+  });
+
+  it("makes every file of a run under the login's own mask, from the claim folder down", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi'", { env: { ANTHROPIC_API_KEY: "sk-ant-x" }, input: ["one"] });
+    for await (const _ of stream.lines) void _;
+    const lines = launchCalls(guest.calls).at(-1)!.split("\n");
+    // Ahead of the claim's mkdir, so the folder the script, the input, the fifo, the log and the pid file land in
+    // is the login's own; another account on a machine the person owns must not read the key in those exports.
+    expect(lines[1]).toBe("umask 077");
+    expect(lines[2]!.startsWith("mkdir '/tmp/wsp-run/")).toBe(true);
+    expect(lines.indexOf("umask 077")).toBeLessThan(lines.findIndex(l => l.startsWith("setsid bash ")));
   });
 
   it("the run script puts the turn's processes at the work score before anything else, so a build that outgrows the machine dies before the daemon", async () => {

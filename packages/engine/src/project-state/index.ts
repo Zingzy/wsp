@@ -20,7 +20,7 @@ import { ROOTS_STEP, filterStep, listScript } from "./listing.js";
 import { resolveProjectPath, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 export { parseMergeOutput, type MergeOutput } from "./merge.js";
-export { filesUnder, resolveProjectPath, type MovedState, type ProjectStateResolver, type SharedStore } from "./resolver.js";
+export { filesUnder, insideFolder, resolveProjectPath, underHome, type MovedState, type ProjectStateResolver, type SharedStore } from "./resolver.js";
 export { parseStateListing, storeCopy, type UnreadStore } from "./listing.js";
 export { underProject } from "@wsp/protocol";
 

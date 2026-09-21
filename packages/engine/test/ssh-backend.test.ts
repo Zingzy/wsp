@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { ARCH_READ, OS_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
+import { ARCH_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { probeCommand } from "../src/machine-context.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -183,13 +185,82 @@ describe("ssh backend", () => {
       return sshBackend(transport).adopt(REACH).then(a => ({ ...a.login }));
     };
     expect(SSH_STORE_VARS).toContain("CLAUDE_CONFIG_DIR");
-    // The read asks a login shell for each store variable the catalog names, in the same call that asks for PATH.
-    expect(SSH_READ_SCRIPT).toContain("bash -lc");
+    // The read asks the machine's own shell for each store variable the catalog names, in the same call as PATH.
+    expect(SSH_READ_SCRIPT).toContain("bash --noprofile --norc -c");
     expect(SSH_READ_SCRIPT).toContain('printf "store:CLAUDE_CONFIG_DIR %s');
     expect(await read("store:CLAUDE_CONFIG_DIR /root/.claude-cfg\n")).toMatchObject({ HOME: "/root", CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
     // A machine that names none leaves the harness on its default, and one that names shell is left there too.
     expect((await read(""))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
     expect((await read("store:CLAUDE_CONFIG_DIR /root/x; id\n"))["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+  });
+
+  it("opens no login file of the machine's own, run against a home whose profile would write one", async () => {
+    // A computer somebody owns is worked as its own root by the host, and that root's home is the one every
+    // workspace on it writes, so a profile or an rc file under it is a file a workspace wrote.
+    expect(SSH_READ_SCRIPT).toContain("bash --noprofile --norc -c");
+    expect(SSH_READ_SCRIPT).not.toContain("bash -lc");
+    expect(SSH_READ_SCRIPT).not.toContain("bash -l ");
+    const home = mkdtempSync(join(tmpdir(), "wsp-login-read-"));
+    try {
+      const marker = join(home, "sourced");
+      for (const rc of [".profile", ".bash_profile", ".bashrc"]) writeFileSync(join(home, rc), `echo ${rc} >> ${marker}\n`);
+      const said = spawnSync("bash", ["-c", `export HOME=${home}\n${SSH_READ_SCRIPT}`], { encoding: "utf8" });
+      expect(said.status).toBe(0);
+      const values = readValues(said.stdout);
+      expect(values["home"]).toBe(home);
+      expect(values["user"]).toBe(userInfo().username);
+      expect(values["path"]).toBeTruthy();
+      expect(Number(values["cpu"])).toBeGreaterThan(0);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("reads which login shell the machine's root runs, off its passwd entry and never by running that shell", async () => {
+    // sshd hands every command wsp sends to this login's own shell with -c before the bash -c the client names, so
+    // which shell it is decides whether a file under the login's home runs first. The read asks getent, which runs
+    // no shell of the machine's, and is the same line the context probe reads.
+    expect(SSH_READ_SCRIPT).toContain(SHELL_READ);
+    expect(SSH_READ_SCRIPT).toContain('printf "shell %s\\n" "$shell"');
+    expect(probeCommand()).toContain(SHELL_READ);
+    const said = (line: string): SshTransport => async () => ({ exitCode: 0, stdout: `home /root\nuser root\n${line}path /usr/bin\ncpu 1\nmemkb 1024\n`, stderr: "" });
+    expect(await readSshMachine(REACH, said("shell zsh\n"))).toMatchObject({ shell: "zsh" });
+    expect(await readSshMachine(REACH, said("shell bash\n"))).toMatchObject({ shell: "bash" });
+    // A read that named none carries none: which shells a road may work through is that road's rule, not this one's.
+    expect((await readSshMachine(REACH, said("")))["shell"]).toBeUndefined();
+    expect((await new SshBackend({ transport: said("shell fish\n"), hostKey: async () => undefined, knownHosts: async () => ({}) }).adopt(REACH)).shell).toBe("fish");
+
+    // What the line answers on this computer, run for real: a name and nothing more, and no file of a home read.
+    const home = mkdtempSync(join(tmpdir(), "wsp-shell-read-"));
+    try {
+      const marker = join(home, "sourced");
+      for (const rc of [".profile", ".bash_profile", ".bashrc", ".zshenv"]) writeFileSync(join(home, rc), `echo ${rc} >> ${marker}\n`);
+      // A folder holding this computer's bash and nothing else, so the read finds no getent whichever system this
+      // runs on: that is the shape of a machine whose passwd cannot be read, which is what the fallbacks are for.
+      const bin = join(home, "bin");
+      mkdirSync(bin);
+      symlinkSync(spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim(), join(bin, "bash"));
+      const answers = (env: Record<string, string>): string => {
+        const out = spawnSync("bash", ["-c", `${SHELL_READ}\nprintf "shell %s\\n" "$shell"`], { encoding: "utf8", env: { HOME: home, PATH: bin, ...env } });
+        expect(out.status).toBe(0);
+        return readValues(out.stdout)["shell"]!;
+      };
+      expect(answers({ PATH: process.env["PATH"]! })).toMatch(/^[A-Za-z0-9._-]+$/);
+      // What this line reads is a passwd entry and two variables, never a file; that the whole read opens none of
+      // the machine's own is the case below, which runs the script the way a dial runs it. Pointing a shell's own
+      // HOME at this home before it starts would measure that shell's startup, which is not this line's.
+      // Behind the passwd entry, the login's own SHELL, which sshd sets for every session it opens: a machine
+      // carrying no getent names its own shell rather than the word that would let it through. PATH holds nothing
+      // here, so getent is missing whether or not this computer has one.
+      expect(answers({ SHELL: "/usr/bin/zsh" })).toBe("zsh");
+      expect(answers({ SHELL: "/usr/local/bin/fish" })).toBe("fish");
+      // And behind that bash, which is what every reader takes an answer of nothing for. bash fills SHELL from the
+      // passwd database where it is unset, so the word has to be emptied rather than left out to reach this.
+      expect(answers({ SHELL: "" })).toBe("bash");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("every command to one machine rides one master connection, and two machines never share one", () => {
@@ -277,7 +348,7 @@ describe("the chip a machine over ssh says it runs", () => {
     // table above this file, so nothing here turns an unknown word into nothing.
     for (const said of ["x86_64", "aarch64", "arm64", "riscv64"]) {
       expect(await readSshMachine(REACH, readsArch(`arch ${said}\n`))).toMatchObject({ arch: said });
-      expect(await new SshBackend({ transport: readsArch(`arch ${said}\n`), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).toMatchObject({ arch: said });
+      expect(await new SshBackend({ transport: readsArch(`arch ${said}\n`), hostKey: async () => undefined, knownHosts: async () => ({}) }).adopt(REACH)).toMatchObject({ arch: said });
     }
   });
 
@@ -286,7 +357,7 @@ describe("the chip a machine over ssh says it runs", () => {
     // line leaves it absent. Neither is a chip, and the caller refuses rather than guessing at one.
     for (const line of ["", "arch \n"]) {
       expect(await readSshMachine(REACH, readsArch(line))).not.toHaveProperty("arch");
-      expect(await new SshBackend({ transport: readsArch(line), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).not.toHaveProperty("arch");
+      expect(await new SshBackend({ transport: readsArch(line), hostKey: async () => undefined, knownHosts: async () => ({}) }).adopt(REACH)).not.toHaveProperty("arch");
     }
     expect(archOf({})).toBeUndefined();
     expect(archOf({ arch: "" })).toBeUndefined();
@@ -512,6 +583,40 @@ describe("the key a machine over ssh is known by", () => {
     // The machine was asked and said nothing: the record goes without an identity rather than with a guess.
     expect(await knownHostKey(REACH, run(CA_FOUND, ""))).toBeUndefined();
     expect(scans).toHaveLength(1);
+  });
+
+  it("the file and the name the entry is written under come off one reading of the dial, never off the word typed", async () => {
+    // A config of the shape the review found: the person types a short name and the client dials, and writes the
+    // entry under, the address behind it. A line built from the typed word would remove nothing.
+    const behindAName = ["user dev", "hostname 10.0.0.5", "port 2222", "userknownhostsfile /Users/dev/.ssh/known_hosts_work"].join("\n");
+    const run = (config: string): SshLocalRun => async file => (file === "ssh" ? { exitCode: 0, stdout: config, stderr: "" } : { exitCode: 255, stdout: "", stderr: "" });
+    expect(await knownHostsWritten({ user: "dev", host: "box", port: 2222 }, run(behindAName))).toEqual({ file: "/Users/dev/.ssh/known_hosts_work", target: "[10.0.0.5]:2222" });
+    // An alias the person set is the whole name the client writes, and ssh's own port carries no brackets.
+    expect(await knownHostsWritten(REACH, run(`${behindAName}\nhostkeyalias box-behind-a-tunnel`))).toMatchObject({ target: "box-behind-a-tunnel" });
+    expect(await knownHostsWritten(REACH, run("user dev\nhostname 10.0.0.5\nport 22"))).toMatchObject({ target: "10.0.0.5" });
+    // A client that cannot say what it would do names neither half, which leaves a screen its own default.
+    expect(await knownHostsWritten(REACH, async () => ({ exitCode: 255, stdout: "", stderr: "Bad configuration\n" }))).toEqual({});
+  });
+
+  it("the key a machine itself answers with is one read of its ssh port, and nothing where the person's config stops the scan", async () => {
+    const asked: { file: string; args: readonly string[] }[] = [];
+    const run = (proxy: string): SshLocalRun => async (file, args) => {
+      asked.push({ file, args });
+      if (file === "ssh") return { exitCode: 0, stdout: `${CONFIG}\n${proxy}`, stderr: "" };
+      return file === "ssh-keyscan" ? { exitCode: 0, stdout: OFFERED, stderr: "# 10.0.0.5:2222 SSH-2.0-OpenSSH_9.6\n" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // The machine is asked at the host and port the client resolved for the dial, and the key that comes back is
+    // the one of the types this client prefers, so what a person is shown is what a dial would negotiate.
+    expect(await offeredHostKey(REACH, run(""))).toEqual({ key: OFFERED_KEY });
+    expect(asked.at(-1)).toEqual({ file: "ssh-keyscan", args: ["-T", "5", "-p", "2222", "10.0.0.5"] });
+    // Nothing is dialled where the client would reach the machine through a jump or a command of the person's: the
+    // scan dials the resolved name itself, and whatever answered there is not that machine. The refusal names the
+    // config line that stopped it, so the person knows what to read the key off instead.
+    expect(await offeredHostKey(REACH, run("proxyjump bastion.example.com"))).toEqual({ stoppedBy: "ProxyJump" });
+    expect(await offeredHostKey(REACH, run("proxycommand nc %h %p"))).toEqual({ stoppedBy: "ProxyCommand" });
+    expect(asked.filter(a => a.file === "ssh-keyscan")).toHaveLength(1);
+    // A machine that answers no scan leaves the person with neither a key nor a reason of the config's.
+    expect(await offeredHostKey(REACH, async file => (file === "ssh" ? { exitCode: 0, stdout: CONFIG, stderr: "" } : { exitCode: 1, stdout: "", stderr: "" }))).toEqual({});
   });
 
   it("a machine the client reaches through a jump or a command of the person's is asked nothing, since this road cannot take either", async () => {

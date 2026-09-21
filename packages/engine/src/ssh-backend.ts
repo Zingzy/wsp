@@ -17,7 +17,7 @@ import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
-import { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+import { ARCH_READ, HOME_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -281,6 +281,24 @@ async function offeredHostKeys(values: Record<string, string>, run: SshLocalRun)
   return read.exitCode === 0 ? read.stdout : "";
 }
 
+/** What a machine itself answers with on its ssh port, with nothing authenticated and nothing installed: one scan
+ * of the address the client would dial, read as a known_hosts entry is read, and what in the person's own ssh
+ * config stopped the scan where one did. This is what a person is shown before the first dial of a computer this
+ * one has never met, to check against the computer in front of them; it stands on no trust of its own and is never
+ * what a dial is checked against, which stays the client's job.
+ *
+ * A jump or a command of the person's stops it: the scan dials the resolved name itself and can take neither, so
+ * whatever answered on this network would be shown as that machine's key. */
+export async function offeredHostKey(reach: SshReach, run: SshLocalRun = localRun): Promise<{ key?: string; stoppedBy?: string }> {
+  const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
+  if (config.exitCode !== 0) return {};
+  const values = readValues(config.stdout);
+  const stoppedBy = (values["proxyjump"] ?? "") !== "" ? "ProxyJump" : (values["proxycommand"] ?? "") !== "" ? "ProxyCommand" : undefined;
+  if (stoppedBy !== undefined) return { stoppedBy };
+  const key = hostKeyFound(await offeredHostKeys(values, run), values["hostkeyalgorithms"] ?? "");
+  return key === undefined ? {} : { key };
+}
+
 /** The key this machine is known by, as one string whoever asks. `ssh -G` answers where the client looks and what
  * it prefers there with the person's own config applied, and `ssh-keygen -F` reads the entry out, hashed or not.
  * That much is read on this computer with nothing dialled, which is the road that survives a warm master: the
@@ -304,13 +322,20 @@ export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun)
   return hostKeyFound(await offeredHostKeys(values, run), algorithms);
 }
 
-/** The file accept-new writes a machine's key into on this computer, off the same `ssh -G` the key is read
- * through: the first the client names, which is the person's own where a config points `UserKnownHostsFile`
- * somewhere other than the default. Nothing where the client answers nothing or writes no file at all, which
- * leaves a screen to name the default rather than a path this computer did not confirm. */
-export async function knownHostsWritten(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
+/** The entry accept-new writes on this computer, both halves off the one `ssh -G` the key is read through: the
+ * file, the first the client names, which is the person's own where a config points `UserKnownHostsFile` somewhere
+ * other than the default, and the name that entry is written under, which is the client's own reading of the dial
+ * and not the word that was typed. Both are wanted by the same screens, and a second reading of either rule would
+ * name a file or a line a person cannot act on: under a `Host box` / `HostName 10.0.0.5` config the entry is
+ * written under the address, so a line built from the typed word would remove nothing. Empty where the client
+ * answers nothing, which leaves a screen to name the default rather than a path this computer did not confirm. */
+export async function knownHostsWritten(reach: SshReach, run: SshLocalRun = localRun): Promise<{ file?: string; target?: string }> {
   const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
-  return config.exitCode === 0 ? knownHostFiles(readValues(config.stdout))[0] : undefined;
+  if (config.exitCode !== 0) return {};
+  const values = readValues(config.stdout);
+  const file = knownHostFiles(values)[0];
+  const target = knownHostTarget(values);
+  return { ...(file !== undefined ? { file } : {}), ...(target !== undefined ? { target } : {}) };
 }
 
 /** What a machine over ssh is, as the machine itself answers: the key it holds and the login a turn runs as. Two
@@ -362,21 +387,31 @@ export const SSH_DIAL_MS = 15_000;
  * that is not a plain variable name is left out rather than carried there. */
 export const SSH_STORE_VARS: readonly string[] = CATALOG_AGENTS.map(a => a.stateHomeEnv).filter((name): name is string => name !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(name));
 
-/** The one login shell the read opens: the PATH a turn runs under, and the store variable each harness reads, so a
- * machine whose person points their harness at another folder is signed in for a turn the way it is for them. It is
- * exported because a computer somebody joined reads its own login by this same rule, in a shell of its own: a turn
- * there runs the tools their own shell finds, and the shell that happened to type wsp join is not that shell. */
+/** What the read asks the machine's own shell for: the PATH a turn runs under, and the store variable each harness
+ * reads, so a machine whose person points their harness at another folder is signed in for a turn the way it is for
+ * them. It is exported because a computer somebody joined reads its own login by this same rule, in a shell of its
+ * own: a turn there runs the tools their own shell finds, and the shell that happened to type wsp join is not that
+ * shell. */
 export const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
 
-/** What one dial reads off a machine before its record exists: its login environment and the size the row shows.
- * The PATH and the stores come from a login shell, asked for on purpose and once: on the person's own machine the
- * tools a turn runs and the folder their harness reads are where their own shell finds them, not where a golden put
- * them. Linux answers the first branch of each size pair, macOS the second. */
+/** What one dial reads off a machine before its record exists: its environment and the size the row shows. Linux
+ * answers the first branch of each size pair, macOS the second.
+ *
+ * The shell the read runs in opens no file of the machine's own. Every adopt on this road is a computer the host
+ * then works as that computer's root, whose home is the one every workspace there writes, so a profile or an rc
+ * file under it is a file a workspace wrote and a login shell would run it outside every namespace. What that
+ * costs is the PATH: it is the machine's non-login one, which is what the deploy exports and the unit is told,
+ * and the daemon replaces its own at start anyway. */
 export const SSH_READ_SCRIPT = [
   HOME_READ,
   ARCH_READ,
   'printf "user %s\\n" "$(id -un)"',
-  `bash -lc ${shellQuote(LOGIN_READ)} 2>/dev/null`,
+  // sshd hands every command wsp sends to this login's own shell with -c before the bash -c above it, so which
+  // shell that is decides whether a file under the login's home runs first. Read the same way the context probe
+  // reads it, off a passwd entry and never by running that shell.
+  SHELL_READ,
+  'printf "shell %s\\n" "$shell"',
+  `env -u BASH_ENV bash --noprofile --norc -c ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
   'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
 ].join("\n");
@@ -388,7 +423,7 @@ export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n
 
 /** One dial that both proves the machine answers and records what wsp needs of it. A dial that fails carries the
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
-export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string }> {
+export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string; shell?: string }> {
   const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000 });
   if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
   const values = readValues(res.stdout);
@@ -404,10 +439,13 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
   const arch = archOf(values);
+  // A name and nothing else: which shells a road may work through is that road's rule, not this reading's.
+  const shell = values["shell"];
   return {
     login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
     ...(arch !== undefined ? { arch } : {}),
+    ...(shell !== undefined && shell !== "" ? { shell } : {}),
   };
 }
 
@@ -561,8 +599,11 @@ export interface SshBackendOptions {
   transport?: SshTransport;
   /** How the key a machine holds is read; the one road above unless a test hands its own. */
   hostKey?: SshHostKeyReader;
-  /** Which file on this computer that entry was written into; the client's own answer unless a test hands its own. */
-  knownHosts?: (reach: SshReach) => Promise<string | undefined>;
+  /** The file that entry was written into on this computer and the name it was written under; the client's own
+   * answer unless a test hands its own. */
+  knownHosts?: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
+  /** What the machine itself answers a scan with; the read above unless a test hands its own. */
+  offeredKey?: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -598,12 +639,14 @@ export class SshBackend implements MachineBackend {
 
   private readonly transport: SshTransport;
   private readonly hostKey: SshHostKeyReader;
-  private readonly knownHosts: (reach: SshReach) => Promise<string | undefined>;
+  private readonly knownHosts: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
+  private readonly offered: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
     this.hostKey = opts.hostKey ?? knownHostKey;
     this.knownHosts = opts.knownHosts ?? knownHostsWritten;
+    this.offered = opts.offeredKey ?? offeredHostKey;
   }
 
   async create(): Promise<Machine> {
@@ -629,10 +672,10 @@ export class SshBackend implements MachineBackend {
    * workspace is also the one that proves the dial works. The key it answers with is read after that dial and not
    * out of it: accept-new wrote the entry as the connection was made, while a dial riding a master the last minute
    * left open exchanges no key at all, and a record with no identity is a machine that can be recorded twice. */
-  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; arch?: string; hostKey?: string }> {
-    const { login, shape, arch } = await readSshMachine(reach, this.transport);
+  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; arch?: string; shell?: string; hostKey?: string }> {
+    const { login, shape, arch, shell } = await readSshMachine(reach, this.transport);
     const hostKey = await this.keyFor(reach);
-    return { machine: new SshMachine(reach, this.transport), login, shape, ...(arch !== undefined ? { arch } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
+    return { machine: new SshMachine(reach, this.transport), login, shape, ...(arch !== undefined ? { arch } : {}), ...(shell !== undefined ? { shell } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
   }
 
   /** The key this computer's ssh client holds for a machine, read with nothing dialled, or nothing where it holds
@@ -642,10 +685,17 @@ export class SshBackend implements MachineBackend {
     return this.hostKey(reach);
   }
 
-  /** The file that key was written into on this computer, as the client itself answers rather than as a default:
-   * a config pointing UserKnownHostsFile somewhere else is read out, so a screen naming the file names the true
-   * one. Nothing where the client answers nothing, which leaves that screen its default to name. */
-  async knownHostsFile(reach: SshReach): Promise<string | undefined> {
+  /** The entry that key was written into on this computer, as the client itself answers rather than as a default:
+   * a config pointing UserKnownHostsFile somewhere else is read out and so is a HostName or a HostKeyAlias, so a
+   * screen naming the file and the line that removes the entry names the true ones. Empty where the client
+   * answers nothing, which leaves that screen its default to name. */
+  async knownHostsEntry(reach: SshReach): Promise<{ file?: string; target?: string }> {
     return this.knownHosts(reach);
+  }
+
+  /** What the machine itself answers with, asked of the machine and not of this computer's own files: the one read
+   * a road has before the first dial of a computer nobody here has met. */
+  async offeredKeyFor(reach: SshReach): Promise<{ key?: string; stoppedBy?: string }> {
+    return this.offered(reach);
   }
 }
