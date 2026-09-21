@@ -7,7 +7,7 @@ import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
-import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
+import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
@@ -41,6 +41,9 @@ function launch(): Launch {
   const env = process.env["WSP_HOME"];
   return { packaged: app.isPackaged, cwd: process.cwd(), ...(env !== undefined ? { env } : {}) };
 }
+
+// Before the app is ready, which is the last moment Chromium takes a new home for its files.
+app.setPath("userData", userDataIn(launch()));
 
 /** The host the window is on; every bridge call is gated on its origin and on what a page on it may ask for. */
 let session: HostSession | undefined;
@@ -248,7 +251,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     here: hereWord(process.platform === "darwin"),
     load: async (next, hash) => {
       session = next;
-      await loadHostPage(page, `${next.url}${hash ?? ""}`);
+      await loadHostPage(page, `${next.url}${hash ?? ""}`, { log: io.error });
     },
     log: io.log,
     ssh: sshRoad(systemSshDeps()),
@@ -276,7 +279,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await loadHostPage(page, session.url);
+  await loadHostPage(page, session.url, { log: io.error });
   return true;
 }
 

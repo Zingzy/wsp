@@ -10,7 +10,7 @@ import { localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } 
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { hostTokenMatches, locateHost, openHost, probeHost, statePathIn, type HostSession } from "../src/host-lifecycle.js";
+import { hostTokenMatches, locateHost, openHost, probeHost, statePathIn, userDataIn, type HostSession } from "../src/host-lifecycle.js";
 import { checkSetup } from "../src/setup.js";
 
 const PAGE = `<!doctype html>
@@ -480,5 +480,36 @@ describe("statePathIn", () => {
     const bare = mkdtempSync(join(tmpdir(), "wsp-desktop-bare-"));
     for (const packaged of [true, false]) expect(statePathIn(home, { packaged, cwd: bare })).toBe(join(home, "state.json"));
     rmSync(bare, { recursive: true, force: true });
+  });
+});
+
+describe("userDataIn", () => {
+  let user: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    user = mkdtempSync(join(tmpdir(), "wsp-desktop-user-"));
+    cwd = join(user, "cwd");
+    mkdirSync(cwd);
+    vi.stubEnv("HOME", user);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(user, { recursive: true, force: true });
+  });
+
+  it("puts Chromium's files beside the state file of the home the launch names, so two apps on two homes share no profile", () => {
+    const custom = join(user, "custom-home");
+    expect(userDataIn({ packaged: true, cwd, env: custom })).toBe(join(custom, "desktop"));
+    expect(userDataIn({ packaged: true, cwd })).toBe(join(user, ".wsp", "desktop"));
+    expect(userDataIn({ packaged: true, cwd, env: custom })).not.toBe(userDataIn({ packaged: true, cwd }));
+  });
+
+  it("follows the state file a development run shares with wspx, which sits in the checkout", () => {
+    writeFileSync(join(cwd, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
+    expect(userDataIn({ packaged: false, cwd })).toBe(join(cwd, ".wsp", "desktop"));
+    // WSP_HOME wins over the checkout, packaged or not, as the state file does.
+    const custom = join(user, "custom-home");
+    expect(userDataIn({ packaged: false, cwd, env: custom })).toBe(join(custom, "desktop"));
   });
 });

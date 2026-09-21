@@ -49,9 +49,28 @@ export function guardWorkers(session: PageSession): void {
   });
 }
 
+/** How long the sweep before a load may take: on a profile another app holds open it never comes back, and the
+ * window stayed shut behind it. */
+export const SWEEP_BOUND_MS = 2_000;
+
+/** The line logged when the sweep did not come back or failed: the page loads without it, and the person reads why. */
+export const sweepFailedLine = (why: string): string => `service worker sweep skipped: ${why}; loading the page without it`;
+
 /** Puts the window on a host's page, with the session's worker registrations swept first: a worker an earlier build
- * let in is gone before a page carrying this computer's token is loaded on an origin it could hold. */
-export async function loadHostPage(page: HostPage, url: string): Promise<void> {
-  await page.webContents.session.clearStorageData({ storages: ["serviceworkers"] });
+ * let in is gone before a page carrying this computer's token digest is loaded on an origin it could hold. The
+ * sweep is bounded: a profile locked by another process holds it open for ever, and a window that never opens
+ * says nothing, so the page loads once the bound passes and one line says the sweep was skipped. */
+export async function loadHostPage(page: HostPage, url: string, o: { boundMs?: number; log?: (line: string) => void } = {}): Promise<void> {
+  const bound = o.boundMs ?? SWEEP_BOUND_MS;
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<string>(resolve => {
+    timer = setTimeout(() => resolve(`not done in ${bound} ms`), bound);
+  });
+  const swept = page.webContents.session
+    .clearStorageData({ storages: ["serviceworkers"] })
+    .then(() => undefined, (e: unknown) => (e instanceof Error ? e.message : String(e)));
+  const failed = await Promise.race([swept, late]);
+  clearTimeout(timer);
+  if (failed !== undefined) o.log?.(sweepFailedLine(failed));
   await page.loadURL(url);
 }

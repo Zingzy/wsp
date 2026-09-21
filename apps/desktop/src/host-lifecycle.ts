@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { defaultHomeIn, devCheckoutState, dialAddress, homeNamed, hostTokenFor, lockPathFor, ownPid, serve, servingHost, type CliIO, type HostLock, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
@@ -128,14 +128,24 @@ async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   return attached(held.port, `http://${at}`);
 }
 
-/** Runs before the setup gate: a serving host is the proof of setup. WSP_HOME
- * names the home when it is set, else this computer's own, and the lock beside
- * that home's state file is the one thing read. A window that should open on
- * another home is launched with WSP_HOME naming it, which is the one way any
- * road here says which home it means. */
+/** The wsp home a launch means: WSP_HOME when it is set, else this computer's own. A window that should open on
+ * another home is launched with WSP_HOME naming it, which is the one way any road here says which home it means. */
+export function homeOf(launch: Launch): string {
+  const env = homeNamed(launch.env);
+  return env !== undefined ? resolve(env) : defaultHomeIn(homedir());
+}
+
+/** Where this app keeps Chromium's own files, its profile, caches and worker registrations: one folder beside the
+ * state file the launch serves, so two apps on two homes never share one profile. A shared profile's databases
+ * are locked by the first app to open them, and the second launch's page load never came back. */
+export function userDataIn(launch: Launch): string {
+  return join(dirname(statePathIn(homeOf(launch), launch)), "desktop");
+}
+
+/** Runs before the setup gate: a serving host is the proof of setup. The lock beside the launch's home's state file
+ * is the one thing read. */
 export async function locateHost(opts: Launch): Promise<Located> {
-  const env = homeNamed(opts.env);
-  const home = env !== undefined ? resolve(env) : defaultHomeIn(homedir());
+  const home = homeOf(opts);
   const session = await lockedHost(statePathIn(home, opts));
   return { home, ...(session !== undefined ? { session } : {}) };
 }
