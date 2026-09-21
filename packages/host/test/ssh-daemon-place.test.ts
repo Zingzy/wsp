@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -230,6 +230,9 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(s).toContain(`grep -vF '/home/maya/.wsp/profile.sh' '/home/maya/.profile'`);
     expect(s).toContain(`printf '%s\\n' '${profileSourceLine("/home/maya/.wsp/profile.sh")}' >> '/home/maya/.profile'`);
     expect(s).not.toContain("grep -q '/home/maya/.wsp/profile.sh'");
+    // One home for the text: what the join deploys here is the lines an update runs on a computer already joined,
+    // in this order and with nothing of the deploy's own between them.
+    expect(s).toContain(loginFilesStep(sshDaemonPlace(LOGIN)).join("\n"));
   });
 
   it("never writes the token into a command, since every account on the machine can read a running one", () => {

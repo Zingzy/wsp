@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 66,
+  "daemonVersion": 67,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -41,6 +41,7 @@
     "/home/linuxbrew"
   ],
   "toolsPath": "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  "placeWorkspacePath": "/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.local/bin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin",
   "daemonTokenPath": "/root/.wsp/daemon-token",
   "daemonRootsPath": "/root/.wsp/roots",
   "guestInboxDir": "/root/.wsp/inbox",
