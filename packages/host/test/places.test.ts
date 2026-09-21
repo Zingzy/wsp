@@ -14,13 +14,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
-import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
+import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
 import {
@@ -58,6 +58,8 @@ import {
   placeNoUpdateRoadLine,
   placeUnit,
   PLACE_NO_KEEP_LINE,
+  PLACE_UPDATED_LINE,
+  placeLoginFilesFailedLine,
   placeUpdateFailedLine,
   placeUpdateScript,
   placeUpdater,
@@ -1928,6 +1930,7 @@ describe("which binary an update carries and how it travels", () => {
       link: {
         request: (op: string, params?: Record<string, unknown>) => {
           frames.push({ op, ...params });
+          if (op === "exec") return Promise.resolve({ exitCode: 0, stdout: "", stderr: "", truncated: false });
           return Promise.resolve(params?.["last"] === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {});
         },
       } as never,
@@ -1953,37 +1956,231 @@ describe("which binary an update carries and how it travels", () => {
   it("picks the binary by the chip that computer said it is, never this one's, and sends it as bytes under one upload id", async () => {
     const dir = daemonDir();
     const { link, frames } = fakeLink();
-    const landed = await placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "arm64" }), link });
+    const landed = await placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "arm64" }), daemon: true, link });
     // Both paths come off the last part's own reply, so the line names what that computer actually did.
     expect(landed).toEqual({ road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
     // The chip the box said, so a host on x64 deploys to an arm64 box the binary that box can run.
     const wanted = readFileSync(daemonBinaryIn(dir, "aarch64-unknown-linux-musl"));
-    expect(Buffer.concat(frames.map(f => Buffer.from(String(f["data"]), "base64")))).toEqual(wanted);
-    expect(frames.every(f => f["op"] === "place.update")).toBe(true);
-    expect(new Set(frames.map(f => f["uploadId"]))).toHaveProperty("size", 1);
+    // The bytes are the parts alone: ahead of them rides the one exec that writes wsp's login files there, which
+    // the cases below read.
+    const parts = frames.filter(f => f["op"] === "place.update");
+    expect(frames.map(f => f["op"])).toEqual(["exec", ...parts.map(() => "place.update")]);
+    expect(Buffer.concat(parts.map(f => Buffer.from(String(f["data"]), "base64")))).toEqual(wanted);
+    expect(new Set(parts.map(f => f["uploadId"]))).toHaveProperty("size", 1);
     // Every part carries the sha256 of the whole, which is what the last part is checked against before anything
     // is moved over the binary the unit starts.
-    expect(new Set(frames.map(f => f["sha256"]))).toEqual(new Set([createHash("sha256").update(wanted).digest("hex")]));
-    expect(frames.map(f => f["seq"])).toEqual([...frames.keys()]);
-    expect(frames.at(-1)!["last"]).toBe(true);
+    expect(new Set(parts.map(f => f["sha256"]))).toEqual(new Set([createHash("sha256").update(wanted).digest("hex")]));
+    expect(parts.map(f => f["seq"])).toEqual([...parts.keys()]);
+    expect(parts.at(-1)!["last"]).toBe(true);
     // Never a command line: a command sits in a world readable /proc/<pid>/cmdline while it runs.
-    expect(frames.some(f => typeof f["cmd"] === "string")).toBe(false);
+    expect(parts.some(f => typeof f["cmd"] === "string")).toBe(false);
   });
 
   it("refuses a chip this wsp builds no daemon for, and a computer with no link and no login, before a byte moves", async () => {
     const dir = daemonDir();
     const { link, frames } = fakeLink();
-    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "riscv64" }), link })).rejects.toThrow(
+    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "riscv64" }), daemon: true, link })).rejects.toThrow(
       placeNoChipLine("spoo", "linux", "riscv64"),
     );
-    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf() })).rejects.toThrow(placeNoUpdateRoadLine("spoo"));
+    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true })).rejects.toThrow(placeNoUpdateRoadLine("spoo"));
     expect(frames).toEqual([]);
   });
 
   it("says which file is missing where this command carries no daemon for that chip at all", async () => {
     const { link } = fakeLink();
     const empty = tmp("update-no-asset");
-    await expect(placeUpdater({ daemonDir: empty })({ placeId: "p_1", name: "spoo", report: reportOf(), link })).rejects.toThrow(/wsp-daemon binary missing/);
+    await expect(placeUpdater({ daemonDir: empty })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true, link })).rejects.toThrow(/wsp-daemon binary missing/);
+  });
+});
+
+describe("wsp's own login files on a computer already joined, written by every update", () => {
+  const HOME = "/home/maya";
+  /** The lines this host spells for that box, off the place its login names: the one home of the text, which the
+   * deploy at the join reads too. */
+  const FILES = loginFilesStep(sshDaemonPlace({ home: HOME, path: "/usr/bin" })).join("\n");
+
+  const reportOf = (over: Partial<PlaceReport> = {}): PlaceReport => ({
+    name: "spoo",
+    platform: "linux",
+    arch: "x64",
+    os: "Ubuntu 24.04",
+    shape: { cpu: 2, memMb: 7747 },
+    login: { HOME, USER: "maya", PATH: "/usr/bin" },
+    runsWorkspaces: true,
+    engine: "none",
+    daemonVersion: 27,
+    agents: [],
+    wsp: [`${HOME}/.wsp/daemon/wsp/dist/bin.js`],
+    dialed: "http://192.168.1.20:4400",
+    ...over,
+  });
+
+  /** A daemon asset with one binary per target, as the update's own cases stage it. */
+  const daemonDir = (): string => {
+    const dir = tmp("login-files-asset");
+    for (const target of GUEST_DAEMON_TARGETS) {
+      const at = daemonBinaryIn(dir, target.triple);
+      mkdirSync(join(at, ".."), { recursive: true });
+      writeFileSync(at, `a daemon for ${target.uname}`);
+    }
+    return dir;
+  };
+
+  const fakeLink = (): { link: NonNullable<PlaceUpdateRequest["link"]>; frames: Record<string, unknown>[] } => {
+    const frames: Record<string, unknown>[] = [];
+    return {
+      frames,
+      link: {
+        request: (op: string, params?: Record<string, unknown>) => {
+          frames.push({ op, ...params });
+          if (op === "exec") return Promise.resolve({ exitCode: 0, stdout: "", stderr: "", truncated: false });
+          return Promise.resolve(params?.["last"] === true ? { at: `${HOME}/.wsp/daemon/wsp-daemon` } : {});
+        },
+      } as never,
+    };
+  };
+
+  /** One box over ssh, as the update's road sees it: what it was asked to run and what landed on it. */
+  const fakeBox = (answer = { exitCode: 0, stdout: `${PLACE_UPDATED_LINE} /usr/local/bin/wsp-daemon\n`, stderr: "" }, home = HOME) => {
+    const ran: string[] = [];
+    const landed: string[] = [];
+    const machine = {
+      id: "ssh://maya@box:22",
+      kind: "sandbox",
+      putBytes: async (path: string) => {
+        landed.push(path);
+      },
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "Ubuntu 24.04" }),
+      run: async (script: string) => {
+        ran.push(script);
+        return answer;
+      },
+    };
+    return { ran, landed, backend: { adopt: async () => ({ machine, login: { HOME: home, PATH: "/usr/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }) } };
+  };
+
+  it("sends them over the link as one exec ahead of the first frame of the swap, in the text the deploy writes", async () => {
+    const { link, frames } = fakeLink();
+    const landed = await placeUpdater({ daemonDir: daemonDir() })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true, link });
+    expect(landed).toMatchObject({ road: "link" });
+    // One exec, and it carries the one home of the text: wsp's own profile file and the guarded line for the
+    // person's login file, with every older line naming that file taken out first.
+    const execs = frames.filter(f => f["op"] === "exec");
+    expect(execs).toHaveLength(1);
+    expect(execs[0]!["cmd"]).toBe(FILES);
+    expect(String(execs[0]!["cmd"])).toContain(profileSourceLine(sshDaemonPaths(HOME).profileFile));
+    expect(String(execs[0]!["cmd"])).toContain(`grep -vF '${sshDaemonPaths(HOME).profileFile}' '${HOME}/.profile'`);
+    // Ahead of the bytes: the swap restarts that daemon and drops this link, so an exec sent after it reaches
+    // nothing.
+    expect(frames.findIndex(f => f["op"] === "exec")).toBeLessThan(frames.findIndex(f => f["op"] === "place.update"));
+  });
+
+  it("writes them on an update that carries no binary, and answers no landing", async () => {
+    const { link, frames } = fakeLink();
+    // No daemon asset at all: an update that carries no binary reads none, so nothing here can land one.
+    const answer = await placeUpdater({ daemonDir: tmp("login-files-no-asset") })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: false, link });
+    expect(answer).toBeUndefined();
+    expect(frames.map(f => f["op"])).toEqual(["exec"]);
+    expect(frames[0]!["cmd"]).toBe(FILES);
+  });
+
+  it("refuses a computer it holds no road to, on an update that carries no binary as on one that does", async () => {
+    // A computer joined by a code holds no ssh login, so a link that is down leaves this nothing to run the
+    // lines over: an update of a computer that cannot be reached is refused rather than passed over quietly.
+    await expect(
+      placeUpdater({ daemonDir: daemonDir() })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: false }),
+    ).rejects.toThrow(placeNoUpdateRoadLine("spoo"));
+  });
+
+  it("passes over a computer whose report records no home, on either kind of update", async () => {
+    const bare = reportOf({ login: { USER: "maya", PATH: "/usr/bin" } });
+    const none = fakeLink();
+    expect(await placeUpdater({ daemonDir: tmp("login-files-bare") })({ placeId: "p_1", name: "spoo", report: bare, daemon: false, link: none.link })).toBeUndefined();
+    expect(none.frames).toEqual([]);
+    // And where a binary goes all the same: every path the lines build comes off that home and there is none.
+    const moving = fakeLink();
+    await placeUpdater({ daemonDir: daemonDir() })({ placeId: "p_1", name: "spoo", report: bare, daemon: true, link: moving.link });
+    expect(moving.frames.every(f => f["op"] === "place.update")).toBe(true);
+  });
+
+  it("puts them ahead of the swap in the one script over ssh, off the login that road just read", async () => {
+    const box = fakeBox();
+    const landed = await placeUpdater({ daemonDir: daemonDir(), backend: box.backend as never })({
+      placeId: "p_1",
+      name: "spoo",
+      report: reportOf(),
+      daemon: true,
+      ssh: { ssh: "maya@box" },
+    });
+    expect(landed).toEqual({ road: "ssh", at: "/usr/local/bin/wsp-daemon", kept: "/usr/local/bin/wsp-daemon.old" });
+    expect(box.ran).toHaveLength(1);
+    expect(box.ran[0]).toContain(FILES);
+    expect(box.ran[0]!.indexOf(FILES)).toBeLessThan(box.ran[0]!.indexOf("systemctl restart"));
+  });
+
+  it("runs them alone over ssh where no binary goes, and lands nothing", async () => {
+    const box = fakeBox({ exitCode: 0, stdout: "", stderr: "" });
+    expect(
+      await placeUpdater({ daemonDir: daemonDir(), backend: box.backend as never })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: false, ssh: { ssh: "maya@box" } }),
+    ).toBeUndefined();
+    expect(box.ran).toEqual([FILES]);
+    expect(box.landed).toEqual([]);
+  });
+
+  it("stops the update on the box's own words where the lines could not be written", async () => {
+    const box = fakeBox({ exitCode: 1, stdout: "", stderr: "/home/maya/.profile: Permission denied" });
+    await expect(
+      placeUpdater({ daemonDir: daemonDir(), backend: box.backend as never })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: false, ssh: { ssh: "maya@box" } }),
+    ).rejects.toThrow(placeLoginFilesFailedLine("spoo", "/home/maya/.profile: Permission denied"));
+  });
+
+  /** The text each road sends, run for real under bash on a home of this test's own: what a person's login file
+   * holds afterwards is the whole of what these lines promise. Both roads run them under a plain `bash -c`, the
+   * daemon's exec on the link road and the transport's on the ssh road, and neither sets `set -e`. */
+  const ranOn = (body: string): void => {
+    execFileSync("bash", ["-c", body], { encoding: "utf8" });
+  };
+
+  it("leaves a login file holding the old unguarded line with exactly one guarded line and the rest byte for byte", async () => {
+    const home = tmp("login-files-live");
+    const at = sshDaemonPaths(home);
+    // What the correction read on that computer: the line the deploy wrote before the guard, with the person's
+    // own lines around it.
+    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\n# after\n`);
+    const { link, frames } = fakeLink();
+    await placeUpdater({ daemonDir: tmp("login-files-live-asset") })({
+      placeId: "p_1",
+      name: "spoo",
+      report: reportOf({ login: { HOME: home, USER: "maya", PATH: "/usr/bin" } }),
+      daemon: false,
+      link,
+    });
+    ranOn(String(frames[0]!["cmd"]));
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`# theirs\n# after\n${profileSourceLine(at.profileFile)}\n`);
+    expect(readFileSync(at.profileFile, "utf8")).toBe(`export BROWSER=${at.binDir}/wsp-open\nunset DISPLAY\n`);
+    // The copy the take-out writes is its own and goes with it: nothing of wsp's is left beside their file.
+    expect(existsSync(`${join(home, ".profile")}.wsp-out`)).toBe(false);
+  });
+
+  it("makes the one line over ssh where the login has no file of its own, and says it once however often it runs", async () => {
+    const home = tmp("login-files-fresh");
+    const at = sshDaemonPaths(home);
+    const box = fakeBox({ exitCode: 0, stdout: "", stderr: "" }, home);
+    await placeUpdater({ daemonDir: tmp("login-files-fresh-asset"), backend: box.backend as never })({
+      placeId: "p_1",
+      name: "spoo",
+      report: reportOf(),
+      daemon: false,
+      ssh: { ssh: "maya@box" },
+    });
+    // The script that road sent, off the login the adopt read: no restart in it, since this update carries no
+    // binary.
+    ranOn(box.ran[0]!);
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`${profileSourceLine(at.profileFile)}\n`);
+    // Run again, as the next update runs it: one line, not two.
+    ranOn(box.ran[0]!);
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`${profileSourceLine(at.profileFile)}\n`);
   });
 });
 

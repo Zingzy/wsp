@@ -67,11 +67,11 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -521,6 +521,11 @@ export function placeUpdateScript(home: string, landed: string, unit = placeUnit
   ].join("\n");
 }
 
+/** What the box said when wsp's own login files could not be written there: the update stops on it, since the
+ * lines exit 0 by design and a failure is the link going or the login file being unreadable, and the person runs
+ * the line again. */
+export const placeLoginFilesFailedLine = (name: string, said: string): string => `${name} did not take wsp's login files: ${said}`;
+
 /** The refusal an update gets on a computer this host is holding no link to and was never installed over ssh: a
  * computer joined by typing a code is reached over its link alone. */
 export const placeNoUpdateRoadLine = (name: string): string =>
@@ -536,6 +541,12 @@ export const placeUpdateFailedLine = (name: string, said: string): string => `${
  * Two roads, one rule about which: the link the place is holding, which carries the bytes as frames and ends in the
  * agent restarting itself, and the ssh road the install used where there is no link. Neither carries the binary on
  * a command line.
+ *
+ * wsp's own login files on that computer are written first on whichever road this holds, and on every update
+ * rather than only where a binary goes: their text is this host's and moves with it. Over the link they are one
+ * exec on the daemon the box is running now, sent before the first frame of the swap, since the swap restarts
+ * that daemon and drops the link; over ssh they are the lines ahead of the swap in the one script. A computer
+ * whose report records no home is passed over, and the update's own answer says the recipe got none.
  */
 export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } = {}): PlaceUpdater {
   /** The binary this wsp holds for one target, refused by the file's own name where this command carries none. */
@@ -544,12 +555,25 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     if (!existsSync(bin)) throw new Error(`${assetName("daemon")} missing: ${bin}`);
     return new Uint8Array(readFileSync(bin));
   };
+  /** wsp's login files as this host spells them, run on that computer: the one home of the text, read here and by
+   * the deploy at the join. The place is built off the login given, so the two roads write the one home on a box
+   * whose login has not moved, and the road that adopted afresh writes where it now is. */
+  const loginFiles = (login: { home: string; path: string }): string => loginFilesStep(sshDaemonPlace(login)).join("\n");
   return async req => {
+    const home = req.report.login["HOME"];
     if (req.link !== undefined) {
-      // The chip the report carries, which is the same link this is about to send on, so the two cannot disagree.
-      const target = daemonTargetFor(req.report.platform, req.report.arch);
-      if (target === undefined) throw new Error(placeNoChipLine(req.name, req.report.platform, req.report.arch));
-      const bytes = binaryFor(target);
+      // Every check before the first thing that writes: a chip this wsp has no daemon for, or a command carrying
+      // no binary for it, leaves the box exactly as it was found.
+      const target = req.daemon ? daemonTargetFor(req.report.platform, req.report.arch) : undefined;
+      if (req.daemon && target === undefined) throw new Error(placeNoChipLine(req.name, req.report.platform, req.report.arch));
+      const bytes = target === undefined ? undefined : binaryFor(target);
+      // Ahead of the frames: the swap restarts the daemon under this link, so an exec sent after it would reach
+      // a link that is gone. The daemon the box runs now takes it, whatever version that is.
+      if (home !== undefined) {
+        const said = await new PlaceMachine(req.link, { id: req.name, home }).exec(loginFiles({ home, path: req.report.login["PATH"] ?? "" }));
+        if (said.exitCode !== 0) throw new Error(placeLoginFilesFailedLine(req.name, `${said.stdout.slice(-300)} ${said.stderr.slice(-200)}`.trim()));
+      }
+      if (bytes === undefined) return undefined;
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const uploadId = randomBytes(8).toString("hex");
       const parts = Math.max(1, Math.ceil(bytes.length / MACHINE_PUT_PART_BYTES));
@@ -570,13 +594,21 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     if (req.ssh === undefined) throw new Error(placeNoUpdateRoadLine(req.name));
     const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
     const { machine, login, arch } = await (deps.backend ?? new SshBackend()).adopt(reach);
+    // The login this road just read rather than the one the record kept, as the join builds its place from: a box
+    // whose login moved takes wsp's files where it now is.
+    const files = loginFiles({ home: login.HOME, path: login.PATH });
+    if (!req.daemon) {
+      const wrote = await machine.run(files, { deadlineMs: 180_000 });
+      if (wrote.exitCode !== 0) throw new Error(placeLoginFilesFailedLine(req.name, `${wrote.stdout.slice(-300)} ${wrote.stderr.slice(-200)}`.trim()));
+      return undefined;
+    }
     // The chip the box says now rather than the one the record kept, read before a byte is sent: a computer that
     // was rebuilt on another chip since it joined takes the binary it can run or none at all.
     const said = arch === undefined ? undefined : guestDaemonTarget(arch);
     if (said === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
     const landing = `${placeDaemonPaths(login.HOME).putDir}/${DAEMON_BIN}`;
     await landBytes(machine, landing, binaryFor(said));
-    const res = await machine.run(placeUpdateScript(login.HOME, landing), { deadlineMs: 180_000 });
+    const res = await machine.run([files, placeUpdateScript(login.HOME, landing)].join("\n"), { deadlineMs: 180_000 });
     const printed = res.stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
     const landed = printed.find(line => line.startsWith(PLACE_UPDATED_LINE));
     if (landed === undefined) throw new Error(placeUpdateFailedLine(req.name, `${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim()));

@@ -72,9 +72,10 @@ pub fn boot_cmd() -> Vec<String> {
 }
 
 /// What every exec carries ahead of its command: the home and the user every wsp guest exec sets, and the
-/// compose project of a workspace that asked for an engine. The project name rides on each exec as well as on the
-/// boot because an exec runs as a tenant of the workspace, which youki hands the init's namespaces and cgroup
-/// and none of its environment.
+/// compose project of a workspace that asked for an engine. A tenant starts from the workspace's own boot
+/// environment, which the container crate takes off the spec and the builder's own entries override by name, so
+/// the PATH and the recipe's knobs are there already; this line is what holds for a workspace booted by an older
+/// daemon and taken over by this one, whose spec carries neither.
 pub fn exec_env(record: &Workspace) -> String {
     match record.engine {
         true => format!("{EXEC_ENV} COMPOSE_PROJECT_NAME={}", compose_project(&record.id)),
@@ -1013,7 +1014,8 @@ impl Ops {
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
         // The compose project of a workspace with an engine, in the environment its daemon and every thread
-        // under it inherits; the exec road carries the same name, since a tenant inherits none of this.
+        // under it inherits; the exec road sets the same name, which is what holds for a workspace booted by an
+        // older daemon and taken over by this one.
         let compose_name = record.engine.then(|| compose_project(&id));
         let cgroup = self.layout.cgroup_name(&id);
         let config = Config {
@@ -1249,6 +1251,8 @@ impl Ops {
         shell: Option<&str>,
     ) -> Result<runtime::PtyInsideRunning, OpError> {
         let record = self.running(id)?;
+        // Over the workspace's own boot environment, which the broker starts from as every tenant does: the
+        // PATH the workspace booted with and the recipe's knobs are there and none of them is spelled here.
         let mut env = BTreeMap::from([
             ("HOME".to_owned(), "/root".to_owned()),
             ("USER".to_owned(), "root".to_owned()),
@@ -2202,7 +2206,7 @@ mod tests {
     }
 
     /// Every exec carries the home and the user; one in a workspace with an engine carries its compose project
-    /// too, since youki hands a tenant none of the init's environment.
+    /// too, beside what the tenant already reads off the workspace's own boot environment.
     #[test]
     fn an_exec_in_a_workspace_with_an_engine_carries_its_compose_project() {
         assert_eq!(exec_env(&awake("wsp-a", None)), "export HOME=/root USER=root");

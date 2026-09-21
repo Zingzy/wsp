@@ -668,10 +668,11 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
     let id = w.create(spec(json!({}))).await;
     // The PATH the boot hands its first process, read off that process's own environment rather than off a shell
     // this case started: it is the one every process in the workspace inherits, and the one order of directories
-    // a person's thread on this workspace carries too.
+    // a person's thread on this workspace carries too. This spec carries no PATH of its own, so what stands here
+    // is the daemon's own line; a create that carries one is the host's word and is read in the case below.
     let (code, path, err) = w.exec(&id, "tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^PATH=//p'").await;
     show("the PATH the workspace booted with", code, &path, &err);
-    assert_eq!((code, path.trim()), (0, wsp_frames::numbers::TOOLS_PATH));
+    assert_eq!((code, path.trim()), (0, wsp_frames::numbers::PLACE_WORKSPACE_PATH));
     for root in &roots {
         // What the box keeps under the root, read from the box before the workspace is asked: the case says
         // afterwards that nothing inside changed it.
@@ -2956,6 +2957,85 @@ async fn a_guest_inside_a_workspace_reaches_the_daemon_over_the_socket_of_its_ow
     w.close().await;
 }
 
+/// What a workspace on this computer carries into a thread, a command and a pane: the order the host asked for
+/// and the recipe's knobs beside it, one environment for all three. The boot's is the spec's, an exec and the
+/// pty broker are tenants that start from it, and the login shell in a pane reads the file the boot wrote in the
+/// workspace's own /etc after the box's own profile has set root's PATH.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspace_carries_the_hosts_order_and_its_knobs_into_an_exec_a_pty_and_a_pane() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    // One knob of the case's own beside the PATH the host sends: the daemon spells no manager's name, so a name
+    // nothing here knows is what proves the record's own envs reach every road inside.
+    let knob = "/opt/wsp/uv/tools";
+    let id = w.create(spec(json!({ "envs": { "WSP_KNOB": knob, "PATH": wsp_frames::numbers::PLACE_WORKSPACE_PATH } }))).await;
+
+    // An exec, which runs as a tenant of the workspace: the crate reads the spec's environment as the tenant's
+    // baseline, so what the create carried is there with nothing exported by hand.
+    let (code, out, err) = w.exec(&id, "printf '%s\\n' \"$WSP_KNOB\" \"$PATH\"").await;
+    show("the environment one exec inside carries", code, &out, &err);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!((code, lines.first().copied()), (0, Some(knob)), "{out}");
+    assert_eq!(lines.get(1).copied(), Some(wsp_frames::numbers::PLACE_WORKSPACE_PATH), "{out}");
+
+    let d = frames_daemon().await;
+    let mut pane = FrameClient::connect(d.addr).await;
+    let made = pane.ok("pty.create", json!({ "machineId": &id, "cols": 100, "rows": 40, "cwd": "/root" })).await;
+    let pty = made["ptyId"].as_str().unwrap().to_owned();
+    let pid = made["pid"].as_u64().unwrap();
+    // The pid the reply carries is the broker's on the box, so its own environment is what the shell in that
+    // pane was started from: read off the box rather than out of the shell, whose login files run after it.
+    let environ = fs::read(format!("/proc/{pid}/environ")).unwrap();
+    let held: Vec<&str> = std::str::from_utf8(&environ).unwrap().split('\0').filter(|e| !e.is_empty()).collect();
+    assert!(held.contains(&format!("WSP_KNOB={knob}").as_str()), "the pty broker carries no knob: {held:?}");
+    assert!(
+        held.contains(&format!("PATH={}", wsp_frames::numbers::PLACE_WORKSPACE_PATH).as_str()),
+        "the pty broker carries another PATH: {held:?}"
+    );
+
+    // And the pane's own shell, which is a login shell: the box's /etc/profile resets root's PATH and then reads
+    // the workspace's own file under /etc/profile.d, so what a person types there runs the prefix's copy first.
+    pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
+    pane.ok("pty.write", json!({ "ptyId": &pty, "machineId": &id, "data": "printf 'pane-%s\\n' \"$PATH\"\n" })).await;
+    let opens = format!("pane-{}", wsp_frames::numbers::PLACE_WORKSPACE_PATH.split(':').take(2).collect::<Vec<_>>().join(":"));
+    assert!(pane.printed_within(&pty, &opens, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    pane.ok("pty.kill", json!({ "ptyId": &pty, "machineId": &id })).await;
+    w.close().await;
+}
+
+/// The word a process inside a workspace runs for wsp is the shim the boot wrote, not a copy planted under the
+/// home every workspace on this computer shares. The copy is read with `command -v` and never run: what it would
+/// do is what the order is here to prevent.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspace_runs_wsps_own_word_and_not_a_copy_planted_under_the_shared_home() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let before = listing(Path::new(PLANTED_DIR));
+    // Planted before the workspace is made, as a sibling's thread would have left it, and swept whatever ends
+    // this case. The lock World takes is not taken here: opening it is what takes it.
+    let planted = Planted::named("wsp");
+    let planted_at = planted.binary.to_string_lossy().into_owned();
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+
+    let (code, found, err) = w.exec(&id, "command -v wsp").await;
+    show("the wsp a process inside resolves", code, &found, &err);
+    assert_eq!((code, found.trim()), (0, wsp_frames::numbers::GUEST_WSP_PATH), "{err}");
+
+    // The case's own red, driven inside on the order a workspace here booted with before this round: the same
+    // read there answers the planted copy, so the green above is the order holding and not a copy nothing would
+    // have found either way.
+    let (code, old, err) = w.exec(&id, &format!("export PATH={}\ncommand -v wsp", wsp_frames::numbers::TOOLS_PATH)).await;
+    show("the same read on the old order", code, &old, &err);
+    assert_eq!(old.trim(), planted_at, "{err}");
+    assert!(!planted.ran(), "the planted copy was run inside the workspace");
+
+    planted.sweep();
+    assert_eq!(listing(Path::new(PLANTED_DIR)), before, "this case left something under the shared home");
+    w.close().await;
+}
+
 /// A workspace whose init ends on its own ends the way a stop ends it: the daemon that took the workspaces over
 /// hears the same word, so the door inside goes, its socket file goes with it, and the workspace reads as a nap
 /// the wake boots from.
@@ -3100,10 +3180,15 @@ struct Planted {
 
 impl Planted {
     fn new() -> Planted {
+        Planted::named(SHADOWED)
+    }
+
+    /// The same under another name, for a case that shadows a word of wsp's own rather than a tool of the box's.
+    fn named(name: &str) -> Planted {
         let dir = PathBuf::from(PLANTED_DIR);
         let made_dir = !dir.exists();
         fs::create_dir_all(&dir).unwrap();
-        let planted = Planted { binary: dir.join(SHADOWED), marker: PathBuf::from("/root/wsp-live-planted-ran"), made_dir };
+        let planted = Planted { binary: dir.join(name), marker: PathBuf::from("/root/wsp-live-planted-ran"), made_dir };
         // A file already standing under that name is the box's own, whoever put it there: this case shadows a
         // tool and sweeps what it shadowed, and it will not delete a file it did not write.
         assert!(!planted.binary.exists(), "{} already stands; remove it and run again", planted.binary.display());
