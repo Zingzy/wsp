@@ -116,8 +116,8 @@ export interface ClientRow {
   name: string;
   created_at: string;
   last_seen: string | null;
-  /** The fingerprint of the device key this computer signed in with; a computer signed in before device keys holds
-   * none, and no box can admit it. */
+  /** The fingerprint of the device key this computer signed in with, one computer's per account under the index
+   * beside the column; a computer signed in before device keys holds none, and no box can admit it. */
   fingerprint: string | null;
 }
 
@@ -130,8 +130,19 @@ export async function clientsOf(env: Env, accountId: string): Promise<ClientRow[
   return results;
 }
 
-export async function insertClient(env: Env, row: Pick<ClientRow, "id" | "account_id" | "name" | "created_at" | "fingerprint">): Promise<void> {
-  await env.DB.prepare("INSERT INTO clients (id, account_id, name, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at, row.fingerprint).run();
+/** The computer this account already holds under this key, if any: a key is one computer's on an account, as a
+ * name is one box's, and a code that named no key is held by nobody. */
+export async function clientKeyed(env: Env, accountId: string, fingerprint: string | null): Promise<ClientRow | undefined> {
+  return (await env.DB.prepare("SELECT * FROM clients WHERE account_id = ? AND fingerprint = ?").bind(accountId, fingerprint).first<ClientRow>()) ?? undefined;
+}
+
+/** Answers whether the row landed: the index keeps one computer per key on an account, so a poll that lost to
+ * another code approved under the same key reads a refusal off this answer rather than a failed statement. */
+export async function insertClient(env: Env, row: Pick<ClientRow, "id" | "account_id" | "name" | "created_at" | "fingerprint">): Promise<boolean> {
+  const { meta } = await env.DB.prepare("INSERT INTO clients (id, account_id, name, created_at, fingerprint) VALUES (?, ?, ?, ?, ?) ON CONFLICT (account_id, fingerprint) DO NOTHING")
+    .bind(row.id, row.account_id, row.name, row.created_at, row.fingerprint)
+    .run();
+  return (meta.changes ?? 0) > 0;
 }
 
 export async function seenClient(env: Env, id: string, at: string): Promise<void> {

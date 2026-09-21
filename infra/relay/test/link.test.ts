@@ -663,3 +663,91 @@ describe("an approval from a signed-in wsp, carrying the admission it signed", (
     expect(kept.signer).toBe(desk.fingerprint);
   });
 });
+
+describe("a key is one computer's on an account", () => {
+  /** The approval the page posts for a code, with the stamp the page rendered for it. */
+  async function approveOnPage(relay: RelayHarness, code: string, cookie: string): Promise<Response> {
+    const stamp = /name="stamp" value="([^"]+)"/.exec(await (await typeCode(relay, code, cookie)).text())?.[1] ?? "";
+    return relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, stamp }).toString() });
+  }
+
+  const linkRow = async (relay: RelayHarness, code: string): Promise<{ state: string; account_id: string | null; admission: string | null }> =>
+    (await relay.db.prepare("SELECT state, account_id, admission FROM link_codes WHERE code = ?").bind(code).first()) as { state: string; account_id: string | null; admission: string | null };
+
+  it("refuses to sign a second computer in on the page under a key the account already holds, until that computer is signed out", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const again = (await (await startFrom(relay, "client", "a second Mac", "10.0.0.2", mac.fingerprint!)).json()) as { code: string; pollToken: string };
+
+    const refused = await approveOnPage(relay, again.code, mac.cookie);
+    expect(refused.status).toBe(409);
+    const said = ((await refused.json()) as { error: string }).error;
+    expect(said).toContain("the Mac");
+    expect(said).toContain(`wsp logout ${mac.id}`);
+    expect(await linkRow(relay, again.code)).toEqual({ state: "pending", account_id: null, admission: null });
+    expect(await (await poll(relay, again.pollToken)).json()).toEqual({ state: "pending" });
+    expect(await count(relay, "clients")).toBe(1);
+
+    // Another account is another namespace: the same key signs in there.
+    const theirs = (await (await startFrom(relay, "client", "sam's Mac", "10.0.0.3", mac.fingerprint!)).json()) as { code: string; pollToken: string };
+    expect((await approveOnPage(relay, theirs.code, await signIn(relay, "sam", "7"))).status).toBe(200);
+    expect(((await (await poll(relay, theirs.pollToken)).json()) as { state: string }).state).toBe("approved");
+
+    // Signed out, the key is free, and the same code is approved and minted under it.
+    expect((await relay.fetch(`/clients/${mac.id}`, { method: "DELETE", headers: bearer(mac.token) })).status).toBe(200);
+    expect((await approveOnPage(relay, again.code, mac.cookie)).status).toBe(200);
+    const answer = (await (await poll(relay, again.pollToken)).json()) as { state: string; token: string };
+    expect(answer.state).toBe("approved");
+    const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
+    const row = (await relay.db.prepare("SELECT name, fingerprint FROM clients WHERE id = ?").bind(claims!.subject).first()) as { name: string; fingerprint: string };
+    expect(row).toEqual({ name: "a second Mac", fingerprint: mac.fingerprint });
+  });
+
+  it("refuses an approval from a signed-in wsp for a code started under a key the account already holds, so a token cannot mint itself a row as the Mac", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    // The desk's token starts a code claiming the Mac's key and approves it as itself, for the key the code named.
+    const claim = (await (await startFrom(relay, "client", "an impostor", "10.0.0.2", mac.fingerprint!)).json()) as { code: string; pollToken: string };
+
+    const refused = await approveFromWsp(relay, desk.token, claim.code, fakeAdmission(mac.fingerprint!, desk.fingerprint!));
+    expect(refused.status).toBe(409);
+    const said = ((await refused.json()) as { error: string }).error;
+    expect(said).toContain("the Mac");
+    expect(said).toContain(`wsp logout ${mac.id}`);
+    expect(await linkRow(relay, claim.code)).toEqual({ state: "pending", account_id: null, admission: null });
+    expect(await (await poll(relay, claim.pollToken)).json()).toEqual({ state: "pending" });
+    expect(await count(relay, "clients")).toBe(2);
+    expect(await count(relay, "admissions")).toBe(0);
+    // The Mac's own row is the one still under its key.
+    const under = (await relay.db.prepare("SELECT id FROM clients WHERE fingerprint = ?").bind(mac.fingerprint).all()).results;
+    expect(under).toEqual([{ id: mac.id }]);
+  });
+
+  it("makes one row where two codes were approved under one key, and tells the second poll to sign the first out", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const key = fingerprintFor("one laptop");
+    const first = (await (await startFrom(relay, "client", "the laptop", "10.0.0.2", key)).json()) as { code: string; pollToken: string };
+    const second = (await (await startFrom(relay, "client", "the laptop again", "10.0.0.3", key)).json()) as { code: string; pollToken: string };
+    // No computer holds the key until a poll mints one, so neither approval can see the other's code.
+    expect((await approveFromWsp(relay, mac.token, first.code, fakeAdmission(key, mac.fingerprint!))).status).toBe(200);
+    expect((await approveFromWsp(relay, mac.token, second.code, fakeAdmission(key, mac.fingerprint!))).status).toBe(200);
+
+    const one = (await (await poll(relay, first.pollToken)).json()) as { state: string; token: string };
+    expect(one.state).toBe("approved");
+    const claims = await readToken(relay.env.RELAY_SIGNING_KEY, one.token);
+    expect(await count(relay, "admissions")).toBe(1);
+
+    const two = await poll(relay, second.pollToken);
+    expect(two.status).toBe(409);
+    const said = ((await two.json()) as { error: string }).error;
+    expect(said).toContain("the laptop");
+    expect(said).toContain(`wsp logout ${claims!.subject}`);
+    // One row under the key, the second's admission never landed, and both codes are spent.
+    expect(await count(relay, "clients")).toBe(2);
+    expect(await count(relay, "admissions")).toBe(1);
+    expect(await count(relay, "link_codes")).toBe(0);
+    expect((await poll(relay, second.pollToken)).status).toBe(404);
+  });
+});

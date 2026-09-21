@@ -7,13 +7,13 @@
 // on a computer already in, whose approval carries the admission it signed. The
 // code is spent by the approval and the token by the first poll that takes it.
 import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
-import { accountByProvider, accountOf, approveLink, deleteLink, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+import { accountByProvider, accountOf, approveLink, clientKeyed, deleteLink, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { boxNamedRefusal, clientFor, signedByBearer } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
 import type { Ctx } from "./index.js";
 import { approvePage, approvedPage, codePage, gonePage } from "./page.js";
-import { refuse } from "./refusal.js";
+import { refuse, type Refusal } from "./refusal.js";
 import { NONCE_COOKIE, SESSION_COOKIE, cookieOf, mintSession, mintStamp, mintToken, nonceCookie, readSession, readStamp, sessionCookie } from "./tokens.js";
 
 /** A code stands a quarter of an hour: long enough to open a browser and sign in, short enough that a code left on a screen is dead. */
@@ -152,6 +152,15 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   return new Response(null, { status: 302, headers });
 }
 
+/** A key is one computer's on an account, as a name is one box's: the refusal for a client code started under a
+ * key a computer on the account already signed in with, naming that computer and the sign-out that frees the key,
+ * and nothing where the key is free. Both approval roads read it, and the poll reads it where two codes approved
+ * under one key met the index. */
+async function keyHeldRefusal(ctx: Ctx, accountId: string, fingerprint: string | null): Promise<Refusal | undefined> {
+  const held = await clientKeyed(ctx.env, accountId, fingerprint);
+  return held === undefined ? undefined : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, then run wsp login again`);
+}
+
 /** The person says yes, on the page or from a wsp already in. The code is spent here, once, whichever gets there
  * first. A request carrying a bearer is a wsp's, since the page's form carries none. */
 export async function linkApprove(ctx: Ctx): Promise<Response> {
@@ -170,6 +179,8 @@ export async function linkApprove(ctx: Ctx): Promise<Response> {
   // One name, one box, per account: a client asks for a box by the name on this page, so two of them would be a
   // line that could go to either.
   if (row.kind === "host" && (await hostNamed(ctx.env, who.id, row.name)) !== undefined) throw boxNamedRefusal(row.name);
+  const held = row.kind === "client" ? await keyHeldRefusal(ctx, who.id, row.fingerprint) : undefined;
+  if (held !== undefined) throw held;
   const hostId = row.kind === "host" ? newId("h", ctx.deps.random) : null;
   if (!(await approveLink(ctx.env, code, who.id, hostId))) throw refuse(409, "that code was already approved");
   if (hostId !== null) await insertHost(ctx.env, { id: hostId, account_id: who.id, name: row.name, created_at: new Date(ctx.deps.now()).toISOString() });
@@ -191,6 +202,8 @@ async function approveFromWsp(ctx: Ctx): Promise<Response> {
   if (row.state !== "pending") throw refuse(409, "that code was already approved");
   if (row.kind !== "client") throw refuse(400, "that code is a box's, and a box is approved on the page or put on the account with wsp host link from a signed-in computer; an admission is for a computer signing in");
   if (admission.device !== row.fingerprint) throw refuse(400, `that admission is for ${admission.device}, and the code was started by ${row.fingerprint ?? "a wsp that named no key"}`);
+  const held = await keyHeldRefusal(ctx, who.account, row.fingerprint);
+  if (held !== undefined) throw held;
   if (!(await approveLink(ctx.env, code, who.account, null, JSON.stringify(admission)))) throw refuse(409, "that code was already approved");
   return Response.json({ approved: true, name: row.name });
 }
@@ -216,7 +229,10 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
   if (row.kind === "client") {
     subject = newId("c", ctx.deps.random);
     const at = new Date(ctx.deps.now()).toISOString();
-    await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, fingerprint: row.fingerprint, created_at: at });
+    if (!(await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, fingerprint: row.fingerprint, created_at: at }))) {
+      // Two codes approved under one key: the first poll took the key, and this one names the computer that holds it.
+      throw (await keyHeldRefusal(ctx, row.account_id!, row.fingerprint)) ?? refuse(409, "the computer that held that key was signed out while this code waited; run wsp login again");
+    }
     // The admission waited on the code for the id this row has now; the poll is where it becomes the computer's.
     if (row.admission !== null) {
       const admission = JSON.parse(row.admission) as Admission;

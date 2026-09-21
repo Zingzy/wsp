@@ -9,6 +9,10 @@
 ALTER TABLE link_codes ADD COLUMN fingerprint TEXT;
 ALTER TABLE link_codes ADD COLUMN admission TEXT;
 ALTER TABLE clients ADD COLUMN fingerprint TEXT;
+-- A key is one computer's on an account, as a name is one box's. SQLite keeps
+-- nulls distinct under a unique index, so the computers signed in before device
+-- keys collide with nothing.
+CREATE UNIQUE INDEX clients_account_key ON clients (account_id, fingerprint);
 ALTER TABLE hosts ADD COLUMN host_key TEXT;
 
 CREATE TABLE admissions (
