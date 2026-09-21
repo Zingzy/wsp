@@ -3060,9 +3060,18 @@ describe("wsp verbs over the host", () => {
       execGuest(backend, "Linux\n", 0);
       expect((await line("exec", "alpha", "--", "uname")).io.lines).toEqual(["Linux"]);
       expect((await line("exec", alpha.id, "--", "uname")).io.lines).toEqual(["Linux"]);
-      const listedThreads = await line("threads", "alpha");
+      const listedThreads = await line("threads", "alpha", "--json");
       expect(listedThreads.code, listedThreads.io.errors.join("\n")).toBe(0);
-      expect((await line("send", row!.threadId!, "and the rest")).code).toBe(0);
+      // The person's own thread is another tree on the same workspace: the caller's listing leaves it out and its
+      // id reads as no thread at all, so a thread cannot send into one it did not open.
+      expect(json(listedThreads.io)).toEqual([{ threads: [] }]);
+      expect((await line("send", row!.threadId!, "and the rest")).io.errors).toEqual([`wsp send: no thread ${row!.threadId}`]);
+      // The thread it opened for itself is the one it drives, on the same ids the same listing prints.
+      const opened = await line("run", "alpha", "kid");
+      expect(opened.code, opened.io.errors.join("\n")).toBe(0);
+      const kid = (await rt.sessions.list()).find(r => r.threadId !== row!.threadId)!;
+      expect(json(await line("threads", "alpha", "--json").then(r => r.io))).toEqual([{ threads: [expect.objectContaining({ threadId: kid.threadId })] }]);
+      expect((await line("send", kid.threadId!, "and the rest")).code).toBe(0);
     });
 
     it("a workspace the caller's reach hides reads to a thread exactly as one that does not exist", async () => {

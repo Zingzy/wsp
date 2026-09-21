@@ -159,7 +159,9 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[], 
     return f.pieces === 0 ? [write] : [write, `rm -f ${names}`];
   };
   const last = (): string => [head, ...before, "set -o pipefail", ...plan.flatMap(land), ...after].join("\n");
-  const piece = (path: string, i: number, part: string): string => [head, `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, `echo ${HANDSHAKE.piece}`].join("\n");
+  // A piece waits on disk for the last exec to join and remove it, so it is the writer's alone while it waits: a
+  // script cut into pieces carries the same bytes as one that fits, the caller's environment among them.
+  const piece = (path: string, i: number, part: string): string => [head, "umask 077", `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, `echo ${HANDSHAKE.piece}`].join("\n");
   const execs: string[] = [];
   while (!execFits(last())) {
     const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];

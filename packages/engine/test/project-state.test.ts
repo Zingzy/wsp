@@ -9,7 +9,7 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
-import { PROJECT_STATE_RESOLVERS, agentHome, agentHomes, countProjectState, guestAgentHomes, moveProjectState, parseMergeOutput, parseStateListing, resolveProjectPath, stateListing, storeCopy, underProject, type MergeOutput, type ProjectStateResolver, type UnreadStore } from "../src/project-state/index.js";
+import { PROJECT_STATE_RESOLVERS, agentHome, agentHomes, countProjectState, guestAgentHomes, insideFolder, moveProjectState, parseMergeOutput, parseStateListing, resolveProjectPath, stateListing, storeCopy, underHome, underProject, type MergeOutput, type ProjectStateResolver, type UnreadStore } from "../src/project-state/index.js";
 import { mergeScript } from "../src/project-state/merge.js";
 import { rewriteJsonl } from "../src/project-state/resolver.js";
 import { PY_PREAMBLE } from "../src/project-state/py.js";
@@ -486,6 +486,24 @@ describe("project path rules", () => {
     expect(underProject("/a/proj2", "/a/proj")).toBe(false);
     expect(underProject("/a", "/a/proj")).toBe(false);
     expect(resolveProjectPath("/a/proj/")).toBe("/a/proj");
+  });
+
+  it("a name a machine's own archive carried stays inside the home, and a name that only starts with two dots is a folder", () => {
+    // The one lexical containment rule, read by the resolvers that build a path from an index row or a registry
+    // slug and by the lander that copies what they name: a second copy of it read `..cache` as a climb.
+    expect(insideFolder("sessions/a.jsonl")).toBe(true);
+    expect(insideFolder("..cache")).toBe(true);
+    expect(insideFolder("a/..cache/b")).toBe(true);
+    expect(insideFolder("..")).toBe(false);
+    expect(insideFolder(join("..", "out"))).toBe(false);
+    expect(insideFolder("")).toBe(false);
+    expect(insideFolder("/etc/passwd")).toBe(false);
+
+    // And through the road the resolvers take it by: a rollout row or a slug that climbs names nothing.
+    expect(underHome("/root/.codex", "sessions", "a.jsonl")).toBe("/root/.codex/sessions/a.jsonl");
+    expect(underHome("/root/.codex", "sessions", "../../../../etc/passwd")).toBeUndefined();
+    expect(underHome("/root/.gemini", "..cache")).toBe("/root/.gemini/..cache");
+    expect(underHome("/root/.gemini")).toBeUndefined();
   });
 });
 

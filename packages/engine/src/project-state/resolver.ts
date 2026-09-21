@@ -5,7 +5,7 @@
 // paths and the core resolves what still exists.
 import { createReadStream, createWriteStream, existsSync, readdirSync, realpathSync, renameSync, statSync } from "node:fs";
 import { chmod, rename, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { once } from "node:events";
 import { finished } from "node:stream/promises";
 import { underProject, type ProjectCarry } from "@wsp/protocol";
@@ -78,6 +78,22 @@ export function resolveProjectPath(path: string): string {
  * inside it, nothing for anything else. */
 export function movedPath(path: string, from: string, to: string): string | undefined {
   return underProject(path, from) ? to + path.slice(from.length) : undefined;
+}
+
+/** Whether a path relative to a folder stays inside it: the one lexical containment rule, so no caller writes a
+ * second. Empty is the folder itself, which is no path under it, and a climb is a `..` of its own, never a name
+ * that merely starts with two dots (`..cache` is a folder somebody made). */
+export function insideFolder(rel: string): boolean {
+  return rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+
+/** A path under a home built from a name the archive itself carried, or nothing where that name reaches out of the
+ * home. An index row's rollout path and a registry's slug are the machine's own bytes, and a landing runs every
+ * resolver over an archive a box answered with, so a name that climbs out of the home is one the resolver drops
+ * rather than one it reads, rewrites or copies. */
+export function underHome(home: string, ...parts: readonly string[]): string | undefined {
+  const at = join(home, ...parts);
+  return insideFolder(relative(home, at)) ? at : undefined;
 }
 
 /** A stored value moved when it is a path at or under `from`, else itself. */

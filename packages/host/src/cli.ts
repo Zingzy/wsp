@@ -1665,6 +1665,7 @@ interface SharedFlags {
   "code-file"?: string;
   "ssh-port"?: string;
   "ssh-key"?: string;
+  "host-key"?: string;
   base?: string;
   keep?: string[];
   cut?: string[];
@@ -1953,7 +1954,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      "wsp add [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>]",
+      "wsp add [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
     about:
       "a computer of yours over ssh, or a project: a folder on this computer worked in place, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
@@ -1967,7 +1968,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["no-memory"] === true ? { noMemory: true } : {}),
         ...(values["no-commits"] === true ? { noCommits: true } : {}),
         ...(values.remember === true ? { remember: true } : {}),
-      })),
+      }, values["host-key"])),
   },
   remove: {
     page: "front",
@@ -2249,6 +2250,7 @@ export const SHARED_OPTIONS: Options = {
   "code-file": { type: "string" },
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
+  "host-key": { type: "string" },
   base: { type: "string" },
   keep: { type: "string", multiple: true },
   cut: { type: "string", multiple: true },
@@ -2381,6 +2383,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
+  { name: "host-key", on: ["add"], says: "the host key of a computer this one has never dialled, as you read it on that computer; without it the add shows you the key that computer answers with and asks, and off a terminal it refuses rather than trusting whatever answers" },
   { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
   { name: "sign-in", on: ["add"], says: "the agent to sign in on the place named, once, outside every workspace on it: the sign-in runs on that computer and every workspace there shares the one login. Offered by the join itself; this is the same road for a computer already in" },
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },

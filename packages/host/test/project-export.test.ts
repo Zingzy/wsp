@@ -4,9 +4,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { guestAgentHomes, tarOf, type TarEntry } from "@wsp/engine";
-import { storeUnreadLine } from "@wsp/protocol";
+import { stateEntryRefusal, storeUnreadLine } from "@wsp/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { projectLander } from "../src/project-export.js";
 
@@ -257,6 +257,95 @@ describe("projectLander", () => {
       expect(existsSync(join(outside, "evil.txt"))).toBe(false);
       expect(readFileSync(join(dest, outside, "evil.txt"), "utf8")).toBe("evil\n");
       expect(readdirSync(root)).toEqual(["proj"]);
+    });
+
+    it("a state archive whose expected home is a link is refused whole, before a resolver runs, and the folder it points at is untouched", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      // The agent store on this computer, as the archive would reach it: the landing must leave it byte for byte.
+      const real = `${realpathSync(root)}/proj`;
+      const homes = macHomes(real);
+      const before = snapshot(homes["claude"]!);
+      const tar = tarOf([
+        { path: "root/.codex/state_5.sqlite", mode: 0o644, content: "x" },
+        { path: "root/.claude-cfg", target: homes["claude"]! },
+      ]);
+      await expect(projectLander(homes).land({ source: SOURCE, dest, replace: false, archive: archived(folderTar()), state: { archive: archived(tar), homes: guestAgentHomes() } })).rejects.toThrow(
+        stateEntryRefusal("root/.claude-cfg", "a link"),
+      );
+      expect(snapshot(homes["claude"]!)).toEqual(before);
+      expect(readdirSync(root)).toEqual([]);
+      expect(readdirSync(tmpdir()).filter(n => n.startsWith("wsp-home-"))).toEqual([]);
+    });
+
+    it("a state archive holding an entry that is no file and no folder is refused the same way", async () => {
+      const root = scratch();
+      const packed = scratch();
+      mkdirSync(join(packed, "root/.codex"), { recursive: true });
+      expect(spawnSync("mkfifo", [join(packed, "root/.codex/pipe")]).status).toBe(0);
+      writeFileSync(join(packed, "root/.codex/state_5.sqlite"), "x");
+      const archive = join(scratch(), "fifo.tgz");
+      expect(spawnSync("tar", ["-czf", archive, "-C", packed, "root"]).status).toBe(0);
+      await expect(projectLander(macHomes(join(root, "proj"))).land({ source: SOURCE, dest: join(root, "proj"), replace: false, archive: archived(folderTar()), state: { archive, homes: guestAgentHomes() } })).rejects.toThrow(
+        stateEntryRefusal(join("root", ".codex", "pipe"), "a fifo"),
+      );
+      expect(readdirSync(root)).toEqual([]);
+    });
+
+    it("a home that reaches out of the folder the archive was opened in fails that agent's row alone, and the rest lands", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      const real = `${realpathSync(root)}/proj`;
+      const homes = macHomes(real);
+      const before = snapshot(homes["codex"]!);
+      // Four levels up from a scratch home's own root is the folder every scratch home is made in; a store standing
+      // there is one this landing must not be pointed at, whatever the homes list says.
+      const outside = join(tmpdir(), ".codex-outside");
+      mkdirSync(outside, { recursive: true });
+      try {
+        const landed = await projectLander(homes).land({
+          source: SOURCE,
+          dest,
+          replace: false,
+          archive: archived(folderTar()),
+          state: { archive: archived(stateTar()), homes: { ...guestAgentHomes(), codex: `root/../../${basename(outside)}` } },
+        });
+        expect(landed.files).toBe(3);
+        expect(landed.agents.map(a => [a.agent, a.outcome])).toEqual([["claude", "moved"], ["codex", "failed"], ["hermes", "nothing"]]);
+        expect(landed.agents.find(a => a.agent === "codex")).toMatchObject({ error: stateEntryRefusal(`root/../../${basename(outside)}`, "a path out of the folder it was opened in") });
+        expect(snapshot(homes["codex"]!)).toEqual(before);
+        expect(readdirSync(outside)).toEqual([]);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it("a rollout the machine's own index names outside the home it travelled in is neither rewritten there nor copied home", async () => {
+      const root = scratch();
+      const dest = join(root, "proj");
+      const real = `${realpathSync(root)}/proj`;
+      const homes = macHomes(real);
+      // A file standing for one of this computer's own, at the path the index's dot-dot climb lands on: four levels
+      // up from <scratch>/root/.codex/sessions/ is the folder every scratch home is made in.
+      const loot = join(tmpdir(), "wsp-export-loot.jsonl");
+      writeFileSync(loot, rollout(SOURCE));
+      try {
+        const index = sqlite(CODEX_SCHEMA, [["insert into threads values (?, ?, ?, 0, 1)", ["t1", `/root/.codex/sessions/../../../../${basename(loot)}`, SOURCE]]]);
+        const landed = await projectLander(homes).land({
+          source: SOURCE,
+          dest,
+          replace: false,
+          archive: archived(folderTar()),
+          state: { archive: archived(tarOf([{ path: "root/.codex/state_5.sqlite", mode: 0o644, content: index }])), homes: guestAgentHomes() },
+        });
+        // The row it named is one the landing skipped, so nothing of codex's state came home.
+        expect(landed.agents.map(a => [a.agent, a.outcome])).toEqual([["codex", "nothing"]]);
+        expect(landed.agents[0]).toMatchObject({ files: 0, bytes: 0 });
+        expect(readFileSync(loot, "utf8")).toBe(rollout(SOURCE));
+        expect(snapshot(homes["codex"]!)[basename(loot)]).toBeUndefined();
+      } finally {
+        rmSync(loot, { force: true });
+      }
     });
 
     it("a file through a link that points out of the folder is refused, the link's target untouched, nothing at or beside the destination", async () => {
