@@ -68,6 +68,13 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/** Whether this machine has an IPv6 loopback to bind at all: a runner without one cannot hold the ::1 case. */
+const ipv6Loopback = await new Promise<boolean>(resolve => {
+  const probe = createTcpServer();
+  probe.once("error", () => resolve(false));
+  probe.listen(0, "::1", () => probe.close(() => resolve(true)));
+});
+
 async function refused(url: string): Promise<boolean> {
   try {
     await fetch(url);
@@ -268,6 +275,17 @@ describe("openHost", () => {
     } finally {
       await closeServer(squatter);
     }
+  });
+
+  it.runIf(ipv6Loopback)("dials a loopback lock where its address says that host answers, not this computer's other loopback name", async () => {
+    // A host up with --listen ::1 binds a loopback address, so its page carries its token, and it answers there
+    // and nowhere else.
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath: join(home, "state.json") });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "::1", startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
+    session = await open(await freePort(), 0);
+    expect(session.owned).toBe(false);
+    expect(session.url).toBe(`http://[::1]:${existing.port}`);
   });
 
   it("attaches through the lock alone to a host bound beyond this computer, whose page carries no token by design", async () => {

@@ -62,25 +62,25 @@ function canListen(port: number): Promise<boolean> {
   });
 }
 
-/** The boot object of the page a host on this computer's own port serves, or nothing where nothing there answers
- * as a wsp host. */
-async function bootOn(port: number): Promise<BootPayload | undefined> {
+/** The boot object of the page served at this authority, or nothing where nothing there answers as a wsp host. */
+async function bootAt(at: string): Promise<BootPayload | undefined> {
   try {
-    const res = await fetch(`http://${authority(LOOPBACK, port)}/`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`http://${at}/`, { signal: AbortSignal.timeout(2000) });
     return res.ok ? bootLineOf(await res.text()) : undefined;
   } catch {
     return undefined;
   }
 }
 
-/** What a port on this computer holds. Read by the ssh road to tell when the host behind a forward is up; a page
- * carrying the boot line is no reason on its own to attach, which the lock is. */
+/** What a port on this computer holds. Read by the ssh road to tell when the host behind a forward is up, and a
+ * forward is bound on this computer's own loopback; a page carrying the boot line is no reason on its own to
+ * attach, which the lock is. */
 export async function probeHost(port: number): Promise<PortState> {
-  if ((await bootOn(port)) !== undefined) return "wsp";
+  if ((await bootAt(authority(LOOPBACK, port))) !== undefined) return "wsp";
   return (await canListen(port)) ? "free" : "other";
 }
 
-function attached(port: number, url = `http://${authority(LOOPBACK, port)}`): HostSession {
+function attached(port: number, url: string): HostSession {
   return { url, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
@@ -109,17 +109,20 @@ export function statePathIn(home: string, launch: Launch): string {
  * the whole road in: a page on a port carrying the boot line is anything any login on this computer cares to
  * serve. Its pid is this login's, and then one of two readings by the address it bound. A host on loopback serves
  * its page with its own token inlined, so the page is held to the token file beside the state. A host bound
- * beyond this computer serves a page with no token by design, and the lock alone is the reading for it. Anything
- * else is a refusal: this window starts no second host on a state file another process holds. */
+ * beyond this computer serves a page with no token by design, and the lock alone is the reading for it. Either
+ * road is dialled where the lock says that host answers, which for a host on ::1 or on 127.0.0.2 is there and
+ * nowhere else. Anything else is a refusal: this window starts no second host on a state file another process
+ * holds. */
 async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   const held = servingHost(statePath);
   if (held === undefined) return undefined;
   if (!ownPid(held.pid)) throw wontAttach(statePath, held, "that process is not this login's");
-  if (!isLoopback(held.address ?? LOOPBACK)) return attached(held.port, `http://${authority(dialAddress(held), held.port)}`);
-  const boot = await bootOn(held.port);
+  const at = authority(dialAddress(held), held.port);
+  if (!isLoopback(held.address ?? LOOPBACK)) return attached(held.port, `http://${at}`);
+  const boot = await bootAt(at);
   if (boot === undefined) throw wontAttach(statePath, held, "no wsp host answers there");
   if (boot.token === undefined || !hostTokenMatches(statePath, boot.token)) throw wontAttach(statePath, held, "the page it serves carries another token than the file beside this state");
-  return attached(held.port);
+  return attached(held.port, `http://${at}`);
 }
 
 /** Runs before the setup gate: a serving host is the proof of setup. WSP_HOME
