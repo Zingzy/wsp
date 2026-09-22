@@ -19,6 +19,7 @@ import { useStore } from "../src/protocol/store.js";
 import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
+import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useSignInStore } from "../src/shell/signInStore.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
@@ -117,7 +118,7 @@ describe("app shell", () => {
     expect(tabbar()).not.toBeNull();
   });
 
-  it("gives Settings the whole region right of the sidebar, and gives the panel back on the surface it was on", async () => {
+  it("gives Settings the whole region right of the sidebar with no layout control in the header, and gives the panel back on the surface it was on", async () => {
     await mountShell();
     // On a surface of its own first, so what comes back is a chosen one and not the record's default.
     act(() => useRightPanelStore.getState().open("ws_a", "diff"));
@@ -130,11 +131,17 @@ describe("app shell", () => {
     expect(tabbar()).toBeNull();
     expect(document.querySelector("[data-right-panel-surface-content]")).toBeNull();
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
-    // The toggle is held while Settings stands, so no press can move the panel behind it.
-    expect((screen.getByRole("button", { name: "Toggle right panel" }) as HTMLButtonElement).disabled).toBe(true);
+    // No layout control stands in the header while Settings does, and the settings sidebar is in the app sidebar's
+    // place: the chord behind the page does not move the panel's record.
+    expect(screen.queryByRole("button", { name: "Toggle right panel" })).toBeNull();
+    expect(document.querySelector("[data-settings-groups]")).not.toBeNull();
+    runShellCommand("rightPanel.toggle", { workspaceId: "ws_a", toggleSidebar: () => {} }, []);
+    expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
     act(() => useStore.setState({ settingsOpen: false }));
     await settle();
     expect(tabbar()).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Toggle right panel" })).toBeTruthy();
+    expect(document.querySelector("[data-settings-groups]")).toBeNull();
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
   });
 

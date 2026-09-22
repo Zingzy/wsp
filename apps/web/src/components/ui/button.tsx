@@ -17,6 +17,10 @@ const OUTLINE_SURFACE = `${HELD_SURFACE} not-dark:bg-clip-padding shadow-xs/5 no
 /** The outline's faint dark-theme edge light, on the border pixel rather than inside it. */
 const OUTLINE_DARK_EDGE = "dark:not-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-disabled:not-active:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]";
 
+/** The ring a control takes where the accent would be a third hue on one screen: a destructive confirm, and the
+ * Cancel standing beside it. A blue ring between a neutral button and a red one says nothing about either. */
+const NEUTRAL_RING = "focus-visible:ring-muted-foreground";
+
 /** The inset a button pulls its glyphs in by. A control that is not a button but has to line up with one beside it
  * wears the same inset, so it is read from here rather than spelled again. */
 const BUTTON_GLYPH_INSET = "[&_svg]:-mx-0.5";
@@ -51,7 +55,7 @@ const buttonVariants = cva(
       },
       variant: {
         default: `${KEYCAP_BEVEL} border-primary bg-primary text-primary-foreground shadow-primary/24 shadow-xs [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-primary/90`,
-        destructive: `${KEYCAP_BEVEL} border-destructive bg-destructive text-white shadow-destructive/24 shadow-xs [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-destructive/90`,
+        destructive: `${KEYCAP_BEVEL} ${NEUTRAL_RING} border-destructive bg-destructive text-white shadow-destructive/24 shadow-xs [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-destructive/90`,
         "destructive-outline": `${OUTLINE_SURFACE} ${OUTLINE_DARK_EDGE} text-destructive-foreground [:hover,[data-pressed]]:border-destructive/32 [:hover,[data-pressed]]:bg-destructive/4`,
         ghost:
           "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
@@ -85,7 +89,7 @@ function Button({ className, variant, size, held = false, render, ...props }: Bu
     : "button";
 
   const defaultProps = {
-    className: cn(buttonVariants({ className, size, variant: held ? "outline" : variant })),
+    className: cn(buttonVariants({ className, size, variant: held ? "outline" : variant }), held && HELD_DIM),
     "data-slot": "button",
     type: typeValue,
   };
@@ -99,7 +103,14 @@ function Button({ className, variant, size, held = false, render, ...props }: Bu
   });
 }
 
-/** The orange confirm tier on an outline button: the one look for an action after which something does not come back. */
-const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
+/** How far a held control falls: the generic disabled step reads as the live outline beside it in a row's slot, so
+ * a control waiting on a road nobody has takes half the ink and edge of one that can be pressed. Opacity alone,
+ * since a held control that changed colour would be saying something other than that it cannot be pressed. */
+const HELD_DIM = "disabled:opacity-50";
 
-export { Button, BUTTON_GLYPH_INSET, buttonVariants, HELD_SURFACE, WARN_BUTTON };
+/** A door to a confirmation for something that does not come back: neutral at rest, as every other action in a
+ * row's slot is, and the danger ink and edge under the pointer. The act itself is the dialog's button, which is
+ * where red stands at rest, so no page carries more than one loud thing. */
+const DANGER_BUTTON = "transition-[color,border-color,box-shadow] duration-150 [:hover,[data-pressed]]:border-destructive/50 [:hover,[data-pressed]]:text-destructive-foreground";
+
+export { Button, BUTTON_GLYPH_INSET, buttonVariants, DANGER_BUTTON, HELD_SURFACE, NEUTRAL_RING };

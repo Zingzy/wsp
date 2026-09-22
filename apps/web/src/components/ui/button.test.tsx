@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one drawing of a keycap that cannot be pressed yet, which every sheet and
 // dialog reads off this component rather than spelling again: the outline
-// variant, disabled, marked, at the size and in the slot the live one has.
+// variant, disabled, marked, dimmed a step further than an ordinary disabled
+// control, at the size and in the slot the live one has.
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Button } from "./button.js";
@@ -31,6 +32,17 @@ describe("a held keycap", () => {
     expect(classesOf("Add")).toEqual(expect.arrayContaining(["bg-primary"]));
     // The switch moves nothing: same size classes, same word, same slot.
     expect({ size: classesOf("Add").filter(c => c.startsWith("h-") || c.startsWith("px-")), word: live.textContent }).toEqual(held);
+  });
+
+  it("falls further down the opacity ramp than an ordinary disabled control, and keeps only the one step", () => {
+    render(<Button held>Add</Button>);
+    // The generic disabled step read as the live outline beside it in a row's slot, so a held control takes its
+    // own; both at once would leave the stronger one deciding and the weaker one saying nothing.
+    expect(classesOf("Add")).toEqual(expect.arrayContaining(["disabled:opacity-50"]));
+    expect(classesOf("Add")).not.toEqual(expect.arrayContaining(["disabled:opacity-64"]));
+    cleanup();
+    render(<Button disabled>Removing…</Button>);
+    expect(classesOf("Removing…")).toEqual(expect.arrayContaining(["disabled:opacity-64"]));
   });
 
   it("stays disabled when the caller disables for its own reason as well", () => {

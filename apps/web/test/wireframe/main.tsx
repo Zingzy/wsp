@@ -36,19 +36,26 @@
 //                        lines and are cut at the second
 //   creating         the creation view with its stage log and the word table's
 //                    own line under it, off the record the create answered with
-//   computers        Settings on a fresh state: this Mac's row alone, no cloud
-//                    row and no price
-//   computers-many   the same with three computers joined and a cloud account
-//                    whose key this host holds, and the three words a recipe job
-//                    reads as on their rows
-//   computers-open   one of those boxes open on its agents block
-//   computers-here   this Mac's row open on the agents found here
-//   computers-failed the box whose recipe lost rows, open on the agent it could
-//                    not put on, the file that failed and the server set aside
-//   add-computer     the Add a computer sheet, one field, nothing typed
-//   add-computer-run the same sheet with the install under way
-//   add-computer-refused  the same sheet with what ssh said in the slot
-//   remove-computer  the Remove dialog over the table
+//   settings-appearance   Settings on Appearance, the record at its defaults
+//   settings-restore      the same with the sidebar width off its default, so
+//                         Restore defaults stands (with ?sidebar=<px>)
+//   settings-light-picked the Light segment picked on the dark side
+//   settings-computers    the Computers list: this Mac, three boxes joined and
+//                         the cloud whose key this host holds
+//   settings-computer     the box whose recipe is done, its own page
+//   settings-computer-failed  the box whose recipe lost rows
+//   settings-this-mac     this Mac's page, the agents found here
+//   settings-cloud        the cloud's page with the image built and copied
+//   settings-projects     the Projects list, one on the box
+//   settings-project      spoo's own page
+//   settings-devices      three devices paired, one of them this browser
+//   settings-account      the one Account row, not signed in
+//   settings-keybindings  the chords, in a desktop shell
+//   settings-about        the two halves of the release, in a desktop shell
+//   settings-search       "width" typed in the field
+//   settings-over-panel   a workspace's panel open, then Settings over it
+//   settings-add-computer the Add a computer sheet over Computers
+//   settings-remove-computer  the Remove dialog over the box's page
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
 //   bring-back-absent    the same on a workspace whose computer is not
@@ -57,10 +64,12 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { SettingsPage } from "../../src/settings/SettingsPage";
+import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
+import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
@@ -233,7 +242,7 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
  * done, one still running and one that lost two rows, and the cloud account whose key this host holds. */
 const COMPUTERS: PlaceView[] = [
   { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, takesForks: false } as PlaceView,
-  box("p_spoo", "spoo", { provision: provision({}) }),
+  box("p_spoo", "spoo", { default: true, provision: provision({}) }),
   box("p_dev4", "dev4", { provision: provision({ state: "running", finishedAt: undefined, at: { label: "uv", index: 3, of: 7 } }) }),
   box("p_lab", "lab", {
     provision: provision({
@@ -258,19 +267,63 @@ const COMPUTERS: PlaceView[] = [
 ];
 
 const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent", "first-run-agents"];
-/** The screens that are Settings in the centre rather than a workspace: the table, one row open, the sheet and
- * the Remove dialog. */
-const computerScreens = ["computers", "computers-many", "computers-open", "computers-here", "computers-failed", "add-computer", "add-computer-run", "add-computer-refused", "remove-computer"];
-const settings = computerScreens.includes(screen);
-/** Which computers this host holds on this screen: one alone where the table is read fresh, the whole list where
- * it is read with boxes and a cloud on it. */
-const manyComputers = ["computers-many", "computers-open", "computers-failed", "remove-computer"].includes(screen);
-const computers = settings ? (manyComputers ? COMPUTERS : [COMPUTERS[0]!]) : places;
+/** The screens that are Settings in the centre rather than a workspace, each by the page it opens on. */
+const SETTINGS_SCREENS: Record<string, SettingsAt> = {
+  "settings-appearance": { kind: "group", group: "appearance" },
+  "settings-restore": { kind: "group", group: "appearance" },
+  "settings-light-picked": { kind: "group", group: "appearance" },
+  "settings-computers": { kind: "group", group: "computers" },
+  "settings-computer": { kind: "computer", id: "p_spoo" },
+  "settings-computer-failed": { kind: "computer", id: "p_lab" },
+  "settings-this-mac": { kind: "computer", id: "here" },
+  "settings-cloud": { kind: "computer", id: "solari" },
+  "settings-projects": { kind: "group", group: "projects" },
+  "settings-project": { kind: "project", id: "pr_spoo" },
+  "settings-devices": { kind: "group", group: "devices" },
+  "settings-account": { kind: "group", group: "account" },
+  "settings-keybindings": { kind: "group", group: "keybindings" },
+  "settings-about": { kind: "group", group: "about" },
+  "settings-search": { kind: "group", group: "appearance" },
+  "settings-over-panel": { kind: "group", group: "appearance" },
+  "settings-add-computer": { kind: "group", group: "computers" },
+  "settings-remove-computer": { kind: "computer", id: "p_spoo" },
+};
+const settingsAt = SETTINGS_SCREENS[screen];
+const settings = settingsAt !== undefined;
+/** Every computer this host holds on a settings screen: this Mac, three boxes and the cloud whose key it holds. */
+const computers = settings ? COMPUTERS : places;
+/** The image this host sealed and where it stands, on the cloud's page. */
+const IMAGE: SealedImage = {
+  name: "default",
+  version: 3,
+  hash: "a".repeat(63) + "1",
+  recipeHash: "recipe-1",
+  logins: [{ name: "claude", state: "copied" }, { name: "gh", state: "signed-in" }],
+  sealedAt: new Date(Date.parse(AT) - 3 * 3_600_000).toISOString(),
+  sealedFrom: "this Mac",
+  vault: { sha256: "c".repeat(64), bytes: 4_200, paths: 7, takenAt: AT },
+  usedBytes: 1.2 * GB,
+};
+const IMAGE_COPIES = [
+  { place: "spoo", version: 3, hash: IMAGE.hash, snapshotId: "snap_spoo", builtAt: new Date(Date.parse(AT) - 2 * 3_600_000).toISOString(), sizeBytes: 1.2 * GB },
+  { place: "solari", version: 2, hash: "b".repeat(63) + "2", snapshotId: "snap_slr", builtAt: new Date(Date.parse(AT) - 26 * 3_600_000).toISOString(), sizeBytes: 1.1 * GB },
+];
+/** The devices paired with this wsp: a laptop, a phone's browser and this browser, and a running thread's token,
+ * which is not a device a person revokes and is not drawn. */
+const DEVICES: DeviceView[] = [
+  { id: "d_1", name: "zingzy-laptop", createdAt: new Date(Date.now() - 9 * 86_400_000).toISOString(), lastSeenAt: new Date(Date.now() - 12 * 60_000).toISOString() },
+  { id: "d_2", name: "Safari on iPhone", createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(), lastSeenAt: new Date(Date.now() - 3 * 3_600_000).toISOString() },
+  { id: "d_3", name: "zingzy-mbp", createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), lastSeenAt: new Date().toISOString(), here: true },
+  { id: "d_4", name: "a thread's token", createdAt: AT, lastSeenAt: AT, scope: { kind: "thread", workspaceId: "ws_copy", threadId: "th_lead", rootThreadId: "th_lead" } },
+];
 const drawsSidebar = !firstRunScreens.includes(screen) && screen !== "creating";
 /** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
 const emptyScreen = screen === "sidebar-empty";
 const oneProject = screen === "sidebar-one-project";
-const RECORDED: ProjectView[] = emptyScreen ? [] : oneProject ? [SPOO] : [SPOO, WSP, LANDING];
+/** On a settings screen spoo carries what its own page reads: the branch a workspace starts on, the last agent and
+ * what the seed carried. */
+const SPOO_RECORDED: ProjectView = settings ? { ...SPOO, base: "main", lastAgent: "claude", seeded: { files: 412, bytes: 3_250_000, memory: "landed", memoryFiles: 3, commits: 9, at: AT } } : SPOO;
+const RECORDED: ProjectView[] = emptyScreen ? [] : oneProject ? [SPOO] : [SPOO_RECORDED, WSP, LANDING];
 
 /** The workspaces this screen's store holds, which is also what the fake host answers with: a bind that answered
  * something else would paint over the record the screen is about. */
@@ -299,7 +352,7 @@ const api = {
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
   listHarnesses: async () => [],
   initGet: async () => ({
-    keys: { solari: manyComputers },
+    keys: { solari: settings },
     home: "/Users/dev",
     agents:
       screen === "first-run-no-agent"
@@ -321,14 +374,21 @@ const api = {
   // The one road Bring back takes; the screen about a wsp whose host carries no such request has none.
   ...(screen === "bring-back-roadless" ? {} : { bringBack: async () => ({ branch: "agent/stripe-import", base: "main", ahead: 1, uncommitted: 0, stat: [] }) }),
   daemon: { open: () => () => {} },
-  spend: async () => [],
-  image: async () => ({ image: null, copies: [] }),
+  spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
+  image: async () => (settings ? { image: IMAGE, copies: IMAGE_COPIES, projects: [] } : { image: null, copies: [], projects: [] }),
   hostTerminalConfig: async () => ({ files: [] }),
+  account: async () => ({ signedIn: false }),
+  devicesList: async () => DEVICES,
+  devicesRevoke: async () => {},
+  // A dial that answers, so a computer's page draws Try now beside when it last answered.
+  dialPlace: async (placeId: string) => {
+    const place = computers.find(row => row.id === placeId)!;
+    return { dialled: { at: new Date().toISOString(), answered: true, roundTripMs: 41 }, line: `${place.name} answered in 41 ms.`, place };
+  },
   // The one road the sheet runs: it reports each step in the protocol's own words for it, the way the client does,
   // so no line on the plan says one thing before Add and another after. On the refused screen it answers with
   // ssh's own line instead, which lands in the slot under the field.
   addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
-    if (screen === "add-computer-refused") throw new Error("ssh refused the login (publickey).");
     onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
     onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
     onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
@@ -337,36 +397,45 @@ const api = {
 } as unknown as Api;
 
 // The desktop shell's bridge, on the one screen about the foot: the hosts this window can move between, which is
-// what draws the row naming the computer it is on. Every other screen is a browser tab and draws no foot row.
+// what draws the row naming the computer it is on. Every other screen is a browser tab and draws no foot row,
+// except the two settings screens that read the shell's half: the chords a tab keeps for itself and the app's version.
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
+}
+if (screen === "settings-keybindings" || screen === "settings-about") {
+  window.wsp = { version: "0.2.0" };
+  (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.2.0" };
 }
 
 // The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
 const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
 const sidebarWidth = params.get("sidebar");
+// The page Settings opens on, as this window would remember it, and the one screen with text in the field.
+if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "width" : "" });
 useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
-  preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}) },
+  preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: ["add-computer", "add-computer-run", "add-computer-refused"].includes(screen),
+  addComputerOpen: screen === "settings-add-computer",
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},
   sessions: drawsSidebar ? HELD_SESSIONS : {},
-  selectedId: null,
+  // The screen about Settings over a workspace's panel has that workspace selected; every other opens on none.
+  selectedId: screen === "settings-over-panel" ? "ws_copy" : null,
   selectedThreadId: null,
 } as never);
 useStore.getState().bind(api);
 // A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
 // sidebar and the creation view are what these shots are of, so the panel on every workspace a screen can select
-// is shut before the first paint.
+// is shut before the first paint, except on the one screen about the panel coming back after Settings.
 const shutPanel = { isOpen: false, activeSurfaceId: null, surfaces: [] };
-useRightPanelStore.setState({ byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, shutPanel])) });
+const openPanel = { isOpen: true, activeSurfaceId: "browser:new", surfaces: [{ id: "browser:new" as const, kind: "preview" as const, resourceId: null }] };
+useRightPanelStore.setState({ byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : shutPanel])) });
 
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
@@ -388,9 +457,22 @@ const creation = {
   ],
 };
 
+/** The app's own theme rule, mounted on the settings screens so the Theme row's pick moves the page it stands on. */
+function ThemeRule() {
+  useThemeEffect();
+  return null;
+}
+
 function Centre() {
   if (screen === "creating") return <WorkspaceCreation creation={creation as never} />;
-  if (settings) return <SettingsPage />;
+  if (settings) {
+    return (
+      <>
+        <ThemeRule />
+        <SettingsPage />
+      </>
+    );
+  }
   // With no project the first run is the whole centre, as the app draws it, beside the sidebar's one row.
   if (emptyScreen) return <FirstRun />;
   return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">center content</div>;
@@ -460,15 +542,8 @@ setTimeout(() => {
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, composed: true, clientX: Math.round(box.left + 80), clientY: Math.round(box.top + 20) }));
     }, 120);
   }
-  if (screen === "computers-open") clickWhenThere('[data-place-row="p_spoo"]');
-  if (screen === "computers-failed") clickWhenThere('[data-place-row="p_lab"]');
-  if (screen === "computers-here") clickWhenThere('[data-place-row="here"]');
   // The thread three deep, whose row is the lifted one on the filtered screen, and the switcher's menu.
   if (screen === "sidebar-picked") clickWhenThere("[data-row-id='thread:th_review']");
   if (screen === "switcher-open") clickWhenThere("[data-k=project-switcher]");
-  if (screen === "remove-computer") clickWhenThere('[data-place-row="p_spoo"]', () => clickWhenThere('[data-k="place-detail"] [data-k="remove"]'));
-  if (screen === "add-computer-run" || screen === "add-computer-refused") {
-    typed("login", "root@spoo");
-    setTimeout(() => document.querySelector<HTMLButtonElement>("[data-k=ssh-add]")?.click(), 60);
-  }
+  if (screen === "settings-remove-computer") clickWhenThere('[data-settings-page] [data-k="remove"]');
 }, 400);

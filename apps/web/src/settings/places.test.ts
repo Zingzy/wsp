@@ -210,10 +210,10 @@ describe("which rows the Computers table draws", () => {
     };
     const place: PlaceView = { ...hetzner, name: "spoo", agents: ["claude", "codex", "cursor"], provision };
     expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "installed", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude" },
-      { id: "codex", name: "Codex", state: "already there", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+      { id: "claude", name: "Claude Code", state: "installed" },
+      { id: "codex", name: "Codex", state: "already there" },
       // An agent the job carried no row for is what the computer said it found, and no more.
-      { id: "cursor", name: "cursor", state: "found", held: "Sign in from a terminal for now: wsp add spoo --sign-in cursor" },
+      { id: "cursor", name: "cursor", state: "found" },
     ]);
     // The tool rows are counted in the row's own state slot, not listed here; the person's own files and the
     // servers written into their agents' configs are.
@@ -233,8 +233,8 @@ describe("which rows the Computers table draws", () => {
       signIns: { claude: "vault-key", codex: "none" },
     };
     expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude", signedIn: true },
-      { id: "codex", name: "Codex", state: "0.153.0 · not signed in", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", signedIn: true },
+      { id: "codex", name: "Codex", state: "0.153.0 · not signed in" },
     ]);
     // A sign-in on the computer itself reads as one, and a recipe row that installed the agent adds nothing the
     // line does not already say.
