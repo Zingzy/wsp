@@ -11,7 +11,7 @@ import { admissionsByClient, clientOf, clientsOf, deleteClient, insertAdmission,
 import { clientFor, signedByBearer } from "./hosts.js";
 import { newId } from "./ids.js";
 import type { Ctx } from "./index.js";
-import { SIGN_OUT_STAMP, accountPage, carriesBearer, signedIn } from "./link.js";
+import { SIGN_OUT_STAMP, carriesBearer, signedIn, toSignIn } from "./link.js";
 import { refuse } from "./refusal.js";
 import { readStamp } from "./tokens.js";
 
@@ -56,13 +56,15 @@ export async function clientDelete(ctx: Ctx): Promise<Response> {
 export async function clientSignOut(ctx: Ctx): Promise<Response> {
   if (carriesBearer(ctx.req)) throw refuse(400, "this is the page's sign-out, which takes the browser's sign-in and no token; with a token, wsp logout <id> signs a computer out");
   const who = await signedIn(ctx);
-  if (who === undefined) throw refuse(401, `sign in first: open ${ctx.url.origin}/link/verify`);
+  // The stamp is bound to the account, not the session, so the same form still stands once the sign-in lands.
+  if (who === undefined) return toSignIn(ctx);
   const id = ctx.params["id"]!;
   const stamped = await readStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_OUT_STAMP, new URLSearchParams(await bodyText(ctx)).get("stamp") ?? undefined, ctx.deps.now(), who.id);
   if (stamped !== id) throw refuse(403, `that form did not come from this relay's page, or it is older than fifteen minutes; open ${ctx.url.origin}/link/verify again`);
   const row = await clientOn(ctx, who.id);
   await deleteClient(ctx.env, row.id);
-  return accountPage(ctx, who);
+  // Back to the page's own address, so a reload reads the list rather than posting a spent stamp.
+  return new Response(null, { status: 303, headers: { location: "/link/verify" } });
 }
 
 /** An admission for a computer already on the account, which signed in on the page and was admitted by nobody, or

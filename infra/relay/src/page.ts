@@ -37,7 +37,8 @@ input[type=text] { background: #18181b; color: #e4e4e7; border: 1px solid #27272
 <body><main>${body}</main></body>
 </html>
 `;
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+  // No box under the zone may frame a page and click through it with the account's cookie, which rides same-site.
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "frame-ancestors 'none'" } });
 }
 
 /** What the person reads before they let a box, or one of their own computers, onto their account. The two say
@@ -52,7 +53,7 @@ export function approvePage(name: string, login: string, code: string, stamp: st
     kind === "host"
       ? `<p>The relay learns where this computer answers and nothing else: it never holds a pairing code, a device token or anything your agents say.</p>`
       : `<p>This computer will hold a token that can <b>list every box on this account, take any of them off it and put one on</b>, tunnel and hostname included. It cannot open a box: that takes an approval from a computer already in, <b>wsp login &lt;word&gt;</b> there, and approving here signs it in without one.</p>
-<p>The sign-in stands for 30 days, and you can take it away sooner with <b>wsp logout &lt;id&gt;</b>.</p>`;
+<p>The sign-in stands for 30 days, and you can take it away sooner with <b>wsp logout &lt;id&gt;</b>, or from this page.</p>`;
   return page(
     title,
     `<h1>${heading}</h1>

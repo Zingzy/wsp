@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { mintStamp, readToken } from "../src/tokens.js";
+import { SESSION_COOKIE, mintStamp, readToken } from "../src/tokens.js";
 import { RELAY_ORIGIN, fakeAdmission, fingerprintFor, firstCookie, linkedVia, relayHarness, signIn, typeCode, type RelayHarness } from "./relay.js";
 
 /** A start, from an address of its own where the case makes several: the relay counts its caps per source, and a
@@ -798,6 +798,7 @@ describe("the page signs a computer out, and admits nobody", () => {
 
     const page = await relay.fetch("/link/verify", { headers: { cookie: mac.cookie } });
     expect(page.status).toBe(200);
+    expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     const html = await page.text();
     expect(html).toContain('name="code"');
     for (const one of [mac, desk]) {
@@ -809,11 +810,14 @@ describe("the page signs a computer out, and admits nobody", () => {
     expect(html).toContain("the desk");
     expect(html).not.toContain(sam.id);
 
-    // The desk lost its client file, so its token is gone with it; the browser signs it out.
+    // The desk lost its client file, so its token is gone with it; the browser signs it out and lands back on the
+    // page's own address, so a reload reads the list and posts no spent stamp.
     const out = await signOut(relay, desk.id, signOutStamp(html, desk.id), { cookie: mac.cookie });
-    expect(out.status).toBe(200);
-    expect(out.headers.get("content-type")).toContain("text/html");
-    const after = await out.text();
+    expect(out.status).toBe(303);
+    expect(out.headers.get("location")).toBe("/link/verify");
+    const reloaded = await relay.fetch(out.headers.get("location")!, { headers: { cookie: mac.cookie } });
+    expect(reloaded.status).toBe(200);
+    const after = await reloaded.text();
     expect(after).toContain(mac.id);
     expect(after).not.toContain(desk.id);
     expect((await relay.db.prepare("SELECT id FROM clients WHERE account_id = ?").bind(await accountId(relay, "maya")).all()).results).toEqual([{ id: mac.id }]);
@@ -850,7 +854,6 @@ describe("the page signs a computer out, and admits nobody", () => {
       ["a stamp minted for another account", () => signOut(relay, desk.id, samsStamp, { cookie: sam.cookie }), 403],
       ["a stamp for another computer", () => signOut(relay, desk.id, signOutStamp(mine, mac.id), { cookie: mac.cookie }), 403],
       ["an approve stamp", () => signOut(relay, desk.id, approveStamp, { cookie: mac.cookie }), 403],
-      ["no session", () => signOut(relay, desk.id, deskStamp, {}), 401],
       ["a bearer", () => signOut(relay, desk.id, deskStamp, { cookie: mac.cookie, authorization: `Bearer ${mac.token}` }), 400],
     ];
     for (const [what, send, status] of tries) {
@@ -859,6 +862,20 @@ describe("the page signs a computer out, and admits nobody", () => {
       expect(await count(relay, "clients"), what).toBe(3);
       expect(await count(relay, "admissions"), what).toBe(1);
     }
+
+    // With no session the browser goes to sign in, as the code form's post does, and signs nothing out. The stamp is
+    // bound to the account, so once the sign-in lands the same form signs the desk out.
+    const unsigned = await signOut(relay, desk.id, deskStamp, {});
+    expect(unsigned.status).toBe(302);
+    const toGitHub = new URL(unsigned.headers.get("location") ?? "");
+    expect(toGitHub.origin).toBe("https://github.com");
+    expect(await count(relay, "clients")).toBe(3);
+    relay.answer("POST https://github.com/login/oauth/access_token", { access_token: "gho_fake", token_type: "bearer" });
+    relay.answer("GET https://api.github.com/user", { id: "4242", login: "maya" });
+    const back = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(toGitHub.searchParams.get("state") ?? "")}`, { headers: { cookie: firstCookie(unsigned) } });
+    expect(back.headers.get("location")).toBe("/link/verify");
+    expect((await signOut(relay, desk.id, deskStamp, { cookie: firstCookie(back, SESSION_COOKIE) })).status).toBe(303);
+    expect((await relay.db.prepare("SELECT id FROM clients WHERE id = ?").bind(desk.id).first())).toBeNull();
 
     // A sign-out stamp is no approval: minted for a code, it approves nothing.
     const code = (await (await startFrom(relay, "client", "the laptop", "10.0.0.2")).json()) as { code: string; pollToken: string };
@@ -875,14 +892,16 @@ describe("the page signs a computer out, and admits nobody", () => {
     const relay = await relayHarness();
     const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
 
-    const signedOut = await relay.fetch(`/clients/${mac.id}/signout`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "stamp=x" });
-    expect(signedOut.status).toBe(401);
-    expect(signedOut.headers.get("content-type")).toContain("text/html");
-    expect(await signedOut.text()).toContain("sign in first");
+    const forged = await relay.fetch(`/clients/${mac.id}/signout`, { method: "POST", headers: { cookie: mac.cookie, "content-type": "application/x-www-form-urlencoded" }, body: "stamp=x" });
+    expect(forged.status).toBe(403);
+    expect(forged.headers.get("content-type")).toContain("text/html");
+    expect(forged.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(await forged.text()).toContain("that form did not come from this relay");
 
     const callback = await relay.fetch("/link/callback?code=gh_code&state=forged");
     expect(callback.status).toBe(400);
     expect(callback.headers.get("content-type")).toContain("text/html");
+    expect(callback.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     expect(await callback.text()).toContain("that sign-in did not start in this browser");
 
     const polled = await poll(relay, "no-such-token");
