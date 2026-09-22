@@ -18,7 +18,7 @@ import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { startRefusingDoor, type RefusingDoor } from "./refusing-door.js";
-import { stubBackend, tokenGuest, type StubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, tokenGuest, type StubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -244,6 +244,7 @@ describe("who may open a channel", () => {
       rootsPath: join(localRoot, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
       daemonRoad: async () => road,
     };
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local });

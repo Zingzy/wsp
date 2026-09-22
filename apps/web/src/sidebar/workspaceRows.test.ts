@@ -25,7 +25,7 @@ const row = (over: Partial<WorkspaceView>): Pick<SidebarProjectSnapshot, "worksp
 
 describe("what a workspace row says it is made of", () => {
   it("joins the copy word, the computer where it is not this one, and the ports word, all off the protocol's table", () => {
-    expect(madeOfLine({ project: row({ copy: copy({ road: "in-place" }) }), landing: SHARES, computer: null })).toBe("in this folder · shares this Mac's ports");
+    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null })).toBe("a copy · shares this Mac's ports");
     expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null })).toBe("a copy · shares this Mac's ports, PORT 3100");
     expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo" })).toBe("a copy · spoo · own network");
   });

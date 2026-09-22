@@ -5,10 +5,11 @@ import { createServer, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } from "@wsp/host";
+import { localWiring, localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
+import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
 import { hostTokenMatches, locateHost, openHost, probeHost, statePathIn, type HostSession } from "../src/host-lifecycle.js";
 import { checkSetup } from "../src/setup.js";
 
@@ -229,7 +230,8 @@ describe("openHost", () => {
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     const statePath = join(home, "state.json");
-    const recorded = makeRuntime({}, statePath);
+    // The copy road alone is faked: every workspace here is a copy, and this checkout stages no daemon binary.
+    const recorded = makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake()));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-lifecycle-")));
     execFileSync("git", ["init", "-q", folder]);
     const project = await recorded.projects.add({ source: folder, name: "thisbox" });
@@ -242,7 +244,7 @@ describe("openHost", () => {
     session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(), ...(state.ready ? { runtime: state.runtime } : {}) });
     expect(session.owned).toBe(true);
     expect((await bootOf(session.url))?.token).toMatch(/^[A-Za-z0-9_-]{32}$/);
-    // The workspace is this computer, so the folder its turns start in is here.
+    // The workspace is a copy of a folder on this computer, so the folder its commands start in is here.
     expect(existsSync(localWorkFolder(home))).toBe(true);
   });
 

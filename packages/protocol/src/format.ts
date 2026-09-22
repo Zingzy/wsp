@@ -2323,9 +2323,9 @@ export function initAgentNoRecipeLine(recipePath: string, reason?: string): stri
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
 
-/** The one sentence for the local workspace a run just recorded: wsp init's last tick and a host asked to serve a
- * state with nothing in it both say it, so this computer is named the same way whichever road wrote the record. */
-export const thisComputerLine = (name: string, id: string): string => `Workspace ${name} (${id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
+/** The one sentence for the local workspace a run just recorded: wsp init's last tick says it, so what a workspace
+ * here is, a copy of the person's folder on this computer, is named the same way whichever road wrote the record. */
+export const thisComputerLine = (name: string, id: string, folder: string): string => `Workspace ${name} (${id}) is a copy of ${folder} on ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
 
 /** What an ssh workspace's computer is, in every sentence and every row that names it: a computer of the person's
  * own that wsp reaches and never runs. The sidebar row prints it on line two, so it is a person's words. */
@@ -2357,18 +2357,21 @@ export function isMacMachine(osName: string | null | undefined): boolean {
  * screen that names this computer uses, so a table and the settings list cannot call one computer two things. */
 export const computerWord = (os: string | null | undefined): string => thisComputer(isMacMachine(os) ? "darwin" : "linux");
 
-/** What a workspace's copy of its project is, in the words a person uses for it: the folder itself worked where it
- * sits, or a copy of it. A directory clone and a git worktree are two roads to the one thing a person reads, so
- * both read the same; which road was taken, and why one was passed over, rides the row's hover text. The one home
- * for the word, so a row in the app and a cell in the command line's table cannot say two things about one
- * workspace. */
-export const madeOfWord = (road: CopyRoad): string => (road === "in-place" ? "in this folder" : "a copy");
+/** What a workspace's copy of its project is, in the words a person uses for it: a copy of the folder. The one home
+ * for the word, read by the first-run screen before any road is taken and by every row after. */
+export const COPY_WORD = "a copy";
 
-/** The road the first piece of work on a project on the computer the host runs on takes: the folder itself, worked
- * where it sits. One home for that default, read by the runtime where it records that first workspace and by the
- * first-run screen to say what the work will be, so the day the ruling on it makes the first workspace a copy the
- * word follows on every screen without one of them writing a road of its own. */
-export const FIRST_WORKSPACE_ROAD: CopyRoad = "in-place";
+/** The word for what a workspace made by this road is. A directory clone and a git worktree are two roads to the
+ * one thing a person reads, so both read the same; which road was taken, and why one was passed over, rides the
+ * row's hover text. The one home for the word, so a row in the app and a cell in the command line's table cannot
+ * say two things about one workspace. */
+export const madeOfWord = (_road: CopyRoad): string => COPY_WORD;
+
+/** The one sentence a host logs for a record of a folder worked in place, which no host writes any more: the record
+ * is not served, the host starts with the rest, and the sentence names the workspace, the folder and the fix, since
+ * nobody reads the old shape and the owner ruled no migration. */
+export const inPlaceRecordLine = (workspaceId: string, folder: string): string =>
+  `workspace ${workspaceId} was recorded as ${folder} worked in place, and every workspace here is a copy now: it is not served, wsp new "<what you are working on>" makes a copy of the project, and the record goes when the state file is moved aside`;
 
 /** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
  * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
@@ -2401,12 +2404,12 @@ export function relayedRefusal(name: string): string {
   return `${name} is ${THIS_COMPUTER}; it answers only requests from ${THIS_COMPUTER}, never one relayed from a machine`;
 }
 
-/** The one sentence a computer the person paired with this host reads when it would start a process on one of this
- * computer's own workspaces. A command, a thread and a shell pane there all run under the person's own login on
- * this computer and read every file it holds, which is the one thing a device paired from somewhere else cannot
- * ask for; reading, listing and everything else that computer does here is unchanged. */
-export function pairedRunRefusal(name: string): string {
-  return `${name} is ${THIS_COMPUTER}; a computer paired with this host reads it but starts no process on it`;
+/** The one sentence a computer the person paired with this host is refused an op with, at the socket and on the
+ * JSON routes alike. It names the op and not a reason: the door is shut until the person gives the device a role,
+ * and what the device may still do is the list the door reads, listing, reading, watching and managing wsp's own
+ * machines and records. */
+export function deviceHeldRefusal(op: string): string {
+  return `${op} is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on`;
 }
 
 /** The one sentence a request relayed from a machine is refused with when it would record a machine that already

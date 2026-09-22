@@ -44,7 +44,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
-import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -122,6 +122,7 @@ describe("agents spawning agents", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {
@@ -1025,7 +1026,7 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a notify target is a thread the caller drives: its own child passes, its parent, its sibling and the person's do not", async () => {
+  it("a notify target is a thread of the caller's tree: its parent, its sibling and its child pass, and the person's does not", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 3 } });
@@ -1045,14 +1046,12 @@ describe("agents spawning agents", () => {
 
     const rows = async (): Promise<number> => (await rt.sessions.list(ws.id)).length;
     const before = await rows();
-    // A target is a thread this caller drives: the lead that opened it, a thread beside it under the same root and
-    // the person's own thread are none of them under it, so each reads as no thread to notify.
-    for (const target of [rootThread, siblingThread, mineThread]) {
-      await expect(rt.sessions.start(ws.id, { prompt: "out", notify: [target] }, asThread(childScope))).rejects.toThrow(`no thread ${target} to notify`);
-    }
+    // A target is a thread of this caller's tree, and the person's own thread beside it is of another: it alone
+    // reads as no thread to notify.
+    await expect(rt.sessions.start(ws.id, { prompt: "out", notify: [mineThread] }, asThread(childScope))).rejects.toThrow(`no thread ${mineThread} to notify`);
     expect(await rows()).toBe(before);
-    // What it drives it may name: its own child, and a thread further down its own tree.
-    const kid = await rt.sessions.start(ws.id, { prompt: "kid", notify: [grandThread] }, asThread(childScope));
+    // The lead that opened it, a thread beside it under the same root and a thread further down its own tree all pass.
+    const kid = await rt.sessions.start(ws.id, { prompt: "kid", notify: [rootThread, siblingThread, grandThread] }, asThread(childScope));
     expect(kid.view().threadId).toBeDefined();
     for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
     await rt.close();
@@ -1244,6 +1243,121 @@ describe("agents spawning agents", () => {
       await handle.finished;
       await rt.close();
     }
+  });
+
+  it("a child on the copy its lead forked reaches the lead on the workspace the person made, on every session verb, and the lead reaches it back", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const copy = await createOn(rt, { name: "builder" }, asThread(rootScope));
+    const child = await rt.sessions.start(copy.id, { prompt: "child" }, asThread(rootScope));
+    const childThread = child.view().threadId!;
+    const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: copy.id, rootThreadId: rootThread };
+
+    // The lead's workspace is outside the child's own workspace tree, and the lead's thread is inside its thread
+    // tree: the row is what the session verbs read, so the lead is reached and its workspace stays out of reach.
+    expect((await rt.sessions.list(ws.id, asThread(childScope))).map(v => v.threadId)).toEqual([rootThread]);
+    expect((await rt.sessions.list(undefined, asThread(childScope))).map(v => v.threadId).sort()).toEqual([rootThread, childThread].sort());
+    expect([...new Set((await rt.sessions.history(ws.id, asThread(childScope))).map(e => e.threadId))]).toEqual([rootThread]);
+    expect(await rt.sessions.steer(opener.id, { prompt: "and this" }, asThread(childScope))).toEqual({ outcome: "unsupported" });
+    expect(await rt.sessions.rename(opener.id, "the lead", asThread(childScope))).toEqual({ outcome: "unsupported" });
+    expect((await rt.sessions.interrupt(opener.id, asThread(childScope))).outcome).toBe("accepted");
+    // A send into the lead lands on the lead's thread, which is how a builder reports into the thread that started it.
+    const report = await rt.sessions.start(ws.id, { prompt: "done", thread: rootThread }, asThread(childScope));
+    expect(report.view().threadId).toBe(rootThread);
+    expect(report.view().workspaceId).toBe(ws.id);
+    // And the lead reaches the child on the copy the same way, as it did before.
+    const steer = await rt.sessions.start(copy.id, { prompt: "more", thread: childThread }, asThread(rootScope));
+    expect(steer.view().threadId).toBe(childThread);
+    expect([...new Set((await rt.sessions.list(copy.id, asThread(rootScope))).map(v => v.threadId))]).toEqual([childThread]);
+    expect((await rt.sessions.interrupt(steer.id, asThread(rootScope))).outcome).toBe("accepted");
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
+  it("the child's reach into its lead's workspace is the thread alone: the workspace verbs, the person's thread and another lead's tree all read as absent", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const mine = await rt.sessions.start(ws.id, { prompt: "the person's own" });
+    const mineThread = mine.view().threadId!;
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const other = await rt.sessions.start(ws.id, { prompt: "second lead" });
+    const otherThread = other.view().threadId!;
+    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const copy = await createOn(rt, { name: "builder" }, asThread(rootScope));
+    const child = await rt.sessions.start(copy.id, { prompt: "child" }, asThread(rootScope));
+    const childScope: ThreadScope = { kind: "thread", threadId: child.view().threadId!, workspaceId: copy.id, rootThreadId: rootThread };
+
+    // The workspace the lead runs on is not the child's: every workspace verb reads it as a workspace that is not there.
+    await expect(rt.workspaces.get(ws.id, asThread(childScope))).rejects.toThrow(noWorkspaceRefusal());
+    await expect(rt.workspaces.execStream(ws.id, ["true"], undefined, asThread(childScope))).rejects.toThrow(noWorkspaceRefusal());
+    await expect(rt.workspaces.wake(ws.id, asThread(childScope))).rejects.toThrow(noWorkspaceRefusal());
+    expect((await rt.workspaces.list(asThread(childScope))).map(w => w.id)).toEqual([copy.id]);
+    // A thread of another tree on that workspace reads as no thread, the person's own and a second lead's alike.
+    for (const [row, threadId] of [[mine, mineThread], [other, otherThread]] as const) {
+      await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: threadId }, asThread(childScope))).rejects.toThrow(`no thread ${threadId} on this workspace`);
+      expect(await rt.sessions.interrupt(row.id, asThread(childScope))).toEqual({ outcome: "not-found" });
+      expect(await rt.sessions.steer(row.id, { prompt: "x" }, asThread(childScope))).toEqual({ outcome: "not-found" });
+      expect(await rt.sessions.rename(row.id, "x", asThread(childScope))).toEqual({ outcome: "not-found" });
+    }
+    // A workspace none of its tree stands on reads as absent to the listing and the transcript too.
+    const elsewhere = await createOn(rt, { golden: "snap_g", name: "elsewhere" });
+    await rt.sessions.start(elsewhere.id, { prompt: "not yours" });
+    await expect(rt.sessions.list(elsewhere.id, asThread(childScope))).rejects.toThrow(noWorkspaceRefusal());
+    await expect(rt.sessions.history(elsewhere.id, asThread(childScope))).rejects.toThrow(noWorkspaceRefusal());
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
+  it("two children of one lead send into and steer each other", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const copy = await createOn(rt, { name: "builder" }, asThread(rootScope));
+    const a = await rt.sessions.start(ws.id, { prompt: "a" }, asThread(rootScope));
+    const b = await rt.sessions.start(copy.id, { prompt: "b" }, asThread(rootScope));
+    const aThread = a.view().threadId!;
+    const bThread = b.view().threadId!;
+    const aScope: ThreadScope = { kind: "thread", threadId: aThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const bScope: ThreadScope = { kind: "thread", threadId: bThread, workspaceId: copy.id, rootThreadId: rootThread };
+    // Siblings share the tree, so each reaches the other, across the two workspaces they run on.
+    expect(await rt.sessions.steer(b.id, { prompt: "from a" }, asThread(aScope))).toEqual({ outcome: "unsupported" });
+    expect(await rt.sessions.steer(a.id, { prompt: "from b" }, asThread(bScope))).toEqual({ outcome: "unsupported" });
+    held.end(held.launches.length - 1);
+    held.end(held.launches.length - 2);
+    await a.finished;
+    await b.finished;
+    expect((await rt.sessions.start(copy.id, { prompt: "a to b", thread: bThread }, asThread(aScope))).view().threadId).toBe(bThread);
+    expect((await rt.sessions.start(ws.id, { prompt: "b to a", thread: aThread }, asThread(bScope))).view().threadId).toBe(aThread);
+    expect([...new Set((await rt.sessions.list(undefined, asThread(aScope))).map(v => v.threadId))].sort()).toEqual([rootThread, aThread, bThread].sort());
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
+  it("a child that stops its lead stops the whole tree, its sibling and itself included, and the answer names them", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const child = await rt.sessions.start(ws.id, { prompt: "child" }, asThread(rootScope));
+    const sibling = await rt.sessions.start(ws.id, { prompt: "sibling" }, asThread(rootScope));
+    const childThread = child.view().threadId!;
+    const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const stopped = await rt.sessions.interrupt(opener.id, asThread(childScope));
+    expect(stopped.outcome).toBe("accepted");
+    expect([...(stopped.under ?? [])].sort()).toEqual([childThread, sibling.view().threadId!].sort());
+    expect((await rt.sessions.list(ws.id)).every(v => v.status !== "running")).toBe(true);
+    await rt.close();
   });
 
   it("stopping a root ends every thread its agents spawned under it", async () => {

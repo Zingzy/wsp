@@ -15,7 +15,7 @@ import { createRuntime } from "../src/runtime.js";
 import { secretsOf } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend, createOn, tempRepo, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, tempRepo, testPlatform } from "./stub-backend.js";
 import type { TurnResult } from "@wsp/protocol";
 
 /** A folder with a first commit in it, which is what a project on this computer is made of. */
@@ -82,6 +82,7 @@ describe("the vault a turn launches with", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, local });
     const folder = repoAt();

@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
@@ -526,6 +526,24 @@ describe("runtime session history", () => {
     expect(earlier).toEqual([{ type: "session.start", workspaceId: ws.id, sessionId: "old", prompt: "old" }]);
     expect((await rt.sessions.history(ws.id))[0]!.threadId).toMatch(UUID);
     await rt.close();
+  });
+
+  it("a resume into a transcript written before threads stamps nothing when the caller may not reach the workspace", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const setup = createRuntime({ backend, store, adapters: {} });
+    const a = await createOn(setup, { golden: "snap_g", name: "a" });
+    const b = await createOn(setup, { golden: "snap_g", name: "b" });
+    await setup.close();
+    await store.put("transcripts", b.id, { workspaceId: b.id, events: [{ type: "session.start", workspaceId: b.id, sessionId: "old-b", prompt: "old" }] });
+    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
+    // A thread on another workspace names the old session: refused, and the transcript is as it was, in memory
+    // and in the store, since the rule is read before anything is written.
+    const by: ThreadScope = { kind: "thread", threadId: "t_a", workspaceId: a.id, rootThreadId: "t_a" };
+    await expect(rt.sessions.start(b.id, { prompt: "more", resume: "old-b" }, { origin: "relayed", by })).rejects.toThrow();
+    expect((await rt.sessions.history(b.id))[0]!.threadId).toBeUndefined();
+    await rt.close();
+    expect(((await store.get("transcripts", b.id)) as { events: { threadId?: string }[] }).events[0]!.threadId).toBeUndefined();
   });
 
   it("sessions.history over the socket carries the threadId", async () => {

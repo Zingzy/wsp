@@ -7,9 +7,17 @@ import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { AdapterEvent, Caller, PermissionAsk, PermissionOutcome, ProjectView, SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { CreatedWorkspace, HarnessAdapterFactory, HarnessStartOptions, ProjectBundler, Runtime } from "@wsp/runtime";
-import type { CliIO } from "../src/cli.js";
+import { DAEMON_VERSION } from "@wsp/protocol";
+import type { CliIO, LocalDaemonStart } from "../src/cli.js";
 import type { StubBackend } from "./stub-backend.js";
-import { createOn as createOnRuntime, projectOn as projectOnRuntime, type CreateOn } from "../../runtime/test/stub-backend.js";
+import { copyingFake, createOn as createOnRuntime, projectOn as projectOnRuntime, type CreateOn } from "../../runtime/test/stub-backend.js";
+
+export { copyingFake };
+
+/** The daemon beside this host as a test wires it: never spawned, answering the version this wsp needs, so the copy
+ * road's version read passes and no binary is looked for. A test that wants the real one stages it and wires none. */
+export const fakeDaemonStart: LocalDaemonStart = async () =>
+  ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} }) as unknown as Awaited<ReturnType<LocalDaemonStart>>;
 
 export const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
