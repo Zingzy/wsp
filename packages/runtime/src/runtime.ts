@@ -5085,10 +5085,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return await createStaged(o, await startedFrom(project, parent), id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
-        // will not part with keeps its record instead, since a machine nobody records bills unseen. Which of the
-        // two it is, is read off the provider and never off the delete answering: a DELETE Solari takes and does
-        // not act on left the machine running with no record naming it, and the record is dropped only once the
-        // provider says the machine is gone.
+        // will not part with keeps its record instead, since a machine nobody records bills unseen.
         const entry = live.get(id);
         let kept: LiveWorkspace | undefined;
         if (entry !== undefined) {
