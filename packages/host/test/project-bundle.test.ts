@@ -35,7 +35,8 @@ function put(root: string, rel: string, content: string | Buffer, mode?: number)
   if (mode !== undefined) chmodSync(abs, mode);
 }
 
-const git = (root: string, ...args: string[]): string => execFileSync("git", ["-C", root, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } }).toString();
+// Maintenance and gc are off: either would run inside the fixture and leave a lock file of its own under .git.
+const git = (root: string, ...args: string[]): string => execFileSync("git", ["-C", root, "-c", "maintenance.auto=false", "-c", "gc.auto=0", ...args], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } }).toString();
 
 /** A repository with tracked source, committed build output, untracked notes, ignored state and every cache shape. */
 function fixture(): string {
@@ -336,6 +337,18 @@ describe("planProject", () => {
     expect(archived.sort()).toEqual([...planned, "outside-link", "up-link"].sort());
     for (const name of ["node_modules", "dist", "build", ".cache", "__pycache__", ".mypy_cache"]) expect(isCacheDir(name), name).toBe(true);
     for (const name of ["src", "notes.txt", "data.sqlite-wal", "caching.md", "MyCache", ".eslintcache", ".DS_Store"]) expect(isCacheDir(name), name).toBe(false);
+  });
+
+  it("git's own lock files stay behind, named under excluded", async () => {
+    const root = fixture();
+    put(root, ".git/index.lock", "");
+    put(root, ".git/objects/maintenance.lock", "");
+    const { plan, files } = await planProject(root, {});
+    const rels = files.map(f => f.rel);
+    for (const lock of [".git/index.lock", ".git/objects/maintenance.lock"]) {
+      expect(rels, lock).not.toContain(lock);
+      expect(plan.excluded, lock).toContain(lock);
+    }
   });
 
   it("Finder metadata stays behind at every level; sqlite journals travel", async () => {

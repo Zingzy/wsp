@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { copyPathFor, gitOnThisMacRefusal, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
+import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const REPO = "https://github.com/spoo-me/frontend.git";
 
@@ -207,6 +207,52 @@ describe("a workspace of a project", () => {
     await expect(rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" })).rejects.toThrow("fatal: could not read Username for 'https://github.com'");
     expect(backend.machines.every(m => m.killed)).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("a fork whose clone fails is gone from the provider even when the first delete does not take, and nothing is recorded", async () => {
+    const backend = stubBackend();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.includes("git clone") ? { exitCode: 128, stdout: "", stderr: "fatal: destination path '/root/x' already exists and is not an empty directory" } : plain(m, cmd));
+    // A provider that answers the delete and keeps the machine, which is what left failed forks running on the
+    // account: the second ask is what takes it away, so the road has to read the provider rather than the answer.
+    const made = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      const kill = m.kill.bind(m);
+      let asked = 0;
+      m.kill = async () => {
+        if (++asked > 1) await kill();
+      };
+      return m;
+    };
+    const { adapter } = recording();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local: fakeLocal(here()), killConfirm: { graceMs: 20, pollMs: 1 } });
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "x" });
+    await expect(rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" })).rejects.toThrow("already exists and is not an empty directory");
+    expect(await backend.list()).toEqual([]);
+    expect(backend.machines.every(m => m.killed)).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("a fork whose clone fails and whose machine the provider never parts with keeps a record naming that machine", async () => {
+    const backend = stubBackend();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.includes("git clone") ? { exitCode: 128, stdout: "", stderr: "fatal: destination path '/root/x' already exists and is not an empty directory" } : plain(m, cmd));
+    // A provider that answers every delete and keeps the machine running whatever is read back: the record is all
+    // that is left naming it, so it stays, since a machine nobody records bills unseen.
+    const made = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      m.kill = async () => {};
+      return m;
+    };
+    const { adapter } = recording();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local: fakeLocal(here()), killConfirm: { graceMs: 20, pollMs: 1 } });
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "x" });
+    await expect(rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" })).rejects.toThrow("already exists and is not an empty directory");
+    const kept = await rt.workspaces.list();
+    expect(kept.map(w => w.name)).toEqual(["work"]);
+    expect((await backend.list()).map(m => m.id)).toEqual([kept[0]!.machineId]);
   });
 
   it("takes none of the words a fork takes: the folder is the workspace, so from, size and engine are refused in one sentence", async () => {

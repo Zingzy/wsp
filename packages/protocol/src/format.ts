@@ -2489,6 +2489,15 @@ export function isObjectFrame(parsed: unknown): parsed is Record<string, unknown
  * since none could be read. */
 export const REQUEST_NOT_AN_OBJECT = "a request is one JSON object, not a bare value or an array";
 
+/** The most a JSON route reads off a request body, in bytes, and the one sentence a body past it is refused with:
+ * a stranger down a tunnel reaches those routes, so what they may hand a route is bounded before it is held. */
+export const REQUEST_BODY_MAX_BYTES = 64 * 1024;
+export const REQUEST_BODY_TOO_LARGE = `a request body is at most ${REQUEST_BODY_MAX_BYTES / 1024} KiB`;
+
+/** The one sentence a body that is no JSON at all is refused with. The parser's own words carry the offset it
+ * stopped at and the text around it, which is a stranger's request read back to them. */
+export const REQUEST_BODY_NOT_JSON = "a request body is JSON; this one did not parse";
+
 /** What a guest session is refused with when it asks for a kind this host serves no module for; its own words, since
  * a kind nobody built is not a token nobody holds. */
 export function guestNoKindLine(kind: string): string {
