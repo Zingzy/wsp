@@ -168,7 +168,8 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "max_depth", "max_machines", "model", "name", "notify", "size", "spawn", "task", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "images", "message", "model", "thread"]);
+    // No access among them: a thread's access is the thread's own and a message does not change it.
+    expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["detach", "effort", "images", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
@@ -636,7 +637,7 @@ describe("the MCP server over the host", () => {
     expect(spoo.path).toBe("/root/spoo");
   });
 
-  it("run, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
+  it("run and fork take model, effort and access, send the first two; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
     await call("new", { name: "alpha" });
     const picked = await call("run", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
     expect(picked.isError).toBe(false);
@@ -653,6 +654,11 @@ describe("the MCP server over the host", () => {
     const kept = await call("send", { thread: threadId, message: "go on" });
     expect(kept.isError).toBe(false);
     expect(claude.starts.at(-1)!.model).toBeUndefined();
+    // The send tool takes no access, so one named here is not read and the turn runs at the thread's own.
+    const own = claude.starts.at(-1)!.permissionMode;
+    const named = await call("send", { thread: threadId, message: "and now", access: "plan" });
+    expect(named.isError).toBe(false);
+    expect(claude.starts.at(-1)!.permissionMode).toBe(own);
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", model: "claude-sonnet-5", access: "bypassPermissions" });
     expect(forked.isError).toBe(false);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
@@ -661,7 +667,7 @@ describe("the MCP server over the host", () => {
     const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
     expect(refused.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.');
-    const mode = await call("send", { thread: threadId, message: "go", access: "yolo" });
+    const mode = await call("run", { workspace: "alpha", task: "go", access: "yolo" });
     expect(mode.isError).toBe(true);
     expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
     const minted = (await rt.workspaces.list()).map(w => w.name);

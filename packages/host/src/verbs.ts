@@ -756,9 +756,15 @@ export function takeCommon(argv: ReadonlyArray<string>): { common: string[]; res
   return { common, rest };
 }
 
-/** The model, effort and access mode flags, on every verb that starts a turn. */
+/** The model, effort and access mode flags, on every verb that opens a thread. */
 const PICK_FLAGS = ["model", "effort", "access"] as const;
-const PICK_OPTIONS: NonNullable<ParseArgsConfig["options"]> = Object.fromEntries(PICK_FLAGS.map(name => [name, { type: "string" }]));
+/** What a message into a thread that has run may name. Its access is not one: a thread's access is the thread's
+ * own, changed where the person changes it and never by a message, so the flag reads here as a flag this verb
+ * does not take rather than as a pick that is quietly dropped. */
+const SEND_FLAGS = ["model", "effort"] as const;
+const optionsFor = (names: readonly string[]): NonNullable<ParseArgsConfig["options"]> => Object.fromEntries(names.map(name => [name, { type: "string" }]));
+const PICK_OPTIONS = optionsFor(PICK_FLAGS);
+const SEND_OPTIONS = optionsFor(SEND_FLAGS);
 
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 export const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
@@ -2435,6 +2441,8 @@ const PICK_INPUTS = {
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
   access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
 };
+/** The same two on send, for the reason SEND_FLAGS gives. */
+const SEND_INPUTS = { model: PICK_INPUTS.model, effort: PICK_INPUTS.effort };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
 const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as");
@@ -3399,10 +3407,10 @@ export const VERBS: readonly Verb[] = [
   ...ANSWER_VERBS,
   {
     name: "send",
-    usage: 'wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"',
-    about: "a message to the thread, on a named model, effort or access, with images; a running turn keeps its own; --detach prints the id and returns",
+    usage: 'wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"',
+    about: "a message to the thread, on a named model or effort, with images; the thread keeps its own access and a running turn its own picks; --detach prints the id and returns",
     page: "front",
-    options: { ...PICK_OPTIONS, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    options: { ...SEND_OPTIONS, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message.", usageIs(ctx));
@@ -3417,8 +3425,8 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model, effort or access named here is the turn's; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
-      input: { thread: z.string(), message: z.string(), ...PICK_INPUTS, images: ImagesIn, detach: DetachIn },
+      description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
+      input: { thread: z.string(), message: z.string(), ...SEND_INPUTS, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
       call: async ({ thread: ref, message, images, detach, ...input }, deps) => {
         const client = await deps.client();

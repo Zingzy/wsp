@@ -13,7 +13,10 @@
 // at, so a send that touched no picker keeps that thread where it is: the
 // runtime runs a NEW thread on the model and the effort the catalog marks
 // when neither is picked, the same ones the pickers show; a context window
-// rides as a suffix on the model, so it brings the model along.
+// rides as a suffix on the model, so it brings the model along. Of what
+// comes out here, a send into a thread that has run carries the model and
+// the effort and leaves the agent and the access behind, those being that
+// thread's own off its rows (sendPicks).
 import { contextWindowsFor, effortsFor, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import { THREAD_SCOPED_PICKS, type ComposerOptions, type PickThreads } from "./composerOptionsStore";
 
@@ -79,11 +82,15 @@ export function runningPicks(session: SessionView | null, running: boolean): Com
  * read off this thread's own rows, the running turn included, or a second thread running in the same workspace would
  * paint this one's pickers with its model, effort and access. A thread keeps running on the model, the effort and
  * the access it was opened with, so those, and not the catalog's defaults, are what the pickers show once the turn
- * is over and what the send carries: a default filled in here moves the thread somewhere nobody asked for. */
-export function threadPicks(thread: { running: boolean; model: string | null }, rows: ReadonlyArray<SessionView>): ComposerOptions {
+ * is over and what the send carries: a default filled in here moves the thread somewhere nobody asked for. The
+ * access the transcript's record carries stands under the rows: an access pick moves the thread's latest row along
+ * with its record, so the row is the fresher of the two where there is one, and the record is what a thread whose
+ * rows fell off the runtime's cap still has. */
+export function threadPicks(thread: { running: boolean; model: string | null; permissionMode?: string | null }, rows: ReadonlyArray<SessionView>): ComposerOptions {
   const live = runningPicks(rows.at(-1) ?? null, thread.running);
   if (live.model !== undefined || thread.model === null) return live;
-  return { ...recordedPicks(rows), ...modelPicks(thread.model), ...live };
+  const recorded = thread.permissionMode ?? undefined;
+  return { ...(recorded !== undefined ? { permissionMode: recorded } : {}), ...recordedPicks(rows), ...modelPicks(thread.model), ...live };
 }
 
 /** The picks that apply to the thread in front of the person. Every pick a thread keeps for itself, the model and the

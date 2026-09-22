@@ -6,6 +6,7 @@
 // person keeps, and an access picked while a turn runs. The harness here is a
 // fake that raises the prompt on command, so nothing on a machine is needed
 // and the runtime's own bookkeeping is what is under test.
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,7 +50,8 @@ const ASK: PermissionAsk = {
 function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
   return () => ({
     steers: false,
-    start: ({ onEvent }) => {
+    start: ({ onEvent, resume }) => {
+      const session = resume ?? randomUUID();
       const open = new Map<string, PermissionAsk>();
       const answers: Turn["answers"] = [];
       let interrupted = false;
@@ -58,27 +60,27 @@ function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
         settle = () => {
           for (const askId of [...open.keys()]) {
             open.delete(askId);
-            onEvent({ type: "permission.close", sessionId: SESSION, askId, outcome: "cancelled" });
+            onEvent({ type: "permission.close", sessionId: session, askId, outcome: "cancelled" });
           }
           const result = interrupted ? ({ status: "interrupted" } as const) : ({ status: "completed", text: "done" } as const);
-          onEvent({ type: "turn.done", sessionId: SESSION, result });
-          onEvent({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+          onEvent({ type: "turn.done", sessionId: session, result });
+          onEvent({ type: "session.end", sessionId: session, exitCode: 0, sawResult: true });
           resolve(result);
         };
       });
-      onEvent({ type: "session.start", sessionId: SESSION, cwd: "/root" });
+      onEvent({ type: "session.start", sessionId: session, cwd: "/root" });
       turns.push({
         raise: overrides => {
           const ask = { ...ASK, ...overrides };
           open.set(ask.askId, ask);
-          onEvent({ type: "permission.ask", sessionId: SESSION, ask });
+          onEvent({ type: "permission.ask", sessionId: session, ask });
         },
         answers,
         reply: () => settle?.(),
         interrupted: () => interrupted,
       });
       return {
-        localId: SESSION,
+        localId: session,
         finished,
         interrupt: async () => {
           interrupted = true;
@@ -89,7 +91,7 @@ function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
           if (ask === undefined) return "gone";
           open.delete(askId);
           answers.push({ askId, ...o });
-          onEvent({ type: "permission.close", sessionId: SESSION, askId, outcome: o.outcome, optionId: o.optionId });
+          onEvent({ type: "permission.close", sessionId: session, askId, outcome: o.outcome, optionId: o.optionId });
           return "answered";
         },
       };
@@ -309,6 +311,33 @@ describe("a permission prompt relayed into the chat", () => {
     turn.reply();
     await handle.finished;
   });
+
+  it("a thread of another tree on the workspace is told not-found, as the interrupt tells it, and answers nothing; the asking thread answers", async () => {
+    const { handle, turn, workspaceId } = await started();
+    turn.raise();
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    // A second thread the person opened on the same workspace is its own root: the first thread is outside its tree.
+    const beside = await rt.sessions.start(workspaceId, { prompt: "beside it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    const besideThread = beside.view().threadId!;
+    const outside = { origin: "here", by: { kind: "thread", threadId: besideThread, workspaceId, rootThreadId: besideThread } } as const;
+    // The same absence the sibling verbs answer, before the workspace is read: the prompt stays open and the
+    // harness hears nothing, so a thread of one tree cannot grant what another tree's agent asked to do.
+    expect(await rt.sessions.interrupt(handle.id, outside)).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW }, outside)).toEqual({ outcome: "not-found" });
+    expect(turn.answers).toHaveLength(0);
+    expect(closes(await history(workspaceId))).toHaveLength(0);
+    // A caller inside the tree answers as the person does.
+    const askingThread = handle.view().threadId!;
+    const inside = { origin: "here", by: { kind: "thread", threadId: askingThread, workspaceId, rootThreadId: askingThread } } as const;
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW }, inside)).toEqual({ outcome: "answered" });
+    expect(turn.answers).toMatchObject([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed" }]);
+    expect(closes(await history(workspaceId))).toHaveLength(1);
+    turns[1]!.reply();
+    await beside.finished;
+    turn.reply();
+    await handle.finished;
+  });
 });
 
 describe("the access a thread starts at", () => {
@@ -375,9 +404,10 @@ describe("the access a thread starts at", () => {
     // whose person picked another one keeps it instead of falling to the adapter's own flag.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
-    // A pick still wins over the thread's own.
+    // A mode named on a send is dropped: a thread's access is the thread's own, and sessions.access is the one
+    // road that changes what it may touch.
     await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "plan" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
   it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {
@@ -483,28 +513,30 @@ describe("an access picked while a turn runs", () => {
   });
 
   /** A turn that stays open until the test replies. `moves` is what its harness answers a mode change with, and null
-   * is a harness that takes none mid-turn, as codex exec does. */
+   * is a harness that takes none mid-turn, as codex exec does. A send resumes its thread's session and a thread the
+   * send opens gets one of its own, as a CLI's would, so two threads on one workspace hold two rows. */
   const held = (moves: "set" | "refused" | null): { rt: Runtime; turns: { modes: string[]; reply: () => void }[]; picks: (string | undefined)[] } => {
     const turns: { modes: string[]; reply: () => void }[] = [];
     const picks: (string | undefined)[] = [];
     const adapter: HarnessAdapterFactory = () => ({
       steers: false,
-      start: ({ onEvent, permissionMode }) => {
+      start: ({ onEvent, permissionMode, resume }) => {
         picks.push(permissionMode);
+        const session = resume ?? randomUUID();
         const modes: string[] = [];
         let settle: (() => void) | undefined;
         const finished = new Promise<{ status: "completed"; text: string }>(resolve => {
           settle = () => {
             const result = { status: "completed", text: "done" } as const;
-            onEvent({ type: "turn.done", sessionId: SESSION, result });
-            onEvent({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+            onEvent({ type: "turn.done", sessionId: session, result });
+            onEvent({ type: "session.end", sessionId: session, exitCode: 0, sawResult: true });
             resolve(result);
           };
         });
-        onEvent({ type: "session.start", sessionId: SESSION, cwd: "/root" });
+        onEvent({ type: "session.start", sessionId: session, cwd: "/root" });
         turns.push({ modes, reply: () => settle?.() });
         return {
-          localId: SESSION,
+          localId: session,
           finished,
           interrupt: async () => settle?.(),
           ...(moves === null
@@ -557,13 +589,19 @@ describe("an access picked while a turn runs", () => {
     expect(picks).toEqual(["bypassPermissions", "acceptEdits"]);
   });
 
-  it("a harness that takes no mode change mid-turn answers unsupported and the turn keeps the access it started at", async () => {
-    const { rt, turns } = held(null);
-    const { handle } = await running(rt, turns);
+  it("a harness that takes no mode change mid-turn answers unsupported and the turn keeps the access it started at; the thread's next turn runs at the pick", async () => {
+    const { rt, turns, picks } = held(null);
+    const { handle, workspaceId } = await running(rt, turns);
     expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
+    // The pick landed on the thread's record all the same, which is where its next turn reads its access.
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "plan"]);
   });
 
   it("a CLI that refuses the mode reads as unsupported too, rather than as a change that landed", async () => {
@@ -574,6 +612,55 @@ describe("an access picked while a turn runs", () => {
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
+    // The turn kept its mode to its end; over, its row says the pick its thread's next turn runs at.
+    expect(handle.view().permissionMode).toBe("plan");
+  });
+
+  it("a pick the running turn did not take reaches its row as the turn ends, so no row says a mode the next turn will not run at", async () => {
+    const { rt, turns, picks } = held(null);
+    const { handle, workspaceId } = await running(rt, turns);
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    // While the turn runs, its row says what it is running at: the harness took no change.
+    expect(handle.view().permissionMode).toBe("bypassPermissions");
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions"]);
+    turns[0]!.reply();
+    await handle.finished;
+    // Between turns every client folds the thread's access off this row, and the composer reads the row over the
+    // transcript's start stamp, so the row says the mode the record holds and the next turn runs at.
+    expect(handle.view().permissionMode).toBe("plan");
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["plan"]);
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "plan"]);
+  });
+
+  it("a thread of another tree on the workspace is told not-found, as the interrupt tells it, and moves nothing", async () => {
+    const { rt, turns, picks } = held("set");
+    const { handle, workspaceId } = await running(rt, turns);
+    turns[0]!.reply();
+    await handle.finished;
+    // A second thread the person opened on the same workspace is its own root: the first thread is outside its tree.
+    const beside = await rt.sessions.start(workspaceId, { prompt: "beside it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await beside.finished;
+    const besideThread = beside.view().threadId!;
+    const scoped = { origin: "here", by: { kind: "thread", threadId: besideThread, workspaceId, rootThreadId: besideThread } } as const;
+    // The same absence the sibling verbs answer, before the workspace is read, so a thread learns nothing of a row
+    // it may not drive; and the one road that changes a thread's access is shut to it.
+    expect(await rt.sessions.interrupt(handle.id, scoped)).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.access(handle.id, "plan", scoped)).toEqual({ outcome: "not-found" });
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions", "bypassPermissions"]);
+    // A thread's own row is still its own to move.
+    expect(await rt.sessions.access(beside.id, "plan", scoped)).toEqual({ outcome: "set" });
+    // The first thread's next turn runs at what it ran at.
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
+    await vi.waitFor(() => expect(turns).toHaveLength(3));
+    turns[2]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
   it("a mode the harness's own list does not carry is refused in the words a start refuses it with", async () => {
@@ -585,13 +672,22 @@ describe("an access picked while a turn runs", () => {
     await handle.finished;
   });
 
-  it("answers rather than throwing: an unknown session, and a turn that is already over", async () => {
-    const { rt, turns } = held("set");
-    const { handle } = await running(rt, turns);
+  it("answers rather than throwing: an unknown session is not found, and a pick on a thread between turns is set on its record", async () => {
+    const { rt, turns, picks } = held("set");
+    const { handle, workspaceId } = await running(rt, turns);
     expect(await rt.sessions.access("s_nope", "plan")).toEqual({ outcome: "not-found" });
     turns[0]!.reply();
     await handle.finished;
-    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "not-running" });
+    // No process is touched: the thread's record takes the mode, the row every client folds the access off says
+    // it too, and the thread's next turn runs at it. This is the one road that changes a thread's access, since a
+    // send into a thread names none.
+    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "set" });
     expect(turns[0]!.modes).toEqual([]);
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["plan"]);
+    const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId, permissionMode: "acceptEdits" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    turns[1]!.reply();
+    await next.finished;
+    expect(picks).toEqual(["bypassPermissions", "plan"]);
   });
 });

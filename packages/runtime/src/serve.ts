@@ -36,6 +36,7 @@ import {
   PLACE_UNKNOWN_REFUSAL,
   noSuchPlaceRefusal,
   RELAY_TICKET_REFUSAL,
+  REQUEST_NOT_AN_OBJECT,
   RuntimeRequest,
   SEAL_CLIENT,
   SEAL_UNSERVED,
@@ -50,6 +51,7 @@ import {
   WorkspaceOut,
   threadOpRefusal,
   deviceHeldRefusal,
+  isObjectFrame,
   type AccountView,
   type DeviceView,
   type DoctorLineEvent,
@@ -307,6 +309,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const url = new URL(req.url ?? "/", "ws://localhost");
     // Where this socket came from, as the app shows it beside a computer that just joined.
     const from = peerAddress(req.socket.remoteAddress);
+    // A frame wrong at the wire is an error event on this socket, and one nobody listens for is thrown out of the
+    // library's read, ending a process with no handler. The library has begun closing the socket when it emits;
+    // terminating spares the wait on a peer that sent such bytes to answer the close.
+    ws.on("error", (e: Error) => {
+      console.warn(`socket from ${from} dropped on a wire fault: ${e.message}`);
+      ws.terminate();
+    });
     const ticketParam = url.searchParams.get("ticket");
     let authed = false;
     // What this socket is, decided when it is let in and never again: the ticket it redeemed says whether its
@@ -430,6 +439,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           parsed = JSON.parse(openFrame(seal, raw));
         } catch {
           send({ id: null, ok: false, error: "invalid json" });
+          if (!authed) ws.close(4401, UNAUTHORIZED);
+          return;
+        }
+        // Ahead of every read of the frame's fields: a null frame has none, and reading one off it throws past every
+        // door below and out of this handler, where nothing catches it.
+        if (!isObjectFrame(parsed)) {
+          send({ id: null, ok: false, error: REQUEST_NOT_AN_OBJECT });
           if (!authed) ws.close(4401, UNAUTHORIZED);
           return;
         }

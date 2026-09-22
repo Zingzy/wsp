@@ -51,8 +51,11 @@
 // with words after it still goes as text, since the words may be meant.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
-// model, effort, context window and access picks in the box's footer ride
-// every start, so a change mid-thread applies at the next turn.
+// model, effort, context window and access picks in the box's footer ride a
+// start that opens a thread; a send into a thread that has run carries the
+// model, its window and the effort, so a change mid-thread applies at the
+// next turn, and never the agent or the access, which are that thread's own
+// off its rows.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
@@ -73,7 +76,8 @@ import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
-import { ComposerOptionPickers, useAccessPick, useComposerPicks } from "./ComposerOptionPickers";
+import { ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
+import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
@@ -115,6 +119,21 @@ export function composerSendBlock(input: {
   return null;
 }
 
+/** What a send carries beyond its words and its images: the composer's picks where it opens a thread, and into a
+ * thread that has already run the model and the effort alone, the window riding inside the model as it always
+ * does. Changing the model in the middle of a thread is ordinary and the agent's own command line takes both per
+ * turn. The agent and the access are not picks a message makes: the thread runs on the agent its rows carry, the
+ * runtime refuses a send naming another, and sessions.access is the one road that changes what a thread may
+ * touch. Pinned is the same reading the rail is pinned by, and the runtime reads a thread as existing by the same
+ * rows. */
+export function sendPicks(pinned: boolean, picks: ComposerStart): ComposerStart {
+  if (!pinned) return picks;
+  const kept: ComposerStart = { ...picks };
+  delete kept.harness;
+  delete kept.permissionMode;
+  return kept;
+}
+
 /** What one stop click left behind for the turn it targeted; the turn id keeps it from leaking onto the next turn. */
 interface StopAttempt {
   readonly turnId: string;
@@ -153,7 +172,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
   const [folderPicker, setFolderPicker] = useState(false);
   const openFolderPicker = useCallback(() => setFolderPicker(true), []);
-  const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -233,12 +252,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     return row?.id ?? runningTurn.sessionId;
   }, [runningTurn, sessions]);
   // The same row sessions.interrupt is keyed by: a pick made while this turn runs goes to the runtime by that id.
-  const pickTarget = useMemo(
-    () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
-    [runningTurn, stopTarget],
-  );
-  // The harness's own row decides whether the pick is put to the running turn at all, and it is the same row the
-  // menu reads to say so before the pick.
+  // Between turns, a thread that has run is named by its latest row, the one the pickers stand on, so the pick still
+  // goes through the access verb and the thread's next turn runs at it; a thread that has not run names nothing,
+  // its pick opens it.
+  const pickTarget = useMemo<AccessTarget | null>(() => {
+    if (stopTarget !== null && runningTurn !== null) return { sessionId: stopTarget, turnId: runningTurn.turnId };
+    return latestRow !== null ? { sessionId: latestRow.id, turnId: null } : null;
+  }, [latestRow, runningTurn, stopTarget]);
+  // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
+  // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
@@ -374,7 +396,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             ...(into !== undefined ? { thread: into } : {}),
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
-            ...startOptions,
+            ...sendPicks(pinned, startOptions),
           }),
         )
         .catch((err: unknown) => {
@@ -385,7 +407,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   const send = useCallback(() => {

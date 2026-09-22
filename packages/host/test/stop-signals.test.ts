@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { localExecStream } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecStream } from "@wsp/protocol";
-import { stopOnSignals, type CliIO, type StopProcess } from "../src/cli.js";
+import { stayOnUncaught, stopOnSignals, type CliIO, type StopProcess, type UncaughtProcess } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { alive, grandchild, sweepStrays } from "../../runtime/test/strays.js";
 
@@ -100,4 +100,32 @@ describe("a serving host stopping on a signal", () => {
     running.stream.kill();
     await running.stream.exited;
   }, 20_000);
+});
+
+describe("a serving host meeting an error nothing caught", () => {
+  /** Where the two events arrive, in place of this process: the real ones would end the test runner. It has no exit
+   * to call, so the handler cannot end anything through it. */
+  function standInProcess(): { self: UncaughtProcess; raise: (event: "unhandledRejection" | "uncaughtException", e: unknown) => void } {
+    const listeners = new Map<string, (e: unknown) => void>();
+    return {
+      self: { on: (event, listener) => listeners.set(event, listener) },
+      raise: (event, e) => {
+        const listener = listeners.get(event);
+        if (listener === undefined) throw new Error(`nothing on this host listens for ${event}`);
+        listener(e);
+      },
+    };
+  }
+
+  it("says each in one line naming the error and where it came from, and registers nothing on the real process", () => {
+    const errors: string[] = [];
+    const before = (["unhandledRejection", "uncaughtException"] as const).map(event => process.listenerCount(event));
+    const host = standInProcess();
+    stayOnUncaught(quietIO(errors), host.self);
+    host.raise("unhandledRejection", new TypeError("Cannot read properties of null (reading 'op')"));
+    host.raise("uncaughtException", "a string thrown");
+    expect(errors[0]).toMatch(/^unhandled rejection, kept serving: Cannot read properties of null \(reading 'op'\), at .*stop-signals\.test\.ts:\d+:\d+/);
+    expect(errors.slice(1)).toEqual(["uncaught exception, kept serving: a string thrown"]);
+    expect((["unhandledRejection", "uncaughtException"] as const).map(event => process.listenerCount(event))).toEqual(before);
+  });
 });

@@ -29,6 +29,10 @@ export interface SessionModel {
   readonly model: string | null;
   /** What the CLI announced about itself on the last session.start that carried it. */
   readonly harness: SessionHarness | null;
+  /** The thread's own record as its transcript carries it, off the last session.start that named each: the agent
+   * the thread runs on, by its catalog id, and the access its last turn started at. Null before a start carried it. */
+  readonly agent: string | null;
+  readonly permissionMode: string | null;
 }
 
 export interface DeriveSessionOptions {
@@ -78,6 +82,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
   let turn: TurnBuild | null = null;
   let model: string | null = null;
   let harness: SessionHarness | null = null;
+  let agent: string | null = null;
+  let permissionMode: string | null = null;
 
   const push = (entry: TimelineEntry): number => {
     timeline.push(entry);
@@ -257,6 +263,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         startsBySession.set(event.sessionId, count);
         model = event.model ?? model;
         harness = event.harness ?? harness;
+        agent = event.agent ?? agent;
+        permissionMode = event.permissionMode ?? permissionMode;
         turn = openTurn(event, event.turnId ?? `${event.sessionId}#${count}`, count, at);
         if (event.prompt !== undefined) {
           addMessage(turn, "user", event.prompt, at, false, false, {
@@ -536,7 +544,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     if (entry.kind === "message") messages.push(entry.message);
     else if (entry.kind === "work") workEntries.push(entry.entry);
   }
-  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness };
+  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness, agent, permissionMode };
 }
 
 /** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */
