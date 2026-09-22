@@ -215,9 +215,6 @@ export interface AgentLine {
   id: string;
   name: string;
   state: string;
-  /** Why the sign-in is held here, as the last clause of the row's description. Absent on this computer, whose
-   * agents are signed in where they are installed. */
-  held?: string;
   /** Whether a sign-in already stands for this agent there: its own login on that computer, or the variable this
    * wsp's vault holds for it. The Sign in button is not drawn where one does. */
   signedIn?: boolean;
@@ -240,8 +237,8 @@ export function hereAgentLines(setup: Pick<InitSetup, "agents"> | null): AgentLi
 /** The agents a joined computer reported, named through the catalog: the version each answered with and the word
  * for its sign-in, which are the two facts a person asks first, and the recipe's outcome only where that row
  * failed, since a row that installed or was already there says nothing this line does not. A computer whose daemon
- * reports neither reads as it did before: the recipe's word, or the bare word found. The sign-in beside each is
- * held: nothing on the wire runs one on a computer from here, and the row says so. */
+ * reports neither reads as it did before: the recipe's word, or the bare word found. Why the sign-in beside each
+ * is held is the page's to say, in the one clause every held row on it reads. */
 export function placeAgentLines(place: PlaceView): AgentLine[] {
   return (place.agents ?? []).map(id => {
     const signIn = place.signIns?.[id];
@@ -254,7 +251,6 @@ export function placeAgentLines(place: PlaceView): AgentLine[] {
       id,
       name: agentName(id),
       state: said.length === 0 ? (outcomeWord(row) ?? AGENTS_WORDS.found) : said.join(" · "),
-      held: AGENTS_WORDS.signInHeld,
       ...(signIn === undefined || signIn === "none" ? {} : { signedIn: true }),
     };
   });

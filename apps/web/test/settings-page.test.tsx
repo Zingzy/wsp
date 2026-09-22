@@ -12,6 +12,7 @@ import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalCon
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
+import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useThemeEffect } from "../src/settings/theme.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
@@ -76,7 +77,6 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    // The computers under the open group, this Mac first, each a page of its own.
     expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
@@ -85,6 +85,26 @@ describe("the settings sidebar", () => {
     expect(rowTitles()).not.toContain(SETTINGS_WORDS.theme);
     fireEvent.click(document.querySelector("[data-breadcrumb-group]")!);
     expect(pageAt()).toBe("computers");
+  });
+
+  it("reads which groups have pages under them off the one table, so a group that gains pages is one entry there", () => {
+    expect(SETTINGS_GROUPS.filter(group => group.sub !== undefined).map(group => group.id)).toEqual(["computers", "projects"]);
+  });
+
+  it("holds the room for every computer and project whichever group is open, so picking one moves no row below it", async () => {
+    useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo")] });
+    mountSettings({ api: settingsApi().api });
+    await settle();
+    // Appearance is open and the two computers and the one project are already rows: the sub-rows are the
+    // sidebar's shape, not a state of it.
+    const before = ["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"];
+    expect(sidebarRowIds()).toEqual(before);
+    fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
+    expect(sidebarRowIds()).toEqual(before);
+    fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
+    expect(sidebarRowIds()).toEqual(before);
+    fireEvent.click(document.querySelector("[data-k=settings-projects]")!);
+    expect(sidebarRowIds()).toEqual(before);
   });
 
   it("ArrowDown and ArrowUp walk the sidebar's rows in visual order, from the field into the groups and their sub-rows", async () => {
@@ -293,9 +313,12 @@ describe("the doors and the memory", () => {
     await settle();
     expect(pageAt()).toBe("computers");
     expect(document.querySelector("[data-k=add-computer]")).not.toBeNull();
+    // The door moved the page rather than standing over it: the computer it added is on the list the person is left
+    // on, not behind whatever page they were last reading.
     act(() => useStore.getState().closeAddComputer());
     await settle();
-    expect(pageAt()).toBe("about");
+    expect(pageAt()).toBe("computers");
+    expect(window.localStorage.getItem("wsp:settings-at")).toBe("computers");
     act(() => useStore.getState().openSetup());
     await settle();
     expect(pageAt()).toBe("computer:solari");
@@ -303,7 +326,7 @@ describe("the doors and the memory", () => {
     expect(document.querySelector("[data-cloud-setup-dialog]")).not.toBeNull();
     act(() => useStore.getState().closeSetup());
     await settle();
-    expect(pageAt()).toBe("about");
+    expect(pageAt()).toBe("computers");
   });
 
   it("reopens where it was closed in this window, and a remembered computer or project that is gone falls back to its group", async () => {

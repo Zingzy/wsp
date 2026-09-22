@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { offlineFor, type DeviceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button, WARN_BUTTON } from "../components/ui/button.js";
+import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import type { Api } from "../protocol/client.js";
 import { DEVICES_WORDS, WHERE_WORDS } from "./format.js";
@@ -43,7 +43,7 @@ export function RevokeControl({ device, api, onRevoked, toast }: { device: Devic
   };
   return (
     <>
-      <Button data-k="revoke" size="xs" variant="outline" className={WARN_BUTTON} held={api?.devicesRevoke === undefined} onClick={() => setAsking(true)}>
+      <Button data-k="revoke" size="xs" variant="outline" className={DANGER_BUTTON} held={api?.devicesRevoke === undefined} onClick={() => setAsking(true)}>
         {DEVICES_WORDS.revoke}
       </Button>
       <AlertDialog open={asking} onOpenChange={setAsking}>
@@ -54,7 +54,7 @@ export function RevokeControl({ device, api, onRevoked, toast }: { device: Devic
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>{WHERE_WORDS.cancel}</AlertDialogClose>
-            <Button data-k="revoke-confirm" variant="outline" className={WARN_BUTTON} disabled={busy} onClick={revoke}>
+            <Button data-k="revoke-confirm" variant="destructive" disabled={busy} onClick={revoke}>
               {DEVICES_WORDS.revoke}
             </Button>
           </AlertDialogFooter>

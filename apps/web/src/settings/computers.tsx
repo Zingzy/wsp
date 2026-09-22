@@ -13,15 +13,17 @@
 // account nobody had bought, with an hourly price beside it, read as a bill.
 import { useState } from "react";
 import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, placeSpendLine, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { Button, WARN_BUTTON } from "../components/ui/button.js";
+import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AGENTS_WORDS, WHERE_WORDS } from "./format.js";
 import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, computerRows, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
+import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { Card, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
+import type { SettingsAt } from "./settingsStore.js";
 
 /** What stands on each computer, folded from the workspaces the store already has, each workspace going to
  * exactly one computer by placeOf, the one reading of which computer a workspace stands on. */
@@ -71,6 +73,12 @@ function ownStateWord(ctx: SettingsContext): string {
   const absent = absenceOf(ctx.places, here, here === null ? null : (ctx.statuses[here.id] ?? null), ctx.now);
   const own = ctx.places.find(place => place.id === HERE_PLACE_ID);
   return own === undefined ? "" : placeStateWord(own, absent);
+}
+
+/** The pages under Computers in the sidebar: one per computer the list draws, this one first, read off the same
+ * rule the list reads so a row and its sidebar row cannot disagree about which computers there are. */
+export function computerSubPages(ctx: SettingsContext): { at: SettingsAt; name: string }[] {
+  return computerRows(ctx.places, ctx.reads.setup, placeWorkspaceCounts(ctx.places, ctx.workspaces)).map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place, place.id === HERE_PLACE_ID) }));
 }
 
 export function computersCards(ctx: SettingsContext): SettingsCardData[] {
@@ -137,7 +145,7 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
   const [asking, setAsking] = useState(false);
   return (
     <>
-      <Button data-k="remove" size="xs" variant="outline" className={WARN_BUTTON} onClick={() => setAsking(true)}>
+      <Button data-k="remove" size="xs" variant="outline" className={DANGER_BUTTON} onClick={() => setAsking(true)}>
         {WHERE_WORDS.remove}
       </Button>
       {asking ? (
@@ -201,16 +209,21 @@ function landingOn(ctx: SettingsContext, place: PlaceView): WorkspaceLanding | n
   return project === undefined ? null : (ctx.landings[project.id] ?? null);
 }
 
-/** The cloud's page: the image this host sealed and its copies, since the image exists only behind the cloud's
- * row, then Remove, whose dialog says the key is forgotten. */
+/** The cloud's page: what it has taken, the image this host sealed and its copies, since the image exists only
+ * behind the cloud's row, then Remove, whose dialog says the key is forgotten.
+ *
+ * The image is what this host builds with the cloud's key, so every word about it stands under the same rule the
+ * list row's own cloud stands under: the key is held here. A cloud row drawn for a workspace alone is a machine
+ * somebody else's key made, and this host has nothing to say about its image and nothing to edit. */
 function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageView | null, holding: PlaceHolding, onRemoved: () => void): SettingsCardData[] {
-  const image = view?.image ?? null;
+  const held = keyHeld(place.name, ctx.reads.setup);
+  const image = held ? (view?.image ?? null) : null;
   const spend = ctx.reads.spend.find(row => row.place === place.id);
   const count = holding.workspaces.length;
   const facts: SettingsItem[] = [
     ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: placeSpendLine(spend, count), attrs: { "data-k": "spend" } }]),
     // Until the host has answered there is no fact to say; not built yet is drawn only once the read came back empty.
-    ...(view === null
+    ...(!held || view === null
       ? []
       : image === null
         ? [{ kind: "line" as const, id: "image", label: IMAGE_WORDS.image, value: IMAGE_WORDS.notBuilt, valueClass: "fact" as const, hover: IMAGE_WORDS.firstBuild, attrs: { "data-k": "image-facts" } }]
@@ -227,16 +240,14 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
           value: [`v${copy.version}`, copyStanding(image, copy), copy.sizeBytes === undefined ? undefined : fmtBytes(copy.sizeBytes), builtWhen(copy.builtAt, ctx.now)].filter((word): word is string => word !== undefined).join(" · "),
           attrs: { "data-k": "image-copy", "data-place": copy.place },
         }));
+  const edit = !held ? undefined : (
+    <Button data-k="edit-image" variant="outline" size="xs" onClick={ctx.openSetup}>
+      {IMAGE_WORDS.edit}
+    </Button>
+  );
   return [
-    {
-      id: "cloud",
-      items: facts,
-      under: (
-        <Button data-k="edit-image" variant="outline" size="xs" onClick={ctx.openSetup}>
-          {IMAGE_WORDS.edit}
-        </Button>
-      ),
-    },
+    // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
+    ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts, ...(edit === undefined ? {} : { under: edit }) }]),
     ...(copies.length === 0 ? [] : [{ id: "copies", head: IMAGE_WORDS.copies, items: copies }]),
     {
       id: "acts",

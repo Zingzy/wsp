@@ -88,6 +88,10 @@ describe("Projects", () => {
     const remove = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=remove-project]")!;
     expect(remove().hasAttribute("disabled")).toBe(true);
     expect(remove().hasAttribute("title")).toBe(false);
+    // Held, it is the neutral outline further down the opacity ramp, with no hue of its own anywhere.
+    expect(remove().className).not.toMatch(/warning|bg-destructive/);
+    expect(remove().className).toContain("disabled:opacity-50");
+    expect(remove().className).toContain("border-input");
     expect(descriptionOf("remove")).toBe(projectInUseRefusal("spoo", ["pricing page"]));
     // A project on a joined computer: the line names wsp's own clone there.
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_landing" }));
@@ -100,6 +104,7 @@ describe("Projects", () => {
     fireEvent.click(remove());
     expect(document.querySelector("[data-k=remove-project-title]")?.textContent).toBe("Remove landing?");
     expect(document.querySelector("[data-k=remove-project-sentence]")?.textContent).toBe(PROJECTS_WORDS.removeOnComputer("spoo"));
+    expect(document.querySelector<HTMLElement>("[data-k=remove-project-confirm]")!.className).toContain("bg-destructive");
     fireEvent.click(document.querySelector("[data-k=remove-project-confirm]")!);
     await waitFor(() => expect(removed).toEqual(["pr_landing"]));
     await waitFor(() => expect(useStore.getState().toast).toBe("landing is no longer a project on spoo"));
@@ -128,10 +133,19 @@ describe("Devices", () => {
     expect(rowTitles()).toEqual(["zingzy-laptop", DEVICES_WORDS.thisBrowser]);
     expect(descriptionOf("d_1")).toMatch(/^paired Sep 1 \d\d:\d\d · seen 1[12] min ago$/);
     expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).toContain("font-mono");
-    fireEvent.click(rowOf("d_1")!.querySelector("[data-k=revoke]")!);
+    // The door to the confirmation is neutral where it stands and red only under the pointer; the act itself, in
+    // the dialog, is the one red thing at rest.
+    const revoke = rowOf("d_1")!.querySelector<HTMLElement>("[data-k=revoke]")!;
+    expect(revoke.className).not.toMatch(/warning/);
+    expect(revoke.className).toContain("text-foreground");
+    expect(revoke.className).toContain("[:hover,[data-pressed]]:text-destructive-foreground");
+    fireEvent.click(revoke);
     expect(document.querySelector("[data-k=revoke-title]")?.textContent).toBe("Revoke zingzy-laptop?");
     expect(document.querySelector("[data-k=revoke-sentence]")?.textContent).toBe(DEVICES_WORDS.revokeDescription);
-    fireEvent.click(document.querySelector("[data-k=revoke-confirm]")!);
+    const confirm = document.querySelector<HTMLElement>("[data-k=revoke-confirm]")!;
+    expect(confirm.className).toContain("bg-destructive");
+    expect(confirm.className).not.toMatch(/warning/);
+    fireEvent.click(confirm);
     await waitFor(() => expect(revoked).toEqual(["d_1"]));
     await waitFor(() => expect(rowTitles()).toEqual([DEVICES_WORDS.thisBrowser]));
     // Account holds no second list of them.
@@ -160,6 +174,7 @@ describe("Account", () => {
     expect(action().textContent).toBe(ACCOUNT_WORDS.signIn);
     expect(action().disabled).toBe(true);
     expect(action().hasAttribute("title")).toBe(false);
+    expect(action().className).toContain("disabled:opacity-50");
     document.body.innerHTML = "";
     resetSettings();
     await mount({ account: async () => ({ signedIn: true, login: "zingzy" }) } as Partial<Api>, "account");

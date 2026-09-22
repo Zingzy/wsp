@@ -31,7 +31,6 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
           id: "theme",
           title: SETTINGS_WORDS.theme,
           description: SETTINGS_WORDS.themeDescription,
-          drops: true,
           control: <SegmentedControl aria-label={SETTINGS_WORDS.theme} value={preferences.theme} segments={THEMES} onChange={theme => setPreferences({ theme })} />,
         },
         {
@@ -39,7 +38,6 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
           id: "sidebar-width",
           title: SETTINGS_WORDS.sidebarWidth,
           description: SETTINGS_WORDS.sidebarWidthDescription,
-          drops: true,
           control: (
             <NumberField
               aria-label={SETTINGS_WORDS.sidebarWidth}
@@ -70,7 +68,6 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
           id: "terminal-size",
           title: SETTINGS_WORDS.textSize,
           description: SETTINGS_WORDS.textSizeDescription,
-          drops: true,
           word: TERMINAL_SIZE_FACT[preferences.terminalSize](appTerminalFontSize(), ctx.reads.file?.fontSize),
           attrs: { "data-k": "terminal-size-row" },
           control: <SegmentedControl aria-label={SETTINGS_WORDS.textSize} value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => setPreferences({ terminalSize })} />,

@@ -7,6 +7,13 @@
 // and at most one control; a line of a fixed height with a label at the left
 // and one mono word or keycaps at the right. A card holds rows or lines,
 // never both, so a page's rhythm is one height per card.
+//
+// Below 640 px there is no room for a title, a sentence and a value on one
+// line, and no hover to read a cut word on: so a row's slot moves under its
+// description, its description takes two lines held whether it needs them or
+// not, and a line puts its value under its label with two lines for it. Every
+// row and every line takes the one taller height at that width, so nothing is
+// cut and no card is ragged.
 import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
@@ -17,11 +24,11 @@ import { FACT, VALUE } from "./format.js";
 export type WordClass = "value" | "fact";
 const WORD_CLASS: Record<WordClass, string> = { value: VALUE, fact: FACT };
 
-/** The height every row stands, whatever its words, and the taller one a row takes below 640 px when its control
- * drops under the description: every row of a card that holds one such row takes it, so the card is one height. */
-export const ROW_CLASS = "h-13";
-export const DROPPED_ROW_CLASS = "max-sm:h-21";
-export const LINE_CLASS = "h-8";
+/** The height every row stands, whatever its words, and the taller one every row takes below 640 px, where the
+ * slot has moved under a description that holds two lines. A line stands at one height too, and at the taller one
+ * below 640 px, where whatever is at its right stands under its label instead. */
+export const ROW_CLASS = "h-13 max-sm:h-22";
+export const LINE_CLASS = "h-8 max-sm:h-12";
 
 /** One row of a settings page as data: its words, which the search reads, and the slot's render. */
 export interface SettingsRowData {
@@ -41,8 +48,6 @@ export interface SettingsRowData {
   readonly control?: ReactNode;
   /** A row that opens a page: the whole row is the button and the slot ends in the chevron. */
   readonly open?: () => void;
-  /** A control that drops under the description below 640 px: a segmented control or a stepper. */
-  readonly drops?: boolean;
   /** Extra attributes the tests and the screenshot list reach the row by. */
   readonly attrs?: Record<string, string>;
 }
@@ -79,6 +84,10 @@ export function itemWords(item: SettingsItem): string[] {
   return item.kind === "row" ? [item.title, item.description] : [item.label, ...(item.hover === undefined ? [] : [item.hover])];
 }
 
+/** Two lines of the words' own line height below 640 px, held whether they take one line or two, wrapped on a
+ * space and cut at the second: the room a description and a value each get where no hover can read a cut word. */
+const TWO_LINES_NARROW = "max-sm:line-clamp-2 max-sm:min-h-[2lh] max-sm:whitespace-normal";
+
 const CARD_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
 const TITLE_CLASS = "text-[13px] leading-4 text-foreground";
 const DESCRIPTION_CLASS = "text-xs leading-4 text-muted-foreground";
@@ -99,15 +108,16 @@ export function Card({ id, head, under, children }: { id: string; head?: ReactNo
   );
 }
 
-/** One row: the title over its description at the left, the slot at the right edge. Below 640 px a row whose
- * control drops takes the taller height and puts the slot on a line of its own under the description, the word at
- * its left and the control at its right, so no segment's word is cut. */
-export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, tall = drops, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether the row takes the dropped height below 640 px: its own control drops, or another row's in the same card does. */ tall?: boolean }) {
+/** One row: the title over its description at the left, the slot at the right edge. Below 640 px the slot stands
+ * on a line of its own under the description, the word at its left and the control at its right, and the
+ * description holds two lines there, so neither a word nor a sentence is cut where there is no hover to read it on. */
+export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, attrs }: Omit<SettingsRowData, "kind">) {
+  const drops = word !== undefined || control !== undefined;
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn("flex min-w-0 max-w-[60%] shrink items-center gap-3", drops && (word === undefined ? "max-sm:w-full max-sm:max-w-full max-sm:justify-end" : "max-sm:w-full max-sm:max-w-full max-sm:justify-between"))}>
         {word === undefined ? null : (
-          <span data-settings-word {...(wordK === undefined ? {} : { "data-k": wordK })} className={cn(WORD_CLASS[wordClass], "min-w-0 truncate text-right")} title={word}>
+          <span data-settings-word {...(wordK === undefined ? {} : { "data-k": wordK })} className={cn(WORD_CLASS[wordClass], "min-w-0 truncate text-right max-sm:whitespace-normal max-sm:text-left")} title={word}>
             {word}
           </span>
         )}
@@ -128,14 +138,14 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
             </span>
           )}
         </span>
-        <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate")} title={description}>
+        <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", TWO_LINES_NARROW)} title={description}>
           {description}
         </span>
       </div>
       {slot}
     </>
   );
-  const rowClass = cn("flex items-center gap-4 px-4", ROW_CLASS, tall && DROPPED_ROW_CLASS, drops && "max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1");
+  const rowClass = cn("flex items-center gap-4 px-4", ROW_CLASS, drops && "max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1");
   if (open !== undefined) {
     return (
       <button type="button" data-settings-row={id} className={cn(rowClass, OPENS_CLASS)} onClick={open} {...attrs}>
@@ -151,20 +161,26 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
 }
 
 /** One line: the label at the left, at the right one mono word or the chord's keycaps. The sentence a line has to
- * say is its hover text; a line carries no description. */
+ * say is its hover text; a line carries no description. Below 640 px whatever is at the right stands under the
+ * label instead, a value with two lines of its own: at that width a label and a value sharing one line cut each
+ * other, and a keycap cannot be cut at all, so the label went instead. A line with nothing at its right is a
+ * sentence rather than a label, and takes the two lines there. */
 export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, attrs }: Omit<SettingsLineData, "kind">) {
+  const bare = value === undefined && keys === undefined;
   return (
-    <div data-settings-line={id} className={cn(LINE_CLASS, "flex items-center gap-4 px-4")} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
-      <span data-settings-label className={cn(TITLE_CLASS, "min-w-0 flex-1 truncate")}>
+    <div data-settings-line={id} className={cn(LINE_CLASS, "flex items-center gap-4 px-4 max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-0")} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
+      {/* The label grows to push the value to the right edge while the two share a line, and takes its own height
+          below 640 px, where they are stacked and a grown label would be squeezed under its own line. */}
+      <span data-settings-label className={cn(TITLE_CLASS, "min-w-0 flex-1 truncate max-sm:flex-none", bare && TWO_LINES_NARROW)}>
         {label}
       </span>
       {value === undefined ? null : (
-        <span data-settings-word className={cn(WORD_CLASS[valueClass], "min-w-0 max-w-[60%] truncate text-right")} title={value}>
+        <span data-settings-word className={cn(WORD_CLASS[valueClass], "min-w-0 max-w-[60%] truncate text-right", TWO_LINES_NARROW, "max-sm:max-w-full max-sm:text-left")} title={value}>
           {value}
         </span>
       )}
       {keys === undefined ? null : (
-        <span data-settings-keys className="flex shrink-0 items-center gap-2">
+        <span data-settings-keys className="flex shrink-0 items-center gap-2 max-sm:justify-start">
           {keys.map((chord, at) => (
             <span key={chord.join("+")} className="flex items-center gap-2">
               {at > 0 && keysJoiner !== undefined ? <span className={FACT}>{keysJoiner}</span> : null}
@@ -187,21 +203,18 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
 export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
   return (
     <>
-      {cards.map(card => {
-        const tall = card.items.some(item => item.kind === "row" && item.drops === true);
-        return (
-          <Card key={card.id} id={card.id} head={card.head} under={card.under}>
-            {card.items.map(item => {
-              if (item.kind === "line") {
-                const { kind: _line, ...line } = item;
-                return <Line key={item.id} {...line} />;
-              }
-              const { kind: _row, ...row } = item;
-              return <Row key={item.id} {...row} tall={tall} />;
-            })}
-          </Card>
-        );
-      })}
+      {cards.map(card => (
+        <Card key={card.id} id={card.id} head={card.head} under={card.under}>
+          {card.items.map(item => {
+            if (item.kind === "line") {
+              const { kind: _line, ...line } = item;
+              return <Line key={item.id} {...line} />;
+            }
+            const { kind: _row, ...row } = item;
+            return <Row key={item.id} {...row} />;
+          })}
+        </Card>
+      ))}
     </>
   );
 }

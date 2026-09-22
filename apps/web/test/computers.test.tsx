@@ -529,6 +529,27 @@ describe("the cloud's page", () => {
     await settle();
   });
 
+  it("says nothing about the image on a cloud whose key this host does not hold, and draws no card with nothing in it", async () => {
+    // A cloud row stands on a workspace alone; the image is what this host's own key builds, so a page with no key
+    // has no image line, no Edit image and no copies, and the card those would have stood in is not drawn.
+    const api = computersApi({ image: async () => ({ image: IMAGE, copies: [copy], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: false } })).api;
+    useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_y")] });
+    await mountComputers(api, { kind: "computer", id: "solari" });
+    expect(document.querySelector("[data-k='image-facts']")).toBeNull();
+    expect(document.querySelector("[data-k='image-built']")).toBeNull();
+    expect(document.querySelector("[data-k='edit-image']")).toBeNull();
+    expect(document.querySelector("[data-settings-card='copies']")).toBeNull();
+    expect(document.querySelector("[data-settings-card='cloud']")).toBeNull();
+    // Its one act stands, and the card that holds it is the only one on the page.
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["acts"]);
+    // Remove is the neutral door, red only under the pointer, and the dialog's own button is the red one.
+    const remove = document.querySelector<HTMLElement>("[data-settings-page] [data-k='remove']")!;
+    expect(remove.className).not.toMatch(/warning/);
+    expect(remove.className).toContain("[:hover,[data-pressed]]:text-destructive-foreground");
+    fireEvent.click(remove);
+    expect(document.querySelector<HTMLElement>("[data-k='remove-confirm']")!.className).toContain("bg-destructive");
+  });
+
   it("says the image is not built with what will build it on hover, and draws no Built line and no copies before a build", async () => {
     const api = computersApi({ image: async () => ({ image: null, copies: [], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
     useStore.setState({ places: [here, solari] });

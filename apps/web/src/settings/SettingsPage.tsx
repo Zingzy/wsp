@@ -36,29 +36,26 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
   }
   return (
     <>
-      {found.map(({ group, items }) => {
-        const tall = items.some(item => item.kind === "row" && item.drops === true);
-        return (
-          <Card
-            key={group.id}
-            id={`search-${group.id}`}
-            head={
-              <button type="button" data-k={`search-group-${group.id}`} className="text-left transition-colors duration-150 hover:text-foreground" onClick={() => ctx.go({ kind: "group", group: group.id })}>
-                {group.name}
-              </button>
+      {found.map(({ group, items }) => (
+        <Card
+          key={group.id}
+          id={`search-${group.id}`}
+          head={
+            <button type="button" data-k={`search-group-${group.id}`} className="text-left transition-colors duration-150 hover:text-foreground" onClick={() => ctx.go({ kind: "group", group: group.id })}>
+              {group.name}
+            </button>
+          }
+        >
+          {items.map(item => {
+            if (item.kind === "line") {
+              const { kind: _line, ...line } = item;
+              return <Line key={item.id} {...line} />;
             }
-          >
-            {items.map(item => {
-              if (item.kind === "line") {
-                const { kind: _line, ...line } = item;
-                return <Line key={item.id} {...line} />;
-              }
-              const { kind: _row, ...row } = item;
-              return <Row key={item.id} {...row} tall={tall} />;
-            })}
-          </Card>
-        );
-      })}
+            const { kind: _row, ...row } = item;
+            return <Row key={item.id} {...row} />;
+          })}
+        </Card>
+      ))}
     </>
   );
 }

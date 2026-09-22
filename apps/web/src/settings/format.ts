@@ -219,8 +219,6 @@ export const AGENTS_WORDS = {
   /** An agent a joined computer reported on itself before any recipe ran there. */
   found: "found",
   signIn: "Sign in",
-  /** Why that sign-in is held: nothing on the wire runs one on a computer from here; the command line does. */
-  signInHeld: WHERE_WORDS.notFromApp,
   /** An agent whose own config already names the wsp tools. */
   added: "wsp tools added",
   notAdded: "wsp tools not added",

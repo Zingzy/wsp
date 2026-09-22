@@ -4,7 +4,9 @@
 // the agents here), the Ghostty file's size, the account, the devices, the
 // image and what each place has taken this month. One reader, so two pages
 // asking for one record at one mount cannot ask the host twice, and the
-// sidebar's search reads the same answers.
+// sidebar's search reads the same answers. The one door that moves the page
+// rather than reading anything lands here too, since this is what the page
+// mounts once.
 import { useCallback, useEffect, useRef } from "react";
 import { PLACES_TICKET_REFUSAL } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
@@ -14,12 +16,19 @@ import { useSettingsStore } from "./settingsStore.js";
 export function useSettingsReads(): void {
   const api = useStore(s => s.api);
   const setupOpen = useStore(s => s.setupOpen);
+  const addComputerOpen = useStore(s => s.addComputerOpen);
   const devicesAsked = useSettingsStore(s => s.devicesAsked);
   const setReads = useSettingsStore(s => s.setReads);
   const asking = useRef(false);
   /** Set when this window may not read the money at all, so it stops asking at every tick. Only that refusal sets
    * it: a read dropped while the socket reconnects is asked again at the next tick. */
   const refused = useRef(false);
+
+  // The Add a computer door moves the page rather than standing over it: the sheet is asked for from the first run
+  // and from the palette as well as from the list, and closing it on whatever page was remembered hid the new row.
+  useEffect(() => {
+    if (addComputerOpen) useSettingsStore.getState().go({ kind: "group", group: "computers" });
+  }, [addComputerOpen]);
 
   useEffect(() => {
     let live = true;

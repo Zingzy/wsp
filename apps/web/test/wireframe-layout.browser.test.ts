@@ -17,11 +17,16 @@
 // with no transform once open; the desktop foot names this computer; and the
 // whole is photographed on every screen in both themes for a judge. The
 // settings page follows, on the same page: every row 52 px and every line 32,
-// the settings sidebar's rows 28 with one lifted, the dropped rows 84 at 390,
-// no caps, no cut segment, no sideways scroll, the muted words at AA, the Light
-// pick drawing the page light, Restore defaults only off the defaults, the
-// region right of the sidebar whole with the panel back on the chord, and the
-// one-field sheet's geometry over Computers. Vite serves test/wireframe to Playwright's
+// the settings sidebar's rows 28 with one lifted, every row 88 at 390 and
+// every line 48 with its right side under its label, no label, word, sentence
+// or value cut or spilling its box at that width, no caps, no cut segment, no sideways scroll, the
+// muted words at AA, a held control further down the opacity ramp than a live
+// one, the sub-rows holding their room so picking a group moves no row below
+// it, the Light pick drawing the page light, Restore defaults only off the
+// defaults, the region right of the sidebar whole with the panel back on the
+// chord, and the one-field sheet's geometry over Computers. A computer's page
+// is photographed to its foot at both widths, in a window tall enough to hold
+// it, since its acts are under six agent rows. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -498,17 +503,28 @@ const SETTINGS_SCREENS = [
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
 const ROW = 52;
-const DROPPED_ROW = 84;
+const NARROW_ROW = 88;
 const LINE = 32;
+const NARROW_LINE = 48;
+/** The computers whose page is photographed to its foot, in a window tall enough to hold the whole of it. */
+const FOOT_SCREENS = ["settings-computer", "settings-computer-failed", "settings-this-mac"] as const;
+const FOOT_SIZES = [
+  { width: 1280, height: 1800 },
+  { width: 390, height: 3000 },
+] as const;
 
 /** Every row, line and sidebar row of a settings screen, with its height and what it holds. */
 interface SettingsRead {
-  rows: { id: string; height: number; card: string; drops: boolean; fill: string }[];
-  lines: { id: string; height: number }[];
+  rows: { id: string; height: number; card: string; fill: string; spills: boolean }[];
+  lines: { id: string; height: number; spills: boolean }[];
   sidebarRows: { id: string; height: number; active: boolean }[];
   cutSegments: string[];
+  /** Every word, sentence and value whose box cannot hold it: the ones a person would read cut short. */
+  cutWords: string[];
   dressed: string[];
   scroll: { page: number; client: number };
+  /** The opacity a held control stands at beside a live one, so a row that does nothing reads as doing nothing. */
+  opacities: { held: number[]; live: number[] };
 }
 
 describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chromium", () => {
@@ -548,14 +564,25 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
   const read = (): Promise<SettingsRead> =>
     page!.evaluate(() => {
       const box = (el: Element) => el.getBoundingClientRect();
+      const spills = (el: HTMLElement): boolean => el.scrollHeight > el.clientHeight + 1;
       const rows = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")].map(el => ({
         id: el.dataset["settingsRow"] ?? "?",
         height: box(el).height,
         card: el.closest<HTMLElement>("[data-settings-card]")?.dataset["settingsCard"] ?? "?",
-        drops: el.className.includes("max-sm:flex-col"),
         fill: getComputedStyle(el).backgroundColor,
+        spills: spills(el),
       }));
-      const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({ id: el.dataset["settingsLine"] ?? "?", height: box(el).height }));
+      const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({
+        id: el.dataset["settingsLine"] ?? "?",
+        height: box(el).height,
+        spills: spills(el),
+      }));
+      // A word cut is one whose own box cannot hold it: sideways where it stands on one line, or below the last
+      // line it is allowed where it wraps.
+      const cutWords = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-word], [data-settings-page] [data-settings-description], [data-settings-page] [data-settings-label]")]
+        .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+        .map(el => `${(el.textContent ?? "").trim()} [${el.scrollWidth}/${el.clientWidth} ${el.scrollHeight}/${el.clientHeight}]`);
+      const opacity = (selector: string): number[] => [...document.querySelectorAll<HTMLElement>(selector)].map(el => Number(getComputedStyle(el).opacity));
       const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => ({ id: el.dataset["rowId"] ?? "?", height: box(el).height, active: el.dataset["active"] === "true" }));
       const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
       const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
@@ -563,28 +590,36 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         .map(el => (el.textContent ?? "").trim().slice(0, 20));
       const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
       const viewport = pageEl.closest<HTMLElement>("[data-slot=scroll-area-viewport]")!;
-      return { rows, lines, sidebarRows, cutSegments, dressed, scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth } };
+      return {
+        rows,
+        lines,
+        sidebarRows,
+        cutSegments,
+        cutWords,
+        dressed,
+        scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth },
+        opacities: { held: opacity("[data-settings-page] [data-slot=button][data-held]"), live: opacity("[data-settings-page] [data-slot=button]:not([data-held]):not(:disabled)") },
+      };
     });
 
   const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
-    // Every row of a card stands at one height: 52 px, or 84 where a control in that card drops under its description.
-    const cards = new Map<string, { drops: boolean; heights: number[] }>();
+    // One height per kind at each width: a row is 52, or 88 below 640 px where its slot has moved under a
+    // description holding two lines; a line is 32, or 48 there where its value stands under its label.
     for (const row of got.rows) {
-      const card = cards.get(row.card) ?? { drops: false, heights: [] };
-      card.drops = card.drops || row.drops;
-      card.heights.push(row.height);
-      cards.set(row.card, card);
       expect(row.fill, `${row.id} at ${where} carries no fill of its own`).toBe("rgba(0, 0, 0, 0)");
+      expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? NARROW_ROW : ROW);
+      expect(row.spills, `${row.id} at ${where} holds what it says`).toBe(false);
     }
-    for (const [card, { drops, heights }] of cards) {
-      const want = narrow && drops ? DROPPED_ROW : ROW;
-      for (const height of heights) expect(height, `a row of ${card} at ${where}`).toBe(want);
+    for (const line of got.lines) {
+      expect(line.height, `${line.id} at ${where}`).toBe(narrow ? NARROW_LINE : LINE);
+      expect(line.spills, `${line.id} at ${where} holds what it says`).toBe(false);
     }
-    for (const line of got.lines) expect(line.height, `${line.id} at ${where}`).toBe(LINE);
     for (const row of got.sidebarRows) expect(row.height, `${row.id} at ${where}`).toBe(ONE_LINE);
     expect(got.cutSegments, `segments cut at ${where}`).toEqual([]);
     expect(got.dressed, `caps or tracking at ${where}`).toEqual([]);
     expect(got.scroll.page, `sideways scroll at ${where}`).toBeLessThanOrEqual(got.scroll.client);
+    // A control nobody can press stands further down the opacity ramp than every live one beside it.
+    for (const held of got.opacities.held) for (const live of got.opacities.live) expect(held, `a held control at ${where} against a live one`).toBeLessThan(live);
   };
 
   it("every row is 52 px and every line 32, the sidebar rows 28 with exactly one lifted, no caps, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
@@ -592,9 +627,11 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         await open(screen, theme, waitFor, { width: 1280, height: 800 }, screen === "settings-restore" ? "&sidebar=312" : "");
         const got = await read();
-        console.info(`${screen} ${theme}: rows ${JSON.stringify(got.rows.map(r => [r.id, r.height]))}, lines ${JSON.stringify(got.lines.map(l => [l.id, l.height]))}`);
+        // At this width a description is cut with the whole on its hover, which is the grammar; the log names the
+        // ones that are, so a judge reading the shots and a reader of the report see the same list.
+        console.info(`${screen} ${theme}: rows ${JSON.stringify(got.rows.map(r => [r.id, r.height]))}, lines ${JSON.stringify(got.lines.map(l => [l.id, l.height]))}, cut ${JSON.stringify(got.cutWords)}`);
         expectGrammar(got, `${screen} ${theme} 1280`, false);
-        expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(screen === "settings-search" ? 1 : 1);
+        expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(1);
         // The muted words read at AA on both sides: descriptions, state words and the sub-heads.
         const ratios = await textContrast(page!, "[data-settings-page] [data-settings-description], [data-settings-page] [data-settings-word], [data-settings-page] [data-settings-head], [data-settings-page] [data-settings-mark]");
         for (const ratio of ratios) expect(ratio, `muted text on ${screen} ${theme} reads at ${ratio}`).toBeGreaterThanOrEqual(4.5);
@@ -603,15 +640,17 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("at 390 the rows whose control drops stand at 84 with every row of their card, the rest keep 52, lines 32, and the settings sidebar is the sheet with the groups", async () => {
+  it("at 390 every row stands at 88 with its slot under a two-line description, every line at 48 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         if (screen === "settings-search") continue;
         await open(screen, theme, waitFor, { width: 390, height: 844 }, screen === "settings-restore" ? "&sidebar=312" : "");
         const got = await read();
         expectGrammar(got, `${screen} ${theme} 390`, true);
+        // Nothing a person reads is cut at a width with no hover to read the whole on.
+        expect(got.cutWords, `words cut at ${screen} ${theme} 390`).toEqual([]);
         if (screen === "settings-appearance") {
-          expect(got.rows.map(row => row.height)).toEqual([DROPPED_ROW, DROPPED_ROW, DROPPED_ROW]);
+          expect(got.rows.map(row => row.height)).toEqual([NARROW_ROW, NARROW_ROW, NARROW_ROW]);
           // The segment's whole words at this width, which is why the size segments read App and Ghostty file.
           expect(await page!.locator("[data-settings-row=terminal-size] [role=radio]").allTextContents()).toEqual(["App", "Ghostty file"]);
         }
@@ -636,6 +675,39 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
     }
   }, 300_000);
+
+  it("photographs a computer's page to its foot at both widths, so its skills, its workspaces and its two acts are read", async () => {
+    for (const theme of THEMES) {
+      for (const screen of FOOT_SCREENS) {
+        const waitFor = SETTINGS_SCREENS.find(([name]) => name === screen)![1];
+        for (const size of FOOT_SIZES) {
+          await open(screen, theme, waitFor, size);
+          // The whole page is in the window, so the shot ends where the page does rather than where the fold is.
+          const over = await page!.evaluate(() => {
+            const el = document.querySelector<HTMLElement>("[data-settings-page]")!;
+            const viewport = el.closest<HTMLElement>("[data-slot=scroll-area-viewport]")!;
+            return el.scrollHeight - viewport.clientHeight;
+          });
+          expect(over, `${screen} at ${size.width} by ${size.height} stands whole in the window`).toBeLessThanOrEqual(0);
+          await shot(`${screen}-foot-${size.width}-${theme}`);
+        }
+      }
+    }
+  }, 180_000);
+
+  it("holds the room for the sub-rows whichever group is open, so picking Computers moves no group under it", async () => {
+    const tops = (): Promise<Record<string, number>> =>
+      page!.evaluate(() =>
+        Object.fromEntries([...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => [el.dataset["rowId"] ?? "?", Math.round(el.getBoundingClientRect().top)])),
+      );
+    await open("settings-appearance", "dark", "[data-settings-at=appearance]");
+    const before = await tops();
+    expect(Object.keys(before)).toContain("computer:p_spoo");
+    await page!.locator("[data-k=settings-computers]").click();
+    await page!.waitForSelector("[data-settings-at=computers]");
+    const after = await tops();
+    for (const [id, top] of Object.entries(before)) expect(after[id], `${id} stayed where it was`).toBe(top);
+  }, 60_000);
 
   it("the Light segment picked on the dark side draws the page light, and Restore defaults stands only off the defaults", async () => {
     await open("settings-light-picked", "dark", "[data-settings-at=appearance]");
@@ -673,7 +745,9 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       expect(region.gap).toBeLessThanOrEqual(1);
       expect(region.right).toBe(size.width);
       console.info(`settings region at ${size.width}: sidebar ${region.sidebar}, region ${region.width}`);
-      await page!.keyboard.press("Meta+Comma");
+      // The chord the app reads is the one the browser's own platform gives it, so the press has to follow the
+      // platform too: pinned to the Mac's key, this case waited 30 s for a panel no Ctrl had asked for.
+      await page!.keyboard.press("ControlOrMeta+Comma");
       await page!.waitForSelector("[data-right-panel-tabbar]");
       expect(await page!.locator("[data-settings-groups]").count()).toBe(0);
     }

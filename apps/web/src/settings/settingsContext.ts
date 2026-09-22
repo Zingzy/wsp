@@ -78,16 +78,16 @@ export function useSettingsContext(): SettingsContext {
 /** The cloud whose page a toast's Open lands on with the image sheet over it: the one this host builds at. */
 const SETUP_CLOUD = CLOUD_NAMES.find(row => row.id === "solari")!;
 
-/** The page Settings is on: two doors override the memory, then a remembered page whose noun is gone falls back to
- * its group. While the Add a computer sheet is asked for the page is Computers under it; while the image sheet is
- * asked for the page is the cloud's, so the sheet stands over the rows it is about. */
+/** The page Settings is on: the image sheet overrides the memory while it stands, then a remembered page whose
+ * noun is gone falls back to its group. While the image sheet is asked for the page is the cloud's, so the sheet
+ * stands over the rows it is about, and the remembered page comes back when it shuts. The Add a computer door is
+ * not an override but a move: it writes Computers as the page, so the computer it adds is on the list the person
+ * is left on. */
 export function useSettingsAt(): SettingsAt {
   const stored = useSettingsStore(s => s.at);
-  const addComputerOpen = useStore(s => s.addComputerOpen);
   const setupOpen = useStore(s => s.setupOpen);
   const places = useStore(s => s.places);
   const projects = useStore(s => s.projects);
-  if (addComputerOpen) return { kind: "group", group: "computers" };
   if (setupOpen) return resolveAt({ kind: "computer", id: SETUP_CLOUD.id }, places, projects);
   return resolveAt(stored, places, projects);
 }

@@ -9,7 +9,7 @@ import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button, WARN_BUTTON } from "../components/ui/button.js";
+import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
@@ -18,6 +18,7 @@ import { builtWhen } from "./image.js";
 import { isProviderPlace, placeName } from "./places.js";
 import { Cards, type SettingsCardData, type SettingsItem } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
+import type { SettingsAt } from "./settingsStore.js";
 
 /** The word for where a project comes from, by the kind of its source. */
 export function sourceWord(source: ProjectSource): string {
@@ -41,6 +42,11 @@ export function removeLine(ctx: Pick<SettingsContext, "places">, project: Pick<P
   const place = ctx.places.find(p => p.id === project.computer);
   if (place === undefined) return PROJECTS_WORDS.removeHere;
   return isProviderPlace(place) ? PROJECTS_WORDS.removeAtCloud(placeName(place)) : PROJECTS_WORDS.removeOnComputer(placeName(place));
+}
+
+/** The pages under Projects in the sidebar: one per project this wsp records, in the list's own order. */
+export function projectSubPages(ctx: SettingsContext): { at: SettingsAt; name: string }[] {
+  return ctx.projects.map(project => ({ at: { kind: "project", id: project.id }, name: project.name }));
 }
 
 export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
@@ -97,7 +103,7 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, toast }:
   };
   return (
     <>
-      <Button data-k="remove-project" size="xs" variant="outline" className={WARN_BUTTON} held={refusal !== null || api?.projectsRemove === undefined} onClick={() => setAsking(true)}>
+      <Button data-k="remove-project" size="xs" variant="outline" className={DANGER_BUTTON} held={refusal !== null || api?.projectsRemove === undefined} onClick={() => setAsking(true)}>
         {PROJECTS_WORDS.remove}
       </Button>
       <AlertDialog open={asking} onOpenChange={setAsking}>
@@ -108,7 +114,7 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, toast }:
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>{WHERE_WORDS.cancel}</AlertDialogClose>
-            <Button data-k="remove-project-confirm" variant="outline" className={WARN_BUTTON} disabled={busy} onClick={remove}>
+            <Button data-k="remove-project-confirm" variant="destructive" disabled={busy} onClick={remove}>
               {PROJECTS_WORDS.remove}
             </Button>
           </AlertDialogFooter>

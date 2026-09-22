@@ -9,7 +9,7 @@
 import { useState } from "react";
 import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button, WARN_BUTTON } from "../components/ui/button.js";
+import { Button } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { WHERE_WORDS } from "./format.js";
@@ -71,7 +71,7 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
         )}
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>{WHERE_WORDS.cancel}</AlertDialogClose>
-          <Button data-k="remove-confirm" variant="outline" className={WARN_BUTTON} disabled={busy} onClick={() => void remove()}>
+          <Button data-k="remove-confirm" variant="destructive" disabled={busy} onClick={() => void remove()}>
             {busy ? WHERE_WORDS.removing : WHERE_WORDS.remove}
           </Button>
         </AlertDialogFooter>

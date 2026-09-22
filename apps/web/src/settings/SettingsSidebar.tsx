@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The settings sidebar, in the app sidebar's place while Settings is open: the
 // frame row, a search field, one 28 px row per group with the open one lifted,
-// under the open group one row per computer or project, each a page of its
-// own, and Back at the foot, which closes Settings as Escape does. Typing in
-// the field filters every group's rows; a group with no match dims, and at a
-// phone's width the field's results replace the group list in the sheet, a
-// tap opening the row's page and shutting the sheet. ArrowUp and ArrowDown
-// walk the rows in visual order, as the workspace sidebar's do.
+// under a group that lists nouns one row per noun, each a page of its own and
+// each standing whether its group is open or not, and Back at the foot, which
+// closes Settings as Escape does. Typing in the field filters every group's
+// rows; a group with no match dims, and at a phone's width the field's results
+// replace the group list in the sheet, a tap opening the row's page and
+// shutting the sheet. ArrowUp and ArrowDown walk the rows in visual order, as
+// the workspace sidebar's do.
 import { ArrowLeftIcon, SearchIcon } from "lucide-react";
 import { useRef, type KeyboardEvent } from "react";
-import { HERE_PLACE_ID } from "@wsp/protocol";
 import { Input } from "../components/ui/input.js";
 import { SidebarContent, SidebarMenuButton, useSidebar } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
@@ -19,19 +19,9 @@ import { FOOT_ROW_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS } from "../sidebar/r
 import { SidebarChromeFooter, SidebarChromeHeader } from "../sidebar/SidebarChrome.js";
 import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, searchGroup, type SettingsGroup } from "./groups.js";
-import { computerRows, placeName, placeWorkspaceCounts } from "./places.js";
 import type { SettingsItem } from "./rows.js";
-import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
+import { useSettingsAt, useSettingsContext } from "./settingsContext.js";
 import { atId, groupOf, sameAt, useSettingsStore, type SettingsAt } from "./settingsStore.js";
-
-/** The pages under a group: one per computer this wsp draws, this Mac first, or one per project. */
-export function subPages(group: SettingsGroup, ctx: SettingsContext): { at: SettingsAt; name: string }[] {
-  if (group.id === "computers") {
-    return computerRows(ctx.places, ctx.reads.setup, placeWorkspaceCounts(ctx.places, ctx.workspaces)).map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place, place.id === HERE_PLACE_ID) }));
-  }
-  if (group.id === "projects") return ctx.projects.map(project => ({ at: { kind: "project", id: project.id }, name: project.name }));
-  return [];
-}
 
 /** Brings the row a search result names into view once its page is drawn. */
 function revealItem(id: string): void {
@@ -131,7 +121,9 @@ export function SettingsSidebar() {
     const open = openGroup === group.id;
     const dimmed = matches !== null && (matches.get(group.id)?.length ?? 0) === 0;
     const Glyph = group.glyph;
-    const under = open ? subPages(group, ctx) : [];
+    // The pages under a group stand whether it is open or not: a list that grew when a row was picked moved every
+    // group under it, and a sidebar whose rows change place between states is the one thing the eye cannot forgive.
+    const under = group.sub?.(ctx) ?? [];
     return (
       <li key={group.id} className="flex flex-col">
         <SidebarMenuButton
