@@ -132,14 +132,12 @@ export const TERMINAL_SIZE_FACT: Record<TerminalSizeSource, (appPx: number, file
 };
 
 /** Settings > Account: the one row that says who this wsp is signed in to and what a sign-in buys. The second
- * sentence is why the button is held: no op on the wire signs the app in yet. Nothing about the account is said
- * anywhere else in the window. */
+ * sentence is why the button is held: no op on the wire signs the app in yet. There is no word for being signed
+ * in or not: the button standing there is that state. Nothing about the account is said anywhere else in the
+ * window. */
 export const ACCOUNT_WORDS = {
   title: "Account",
   github: "GitHub",
-  notSignedIn: "not signed in",
-  /** The word for a sign-in the relay named no account for, where signed in is all this computer knows. */
-  signedIn: "signed in",
   signIn: "Sign in with GitHub",
   signOut: "Sign out",
   reach: "Sign in to use this wsp from outside your network. Not from the app yet.",

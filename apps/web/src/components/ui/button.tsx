@@ -99,9 +99,6 @@ function Button({ className, variant, size, held = false, render, ...props }: Bu
   });
 }
 
-/** The orange confirm tier on an outline button: the one look for an action after which something does not come back. */
-const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
-
 /** How far a held control falls: the generic disabled step reads as the live outline beside it in a row's slot, so
  * a control waiting on a road nobody has takes half the ink and edge of one that can be pressed. Opacity alone,
  * since a held control that changed colour would be saying something other than that it cannot be pressed. */
@@ -112,4 +109,4 @@ const HELD_DIM = "disabled:opacity-50";
  * where red stands at rest, so no page carries more than one loud thing. */
 const DANGER_BUTTON = "transition-[color,border-color,box-shadow] duration-150 [:hover,[data-pressed]]:border-destructive/50 [:hover,[data-pressed]]:text-destructive-foreground";
 
-export { Button, BUTTON_GLYPH_INSET, buttonVariants, DANGER_BUTTON, HELD_SURFACE, WARN_BUTTON };
+export { Button, BUTTON_GLYPH_INSET, buttonVariants, DANGER_BUTTON, HELD_SURFACE };

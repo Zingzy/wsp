@@ -165,10 +165,11 @@ describe("Devices", () => {
 });
 
 describe("Account", () => {
-  it("says not signed in with the two sentences as the description and the held button with no title; signed in reads the login and offers Sign out", async () => {
+  it("says nothing but the sentences and the held button with no title while nobody is signed in; signed in reads the login and offers Sign out", async () => {
     await mount({ account: async () => ({ signedIn: false }) } as Partial<Api>, "account");
     expect(rowTitles()).toEqual([ACCOUNT_WORDS.github]);
-    expect(wordOf("github")).toBe(ACCOUNT_WORDS.notSignedIn);
+    // No word for being signed in or not: the button standing there is that state, and the room is the sentence's.
+    expect(wordOf("github")).toBeUndefined();
     expect(descriptionOf("github")).toBe(ACCOUNT_WORDS.reach);
     const action = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=account-action]")!;
     expect(action().textContent).toBe(ACCOUNT_WORDS.signIn);

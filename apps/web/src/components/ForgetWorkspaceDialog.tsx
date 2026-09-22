@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "./ui/alert-dialog.js";
-import { Button, WARN_BUTTON } from "./ui/button.js";
+import { Button } from "./ui/button.js";
 
 /** The two roads out, each with the word on its button, the sentence under the title and the verb it asks for. */
 const ROADS = {
@@ -77,7 +77,7 @@ export function ForgetWorkspaceDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant="outline" className={WARN_BUTTON} disabled={busy} onClick={() => void forget()} data-k="end-workspace">
+          <Button variant="destructive" disabled={busy} onClick={() => void forget()} data-k="end-workspace">
             {busy ? road.busy : road.word}
           </Button>
         </AlertDialogFooter>
