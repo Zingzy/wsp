@@ -557,7 +557,9 @@ describe("catalog", () => {
     const download = join(dir, "download");
     const installed = join(dir, "bin", "claude");
     // The script road's step carries `set -euo pipefail`, pinned above, so a refused sum ends the script where it stands.
+    // The arch is forced so the case reads the checksum road on any machine that runs the suite, not the arch word of the machine's own uname.
     const script = `set -euo pipefail\n${catalog.GOLDEN_SETUP}`
+      .replace('arch="$(uname -m)"', "arch=x86_64")
       .replace(`${HOME_BIN}/claude`, installed)
       .replaceAll("/tmp/claude", download)
       .replace(`"https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`, `"file://${join(dir, "served")}"`)
