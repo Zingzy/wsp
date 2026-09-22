@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXIT_CODES, pairToken, SEAL_UNSERVED } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { advertisedUrl, deviceLines, deviceRoleWord, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
+import { advertisedUrl, deviceLines, deviceRoadWord, deviceRoleWord, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import { hostSideOnlyFix, hostSideOnlyLine, type HostAim } from "../src/hosts.js";
 import { cli, HOST_COMMANDS, HOST_FLAG, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
@@ -126,17 +126,29 @@ describe("wsp host devices", () => {
           { id: "d_1a2b3c4d5e6f7a8b", name: "maya's laptop", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:05:00.000Z" },
           { id: "d_5e6f7a8b1a2b3c4d", name: "a Mac in a browser at 127.0.0.1:4400", createdAt: "2026-09-11T11:00:00.000Z", lastSeenAt: "2026-09-11T11:00:00.000Z", here: true },
           { id: "d_9a8b7c6d5e4f3a2b", name: "thread abcd1234", createdAt: "2026-09-11T12:00:00.000Z", lastSeenAt: "2026-09-11T12:00:00.000Z", scope: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } },
+          {
+            id: "d_2b3c4d5e6f7a8b1a",
+            name: "the desk",
+            createdAt: "2026-09-11T13:00:00.000Z",
+            lastSeenAt: "2026-09-11T13:00:00.000Z",
+            via: { kind: "account", relayDeviceId: "c_desk", fingerprint: "SHA256:aaa", publicKey: "pub", admittedBy: "SHA256:bbb" },
+          },
         ],
       },
     });
     const log: string[] = [];
     expect(await devicesCommand(io(log, []), here(), [], deps(host.client))).toBe(0);
-    expect(log[0]).toMatch(/^DEVICE\s+ID\s+AS\s+PAIRED\s+LAST SEEN$/);
-    expect(log[1]).toMatch(/^maya's laptop\s+d_1a2b3c4d5e6f7a8b\s+device\s+2026/);
-    expect(log[2]).toMatch(/^a Mac in a browser at 127\.0\.0\.1:4400\s+d_5e6f7a8b1a2b3c4d\s+owner\s+2026/);
-    expect(log[3]).toMatch(/^thread abcd1234\s+d_9a8b7c6d5e4f3a2b\s+thread\s+2026/);
+    expect(log[0]).toMatch(/^DEVICE\s+ID\s+AS\s+VIA\s+PAIRED\s+LAST SEEN$/);
+    // One listing for both roads, with the road in a column of its own: a code, or the account both computers are
+    // signed in to.
+    expect(log[1]).toMatch(/^maya's laptop\s+d_1a2b3c4d5e6f7a8b\s+device\s+code\s+2026/);
+    expect(log[2]).toMatch(/^a Mac in a browser at 127\.0\.0\.1:4400\s+d_5e6f7a8b1a2b3c4d\s+owner\s+code\s+2026/);
+    expect(log[3]).toMatch(/^thread abcd1234\s+d_9a8b7c6d5e4f3a2b\s+thread\s+code\s+2026/);
+    expect(log[4]).toMatch(/^the desk\s+d_2b3c4d5e6f7a8b1a\s+device\s+account\s+2026/);
     expect(deviceRoleWord({})).toBe("device");
     expect(deviceRoleWord({ here: true })).toBe("owner");
+    expect(deviceRoadWord({})).toBe("code");
+    expect(deviceRoadWord({ via: { kind: "account", relayDeviceId: "c_1", fingerprint: "SHA256:aaa", publicKey: "pub", admittedBy: "SHA256:bbb" } })).toBe("account");
     expect(host.closes()).toBe(1);
   });
 
@@ -394,7 +406,7 @@ describe("the words", () => {
 
   it("pads the device table's columns and never carries a token", () => {
     const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }], { kind: "here" });
-    expect(lines[0]).toMatch(/^DEVICE\s+ID\s+AS\s+PAIRED\s+LAST SEEN$/);
+    expect(lines[0]).toMatch(/^DEVICE\s+ID\s+AS\s+VIA\s+PAIRED\s+LAST SEEN$/);
     expect(lines.join("\n")).not.toContain("token");
   });
 

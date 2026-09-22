@@ -6,7 +6,7 @@ import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -77,6 +77,10 @@ export interface HostOptions {
   /** The provider row this host is wired to, read off the environment it picked its module out of. The row that
    * holds no machine asks no account anything, so this start lists no snapshots and says so. */
   provider?: string;
+  /** What this host knows of the account's own computers, for the door a computer with no code comes in by: the
+   * key it trusts to sign an admission and the listing its heartbeat reads back. Without it device.auth is
+   * refused, which is what a host on no account answers. */
+  admitted?: AdmittedDevices;
 }
 
 /** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
@@ -109,6 +113,10 @@ export interface HostHandle extends WorkspaceRoads {
   port: number;
   wsPort: number;
   authToken: string;
+  /** Takes one device's token away and cuts the sockets it held, the same road the op takes: what the heartbeat's
+   * reconcile of the account's own listing comes through, so a device the account dropped goes as one revoked at
+   * the terminal goes. */
+  revokeDevice(id: string): Promise<boolean>;
   /** A pairing code whose device is read as the owner: what wsp init mints for the browser it opens, through the
    * handle it holds as it makes the first workspace, so the person who ran init never meets a pair screen. */
   hereCode(): Promise<string>;
@@ -628,6 +636,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is
       // on the next read, and the read is two small files on this computer.
       account: { read: async () => accountHere(opts.statePath, wspHome()) },
+      ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
     });
@@ -689,6 +698,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     port,
     wsPort: rtServer.port,
     authToken,
+    revokeDevice: id => rtServer.revokeDevice(id),
     hereCode: async () => (await rt.devices.issue({ now: Date.now(), ttlMs: PAIR_CODE_TTL_MS, here: true })).code,
     door: {
       open: openDoor,

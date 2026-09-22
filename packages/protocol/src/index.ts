@@ -4237,6 +4237,21 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
  * has to say what it is here before any socket may redeem it. */
 export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
+/** How a device this host admitted through the account got in: the computer it is on the relay, the key it proved
+ * and the key that signed its admission. The public key is kept because a device admitted here may itself sign the
+ * admission of the next one, and the fingerprint because a revoke is remembered by the key rather than by the id a
+ * relay mints afresh at every sign-in. Nothing secret: a public key and two fingerprints. */
+export const DeviceVia = z.object({
+  kind: z.literal("account"),
+  /** The id that device has on the relay, which is what a listing of the account's computers names it by. */
+  relayDeviceId: z.string(),
+  fingerprint: z.string(),
+  publicKey: z.string(),
+  /** The fingerprint of the key whose admission let it in. */
+  admittedBy: z.string(),
+});
+export type DeviceVia = z.infer<typeof DeviceVia>;
+
 /** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp host devices
  * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
  * socket. */
@@ -4255,6 +4270,9 @@ export const DeviceView = z.object({
    * the device is read as the owner on the socket and the JSON routes alike, and is still listed and revoked like
    * every other. Absent is a computer or a browser that took a code from wsp host pair. */
   here: z.literal(true).optional(),
+  /** How this device got in, where it did not redeem a pairing code: the account both computers are signed in to.
+   * Absent is a code, so one record, one listing and one revoke answer for both roads. */
+  via: DeviceVia.optional(),
 });
 export type DeviceView = z.infer<typeof DeviceView>;
 
@@ -4296,7 +4314,72 @@ export type AccountView = z.infer<typeof AccountView>;
 
 /** The refusal a socket let in on a ticket gets for reading the account: who this wsp is signed in to is read at
  * the terminal of the computer it runs on, as the devices and the places are. */
-export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp host linked on the computer the host runs on";
+export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp login on the computer the host runs on";
+
+/** The relay wsp signs in to when a person names none: the one this project runs, opt in as every account road is,
+ * and the only address the lines carry by default. Another relay is named on the line that signs in. */
+export const DEFAULT_RELAY = "https://relay.singhi.me";
+
+/** What one computer already on the account signs for another: the key it admits, its own key, and the moment.
+ * The relay stores these bytes and can make none of them, since it holds no device's private key; every host
+ * verifies the signature itself against the keys it already trusts. `issuedAt` travels and is stored as the
+ * string it was signed with, byte for byte, since the transcript is built from that spelling. */
+export const Admission = z.object({
+  device: z.string(),
+  by: z.string(),
+  issuedAt: z.string(),
+  signature: z.string(),
+});
+export type Admission = z.infer<typeof Admission>;
+
+/** One computer on the account as a host reads it off its heartbeat's reply: which key it proves and which
+ * admissions were signed for it. The signature rides along; the fingerprints alone would prove nothing. */
+export const AccountDevice = z.object({
+  id: z.string(),
+  name: z.string(),
+  fingerprint: z.string(),
+  admissions: z.array(Admission.omit({ device: true })),
+});
+export type AccountDevice = z.infer<typeof AccountDevice>;
+
+/** What the account's devices are as the last heartbeat listed them, and nothing when this host has heard no list
+ * at all: an absent list is unknown and never empty, so a relay that is down, one that answers an older shape and
+ * a beat that was refused admit nobody new and revoke nobody. */
+export const AccountDevices = z.object({ devices: z.array(AccountDevice) });
+
+/** What a device signs to prove it may come in through the account: the key admitted, the key that signed for it
+ * and the moment, built by one function so the wsp that signs and the host that verifies cannot drift. The host
+ * is not inside it: one admission stands at every host on the account whose trust the signer already has, which
+ * is what saves a person a code per host. */
+export function deviceAdmissionTranscript(device: string, by: string, issuedAt: string): Uint8Array {
+  return new TextEncoder().encode(`wsp device admission v1\n${device}\n${by}\n${issuedAt}\n`);
+}
+
+/** The refusal a device.auth gets that this host will not admit: a key the account's listing does not hold, an
+ * admission signed by nobody it trusts, or a signature that does not stand. One sentence for all of them, since a
+ * caller that cannot come in learns nothing from which check caught it, and it names the road in: a computer
+ * already on the account signs this one's key. */
+export const DEVICE_AUTH_REFUSAL =
+  "this host admits a computer on the account only on an admission signed by a key it already trusts; run wsp login to read this computer's id on a computer that is already in, then wsp login <id> there, and dial again";
+
+/** The refusal a device this host revoked gets when it dials again through the account: the key is remembered, so
+ * an admission it still holds admits it nowhere here. A code from the host's own terminal is the way back. */
+export const DEVICE_REVOKED_REFUSAL = "this host took this computer's token away; it is admitted through the account no longer, and wsp host pair on the host is the way back in";
+
+/** The refusal a device.auth gets from a host that is on no account: nothing there names the keys it would trust,
+ * so pairing with a code is the whole road to it. */
+export const DEVICE_ACCOUNT_UNSERVED = "this host is on no account, so it admits no computer through one; run wsp host pair on the computer it runs on for a code";
+
+/** What a computer reads when the host it dialled answered device.auth with its own request schema's refusal: a
+ * host of an older wsp, whose door knows no road in but a pairing code. Told apart from a refusal of this build by
+ * the kind on the frame, which an older host's schema refusal carries none of, so a token this computer never sent
+ * is never read as one that was taken away. */
+export const deviceAuthOldHostLine = (where: string): string =>
+  `the host at ${where} runs an older wsp, whose door does not know how a computer on the account comes in; run wsp host pair on it and wsp host connect ${where} --code <code> to pair with a code instead`;
+
+/** The refusal wsp login gives a word that carries no key: every word wsp login prints carries the fingerprint of
+ * the key being admitted, so a word without one was written by hand or cut in half, and nothing is posted. */
+export const LOGIN_NO_KEY_REFUSAL = "that word names no key for the computer signing in, so nothing here could say which key it would be admitting; run wsp login there again and copy the whole word it prints";
 
 /** The refusal for a host that keeps no records of its own to read an account from, which a bare runtime does not. */
 export const ACCOUNT_UNSERVED = "this host keeps no account records; wsp up serves them";
@@ -4528,6 +4611,19 @@ export type SealOpenRequest = z.infer<typeof SealOpenRequest>;
 export const SealOpenReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature, ephemeral: PlaceEphemeral });
 export type SealOpenReply = z.infer<typeof SealOpenReply>;
 
+/** The first frame of a computer coming in through the account, inside the seal the frame above agreed: the key it
+ * proves, what to call it in the listing, and its signature over the bytes the host challenged it with, which are
+ * the same bytes a joined computer signs at place.prove. Answered with `{ deviceId, deviceToken }`, as a redeem is,
+ * and the socket is that device from then on. */
+export const DeviceAuthRequest = z.object({
+  id: reqId,
+  op: z.literal("device.auth"),
+  publicKey: PlacePublicKey,
+  name: z.string().min(1).max(200),
+  signature: PlaceSignature,
+});
+export type DeviceAuthRequest = z.infer<typeof DeviceAuthRequest>;
+
 /** The refusal a client gets from a host that holds no key of its own to prove: a runtime served without the
  * place wiring, which is a runtime in a test rather than any host a person starts. */
 export const SEAL_UNSERVED = "this host holds no key to prove itself with; the host that serves the app wires one";
@@ -4746,6 +4842,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * send. Answered with a SealOpenReply; it is a door frame read before auth, as a redeem is, and no token names
    * anybody who may send it. */
   SealOpenRequest,
+  /** The other first frame a computer with no code sends, inside the seal: it proves a key the account admitted
+   * rather than spending a code. A door frame read before auth, as a redeem is. */
+  DeviceAuthRequest,
   /** What this wsp knows about the account it is signed in to, off this computer's own records. Answers
    * `{ account }`. Only on the person's own road, never on one let in by a ticket. */
   z.object({ id: reqId, op: z.literal("account.get") }),

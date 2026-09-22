@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LAUNCHED_WITH, WS_PATH, hostNoKeyLine } from "@wsp/protocol";
-import { aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
+import { accountHosts, aimedAlias, aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, severalAccountHostsLine, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
 import { homeNamed } from "../src/serving-home.js";
 import { hostAddress, noHostServingLine } from "../src/verbs.js";
 
@@ -241,6 +241,70 @@ describe("which host a line runs against", () => {
     expect(() => aimedHost("/nowhere/state.json", { host: "attic", env: {}, home })).toThrow(noSuchHostLine("attic", home));
     expect(noSuchHostLine("attic", home)).toContain("box");
     expect(noSuchHostLine("attic", home).split("\n")).toHaveLength(1);
+  });
+});
+
+describe("the account hosts a line falls to", () => {
+  /** A record wsp hosts wrote off the account's listing: the road it came by and the host's id there, and no token
+   * until this computer's first dial. */
+  const onAccount = (url: string, hostId: string): HostRecord => ({ url, deviceId: "", deviceToken: "", hostKey: HOST_KEY, pairedAt: "2026-09-22T00:00:00.000Z", via: { kind: "account", hostId } });
+
+  /** A state folder holding a relay record, which is what says the host on this computer is one of the account's. */
+  function linkedState(hostId: string): string {
+    const dir = tempDir("hosts-linked");
+    writeFileSync(join(dir, "relay.json"), JSON.stringify({ relayUrl: "https://relay.example", hostId, token: "t", name: "this-mac", linkedAt: "2026-09-22T00:00:00.000Z" }));
+    return join(dir, "state.json");
+  }
+
+  it("goes to the one account host that is not this computer when nothing serves here and nothing else named one", () => {
+    const home = tempDir("hosts-account");
+    writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
+    const aim = aimedHost(linkedState("hbox1"), { env: {}, home });
+    expect(aim).toMatchObject({ kind: "alias", alias: "attic" });
+    expect(aimedAlias(linkedState("hbox1"), home)).toBe("attic");
+    // The record is what a dial reads, so it carries the address and the key off the listing.
+    expect(aim.kind === "alias" && aim.record.url).toBe("https://hattic.example");
+  });
+
+  it("starts a host here when the account's one host is the host on this computer", () => {
+    const home = tempDir("hosts-own");
+    writeHost(home, "this-mac", onAccount("https://hbox1.example", "hbox1"));
+    expect(aimedHost(linkedState("hbox1"), { env: {}, home })).toEqual({ kind: "here" });
+    expect(accountHosts(linkedState("hbox1"), home)).toEqual([]);
+    expect(aimedAlias(linkedState("hbox1"), home)).toBeUndefined();
+  });
+
+  it("refuses in one sentence naming them when several are on the account and none is marked", () => {
+    const home = tempDir("hosts-several");
+    writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
+    writeHost(home, "cellar", onAccount("https://hcellar.example", "hcellar"));
+    const statePath = linkedState("hbox1");
+    expect(() => aimedHost(statePath, { env: {}, home })).toThrow(severalAccountHostsLine(["attic", "cellar"]));
+    expect(() => aimedHost(statePath, { env: {}, home })).toThrow(/wsp host default/);
+    expect(aimedAlias(statePath, home)).toBeUndefined();
+    // The mark settles it, and the line goes there.
+    setDefaultHost(home, "cellar");
+    expect(aimedHost(statePath, { env: {}, home })).toMatchObject({ kind: "alias", alias: "cellar" });
+    expect(aimedAlias(statePath, home)).toBe("cellar");
+  });
+
+  it("starts a host here when this computer holds no account record, and when a host does serve the state file", () => {
+    const home = tempDir("hosts-none-here");
+    expect(aimedHost(linkedState("hbox1"), { env: {}, home })).toEqual({ kind: "here" });
+    // A record a code paired is no account host: it is reached by name and never falls to.
+    writeHost(home, "lan", record("http://192.168.1.9:4400"));
+    expect(aimedHost(linkedState("hbox1"), { env: {}, home })).toEqual({ kind: "here" });
+    // And a host serving this state file wins over the account, as it does over the default alias.
+    const served = servedState(4600);
+    writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
+    expect(aimedHost(served, { env: {}, home })).toEqual({ kind: "here" });
+  });
+
+  it("reads the account off the hosts folder and this computer's own record, with no relay asked", () => {
+    const home = tempDir("hosts-offline");
+    writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
+    // A computer that is on no account of its own still falls to the record: the rule reads files and nothing else.
+    expect(aimedHost("/nowhere/state.json", { env: {}, home })).toMatchObject({ kind: "alias", alias: "attic" });
   });
 });
 

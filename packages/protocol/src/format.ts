@@ -3802,6 +3802,82 @@ export function hostMenuAction(id: string): HostMenuAction | undefined {
   return undefined;
 }
 
+/** How often a linked host says where it is on its account, and so how fresh a listing of the account's hosts can
+ * be. Read by the host that beats and by the table below that calls a host up or away, so the two cannot drift. */
+export const HOST_BEAT_MS = 60_000;
+
+/** One row of the one listing wsp hosts prints: a host on the person's account, or one this computer paired with a
+ * code. The command line builds the rows off the relay's listing and the records under its hosts folder; the words
+ * are here, beside every other table's. */
+export interface HostsTableRow {
+  host: string;
+  /** Where it answers, and nothing for a host on the account that has not said where it is yet. */
+  address?: string;
+  via: "account" | "code";
+  /** How long since its last beat, null for a host on the account that has never beaten, and nothing for one
+   * reached by a code, which says nothing about itself until it is dialled. */
+  awayMs?: number | null;
+  /** The device this computer holds there, which the account road has none of until its first dial. */
+  deviceId?: string;
+  connector?: string;
+  /** The fingerprint of the key it proves, which every dial holds it to and a person compares with the one wsp
+   * host pair prints over there. */
+  hostKey?: string;
+  default?: boolean;
+}
+
+/** What a host on the account with no address reads as: there is nothing to dial until wsp up runs over there. */
+export const NOT_UP_YET = "not up yet";
+
+/** Whether a host on the account is answering, off the time since its last beat: up while it is inside two beats,
+ * since one missed beat is a slow minute rather than a host that is gone, and away with the time since after that.
+ * A host that has never beaten has never been up. */
+export function hostBeatWord(awayMs: number | null): string {
+  if (awayMs === null) return "not yet";
+  if (awayMs <= 2 * HOST_BEAT_MS) return `up ${fmtDuration(Math.max(0, awayMs))}`;
+  return `away ${offlineFor(awayMs)}`;
+}
+
+/** The cells of the one hosts table, the header first: every host this computer can reach, whichever road it holds
+ * it by, with the road in a column of its own so a person reads why a host needs no code. */
+export function hostsTable(rows: readonly HostsTableRow[]): string[][] {
+  return [
+    ["HOST", "ADDRESS", "VIA", "STATE", "DEVICE", "CONNECTOR", "KEY", ""],
+    ...rows.map(row => [
+      row.host,
+      row.address ?? NOT_UP_YET,
+      row.via,
+      row.awayMs === undefined ? "" : hostBeatWord(row.awayMs),
+      row.deviceId ?? "",
+      row.connector ?? "",
+      row.hostKey ?? "",
+      row.default === true ? "default" : "",
+    ]),
+  ];
+}
+
+/** What wsp hosts prints for a person who can reach nothing: the two roads to a host, the account one first. */
+export const NO_HOSTS_LINE = "You can reach no host but this computer. Run wsp login to sign in to your account, or wsp host connect <url> --code <code> for a host outside it.";
+
+/** What wsp hosts prints when the relay did not answer: what this computer holds is still the truth about what it
+ * can dial, so the rows are printed and the relay's own words go above them. */
+export const relayQuietLine = (why: string): string => `${why}; the rows below are the hosts this computer already holds`;
+
+/** What wsp hosts says about a record it wrote for a host on the account that the account no longer names: the
+ * record goes, since a name aimed at it would dial a host nobody on the account holds. */
+export const hostDroppedLine = (alias: string): string => `${alias} is no longer a host on your account, so this computer no longer holds a record for it`;
+
+/** What wsp hosts says about an alias already held by a host this computer paired with a code: the record stands
+ * as it is, and the account's host of that name is left out of the folder until the person frees the name. */
+export const hostAliasHeldLine = (alias: string): string =>
+  `your account holds a host called ${alias} and this computer paired with another under that name; the paired one stands, and wsp host forget ${alias} frees the name for the account's`;
+
+/** What a listing that names another key for a host this computer already pinned is refused with: the key is
+ * pinned at first sight and held to on every dial, so a second key is either another host or a relay steering this
+ * computer at one. The record keeps the key it pinned. */
+export const hostKeyMovedLine = (alias: string, held: string, listed: string): string =>
+  `your account lists ${alias} under the key ${listed}, and this computer pinned ${held} when it first saw it; nothing was sent to it. Compare the key wsp host pair prints on that host, and run wsp host forget ${alias} if it is the one the account lists`;
+
 /** A colour as CSS spells it, with its alpha as a percent where one is given. */
 export function fmtRgb(colour: Rgb, alpha?: number): string {
   const channels = `${colour[0]} ${colour[1]} ${colour[2]}`;
