@@ -443,7 +443,6 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp run reads --image, which its row does not show",
       "wsp run reads --model, which its row does not show",
       "wsp run reads --title, which its row does not show",
-      "wsp send reads --access, which its row does not show",
       "wsp send reads --detach, which its row does not show",
       "wsp send reads --effort, which its row does not show",
       "wsp send reads --image, which its row does not show",

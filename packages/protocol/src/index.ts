@@ -886,8 +886,8 @@ export const SessionView = z.object({
    * a listing can say what a thread spent without anyone reading its transcript. */
   costUsd: z.number().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
-   * its own; effort as requested, since the CLI never echoes it, and the permission mode the turn is at, which is
-   * the start's until a pick moves a running turn to another one. */
+   * its own; effort as requested, since the CLI never echoes it, and the permission mode the thread is at, which is
+   * the start's until an access pick moves it, on the running turn or for the next one. */
   model: z.string().optional(),
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
@@ -1331,6 +1331,10 @@ export const SessionStartEvent = z.object({
    * row so a resume past the session index cap still reads what the thread was opened at rather than falling back
    * to the adapter's unnamed default. Absent on a turn from before it was recorded. */
   permissionMode: z.string().optional(),
+  /** The agent this turn ran on, by the id SessionView.harness carries: the thread's own record stamped on its
+   * transcript, beside the access and for the same cap, so a thread whose rows fell off the index still says which
+   * agent it runs on. Absent on a turn from before it was recorded. */
+  agent: z.string().optional(),
   tools: z.array(z.string()).optional(),
   harness: SessionHarness.optional(),
 });
@@ -5369,12 +5373,14 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- session access (what a pick made while a turn runs gets back) ---------------------
 
-/** set: the turn is at the mode, from its next tool call and on the prompt it was stopped on where that mode
- * answers one; a harness whose CLI takes the change only at launch is set too, where its adapter stands in for it
- * by answering that turn's prompts itself. unsupported: the harness takes no access change on a turn already under
- * way and nothing could stand in for it, so the pick is kept and the person's next message carries it.
- * not-running: the turn ended, or its process is gone, before the pick reached it. not-found: this runtime holds no
- * such session. None is an error reply, as a mode the harness's own list does not carry is. */
+/** The thread's record takes the mode on every answer but not-found, so its next turn runs at it whichever comes
+ * back. set: the thread is at the mode now; on a running turn from its next tool call and on the prompt it was
+ * stopped on where that mode answers one, a harness whose CLI takes the change only at launch set too by its
+ * adapter answering that turn's prompts itself; on a thread between turns, from its next turn. unsupported: the
+ * turn running now takes no access change and nothing could stand in for it, so it keeps the mode it started at
+ * and the next turn runs at the pick. not-running: the running turn's process is gone before the pick reached it.
+ * not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does not
+ * carry is. */
 export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
 export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
 export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });

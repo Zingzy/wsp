@@ -108,10 +108,11 @@ describe("the pages wsp prints", () => {
     const block = HELP.split("\n\n")[2]!;
     expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual(["with --on <computer>"]);
     // run and send take the agent's own flags, as the sentence says, and their own help is where they are listed.
-    for (const name of ["run", "send"]) {
-      const verb = CLI_VERBS.find(v => v.name === name)!;
-      for (const pick of ["model", "effort", "access"]) expect(Object.hasOwn(verb.options, pick), `wsp ${name} reads --${pick}`).toBe(true);
-    }
+    // Send takes two of the three: a thread's access is the thread's own and a message does not change it.
+    const reads = (name: string, pick: string): boolean => Object.hasOwn(CLI_VERBS.find(v => v.name === name)!.options, pick);
+    for (const pick of ["model", "effort", "access"]) expect(reads("run", pick), `wsp run reads --${pick}`).toBe(true);
+    for (const pick of ["model", "effort"]) expect(reads("send", pick), `wsp send reads --${pick}`).toBe(true);
+    expect(reads("send", "access"), "wsp send does not read --access").toBe(false);
     // Forty rows on a normal terminal: the page is read whole or it is not read.
     expect(HELP.split("\n").length).toBeLessThanOrEqual(40);
   });

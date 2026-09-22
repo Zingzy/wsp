@@ -558,6 +558,57 @@ describe("composer pickers", () => {
     await waitFor(() => expect(pickerValue("model")).toBe("gpt-6-astra"));
   });
 
+  it("a send into a thread that has run carries the effort picked on it and neither the agent nor the access, which stay the thread's own", async () => {
+    const ran: SessionView = { id: "s0", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" };
+    const { api, started, moved } = fixtureApi({ table: [CLAUDE, CODEX], history: CHAT_STREAM, sessions: [ran], access: "set" });
+    // An agent picked on the rail is the workspace's pick for its next thread; this thread runs on Claude and stays
+    // pinned to it, so the pick stands in what the composer resolved and must not reach the wire.
+    useComposerOptionsStore.setState({ byWorkspaceId: { [WS]: { harness: "codex" } } });
+    await setup(api);
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+    fireEvent.click(picker("defaults")!);
+    fireEvent.click(option("low")!);
+    await waitFor(() => expect(defaultsPick("effort")).toBe("low"));
+    fireEvent.click(picker("defaults")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    // The access went through the access verb, the one road that changes a thread's access, and not into the send.
+    expect(moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]);
+
+    const editor = composerEditor();
+    await typeInto(editor, "go");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ resume: "sess_0001", effort: "low" });
+    expect(started[0]).not.toHaveProperty("harness");
+    expect(started[0]).not.toHaveProperty("permissionMode");
+  });
+
+  it("an access picked on a thread that has run and is between turns goes through the access verb, so the thread's next turn runs at it", async () => {
+    const ran: SessionView = { id: "s0", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
+    const idle = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM, sessions: [ran], access: "set" });
+    await setup(idle.api);
+    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("defaults")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(idle.moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]));
+    // The button says what the thread is now at, and nothing under the box: the verb answered set, the thread's
+    // record has the mode, and the next thread in this workspace starts at it too.
+    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
+
+    // A thread that has not run names no row: its pick decides what it opens at and the verb is not called.
+    cleanup();
+    const fresh = fixtureApi({ table: [CLAUDE], access: "set" });
+    await setup(fresh.api);
+    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("defaults")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    expect(fresh.moved).toEqual([]);
+  });
+
   it("shows the running session's values while a turn streams, the CLI's 1M suffix read as the context window", async () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5[1m]", effort: "low", permissionMode: "plan" };
     const { api } = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running] });
@@ -667,17 +718,18 @@ describe("composer pickers", () => {
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
     expect(defaultsPick("access")).toBe("plan");
 
-    // A harness whose row says a pick waits for the next message said so over the list before the pick, so nothing
-    // is said again under the box, and the turn is not asked to take what it does not take.
+    // A harness whose row says a pick waits for the thread's next turn said so over the list before the pick, so
+    // nothing is said again under the box. The pick still goes through the access verb, which is where the thread's
+    // record takes it for that next turn; the turn running now keeps its mode.
     cleanup();
     const waits = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
     await setup(waits.api);
     await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("defaults")!);
     fireEvent.click(option("plan")!);
+    await waitFor(() => expect(waits.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
     await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
-    expect(waits.moved).toEqual([]);
   });
 
   const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
