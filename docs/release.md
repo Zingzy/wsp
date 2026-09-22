@@ -33,10 +33,18 @@ checkout of `main` on a computer with the Solari key in `.env`.
 6. **Tag.** `git tag v<version> && git push origin v<version>`. A pushed
    `v*` tag is the only thing that starts
    [the release workflow](../.github/workflows/release.yml), and it is the
-   whole desktop road: it checks the tag against every `package.json` that
-   carries a version and stops with both numbers in the line when they
-   disagree, so a tag pushed before step 5 fails here instead of shipping the
-   wrong number. Then a macOS runner builds `apps/desktop` as one universal
+   whole desktop road: it refuses a tag whose commit is not on main's own
+   line, naming the commit it points at, and it checks the tag against every
+   `package.json` that carries a version and stops with both numbers in the
+   line when they disagree, so a tag on a side branch, or one pushed before
+   step 5, fails here instead of shipping. That check runs from the tree the
+   tag points at, so it stops a tag pushed by hand on the wrong commit and not
+   a credential that strips the check from a commit before tagging it; the
+   ruleset on `refs/tags/v*` is the control against that credential. A run
+   started by hand from the Actions tab is always the dry run, whatever ref it
+   runs on: the four daemon binaries are built and the command line package
+   is staged with them, and nothing is drafted, attached or published.
+   Then a macOS runner builds `apps/desktop` as one universal
    bundle carrying both chips, signs it (see
    [Signing the mac bundles](#signing-the-mac-bundles)), checks both slices of
    its signature and its packaged tree, and wraps it in the drag-to-Applications
@@ -50,8 +58,14 @@ checkout of `main` on a computer with the Solari key in `.env`.
    previous tag plus the README's lines on opening a downloaded bundle. Nothing
    else on the workflow reaches npm: step 4 stays a person's, because of the one
    time password.
-7. **Publish the draft.** Read the notes, paste the doctor table from step 3
-   under them, and press publish. Nothing publishes itself. If a runner is
+7. **The draft turns itself into a release.** Once the bundles, the daemon
+   binaries and the npm package have landed, the last job attaches the
+   binaries to the draft, takes it out of draft, and decides latest by
+   version: a tag at or above the one GitHub serves as latest becomes the new
+   latest, a lower one is published without moving `wsp-mac.dmg` and
+   `wsp-linux.AppImage`, and a tag carrying a prerelease part is published as
+   a prerelease and is never latest. Read the notes on the release page and
+   paste the doctor table from step 3 under them. If a runner is
    down, the same bundles come from a Mac by hand:
    `pnpm --filter @wsp/desktop build`, then
    `pnpm --filter @wsp/desktop smoke`, then the disk image electron-builder

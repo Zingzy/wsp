@@ -5,23 +5,24 @@ name: release
 # package on npm through trusted publishing, and the draft turned into a
 # release once every part landed. Every bundle also goes up under a name no
 # version moves, which is what releases/latest/download serves and what the
-# site links. Run by hand it is a dry run: the daemon binaries are built and
-# uploaded as artifacts and the command line package is staged with them, and
-# nothing is drafted, attached or published.
+# site links. A run started by hand is the dry run and there is no box to untick:
+# the daemon binaries are built and uploaded as artifacts and the command line
+# package is staged with them, and nothing is drafted, attached or published.
+# The tag runs the workflow of the commit it points at, so the check that the
+# commit stands on main's own line holds against a tag pushed by hand on the
+# wrong commit, not against a credential that strips the check from a commit
+# first; the ruleset on refs/tags/v* is the control against that credential.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build the daemon binaries and stage the command line package with them; publish nothing
-        type: boolean
-        default: true
 
+# A job holds the grant its own steps use and no other, and no job holds the identity token beside a write on the
+# repository: a compromised dependency compiling in the daemon, mac or linux job runs under a read token, and the one
+# job that can mint the identity token npm trusts writes nothing here.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 env:
   NODE_VERSION: "22"
@@ -37,7 +38,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
@@ -48,13 +49,13 @@ jobs:
       run:
         working-directory: daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain from rust-toolchain.toml
         run: |
           rustup toolchain install
           rustup target add ${{ matrix.target }}
           rustup show
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -77,14 +78,14 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
+            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           else
-            cargo build --release --target "$TARGET" -p wsp-daemon-bin
+            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           fi
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"
           file "wsp-daemon-$TARGET"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wsp-daemon-${{ matrix.target }}
           path: daemon/wsp-daemon-${{ matrix.target }}
@@ -92,18 +93,24 @@ jobs:
 
   draft:
     name: Draft release
-    if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: The tag and the manifests say the same version
+      # The check below reads main's own line off origin/main, and a checkout of a tag brings no branch; the ref is
+      # named on both sides so the fetch writes it whatever refspec the checkout left configured.
+      - name: Main's own line, which the tag has to stand on
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: The tag stands on main's line and says what the manifests say
         id: version
         run: |
           version="$(node packages/wspx/scripts/tag-version.mjs "$GITHUB_REF_NAME")"
@@ -127,12 +134,14 @@ jobs:
     name: macOS disk image
     needs: [draft, daemon]
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -142,7 +151,7 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -164,10 +173,11 @@ jobs:
           pnpm --filter @wsp/desktop run build:mac
       # The screen smoke measures a real Mac's window and fails on a hosted runner's display; it runs in the merge
       # gate on a Mac. Here each bundle's signature and the packaged tree are checked without a screen, and with a
-      # certificate the check insists on a notarized, stapled bundle.
+      # certificate the check insists on a notarized, stapled bundle. It reads whether one signed from WSP_SIGNED, so
+      # the certificate's bytes stay in the environment of the build step and reach no test.
       - name: Check the packaged trees
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
+          WSP_SIGNED: ${{ secrets.CSC_LINK != '' && '1' || '' }}
         run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts
       - name: Name the disk image after the release, and copy it to the name that never moves
         run: |
@@ -187,13 +197,15 @@ jobs:
   linux:
     name: Linux AppImage
     needs: [draft, daemon]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -202,7 +214,7 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -230,28 +242,31 @@ jobs:
   npm:
     name: Command line package on npm
     needs: [draft, daemon]
-    # On a dry run the draft is skipped and this still runs, to stage the package with the four binaries.
-    if: ${{ !cancelled() && needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success') }}
-    runs-on: ubuntu-latest
+    # On a run by hand the draft is skipped and this still runs, to stage the package with the four binaries.
+    if: ${{ !cancelled() && needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success') }}
+    runs-on: ubuntu-24.04
+    # Read because a block that names one grant sets every other to none and the checkout needs it; no write of any
+    # kind, so the job that builds every workspace package can publish and can touch nothing here.
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           registry-url: https://registry.npmjs.org
       # Trusted publishing: the package on npm trusts this repository and this
       # workflow file, so the runner's identity token is the credential and no
-      # npm token exists anywhere. It needs an npm newer than node 22 ships.
-      - run: npm install -g npm@latest
+      # npm token exists anywhere. It needs an npm newer than node 22 ships, at
+      # an exact version, since the latest dist-tag moves under that token.
+      - run: npm install -g npm@12.0.2
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -263,22 +278,44 @@ jobs:
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
-      - name: Attach the binaries to the draft
-        if: ${{ !inputs.dry_run }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
       - name: Publish
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'push' }}
         run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
 
   publish:
     name: Publish the release
     needs: [draft, mac, linux, npm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - name: Turn the draft into a release
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The binaries are attached here and not from the job that publishes to npm, so no job holds the identity
+      # token and a write on this repository at once.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: wsp-daemon-*
+          path: daemon-bins
+      - name: Attach the binaries to the draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
+      # Latest is what releases/latest/download serves and what the site's download buttons link, so it is decided
+      # by version: a release below the one served today, or one carrying a prerelease part, moves neither. The flag
+      # is left unquoted because a prerelease answers two words.
+      - name: Turn the draft into a release, latest where its version says so
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # gh prints the API's error body on stdout and exits 1, so a repository serving no latest release is told
+          # apart by the 404 its stderr names and never by an empty answer; any other failure stops here and leaves
+          # the release a draft rather than guessing that nothing is served.
+          if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> latest-error.txt)"; then
+            grep -q "HTTP 404" latest-error.txt || { cat latest-error.txt >&2; exit 1; }
+            current=""
+          fi
+          flag="$(node packages/wspx/scripts/latest-flag.mjs "$GITHUB_REF_NAME" "$current")"
+          echo "$GITHUB_REF_NAME against the release served as latest (${current:-none}): $flag"
+          gh release edit "$GITHUB_REF_NAME" --draft=false $flag
