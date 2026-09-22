@@ -41,7 +41,7 @@ export { installEach, mcpServerSpec, runningWsp, thisComputersPath, type Install
 export { dialAddress, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
-export { aliasFrom, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, writeHost, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
+export { accountAim, aliasFrom, defaultHost, hostRoadWord, isUrl, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, writeHost, type AccountAim, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
 export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";
 export { addLines, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
 export { joinedAlready, placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";

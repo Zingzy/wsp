@@ -3829,6 +3829,11 @@ export interface HostsTableRow {
 /** What a host on the account with no address reads as: there is nothing to dial until wsp up runs over there. */
 export const NOT_UP_YET = "not up yet";
 
+/** What a host that is beating with no address reads as: it is up, and it says where it is only from a wsp new
+ * enough to send the key every dial holds it to, so its address lands at its next start. One row says one thing:
+ * a host the state column calls up is never called not up yet beside it. */
+export const ADDRESS_NEXT_START = "waits on its next start";
+
 /** Whether a host on the account is answering, off the time since its last beat: up while it is inside two beats,
  * since one missed beat is a slow minute rather than a host that is gone, and away with the time since after that.
  * A host that has never beaten has never been up. */
@@ -3845,7 +3850,7 @@ export function hostsTable(rows: readonly HostsTableRow[]): string[][] {
     ["HOST", "ADDRESS", "VIA", "STATE", "DEVICE", "CONNECTOR", "KEY", ""],
     ...rows.map(row => [
       row.host,
-      row.address ?? NOT_UP_YET,
+      row.address ?? (row.awayMs === undefined || row.awayMs === null ? NOT_UP_YET : ADDRESS_NEXT_START),
       row.via,
       row.awayMs === undefined ? "" : hostBeatWord(row.awayMs),
       row.deviceId ?? "",

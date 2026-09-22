@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localWiring, localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } from "@wsp/host";
+import { dialHost, localWiring, localWorkFolder, makeRuntime, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -172,6 +172,112 @@ describe("openHost", () => {
       runtime: testRuntime(),
     });
   }
+
+  /** A record wsp hosts wrote off the account's listing: the address the relay named, the key pinned at first
+   * sight, and no token until a dial admits this computer over there. */
+  const accountRecord = (over: Partial<HostRecord> = {}): HostRecord => ({
+    url: "https://hbox1.boxes.example",
+    deviceId: "",
+    deviceToken: "",
+    hostKey: "SHA256:box",
+    pairedAt: "2026-09-20T10:00:00.000Z",
+    via: { kind: "account", hostId: "hbox1" },
+    ...over,
+  });
+
+  /** The relay record a linked host keeps beside its state file, which is what says which host on the account is
+   * this computer. */
+  function linkedAs(hostId: string): void {
+    writeFileSync(join(home, "relay.json"), JSON.stringify({ relayUrl: "https://relay.example", hostId, token: "host-relay-token", name: hostId, linkedAt: "2026-09-20T09:00:00.000Z" }));
+  }
+
+  /** A socket that carries nothing: the dial below is asked for a token, not for a conversation. */
+  const stubClient = (): Awaited<ReturnType<typeof dialHost>> => ({
+    request: async <T extends Record<string, unknown>>(): Promise<T> => ({}) as T,
+    events: async () => {},
+    onFrame: () => () => {},
+    closed: Promise.resolve(),
+    closeWords: () => "",
+    close: () => {},
+    terminate: () => {},
+  });
+
+  /** The command line's dial as this window uses it: it admits this computer at the host it was aimed at and
+   * writes the token that host answered into the record, which is what the real one does. */
+  function admittingDial(answered: { deviceId: string; deviceToken: string } = { deviceId: "d_2", deviceToken: "tok-fresh" }): { dial: typeof dialHost; dialled: string[] } {
+    const dialled: string[] = [];
+    return {
+      dialled,
+      dial: async (_statePath, opts = {}) => {
+        const aim = opts.aim;
+        if (aim?.kind !== "alias") throw new Error(`the window dialled ${JSON.stringify(aim)} rather than a saved host`);
+        dialled.push(aim.alias);
+        writeHost(opts.home ?? home, aim.alias, { ...aim.record, ...answered });
+        return stubClient();
+      },
+    };
+  }
+
+  function openWith(dial: typeof dialHost, lines: string[] = [], runtime: Runtime = testRuntime()): Promise<HostSession> {
+    return openHost({ port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: fakeWebDir(), io: quietIO(lines), runtime, dial });
+  }
+
+  it("opens on the one host the account names, after one dial that admits this computer there, and starts no host here", async () => {
+    writeHost(home, "box", accountRecord());
+    const { dial, dialled } = admittingDial();
+    const runtime = testRuntime();
+    const closed = vi.spyOn(runtime, "close");
+    session = await openWith(dial, [], runtime);
+    expect(dialled).toEqual(["box"]);
+    // The runtime the setup gate built serves nothing here, so it goes rather than lingering behind the window.
+    expect(closed).toHaveBeenCalledOnce();
+    expect(session).toMatchObject({ url: "https://hbox1.boxes.example", owned: false, remote: true, alias: "box", label: "box", deviceToken: "tok-fresh" });
+    // Nothing was started on this computer: no lock beside the state file, and the token the page is handed is
+    // the one the dial wrote into the record.
+    expect(existsSync(join(home, "host.lock"))).toBe(false);
+  });
+
+  it("starts a host here when the one host on the account is this computer, which is where a line with no name goes anyway", async () => {
+    writeHost(home, "macbook", accountRecord({ via: { kind: "account", hostId: "hmac" } }));
+    linkedAs("hmac");
+    const { dial, dialled } = admittingDial();
+    session = await openWith(dial);
+    expect(dialled).toEqual([]);
+    expect(session).toMatchObject({ owned: true, remote: false });
+    expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it("starts a host here and says why when the account names several hosts and none of them is marked", async () => {
+    writeHost(home, "box", accountRecord());
+    writeHost(home, "attic", accountRecord({ url: "https://hattic.boxes.example", hostKey: "SHA256:attic", via: { kind: "account", hostId: "hattic" } }));
+    const lines: string[] = [];
+    const { dial, dialled } = admittingDial();
+    session = await openWith(dial, lines);
+    expect(dialled).toEqual([]);
+    expect(session.owned).toBe(true);
+    expect(lines.join("\n")).toContain(severalAccountHostsLine(["attic", "box"]));
+  });
+
+  it("starts a host here for a record paired with a code, which is no host on the account", async () => {
+    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+    const { dial, dialled } = admittingDial();
+    session = await openWith(dial);
+    expect(dialled).toEqual([]);
+    expect(session).toMatchObject({ owned: true, remote: false });
+  });
+
+  it("starts a host here and prints the host's own sentence when the account's host refuses this computer", async () => {
+    writeHost(home, "box", accountRecord());
+    const lines: string[] = [];
+    const refusing: typeof dialHost = async () => {
+      throw Object.assign(new Error("this host admits no device under that key"), { kind: "auth" });
+    };
+    session = await openWith(refusing, lines);
+    expect(session).toMatchObject({ owned: true, remote: false });
+    expect(lines.join("\n")).toContain("this host admits no device under that key");
+    // The record is left as it was: the window said what happened and opened here, and the Hosts menu still holds it.
+    expect(existsSync(join(home, "hosts", "box.json"))).toBe(true);
+  });
 
   it("starts the host on a free port and serves the app with the digest of its token, never the token", async () => {
     session = await open(0, 0);
