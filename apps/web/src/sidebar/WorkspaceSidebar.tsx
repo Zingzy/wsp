@@ -1,23 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The left region, the four nouns as one list: the search row, then every
-// project the host holds as a section row with the count of its workspaces and
-// the plus that starts another piece of work on it, the workspaces of that
-// project under it, each workspace's threads under it, and a workspace an
-// agent forked one step in under the thread that forked it with its own
-// threads under that. Under the projects one row records another. Computers
-// are not here at all: they live in Settings, and the person with one computer
-// never meets a list of them. The settled shelf with the archive nested in it,
-// keyboard traversal, the rebuild of a zombie or gone machine, the forget of a
-// gone one and the project trips' dialogs live here; the rows are WorkspaceRow
-// and ThreadRow beside this file, and the logic comes from the copied t3code
-// files. Every action a row carries, as a button or in its right-click menu,
-// comes from the project, workspace and thread registries. The surface itself
-// is the shell's sidebar-glass: nothing here paints a background.
-import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon, XIcon } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, isLocalWorkspace, workspaceState, type WorkspaceState } from "@wsp/protocol";
+// The left region, the four nouns as one tree. Fixed at the top: the search
+// row with the compose glyph that opens a thread in the selected workspace,
+// and the project switcher, "All projects" or the one project the tree is
+// filtered to. Under them, scrolling: one row per project with its workspaces
+// under it, each workspace's threads under that, a thread another thread's
+// agent opened one step in under its opener, and a workspace an agent forked
+// one step in under the thread that forked it with its own threads under
+// that; under one picked project the tree starts at its workspaces. Child
+// lists draw the rails that make it read as a tree. Computers are not here at
+// all: they live in Settings, and a project on another computer names it once
+// beside its row. On a wsp with no project the body holds one row that points
+// at the first run in the centre. The settled shelf with the archive nested
+// in it, keyboard traversal, the rebuild of a zombie or gone machine, the
+// forget of a gone one and the project trips' dialogs live here; the rows are
+// WorkspaceRow and ThreadRow beside this file, and the logic comes from the
+// copied t3code files. Every action a row carries, as a button or in its
+// right-click menu, comes from the project, workspace and thread registries.
+// The surface itself is the shell's sidebar-glass: nothing here paints a
+// background.
+import { ChevronDownIcon, FolderIcon, PlusIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
+import { CREATION_ASKED, CREATION_FAILED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -28,30 +33,30 @@ import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/ind
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { Button } from "../components/ui/button.js";
-import { SidebarContent, SidebarGroup, SidebarGroupAction, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubItem } from "../components/ui/sidebar.js";
+import { SidebarContent, SidebarGroupAction, SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
-import { catalogIn, useLaunches, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useLaunches, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
-import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, type ProjectTripRequest } from "../shell/shellRequests.js";
+import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestFirstRunFocus, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectSheet } from "./AddProjectSheet.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
-import { ROW_LEAD_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { ProjectSwitcher } from "./ProjectSwitcher.js";
+import { CHILD_LIST_CLASS, GLYPH_ROW_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TOP_ROW_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
-import { SectionRow } from "./SectionRow.js";
-import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
-import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree, workspaceOf, type ProjectRef } from "./threadTree.js";
+import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads, threadForest, type ThreadNode } from "./Sidebar.logic.js";
+import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree, workspaceOf, type ProjectGroup, type ProjectRef } from "./threadTree.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { ThreadLaunchRow, ThreadRow } from "./ThreadRow.js";
 import { WorkspaceRow } from "./WorkspaceRow.js";
-import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, computerName, onQuietComputer, whereWord } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, compactTimeLabel, placeNames, projectComputerWord, whereWord } from "./workspaceRows.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
@@ -59,6 +64,8 @@ const SETTLED_COLLAPSED_KEY = "wsp:sidebar-settled-collapsed";
 /** The archive is the other way about: it holds the rows a person has stopped looking at, so it is shut until this
  * workspace's own chevron opens it, and the list remembers the ones that were opened. */
 const ARCHIVED_OPEN_KEY = "wsp:sidebar-archived-open";
+/** The project the tree is filtered to. A view of this window alone, so it never follows a person to another one. */
+const PROJECT_PICK_KEY = "wsp:sidebar-project";
 const NOTHING_COLLAPSED: ReadonlyArray<string> = [];
 const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
   decode: raw => {
@@ -67,6 +74,14 @@ const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
       throw new Error(`Expected workspace ids, got ${raw}.`);
     }
     return parsed as ReadonlyArray<string>;
+  },
+  encode: value => JSON.stringify(value),
+};
+const projectPickCodec: Codec<string | null> = {
+  decode: raw => {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "string") throw new Error(`Expected a project id, got ${raw}.`);
+    return parsed;
   },
   encode: value => JSON.stringify(value),
 };
@@ -84,17 +99,27 @@ interface RowMachine {
 
 interface VisibleProject {
   readonly project: SidebarProjectSnapshot;
-  readonly active: ReadonlyArray<SidebarThreadSnapshot>;
-  readonly settled: ReadonlyArray<SidebarThreadSnapshot>;
-  readonly archived: ReadonlyArray<SidebarThreadSnapshot>;
+  readonly active: ReadonlyArray<ThreadNode<SidebarThreadSnapshot>>;
+  readonly settled: ReadonlyArray<ThreadNode<SidebarThreadSnapshot>>;
+  readonly archived: ReadonlyArray<ThreadNode<SidebarThreadSnapshot>>;
+  /** Every thread the three trees hold, top to bottom, for the rule that says which forks nest. */
+  readonly rows: { readonly active: ReadonlyArray<string>; readonly settled: ReadonlyArray<string>; readonly archived: ReadonlyArray<string> };
 }
 
 /** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
- * enough to archive. The archive is a reading of the clock, so it comes from the same minute tick the countdowns do. */
+ * enough to archive, each side a tree of openers and the threads they opened. The archive is a reading of the
+ * clock, so it comes from the same minute tick the countdowns do. */
 function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, nowMs: number): VisibleProject[] {
   return threadTree(projects).map(({ project, threads }) => {
     const { active, settled } = splitSidebarThreads(threads);
-    return { project, active, ...foldArchivedThreads(settled, nowMs) };
+    const folded = foldArchivedThreads(settled, nowMs);
+    return {
+      project,
+      active: threadForest(active),
+      settled: threadForest(folded.settled),
+      archived: threadForest(folded.archived),
+      rows: { active: active.map(t => t.id), settled: folded.settled.map(t => t.id), archived: folded.archived.map(t => t.id) },
+    };
   });
 }
 
@@ -108,6 +133,16 @@ interface DialogState {
 /** A project trip's dialog open for one workspace; keyed per opening so its folder and plan reset. */
 interface ProjectTripState extends ProjectTripRequest {
   readonly key: number;
+}
+
+/** The frame round one row and the glyphs its hover puts beside it: the hover group is this frame and not the
+ * whole list item, so a pointer over a row's children lifts nothing on the row above them. */
+function RowFrame({ children, ...props }: { children: ReactNode; onContextMenu?: ((event: MouseEvent<HTMLElement>) => void) | undefined }) {
+  return (
+    <div className="group/menu-item relative" {...props}>
+      {children}
+    </div>
+  );
 }
 
 export function WorkspaceSidebar() {
@@ -125,6 +160,7 @@ export function WorkspaceSidebar() {
   // Until the first list lands an empty group is unknown rather than empty, and the design spec gives this group no
   // waiting state of its own, so it holds nothing at all.
   const ready = useReady();
+  const projectsRead = useProjectsRead();
   const createWorkspace = useStore(s => s.createWorkspace);
   const removeProject = useStore(s => s.removeProject);
   // Where a workspace can go: the same list Settings draws, so a row and that table never name a computer twice.
@@ -142,8 +178,9 @@ export function WorkspaceSidebar() {
 
   const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [archivedOpenIds, setArchivedOpenIds] = useLocalStorage(ARCHIVED_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
+  const [pickStored, setPickStored] = useLocalStorage<string | null>(PROJECT_PICK_KEY, null, projectPickCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  /** The projects whose own section is shut, by the project's id. */
+  /** The projects whose own rows are shut, by the project's id. */
   const [shutProjects, setShutProjects] = useState<ReadonlySet<string>>(() => new Set());
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [addProject, setAddProject] = useState<number | null>(null);
@@ -170,33 +207,35 @@ export function WorkspaceSidebar() {
   const defaultVerbs = useWorkspaceVerbs();
 
   // This window is on another computer and the one running wsp has gone quiet: the rows stand as they were last
-  // known, the line under the search row says why nothing moves, and the rows on that computer take no green, since
-  // nothing here knows what they are doing while it sleeps.
+  // known, and the line under the head says why nothing moves.
   const asleep = hostAsleep(conn);
   const projects = useSidebarProjects();
   const launches = useLaunches();
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
-  /** The thread rows this body draws for each workspace, by the rules that hide one: its project's section shut,
-   * its own threads collapsed, the settled shelf shut over it, the archive shut inside that shelf. What it leaves
-   * out is what a fork cannot nest under, so the rule below gives that fork a row in its project's list instead. */
+  /** The thread rows this body draws for each workspace, by the rules that hide one: its project's row shut, its
+   * own threads collapsed, the settled shelf shut over it, the archive shut inside that shelf. What it leaves out
+   * is what a fork cannot nest under, so the rule below gives that fork a row in its project's list instead. */
   const shown = useMemo(
     () =>
-      visible.map(({ project, active, settled, archived }) => {
+      visible.map(({ project, rows }) => {
         const settledOpen = !settledCollapsed.includes(project.id);
         const archivedOpen = archivedOpenIds.includes(project.id);
         const hidden = shutProjects.has(project.workspace.project.id) || collapsed.has(project.id);
         return {
           workspace: project.id,
-          threads: hidden ? [] : [...active, ...(settledOpen ? settled : []), ...(settledOpen && archivedOpen ? archived : [])].map(thread => thread.id),
+          threads: hidden ? [] : [...rows.active, ...(settledOpen ? rows.settled : []), ...(settledOpen && archivedOpen ? rows.archived : [])],
         };
       }),
     [visible, settledCollapsed, archivedOpenIds, shutProjects, collapsed],
   );
   const nested = useMemo(() => nestedWorkspaces(projects, shown), [projects, shown]);
   const groups = useMemo(() => projectGroups(recorded, projects, nested), [recorded, projects, nested]);
+  const named = useMemo(() => placeNames(places), [places]);
+  // A pick for a project this host no longer holds reads as every project.
+  const picked = pickStored === null ? null : groups.find(group => group.project.id === pickStored) ?? null;
   const outOfMemory = useOutOfMemoryReadings(projects);
-  // One landing per project, for the network half of every row's second line and the pause mode its state word
-  // takes. Asked here, where the projects are drawn, so no row asks for itself.
+  // One landing per project, for the pause mode a row's state word takes. Asked here, where the projects are drawn,
+  // so no row asks for itself.
   useEffect(() => {
     for (const group of groups) void loadLanding(group.project.id);
   }, [groups, loadLanding]);
@@ -212,7 +251,7 @@ export function WorkspaceSidebar() {
   useEffect(
     () =>
       onRenameWorkspaceRequest(({ workspaceId }) => {
-        // The row is the only editor, so a box asked for from the palette opens a section that was shut.
+        // The row is the only editor, so a box asked for from the palette opens a project row that was shut.
         setShutProjects(new Set());
         setRenaming({ rowId: workspaceRowId(workspaceId), saving: false });
       }),
@@ -242,6 +281,9 @@ export function WorkspaceSidebar() {
     newWorkspace: project => openDialog(project),
     ...(api?.projectsRemove === undefined ? {} : { removeProject: (project: string) => void removeProject(project) }),
   };
+  /** One project's actions, as its row and the head standing in for its row both offer them. */
+  const projectActionsOf = (group: ProjectGroup): ResolvedAction[] =>
+    resolveActions(projectActions, { id: group.project.id, name: group.project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
 
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
@@ -278,45 +320,6 @@ export function WorkspaceSidebar() {
     setRenaming(open => (open?.rowId !== rowId ? open : named ? null : { rowId, saving: false }));
   };
 
-  /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. The row is
-   * told the workspace the thread itself runs in, which is the one it is drawn under except where an agent opened
-   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against.
-   * Its verbs reach the machine that workspace runs on, never the one whose rows it sits among: a rename or a stop
-   * travels to the thread's own machine, so a thread on a machine that is gone is refused wherever it is drawn. */
-  const threadRow = (thread: SidebarThreadSnapshot, time: string, under: SidebarProjectSnapshot) => {
-    const owner = workspaceOf(projects, thread) ?? under;
-    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(owner) });
-    const actionsOf = resolveActions(threadActions, target, threadVerbs);
-    const rowId = threadRowId(thread.id);
-    // A workspace this thread's own agent forked is a copy of the computer with its own branch, so it stands as a
-    // workspace row one step in under this row, with its own threads under it.
-    const forked = forkedWorkspaces(projects, thread.id, nested);
-    return (
-      <Fragment key={thread.id}>
-        <ThreadRow
-          thread={thread}
-          time={time}
-          runs={{ workspace: owner.displayName, where: whereWord(owner) }}
-          under={under.displayName}
-          active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
-          renaming={renaming?.rowId === rowId}
-          saving={renaming?.rowId === rowId && renaming.saving}
-          onSelect={() => select(thread.workspaceId, thread.threadId)}
-          onContextMenu={event => void openContextMenu(event, actionsOf)}
-          onRename={title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title }))}
-          onRenameCancel={() => setRenaming(null)}
-          onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
-        />
-        {/* The child's own row, drawn in the list this thread's rows sit in: the sub list is already one step in,
-            and a row is a list item of that list rather than one nested inside another. */}
-        {forked.map(child => {
-          const pane = visible.find(v => v.project.id === child.id);
-          return pane === undefined ? null : listItem(pane);
-        })}
-      </Fragment>
-    );
-  };
-
   /** The machine one workspace runs on, as a thread's verbs read it: the state its row shows and, where it is gone,
    * the words that say so. Read per thread off the workspace the thread itself runs on. */
   const machineOf = (project: SidebarProjectSnapshot): RowMachine => {
@@ -324,16 +327,55 @@ export function WorkspaceSidebar() {
     return { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
   };
 
-  /** What the body needs about one workspace: the actions every surface of it reads, and the action that opens
-   * its first thread. */
-  const blockOf = (project: SidebarProjectSnapshot) => {
-    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status, places), verbs);
-    return { actions, newThreadAction: actionById(actions, "new-thread") };
+  /** One thread's item, wherever it is listed: the active tree and the idle shelf read the same props. The row is
+   * told the workspace the thread itself runs in, which is the one it is drawn under except where an agent opened
+   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against.
+   * Its verbs reach the machine that workspace runs on, never the one whose rows it sits among: a rename or a stop
+   * travels to the thread's own machine, so a thread on a machine that is gone is refused wherever it is drawn.
+   * Under the row, one step in: the threads its own agent opened, then the workspaces its agent forked, each a
+   * block of its own with its threads under it. */
+  const threadItem = (node: ThreadNode<SidebarThreadSnapshot>, time: (thread: SidebarThreadSnapshot) => string, under: SidebarProjectSnapshot, depth: number) => {
+    const { thread, children } = node;
+    const owner = workspaceOf(projects, thread) ?? under;
+    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(owner) });
+    const actionsOf = resolveActions(threadActions, target, threadVerbs);
+    const rowId = threadRowId(thread.id);
+    const forked = forkedWorkspaces(projects, thread.id, nested);
+    return (
+      <li key={thread.id} data-thread-item className={RAIL_ITEM_CLASS}>
+        <RowFrame>
+          <ThreadRow
+            thread={thread}
+            time={time(thread)}
+            runs={{ workspace: owner.displayName, where: whereWord(owner) }}
+            under={under.displayName}
+            depth={depth}
+            active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
+            renaming={renaming?.rowId === rowId}
+            saving={renaming?.rowId === rowId && renaming.saving}
+            onSelect={() => select(thread.workspaceId, thread.threadId)}
+            onContextMenu={event => void openContextMenu(event, actionsOf)}
+            onRename={title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title }))}
+            onRenameCancel={() => setRenaming(null)}
+            onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
+          />
+        </RowFrame>
+        {children.length + forked.length > 0 ? (
+          <ul className={CHILD_LIST_CLASS}>
+            {children.map(child => threadItem(child, time, under, depth + 1))}
+            {forked.map(child => {
+              const pane = visible.find(v => v.project.id === child.id);
+              return pane === undefined ? null : workspaceItem(pane, depth + 1, true);
+            })}
+          </ul>
+        ) : null}
+      </li>
+    );
   };
 
-  /** The rows under one workspace: the line that opens its first thread while it has none, the working rows, then
-   * the idle shelf under its own header with the archive nested inside it. */
-  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, shut: boolean) => {
+  /** The rows under one workspace: the send in flight, the working rows, then the idle shelf under its own fold
+   * with the archive nested inside it; nothing at all while the workspace is collapsed or has nothing to draw. */
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, shut: boolean, depth: number) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
@@ -342,136 +384,150 @@ export function WorkspaceSidebar() {
     /** The send this workspace has in flight, which stands as a row of its own until the runtime writes that
      * thread's: a workspace running a person's first message may not read that it has no threads. */
     const launch = launches[project.id];
+    if (shut || (launch === undefined && active.length + shelved === 0)) return null;
+    const started = (thread: SidebarThreadSnapshot): string => compactTimeLabel(thread.startedAt);
+    const ended = (thread: SidebarThreadSnapshot): string => compactTimeLabel(resolveSettledTimestamp(thread));
+    return (
+      <ul className={CHILD_LIST_CLASS}>
+        {launch === undefined ? null : (
+          <li data-thread-selection-safe className={RAIL_ITEM_CLASS}>
+            <ThreadLaunchRow launch={launch} depth={depth} />
+          </li>
+        )}
+        {active.map(node => threadItem(node, started, project, depth))}
+        {shelved > 0 ? (
+          <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} depth={depth} onToggle={() => toggleSettled(project.id)} />
+        ) : null}
+        {settledOpen ? settled.map(node => threadItem(node, ended, project, depth)) : null}
+        {settledOpen && archived.length > 0 ? (
+          <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} depth={depth} onToggle={() => toggleArchived(project.id)} />
+        ) : null}
+        {settledOpen && archivedOpen ? archived.map(node => threadItem(node, ended, project, depth)) : null}
+      </ul>
+    );
+  };
+
+  /** One workspace's block: its row and the rows under it. The item carries the rail where it stands in a child
+   * list, and none where it stands at the top, which is a workspace under one picked project. */
+  const workspaceItem = (visibleProject: VisibleProject, depth: number, rail: boolean) => {
+    const { project } = visibleProject;
+    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status, places), verbs);
+    const isCollapsed = collapsed.has(project.id);
+    const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
+    const naming = renaming?.rowId === workspaceRowId(project.id);
+    return (
+      <li key={project.id} data-sidebar="menu-item" className={cn(rail && RAIL_ITEM_CLASS)}>
+        {/* A row holding the box takes no menu over it, as a thread row being named does not. */}
+        <RowFrame {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}>
+          <WorkspaceRow
+            project={project}
+            outOfMemory={outOfMemory[project.id]}
+            nowMs={nowMs}
+            depth={depth}
+            actions={actions}
+            active={selectedId === project.id && selectedThreadId === null}
+            collapsed={isCollapsed}
+            rebuildAsked={rebuildAsked}
+            renaming={naming}
+            saving={naming && renaming?.saving === true}
+            onSelect={() => select(project.id)}
+            onToggleCollapsed={() => toggleCollapsed(project.id)}
+            onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
+            onRenameCancel={() => setRenaming(null)}
+            onRenameOpen={openerOf(actionById(actions, "rename"))}
+          />
+        </RowFrame>
+        {threadsOf(visibleProject, isCollapsed, depth + 1)}
+      </li>
+    );
+  };
+
+  /** A workspace being made, under the project it belongs to, at the bottom where it will stand once it is one. */
+  const creationItem = (creation: Creation, depth: number, rail: boolean) => (
+    <li key={creation.key} className={cn(rail && RAIL_ITEM_CLASS)}>
+      <RowFrame>
+        <CreationRow creation={creation} depth={depth} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
+      </RowFrame>
+    </li>
+  );
+
+  /** What stands under a project: its workspaces, the ones being made, and the leaf that says it has none. */
+  const projectChildren = (group: ProjectGroup, depth: number, rail: boolean) => {
+    const made = creations.filter(creation => creation.project === group.project.id);
     return (
       <>
-        {newThreadAction.refusal === null && project.threads.length === 0 && launch === undefined ? (
-          <SidebarMenuSub>
-            <SidebarMenuSubItem data-thread-selection-safe>
-              <span className="block min-h-8 px-2 py-2 text-[11px] leading-4 text-muted-foreground">
-                No threads yet.{" "}
-                <button
-                  type="button"
-                  onClick={() => void runAction(newThreadAction)}
-                  className="cursor-pointer rounded-sm outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2"
-                >
-                  New thread {NEW_THREAD_SHORTCUT}
-                </button>
-              </span>
-            </SidebarMenuSubItem>
-          </SidebarMenuSub>
-        ) : null}
-        {!shut && (launch !== undefined || active.length + shelved > 0) ? (
-          <SidebarMenuSub>
-            {launch === undefined ? null : <ThreadLaunchRow launch={launch} />}
-            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), project))}
-            {shelved > 0 ? (
-              <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
-            ) : null}
-            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
-            {settledOpen && archived.length > 0 ? (
-              <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
-            ) : null}
-            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
-          </SidebarMenuSub>
+        {group.workspaces.map(workspace => {
+          const pane = visible.find(v => v.project.id === workspace.id);
+          return pane === undefined ? null : workspaceItem(pane, depth, rail);
+        })}
+        {made.map(creation => creationItem(creation, depth, rail))}
+        {group.workspaces.length === 0 && made.length === 0 ? (
+          <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
+            <p data-k="no-workspaces" data-depth={depth} className={cn(ROW_PROSE_CLASS, "flex h-7 items-center px-2")}>
+              {PROJECT_WORDS.noWorkspaces}
+            </p>
+          </li>
         ) : null}
       </>
     );
   };
 
-  /** One workspace in the list body: its row and the rows under it. */
-  const listItem = (visibleProject: VisibleProject) => {
-    const { project } = visibleProject;
-    const { actions, newThreadAction } = blockOf(project);
-    const isCollapsed = collapsed.has(project.id);
-    const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
-    const naming = renaming?.rowId === workspaceRowId(project.id);
-    // The row names the computer only where it is not the one this window runs on, which every row would carry.
-    const named = isLocalWorkspace(project.workspace) ? null : computerName(places, project);
+  /** One project under "All projects": its row, with the count of what it hides while shut and the plus that
+   * starts another piece of work on it on hover, then its workspaces one step in. */
+  const projectItem = (group: ProjectGroup) => {
+    const { id, name } = group.project;
+    const shut = shutProjects.has(id);
+    const actions = projectActionsOf(group);
+    const computer = projectComputerWord(group.project, named);
+    const count = group.workspaces.length + creations.filter(creation => creation.project === id).length;
     return (
-      <SidebarMenuItem
-        key={project.id}
-        // A row holding the box takes no menu over it, as a thread row being named does not.
-        {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}
-      >
-        <WorkspaceRow
-          project={project}
-          landing={landings[project.workspace.project.id]?.capabilities ?? null}
-          computer={named}
-          outOfMemory={outOfMemory[project.id]}
-          quiet={onQuietComputer(project, asleep)}
-          nowMs={nowMs}
-          actions={actions}
-          active={selectedId === project.id && selectedThreadId === null}
-          collapsed={isCollapsed}
-          rebuildAsked={rebuildAsked}
-          renaming={naming}
-          saving={naming && renaming?.saving === true}
-          onSelect={() => select(project.id)}
-          onToggleCollapsed={() => toggleCollapsed(project.id)}
-          onRename={name => void sendName(workspaceRowId(project.id), () => renameWorkspace({ workspaceId: project.id, name }))}
-          onRenameCancel={() => setRenaming(null)}
-          onRenameOpen={openerOf(actionById(actions, "rename"))}
-        />
-        {threadsOf(visibleProject, newThreadAction, isCollapsed)}
-      </SidebarMenuItem>
-    );
-  };
-
-  /** One project: its header row with the count of its workspaces and the plus that starts another piece of work
-   * on it, then its workspaces, then the line that says it has none. A workspace being made stands under the
-   * project it belongs to, at the bottom where it will stand once it is one. */
-  const projectSection = (group: { readonly project: ProjectRef; readonly workspaces: ReadonlyArray<SidebarProjectSnapshot> }) => {
-    const shut = shutProjects.has(group.project.id);
-    const made = creations.filter(creation => creation.project === group.project.id);
-    const actions = resolveActions(projectActions, { id: group.project.id, name: group.project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
-    return (
-      <SidebarGroup key={group.project.id} className="pt-0" data-project={group.project.id}>
-        <SectionRow
-          label={group.project.name}
-          k={projectRowK(group.project.id)}
-          count={group.workspaces.length + made.length}
-          collapsed={shut}
-          onToggle={() => toggleProject(group.project.id)}
-          onContextMenu={event => void openContextMenu(event, actions)}
-          action={
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <SidebarGroupAction
-                    data-k="new-workspace"
-                    data-project={group.project.id}
-                    className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
-                    aria-label={NEW_WORKSPACE}
-                    disabled={api === null}
-                    onClick={() => openDialog(group.project.id)}
-                  />
-                }
-              >
-                <PlusIcon />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">{NEW_WORKSPACE}</TooltipPopup>
-            </Tooltip>
-          }
-        />
-        {shut ? null : (
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {group.workspaces.map(workspace => {
-                const pane = visible.find(v => v.project.id === workspace.id);
-                return pane === undefined ? null : listItem(pane);
-              })}
-              {made.map(creation => (
-                <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
-              ))}
-            </SidebarMenu>
-            {group.workspaces.length === 0 && made.length === 0 ? (
-              <p data-k="no-workspaces" className={cn(ROW_PROSE_CLASS, "px-2 py-2 leading-4")}>
-                {PROJECT_WORDS.noWorkspaces}
-              </p>
-            ) : null}
-          </SidebarGroupContent>
-        )}
-      </SidebarGroup>
+      <li key={id} data-project={id}>
+        <RowFrame onContextMenu={event => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
+          <SidebarMenuButton
+            size="sm"
+            data-sidebar-row
+            data-row-id={projectRowK(id)}
+            data-depth={0}
+            aria-expanded={!shut}
+            aria-label={name}
+            className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS, GLYPH_ROW_CLASS)}
+            onClick={() => toggleProject(id)}
+          >
+            <FolderIcon className="size-3.5" />
+            <span data-project-name className="min-w-0 flex-1 truncate">
+              {name}
+            </span>
+            {computer === null ? null : (
+              <span data-project-computer className={cn(ROW_META_CLASS, "shrink-0")}>
+                {computer}
+              </span>
+            )}
+            {/* The slot the plus takes on hover, holding the count while the row is shut and nothing otherwise. */}
+            <span data-project-count className={cn(ROW_META_CLASS, "w-5 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0")}>
+              {shut ? count : ""}
+            </span>
+          </SidebarMenuButton>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <SidebarMenuAction
+                  showOnHover
+                  className="right-2 disabled:pointer-events-none disabled:opacity-50"
+                  data-k="new-workspace"
+                  data-project={id}
+                  aria-label={NEW_WORKSPACE}
+                  disabled={api === null}
+                  onClick={() => openDialog(id)}
+                />
+              }
+            >
+              <PlusIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">{NEW_WORKSPACE}</TooltipPopup>
+          </Tooltip>
+        </RowFrame>
+        {shut ? null : <ul className={CHILD_LIST_CLASS}>{projectChildren(group, 1, true)}</ul>}
+      </li>
     );
   };
 
@@ -507,30 +563,43 @@ export function WorkspaceSidebar() {
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
-  const search = (
-    <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
+  /** The one add control at rest: a new thread in the selected workspace, held while none is selected. */
+  const compose = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <SidebarGroupAction
+            className="top-1 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
+            aria-label="New thread"
+            disabled={selectedWorkspace === null}
+            onClick={() => {
+              if (selectedWorkspace !== null) verbs.newThread(selectedWorkspace.id);
+            }}
+          />
+        }
+      >
+        <SquarePenIcon />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+    </Tooltip>
+  );
+  const header = (
+    <div className="flex flex-col px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
       <div className="relative">
-        <SearchRow
-          action={
-            selectedWorkspace !== null ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <SidebarGroupAction
-                      className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150"
-                      aria-label="New thread"
-                      onClick={() => verbs.newThread(selectedWorkspace.id)}
-                    />
-                  }
-                >
-                  <MessageSquarePlusIcon />
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
-              </Tooltip>
-            ) : undefined
-          }
-        />
+        <SearchRow action={compose} />
       </div>
+      <ProjectSwitcher
+        projects={groups.map(group => group.project)}
+        named={named}
+        pick={picked?.project ?? null}
+        onPick={setPickStored}
+        onNewWorkspace={openDialog}
+        onAddProject={() => setAddProject(Date.now())}
+        onContextMenu={(event, projectId) => {
+          const group = groups.find(g => g.project.id === projectId);
+          if (group !== undefined) void openContextMenu(event, projectActionsOf(group));
+        }}
+      />
       {asleep ? (
         <p data-sidebar-asleep className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {HOST_ASLEEP_LINE}
@@ -543,32 +612,28 @@ export function WorkspaceSidebar() {
     </div>
   );
 
+  /** The creations whose project this host has not answered for: they belong to no row yet, so they wait under
+   * the projects rather than not being drawn at all. */
+  const homeless = creations.filter(creation => !groups.some(group => group.project.id === creation.project));
+  const empty = ready && projectsRead && groups.length === 0 && creations.length === 0;
+
   return (
     <>
       <SidebarChromeHeader />
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
-        <SidebarContent fixedHeader={search}>
-          {groups.map(projectSection)}
-          {/* A row for a workspace being made whose project this host has not answered for: it belongs to no
-              section yet, so it waits under them rather than not being drawn at all. */}
-          {creations.some(creation => !groups.some(group => group.project.id === creation.project)) ? (
-            <SidebarGroup className="pt-0">
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {creations
-                    .filter(creation => !groups.some(group => group.project.id === creation.project))
-                    .map(creation => (
-                      <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
-                    ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ) : null}
-          {ready ? (
-            <SidebarGroup className="pt-0">
-              <SectionRow label={PROJECT_WORDS.add} k="add-project" onPress={() => setAddProject(Date.now())} />
-            </SidebarGroup>
-          ) : null}
+        <SidebarContent fixedHeader={header}>
+          <ul data-sidebar-tree className="flex w-full min-w-0 flex-col gap-1 px-[var(--sidebar-content-inset)] pt-1">
+            {picked === null ? groups.map(projectItem) : projectChildren(picked, 0, false)}
+            {homeless.map(creation => creationItem(creation, 0, false))}
+            {empty ? (
+              <li>
+                <SidebarMenuButton size="sm" data-k="new-project" className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS)} onClick={requestFirstRunFocus}>
+                  <PlusIcon className="size-3.5" />
+                  <span>{PROJECT_WORDS.new}</span>
+                </SidebarMenuButton>
+              </li>
+            ) : null}
+          </ul>
           <ForwardsList />
         </SidebarContent>
         <SidebarChromeFooter>
@@ -642,52 +707,58 @@ export function WorkspaceSidebar() {
   );
 }
 
-/** The header over one group of thread rows, which shuts and opens it: the word alone while the group is open, the
+/** The fold over one group of thread rows, which shuts and opens it: the word alone while the group is open, the
  * word with its count while it is shut, so a shut group still says how much it holds. The idle shelf and the archive
  * under it are one row, so neither can drift from the other. */
-function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string; label: string; count: number; open: boolean; onToggle: () => void }) {
+function ThreadGroupRow({ rowId, label, count, open, depth, onToggle }: { rowId: string; label: string; count: number; open: boolean; depth: number; onToggle: () => void }) {
   return (
-    <SidebarMenuSubItem data-thread-selection-safe>
-      <button
-        type="button"
-        data-sidebar-row
-        data-row-id={rowId}
-        aria-expanded={open}
-        onClick={onToggle}
-        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-hidden ring-ring focus-visible:ring-2"
-      >
-        <span className="text-xs font-medium text-sidebar-whisper/50">{open ? label : `${label} (${count})`}</span>
-        <span className="h-px flex-1 bg-sidebar-border/60" />
-        <ChevronDownIcon aria-hidden className={cn("size-3 text-sidebar-whisper/50 transition-transform", open && "rotate-180")} />
-      </button>
-    </SidebarMenuSubItem>
+    <li data-thread-selection-safe className={RAIL_ITEM_CLASS}>
+      <SidebarMenuButton size="sm" data-sidebar-row data-row-id={rowId} data-depth={depth} aria-expanded={open} onClick={onToggle} className={cn(ONE_LINE_ROW_CLASS, "w-full")}>
+        <span data-group-word className={cn(ROW_PROSE_CLASS, "shrink-0")}>
+          {label}
+        </span>
+        {open ? null : (
+          <>
+            {" "}
+            <span data-group-count className={cn(ROW_META_CLASS, "shrink-0")}>
+              {count}
+            </span>
+          </>
+        )}
+        <span aria-hidden className="min-w-0 flex-1" />
+        <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
+      </SidebarMenuButton>
+    </li>
   );
 }
 
-/** A workspace still being created: the spinner and the step the create is waiting on, wrapped rather than cut at
- * the sidebar's width. A note on a step already taken stays in the log: this line is the create's state. */
-function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
+/** A workspace still being created: the spinner in the lead, the name, the word for a create that was refused in
+ * the slot, and under them the step the create is waiting on, cut at the row's width with the whole of it on the
+ * row's hover text. A note on a step already taken stays in the log: this line is the create's state. */
+function CreationRow({ creation, depth, active, onSelect }: { creation: Creation; depth: number; active: boolean; onSelect: () => void }) {
   const failed = creation.failed !== null;
   const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        size="lg"
-        isActive={active}
-        aria-busy={failed ? undefined : "true"}
-        data-sidebar-row
-        data-row-id={creation.key}
-        className={cn(THREE_LINE_ROW_CLASS, "h-auto min-h-15")}
-        onClick={onSelect}
-      >
-        <span aria-hidden className={ROW_LEAD_CLASS}>
-          {failed ? <span className="size-2 rounded-full bg-destructive" /> : <Spinner className="size-3.5" />}
+    <SidebarMenuButton size="lg" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={creation.key} data-depth={depth} className={TWO_LINE_ROW_CLASS} onClick={onSelect}>
+      {/* The lead centres on the first line, as a one-line row's lead does. */}
+      <span aria-hidden className={cn(ROW_LEAD_CLASS, "mt-[7px]")}>
+        {failed ? null : <Spinner className="size-3.5" />}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={TWO_LINE_FIRST_CLASS}>
+          <span data-creation-name className="min-w-0 flex-1 truncate text-sidebar-foreground">
+            {creation.name}
+          </span>
+          <span data-creation-state className={cn(ROW_PROSE_CLASS, "shrink-0 text-right")}>
+            {failed ? CREATION_FAILED : ""}
+          </span>
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-          <span className="truncate text-sidebar-foreground">{creation.name}</span>
-          <span className={cn("whitespace-normal break-words text-[11px] font-normal", failed ? "text-destructive-foreground" : "text-sidebar-muted-foreground")}>{line}</span>
+        <span className={TWO_LINE_SECOND_CLASS}>
+          <span data-creation-line className={cn(ROW_PROSE_CLASS, "min-w-0 flex-1 truncate")} title={line}>
+            {line}
+          </span>
         </span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
+      </span>
+    </SidebarMenuButton>
   );
 }
