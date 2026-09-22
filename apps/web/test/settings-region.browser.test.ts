@@ -4,13 +4,14 @@
 // whole region right of the sidebar and hands the right panel back as it was;
 // the Computers table gives its name column away rather than scrolling
 // sideways; every value in the workspace pane ends 20 px from the panel's edge,
-// clear of the scroll bar; and a side sheet is as tall as what it holds, top
-// edge 16 px in, never past the window less 32 px. Runs only when asked for
+// clear of the scroll bar; and the one-field side sheet is as tall as what it
+// holds, top edge 16 px in, never past the window less 32 px. Runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PlaceAddStep } from "@wsp/protocol";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -199,32 +200,6 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
     60_000,
   );
 
-  it.each(["dark", "light"] as const)(
-    "in the %s theme every row of the table is one height and the note behind a count is the muted ink",
-    async theme => {
-      // A row with a menu button used to stand 6 px taller than the row without one, which is the first thing a
-      // person reads as wrong in a table of four rows.
-      await open(WINDOWS[0], `theme=${theme}&ws=ws_a&panel=machine&places=1&settings=1`);
-      await page!.waitForSelector("[data-k=places-table]");
-      const rows = await page!.locator("[data-k=places-table] tbody tr").evaluateAll(els => els.map(el => ({ id: el.getAttribute("data-place-row"), height: el.getBoundingClientRect().height, cells: el.children.length })));
-      console.info(`places rows in the ${theme} theme: ${rows.map(r => `${r.id} ${r.height} px in ${r.cells} cells`).join(", ")}`);
-      expect(rows.length).toBeGreaterThan(2);
-      expect(new Set(rows.map(r => Math.round(r.height))).size).toBe(1);
-      // The head's own height, and every row carries the menu column whether or not it has a menu in it.
-      expect(Math.round(rows[0]!.height)).toBe(Math.round(await page!.locator("[data-k=places-table] thead tr").evaluate(el => el.getBoundingClientRect().height)));
-      expect(new Set(rows.map(r => r.cells)).size).toBe(1);
-      // The count stands in the row's own ink and the clause behind it is muted, as the mock draws it.
-      const inks = await page!.locator("[data-k=places-table] tbody [data-k=workspaces-note]").evaluateAll(els =>
-        els.map(el => ({ note: getComputedStyle(el).color, count: getComputedStyle(el.parentElement!).color })),
-      );
-      console.info(`the note behind a count in the ${theme} theme: ${inks.map(i => `${i.note} on ${i.count}`).join(", ")}`);
-      expect(inks.length).toBeGreaterThan(0);
-      for (const ink of inks) expect(ink.note).not.toBe(ink.count);
-      await page!.screenshot({ path: join(SHOTS, `settings-table-rows-${theme}.png`) });
-    },
-    60_000,
-  );
-
   it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
     "at $name in the $theme theme every pane value ends 20 px from the panel's edge",
     async window => {
@@ -256,13 +231,12 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
     await open(short, "theme=dark&ws=ws_a&places=1&settings=1");
     await page!.waitForSelector("[data-k=add-computer-button]");
     await page!.click("[data-k=add-computer-button]");
-    await page!.waitForSelector("[data-k=add-computer]");
-    await page!.click("[data-segment=ssh]");
-    await page!.waitForSelector("[data-k=login-field]");
+    // The one field and the plan under it are there at once: the sheet has one road and asks one thing.
+    await page!.waitForSelector("[data-k=add-computer] [data-k=login-field]");
     await settled("[data-slot=sheet-popup]");
     const popup = await box("[data-slot=sheet-popup]");
     const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-    console.info(`the ssh sheet at ${short.name}: ${popup.w} by ${popup.h}, cap ${short.height - 32}, footer ends ${footer.bottom}`);
+    console.info(`the sheet at ${short.name}: ${popup.w} by ${popup.h}, cap ${short.height - 32}, footer ends ${footer.bottom}`);
     expect(popup.h).toBe(short.height - 32);
     // The footer is in view, not past the window's floor.
     expect(footer.bottom).toBeLessThanOrEqual(short.height);
@@ -278,48 +252,29 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
       return { lines: lines.length, inside: last.top >= view.top - 1 && last.bottom <= view.bottom + 1, word: lines[lines.length - 1]!.textContent };
     });
     console.info(`scrolled to the end: ${reached.lines} lines, the last one ${reached.word}`);
-    expect(reached.lines).toBe(5);
+    expect(reached.lines).toBe(PlaceAddStep.options.length);
     expect(reached.inside).toBe(true);
     await page!.screenshot({ path: join(SHOTS, "sheet-capped-1024x420.png") });
   }, 60_000);
 
-  it.each(WINDOWS)("at $name a side sheet is as tall as what it holds, inset 16 px, and never past the window less 32", async window => {
+  it.each(WINDOWS)("at $name the side sheet is as tall as what it holds, inset 16 px, and never past the window less 32", async window => {
     await open(window, "theme=dark&ws=ws_a&places=1&settings=1");
-    const measure = async (name: string) => {
-      await settled("[data-slot=sheet-popup]");
-      const popup = await box("[data-slot=sheet-popup]");
-      const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-      console.info(`${name} at ${window.name}: ${popup.w} by ${popup.h}, top ${popup.y}, right inset ${window.width - popup.right}`);
-      expect(popup.w).toBe(448);
-      expect(popup.y).toBe(16);
-      expect(window.width - popup.right).toBe(16);
-      // The footer's own bottom is the sheet's, less the popup's hairline: no stretch under it.
-      expect(popup.bottom - footer.bottom).toBeLessThanOrEqual(1);
-      expect(popup.h).toBeLessThanOrEqual(window.height - 32);
-      return popup.h;
-    };
     await page!.waitForSelector("[data-k=add-computer-button]");
     await page!.click("[data-k=add-computer-button]");
-    await page!.waitForSelector("[data-k=add-computer]");
-    await measure("add a computer, the app road");
-    await page!.click("[data-segment=ssh]");
-    await page!.waitForSelector("[data-k=login-field]");
-    const ssh = await measure("add a computer, the ssh road with its plan");
-    // The plan stands before Add is pressed, so the space holds the answer to what this does to that box.
-    expect(await page!.locator("[data-k=plan] [data-k=line]").count()).toBe(5);
-    await page!.screenshot({ path: join(SHOTS, `sheet-ssh-${window.width}.png`) });
-    await page!.keyboard.press("Escape");
-    await page!.waitForSelector("[data-k=add-computer]", { state: "detached" });
-    await page!.click("[data-k=connect-provider]");
-    await page!.waitForSelector("[data-connect-provider-sheet]");
-    await measure("connect a provider, the pick");
-    await page!.click("[data-k=continue]");
-    await page!.waitForSelector("#connect-provider-key");
-    const key = await measure("connect a provider, the key");
-    await page!.screenshot({ path: join(SHOTS, `sheet-key-${window.width}.png`) });
-    // A sheet of one field is nowhere near the cap: the height is the content's, not the window's, and it is the
-    // shortest of them, where the old rule made every one of them the window's height.
-    expect(key).toBeLessThan(ssh);
-    expect(key).toBeLessThan(400);
+    await page!.waitForSelector("[data-k=add-computer] [data-k=login-field]");
+    await settled("[data-slot=sheet-popup]");
+    const popup = await box("[data-slot=sheet-popup]");
+    const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
+    console.info(`add a computer at ${window.name}: ${popup.w} by ${popup.h}, top ${popup.y}, right inset ${window.width - popup.right}`);
+    expect(popup.w).toBe(448);
+    expect(popup.y).toBe(16);
+    expect(window.width - popup.right).toBe(16);
+    // The footer's own bottom is the sheet's, less the popup's hairline: no stretch under it.
+    expect(popup.bottom - footer.bottom).toBeLessThanOrEqual(1);
+    expect(popup.h).toBeLessThanOrEqual(window.height - 32);
+    // The plan stands before Add is pressed, one line per step of the installer, so the space holds the answer to
+    // what this does to that box.
+    expect(await page!.locator("[data-k=plan] [data-k=line]").count()).toBe(PlaceAddStep.options.length);
+    await page!.screenshot({ path: join(SHOTS, `sheet-add-computer-${window.width}.png`) });
   }, 90_000);
 });

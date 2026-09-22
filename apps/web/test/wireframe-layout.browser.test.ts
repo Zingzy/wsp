@@ -468,3 +468,50 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     }
   }, 150_000);
 });
+
+/** The settings screens the wireframe page holds, each with the element its shot waits on. */
+const SETTINGS_SCREENS = [
+  ["computers", "[data-k=places-table]"],
+  ["computers-many", "[data-place-row=solari]"],
+  ["computers-open", "[data-k=place-detail]"],
+  ["computers-failed", "[data-k=place-detail] [data-k=recipe-row]"],
+  ["add-computer", "[data-k=add-computer] [data-k=login-field]"],
+  ["remove-computer", "[data-k=remove-sentence]"],
+] as const;
+
+describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chromium", () => {
+  let vite: ViteChild | undefined;
+  let browser: Browser | undefined;
+  let page: Page | undefined;
+  let base = "";
+
+  beforeAll(async () => {
+    vite = await startVite(WEB_DIR, "/test/wireframe/index.html");
+    base = `${vite.base}/test/wireframe/index.html`;
+    browser = await launchRender();
+    page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.addInitScript(() => window.localStorage.clear());
+    mkdirSync(SHOTS_DIR, { recursive: true });
+  }, 60_000);
+
+  afterAll(() => stopRender(browser, vite?.child));
+
+  const shot = async (name: string): Promise<string> => {
+    const path = join(SHOTS_DIR, `settings-${name}.png`);
+    await page!.screenshot({ path });
+    console.info(`settings screenshot: ${path}`);
+    return path;
+  };
+
+  it("every settings screen stands in the shell's centre under the Settings crumb and is photographed in both themes", async () => {
+    for (const theme of THEMES) {
+      for (const [screen, waitFor] of SETTINGS_SCREENS) {
+        await page!.goto(`${base}?screen=${screen}&theme=${theme}`);
+        await page!.waitForSelector(waitFor);
+        await page!.waitForSelector("[data-settings-page]");
+        expect(await page!.locator("[data-thread-breadcrumb]").textContent()).toBe("Settings");
+        await shot(`${screen}-1280-${theme}`);
+      }
+    }
+  }, 180_000);
+});
