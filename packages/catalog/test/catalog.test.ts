@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
-import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, HOME_BIN, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -274,7 +274,7 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
-    expect(installLine(catalogEntry("claude")!)).toBe(catalog.GOLDEN_SETUP);
+    expect(installLine(catalogEntry("claude")!)).toBe(catalog.CLAUDE_INSTALL);
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
@@ -468,19 +468,17 @@ describe("catalog", () => {
     expect(BREW_PREFIX.startsWith(`${SHARED_TOOL_ROOTS[0]}/`)).toBe(true);
   });
 
-  it("names the directories each vendor's own installer links its commands into, on the script row that carries it", () => {
-    // Five of the catalogue's scripts link into /usr/local/bin and three do not, so one directory on the road
-    // module would put a false note on every box's rust, docker and Claude Code rows. The directories sit on each
-    // script's own row and the module reads them off it.
+  it("names the directories each script links its commands into, on the script row that carries it", () => {
+    // Six of the catalogue's scripts link into /usr/local/bin and two do not, so one directory on the road module
+    // would put a false note on every box's rust and docker rows. The directories sit on each script's own row and
+    // the module reads them off it.
     const scriptBins = (id: string): readonly string[] | undefined => {
       const road = (catalogEntry(id) as ToolEntry | AgentEntry | undefined)?.installRoad;
       return road?.road === "script" ? road.bins : undefined;
     };
-    for (const id of ["node", "uv", "python", "fd", "yarn"]) expect(scriptBins(id), id).toEqual(["/usr/local/bin"]);
+    for (const id of ["node", "uv", "python", "fd", "yarn", "claude"]) expect(scriptBins(id), id).toEqual(["/usr/local/bin"]);
     expect(scriptBins("docker")).toEqual(["/usr/bin"]);
     expect(scriptBins("rust")).toEqual([`${GUEST_HOME}/.cargo/bin`]);
-    // Claude Code's own installer writes into the machine's home, not into /usr/local/bin.
-    expect(scriptBins("claude")).toEqual([`${GUEST_HOME}/.local/bin`]);
     // A script whose row names none says nothing, which is a row that gets no note rather than a wrong one.
     expect(scriptBins("hermes")).toBeUndefined();
   });
@@ -522,9 +520,11 @@ describe("catalog", () => {
   });
 
   it("the default agent is the vendor's own binary at a pinned version, checked against the sums its manifest publishes, and no road runs a vendor installer", () => {
-    expect(catalog.GOLDEN_SETUP).toBe(catalog.CLAUDE_INSTALL);
+    // The image's setup takes off the file an image sealed before held under the home, first on its PATH; the row's
+    // script names no folder under the home, since a box shares that home with every workspace on it.
+    expect(catalog.GOLDEN_SETUP).toBe(`rm -f /root/.local/bin/claude\n${catalog.CLAUDE_INSTALL}`);
     expect(catalog.CLAUDE_CODE.version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(catalog.GOLDEN_SETUP).toBe([
+    expect(catalog.CLAUDE_INSTALL).toBe([
       'arch="$(uname -m)"',
       'case "$arch" in',
       `  x86_64) plat=linux-x64 sha=${catalog.CLAUDE_CODE.sha256.x86_64} ;;`,
@@ -534,15 +534,17 @@ describe("catalog", () => {
       "trap 'rm -f /tmp/claude' EXIT",
       `curl -o /tmp/claude "https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`,
       'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
-      `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
+      `install -D -m 0755 /tmp/claude ${LOCAL_BIN}/claude`,
     ].join("\n"));
     for (const arch of ["x86_64", "aarch64"] as const) expect(catalog.CLAUDE_CODE.sha256[arch], arch).toMatch(/^[0-9a-f]{64}$/);
     // The row installs into the one directory it names, at the version its own text fixes, so a copy gets that version.
     const claude = catalogEntry("claude")!;
     const road = claude.installRoad;
-    expect(road).toEqual({ road: "script", script: catalog.GOLDEN_SETUP, version: catalog.CLAUDE_CODE.version, bins: [HOME_BIN] });
+    expect(road).toEqual({ road: "script", script: catalog.CLAUDE_INSTALL, version: catalog.CLAUDE_CODE.version, bins: [LOCAL_BIN] });
     expect(fixesVersion(road)).toBe(true);
-    expect(roadModule(road).bins(road as never)).toEqual([HOME_BIN]);
+    expect(roadModule(road).bins(road as never)).toEqual([LOCAL_BIN]);
+    // A box's job reads the row under its prefix and finds the harness in the same folder, which its PATH holds.
+    expect(roadModule(road).bins(road as never, installHomes(TOOL_PREFIX))).toEqual([LOCAL_BIN]);
     // Nothing downloads a script and runs it any more: the module that did is gone with the road.
     expect("installerScript" in catalog).toBe(false);
     for (const e of CATALOG) expect(installLine(e), e.id).not.toMatch(/\bbash "\$f"/);
@@ -558,9 +560,9 @@ describe("catalog", () => {
     const installed = join(dir, "bin", "claude");
     // The script road's step carries `set -euo pipefail`, pinned above, so a refused sum ends the script where it stands.
     // The arch is forced so the case reads the checksum road on any machine that runs the suite, not the arch word of the machine's own uname.
-    const script = `set -euo pipefail\n${catalog.GOLDEN_SETUP}`
+    const script = `set -euo pipefail\n${catalog.CLAUDE_INSTALL}`
       .replace('arch="$(uname -m)"', "arch=x86_64")
-      .replace(`${HOME_BIN}/claude`, installed)
+      .replace(`${LOCAL_BIN}/claude`, installed)
       .replaceAll("/tmp/claude", download)
       .replace(`"https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`, `"file://${join(dir, "served")}"`)
       .replaceAll(catalog.CLAUDE_CODE.sha256.x86_64, flip(catalog.CLAUDE_CODE.sha256.x86_64))

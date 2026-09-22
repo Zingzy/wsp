@@ -10,7 +10,7 @@
 // /opt for a computer somebody owns, whose daemon resolves no command through
 // a folder the workspaces there can write.
 import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
-import { APT_ENV, GUEST_HOME, HOME_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
+import { APT_ENV, GUEST_HOME, HOME_BIN, LOCAL_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -105,7 +105,6 @@ const listedVersion = (list: string, pkg: string): string => `${list} 2>/dev/nul
 
 /** The directories a road links the commands it installs into, named once: what a module answers as its `bins`,
  * and what a script row on the catalog names for the installer it carries. */
-export const LOCAL_BIN = "/usr/local/bin";
 const CARGO_HOME = `${GUEST_HOME}/.cargo`;
 export const CARGO_BIN = `${CARGO_HOME}/bin`;
 const GO_BIN = `${GUEST_HOME}/go/bin`;
@@ -190,8 +189,8 @@ const linkedOf = (home: InstallHome): LinkedCommands | undefined => (home.links 
 /** The pair for the manager that keeps its commands in this folder and links them out of it under this job's
  * homes, which is cargo's own folder and pnpm's. Nothing for any other folder a row names, which is the row's own
  * and stands, and nothing at all for a job with no prefix, where no manager links. `/root/.local/bin` is the
- * folder uv and pipx are told to link into rather than one either of them keeps, and it is what the harness
- * installer's row names too, so it answers here only if one of those two is ever given a folder of its own. */
+ * folder uv and pipx are told to link into rather than one either of them keeps, so it answers here only if one of
+ * those two is ever given a folder of its own. */
 function movedHome(dir: string, homes: InstallHomes): LinkedCommands | undefined {
   for (const name of INSTALL_HOMES) {
     if (homes[name].links !== undefined && OWN_HOMES[name].bin === dir) return linkedOf(homes[name]);
@@ -579,7 +578,7 @@ const script: RoadModule<Road<"script">> = {
   words: "by its own installer",
   // Every script this road carries unpacks under /usr/local or /opt, installs by apt, or writes under the machine's home, the /root every workspace on a computer somebody owns shares.
   roots: ["/usr", "/opt", "/root"],
-  // Each script puts its commands where its own vendor puts them and no two share a directory, so the directories ride each script's row and the module reads them off it.
+  // The scripts put their commands in different directories, so the directories ride each script's row and the module reads them off it.
   bins: (r, homes = OWN_HOMES) => homeBins(r.bins ?? [], homes),
   // A row whose installer writes into a manager's own command folder writes into that manager's folder under the
   // prefix once the job tells it so, which no PATH names, so its commands are linked from there as the manager's
