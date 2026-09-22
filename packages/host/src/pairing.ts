@@ -99,6 +99,12 @@ export function deviceRoleWord(device: Pick<DeviceView, "here" | "scope">): stri
   return device.here === true ? "owner" : device.scope !== undefined ? "thread" : "device";
 }
 
+/** How a device came in: through the account both computers are signed in to, or by a code somebody carried. One
+ * record and one listing for the two roads, so this is a column and not a second table. */
+export function deviceRoadWord(device: Pick<DeviceView, "via">): string {
+  return device.via?.kind === "account" ? "account" : "code";
+}
+
 /** The rows wsp host devices prints, oldest pairing first. With nobody paired, the line names the host it was aimed
  * at and sends the person to that host's own terminal for a code, since wsp host pair runs nowhere else. */
 export function deviceLines(devices: readonly DeviceView[], aim: HostAim): string[] {
@@ -106,7 +112,7 @@ export function deviceLines(devices: readonly DeviceView[], aim: HostAim): strin
     const pair = aim.kind === "here" ? "Run wsp host pair for a code." : `Run wsp host pair on ${aimName(aim)} for a code.`;
     return [`No computer is paired with ${hostWord(aim)}. ${pair}`];
   }
-  return table([["DEVICE", "ID", "AS", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, deviceRoleWord(d), d.createdAt, d.lastSeenAt])]);
+  return table([["DEVICE", "ID", "AS", "VIA", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, deviceRoleWord(d), deviceRoadWord(d), d.createdAt, d.lastSeenAt])]);
 }
 
 /** How a devices line names the host it was aimed at: the alias or address it dialled, or this host. */

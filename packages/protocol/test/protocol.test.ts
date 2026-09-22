@@ -882,7 +882,7 @@ describe("runtime wire types", () => {
       "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "project.seed.plan", "project.plan", "project.import", "project.export",
-      "pair.issue", "pair.redeem", "seal.open", "place.join", "place.auth", "place.prove",
+      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
@@ -892,6 +892,34 @@ describe("runtime wire types", () => {
     for (const op of wire.RUNTIME_OPS) expect(wire.DEVICE_OPS.includes(op) || held.includes(op), op).toBe(true);
     for (const op of ["status.list", "workspaces.create"]) expect(wire.DEVICE_OPS).toContain(op);
     expect(wire.deviceHeldRefusal("workspaces.exec")).toBe("workspaces.exec is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on");
+  });
+
+  it("device.auth carries the key a computer on the account proves, and a device's record says which road it came by", () => {
+    const frame = { id: 7, op: "device.auth", publicKey: Buffer.alloc(44).toString("base64"), name: "the laptop", signature: Buffer.alloc(64).toString("base64") };
+    expect(RuntimeRequest.parse(frame)).toEqual(frame);
+    // A frame with no signature over the seal's transcript is no frame at all: the key alone names nobody.
+    const { signature: _s, ...unsigned } = frame;
+    expect(() => RuntimeRequest.parse(unsigned)).toThrow();
+    expect(() => RuntimeRequest.parse({ ...frame, name: "" })).toThrow();
+    // One record for both roads: a code leaves the road absent, the account writes it, and the key rides along so
+    // a device admitted here can sign for the next one.
+    const via = { kind: "account", relayDeviceId: "c_1", fingerprint: "SHA256:aaa", publicKey: "bbb", admittedBy: "SHA256:ccc" };
+    const device = { id: "d_1", name: "the laptop", createdAt: "2026-09-22T00:00:00.000Z", lastSeenAt: "2026-09-22T00:00:00.000Z", via };
+    expect(wire.DeviceView.parse(device)).toEqual(device);
+    const { via: _v, ...coded } = device;
+    expect(wire.DeviceView.parse(coded)).toEqual(coded);
+    expect(() => wire.DeviceView.parse({ ...device, via: { ...via, kind: "code" } })).toThrow();
+  });
+
+  it("an admission binds the key admitted, the key that signed and the moment, and no host, so one stands at every host that trusts the signer", () => {
+    const bytes = wire.deviceAdmissionTranscript("SHA256:device", "SHA256:signer", "2026-09-22T00:00:00.000Z");
+    expect(new TextDecoder().decode(bytes)).toBe("wsp device admission v1\nSHA256:device\nSHA256:signer\n2026-09-22T00:00:00.000Z\n");
+    // Every part of it moves the bytes, so nothing a relay could swap on the way leaves a signature standing.
+    for (const bent of [["SHA256:other", "SHA256:signer", "2026-09-22T00:00:00.000Z"], ["SHA256:device", "SHA256:other", "2026-09-22T00:00:00.000Z"], ["SHA256:device", "SHA256:signer", "2026-09-22T00:00:01.000Z"]]) {
+      expect(new TextDecoder().decode(wire.deviceAdmissionTranscript(bent[0]!, bent[1]!, bent[2]!))).not.toBe(new TextDecoder().decode(bytes));
+    }
+    // The time is the string the relay stores and hands back, byte for byte, since the bytes are built from it.
+    expect(new TextDecoder().decode(wire.deviceAdmissionTranscript("a", "b", "2026-09-22T00:00:00Z"))).toContain("2026-09-22T00:00:00Z");
   });
 
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {

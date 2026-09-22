@@ -87,9 +87,9 @@ import {
   type ServiceRunner,
 } from "./service.js";
 import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
-import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
+import { connectCommand, disconnectCommand, hostDefaultCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
-import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
+import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
@@ -149,9 +149,12 @@ Sleeping is automatic. ${HOST_STARTS_ITSELF}
 
 wsp up                 serve a host in this terminal, to watch it
 wsp down               stop it
+wsp login              sign this computer in to your account
+wsp logout             sign it out; wsp logout <id> signs another out
+wsp hosts              the hosts you can reach, the one lines take marked
 wsp <verb> --help      the verb's own flags
 wsp --help agent       the verbs your agents use
-wsp host --help        a host on another computer: pair, connect, link
+wsp host --help        a host outside your account: pair, connect, link
 wsp --version
 `;
 
@@ -1332,6 +1335,9 @@ async function hostFor(
   // A computer that already joined dials the port its place file names, so the door binds as this host starts
   // rather than waiting for somebody to open the Add a computer sheet again.
   const joined = (await rt.places?.list(Date.now()).catch(() => []))?.some(p => p.kind === "computer" && p.joinedAt !== undefined) === true;
+  // The account's own computers, read by the door and written by the beats below: made here because the door is
+  // wired as the host starts and the beats only begin once it serves.
+  const admitted = admittedDevices(opts.statePath);
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1352,6 +1358,7 @@ async function hostFor(
       doctor: hostDoctorReaders(links, opts.statePath),
       // The row this host forks on, so a host wired to none asks its account nothing at all.
       provider: wiredProviderId(opts.providerEnv),
+      admitted,
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
@@ -1374,7 +1381,19 @@ async function hostFor(
     if (keys.anthropic === undefined) io.log(noClaudeKeyNote(forksNoMachines(rt.backend.capabilities)));
     // The tunnel carries to this host's own app port, so a box on loopback alone is still reachable through the
     // relay and nothing else about how it binds has to change.
-    const relay = linked && opts.relay !== false ? await startRelay({ statePath: opts.statePath, port: handle.port, log: line => io.log(line) }) : undefined;
+    const relay =
+      linked && opts.relay !== false
+        ? await startRelay({
+            statePath: opts.statePath,
+            home: wspHome(),
+            port: handle.port,
+            log: line => io.log(line),
+            admitted,
+            // The revoke the reconcile takes is the op's own, so a device the account dropped loses its sockets
+            // here exactly as one revoked at this terminal does.
+            devices: { list: () => rt.devices.list(), revoke: id => handle.revokeDevice(id) },
+          })
+        : undefined;
     if (linked && opts.relay === false) await stopRecordedConnector(dirname(opts.statePath));
     return {
       ...handle,
@@ -1707,7 +1726,6 @@ interface SharedFlags {
   update?: boolean;
   "sign-in"?: string;
   name?: string;
-  relay?: string;
   host?: string;
   "no-relay"?: boolean;
   provider?: string;
@@ -1812,6 +1830,13 @@ export function doctorRow(places: readonly PlaceView[], word: string): PlaceView
   return found;
 }
 
+/** The one word a line of the account takes, or the refusal for a second: a word nobody reads is a line that did
+ * something other than what was typed. The usage each of them prints is its own row's. */
+function oneWord(words: string, usage: string, args: readonly string[]): string | undefined {
+  if (args.length > 1) throw usageRefusal(`wsp ${words} takes one word, and got ${args.length}.`, `usage: ${usage}`);
+  return args[0];
+}
+
 /** The commands the shared parse serves, keyed by the words that select one. A line is matched against the longest
  * key whose words open it, as a verb's words select a verb, so the plumbing folded under `host` needs no second
  * dispatch of its own. */
@@ -1889,21 +1914,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   "host connect": {
     page: "host",
-    usage: "wsp host connect <url> --code <code> [--name <alias>] [--relay <host>]",
-    about: "redeem a code from a host on another computer for a token of this one's own; --name is what every later line calls that host, and --relay reaches it through your relay by the name it has there",
+    usage: "wsp host connect <url> --code <code> [--name <alias>]",
+    about: "redeem a code from a host outside your account for a token of this computer's own; --name is what every later line calls that host, and a host on your account needs no code at all",
     json: false,
     host: "refused",
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
-  },
-  "host list": {
-    page: "host",
-    usage: "wsp host list",
-    about: "the hosts on other computers this computer holds, the default marked",
-    json: false,
-    host: "refused",
-    cliOnly: "reads which host every line on this computer runs against, which no thread decides for the person",
-    run: (io, opts, _values, args) => hostsCommand(io, opts, args),
   },
   "host default": {
     page: "host",
@@ -1912,7 +1928,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     host: "refused",
     cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person",
-    run: (io, opts, _values, args) => hostsCommand(io, opts, ["default", ...args]),
+    run: (io, opts, _values, args) => hostDefaultCommand(io, opts, args),
   },
   "host forget": {
     page: "host",
@@ -1925,8 +1941,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   "host link": {
     page: "host",
-    usage: "wsp host link <url> [--name <name>]",
-    about: "put this computer on your relay account, so it is reachable from anywhere with no port open to the world; it prints a code and a page to approve it on",
+    usage: "wsp host link [<url>] [--name <name>]",
+    about: "put the host on this computer onto your account, so it is reachable from anywhere with no port open to the world; on a computer that is signed in it takes no address and asks nothing, and on one that is not it prints a code and a page to approve it on",
     json: false,
     host: "refused",
     cliOnly: "puts this computer on a person's relay account, which is theirs to give away",
@@ -1941,23 +1957,35 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there",
     run: (io, opts, values, args) => relayCommand(io, opts, ["unlink", ...args], values),
   },
-  "host linked": {
-    page: "host",
-    usage: "wsp host linked [<url>]",
-    about: "the boxes on your relay account, from whichever computer you are at",
+  login: {
+    page: "front",
+    usage: "wsp login [<relay url>|<word>|<id>]",
+    about: "sign this computer in to your account, so every host on it is a line away with no code typed. With a word another computer's wsp login printed, or the id of one already signed in, it signs that computer's key for the hosts this one is trusted at; with nothing on a computer already signed in it lists the account's computers",
     json: false,
     host: "refused",
-    cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them",
-    run: (io, opts, values, args) => relayCommand(io, opts, ["linked", ...args], values),
+    cliOnly: "signs a person in to their own account and admits their other computers to their hosts, which is theirs to give away and never a thread's",
+    run: (io, opts, _values, args) => loginCommand(io, opts, oneWord("login", "wsp login [<relay url>|<word>|<id>]", args)),
   },
-  "host clients": {
-    page: "host",
-    usage: "wsp host clients [revoke <id>]",
-    about: "which computers hold a token for your relay account; revoke signs one out",
+  logout: {
+    page: "front",
+    usage: "wsp logout [<id>]",
+    about: "sign this computer out of your account, which drops the hosts it reached through it and keeps the ones it paired with a code; with an id it signs another of your computers out, and every host drops what it admitted for that one",
     json: false,
     host: "refused",
-    cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is",
-    run: (io, opts, values, args) => relayCommand(io, opts, ["clients", ...args], values),
+    cliOnly: "takes away a token of this person's and the access it bought, which belongs with the person whose account it is",
+    run: (io, opts, _values, args) => logoutCommand(io, opts, oneWord("logout", "wsp logout [<id>]", args)),
+  },
+  hosts: {
+    page: "front",
+    usage: "wsp hosts",
+    about: "every host this computer can reach, the ones on your account and the ones it paired with a code, with a live beat for the account's and the one every line takes marked",
+    json: false,
+    host: "refused",
+    cliOnly: "reads which hosts this computer can reach and writes the account's into its own files, which no thread decides for the person",
+    run: (io, opts, _values, args) => {
+      if (args.length > 0) throw usageRefusal(`wsp hosts takes no words, and got ${args[0]!}.`, "usage: wsp hosts");
+      return hostsCommand(io, opts);
+    },
   },
   init: {
     page: "front",
@@ -2293,7 +2321,6 @@ export const SHARED_OPTIONS: Options = {
   update: { type: "boolean" },
   "sign-in": { type: "string" },
   name: { type: "string" },
-  relay: { type: "string" },
   host: { type: "string" },
 };
 
@@ -2331,7 +2358,6 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   // The two lines a word of the host page opens: they print inside their parent's usage, so they carry no page of
   // their own to print on, and they are here for the parity table and for the flags they take.
   { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's" },
-  { words: "host clients revoke", options: optionsFor("host clients revoke"), page: "host" as const, usage: "wsp host clients revoke <id>", about: "sign one computer out of your relay account", cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
 ];
 
 /** What a caller reads after `wsp --help`: the page it names, or the front page when it names none. */
@@ -2366,7 +2392,7 @@ export function hostPage(): string {
     pageLines("host"),
     "",
     ...wrap(
-      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair hands out the code that lets another computer drive a host, and it runs at that host's own terminal; devices lists the computers that took one and takes one back out, from that terminal or from any computer paired with the host; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
+      "You need these only for a host on a computer that is not the one you are sitting at: wsp login signs this computer in to your account and wsp hosts lists the hosts on it, which need no code at all. pair hands out the code that lets a computer outside your account drive a host, and it runs at that host's own terminal; devices lists the computers that hold a token for a host and takes one back out, from that terminal or from any computer paired with it; connect, default and forget hold the hosts this computer reaches by a code; link and unlink put the host on this computer onto your account, so it is reachable with no port open to the world.",
       HELP_WIDTH,
       "",
     ),
@@ -2412,7 +2438,6 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
   { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
-  { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
   { name: "host-key", on: ["add"], says: "the host key of a computer this one has never dialled, as you read it on that computer; without it the add shows you the key that computer answers with and asks, and off a terminal it refuses rather than trusting whatever answers" },

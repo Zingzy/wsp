@@ -8,9 +8,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EXIT_CODES, PAIR_CODE_REFUSAL, PAIR_NO_KEY_REFUSAL, pairKeyRefusal, pairToken } from "@wsp/protocol";
+import {
+  DEVICE_AUTH_REFUSAL,
+  DEVICE_REVOKED_REFUSAL,
+  EXIT_CODES,
+  PAIR_CODE_REFUSAL,
+  PAIR_NO_KEY_REFUSAL,
+  PLACE_LINK_NONCE_BYTES,
+  SEAL_CLIENT,
+  UNAUTHORIZED,
+  deviceAdmissionTranscript,
+  deviceAuthOldHostLine,
+  pairKeyRefusal,
+  pairToken,
+  placeLinkTranscript,
+  type AccountDevice,
+  type DeviceView,
+} from "@wsp/protocol";
+import { freshEphemeral, keyFingerprint, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, type Seal } from "@wsp/keys";
+import { randomBytes } from "node:crypto";
+import { WebSocketServer } from "ws";
+import { deviceKeyHere } from "../src/account.js";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { connectCommand, disconnectCommand, hostsCommand, type ConnectDeps } from "../src/connect.js";
+import { connectCommand, disconnectCommand, hostDefaultCommand, type ConnectDeps } from "../src/connect.js";
 import { cli, type CliIO } from "../src/cli.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { defaultHost, dialWindowMs, hostsDir, readHost, writeHost } from "../src/hosts.js";
@@ -31,11 +51,15 @@ const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.p
 let dirs: string[] = [];
 let handle: HostHandle | undefined;
 let roads: TcpProxy[] = [];
+/** Every stand-in host this file started, closed with the rest: a server left listening holds the run open. */
+let servers: WebSocketServer[] = [];
 afterEach(async () => {
   for (const road of roads) await road.close();
   roads = [];
   await handle?.close();
   handle = undefined;
+  for (const server of servers) await new Promise<void>(done => server.close(() => done()));
+  servers = [];
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   dirs = [];
 });
@@ -60,7 +84,6 @@ const handBackDeps = (dial: ConnectDeps["dial"], windowMs = 300): ConnectDeps =>
   dial,
   now: Date.now,
   deviceName: () => "a test",
-  relayUrl: () => Promise.reject(new Error("this line names an alias, so no relay is asked")),
   window: () => windowMs,
 });
 
@@ -196,7 +219,6 @@ describe("wsp host connect", () => {
       dial: () => Promise.reject(new Error("no address this refuses is dialled")),
       now: Date.now,
       deviceName: () => "a test",
-      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
       window: dialWindowMs,
     };
     // ws and wss are addresses a socket is dialled at, not ones a host is served at, and an http:// with no
@@ -219,7 +241,6 @@ describe("wsp host connect", () => {
       },
       now: Date.now,
       deviceName: () => "a test",
-      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
       window: dialWindowMs,
     };
     await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "../evil" }, [box.url], watched)).rejects.toThrow(/not a host alias/);
@@ -239,7 +260,6 @@ describe("wsp host connect", () => {
       },
       now: Date.now,
       deviceName: () => "a test",
-      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
       window: dialWindowMs,
     };
     const code = await box.codeAlone();
@@ -447,34 +467,16 @@ describe("a verb against a connected host", () => {
   });
 });
 
-describe("wsp host list", () => {
-  it("lists every connected host with its address and marks the default, and never prints a token", async () => {
-    const box = await boxAndHome();
-    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
-    const log: string[] = [];
-    expect(await hostsCommand(io(log), { statePath: STATE, home: box.home }, [])).toBe(0);
-    expect(log[0]).toMatch(/^ALIAS/);
-    expect(log[1]).toContain("box");
-    expect(log[1]).toContain(box.url);
-    expect(log[1]).toContain("default");
-    expect(log.join("\n")).not.toContain(readHost(box.home, "box")!.deviceToken);
-  });
-
-  it("says so when this computer is connected to none", async () => {
-    const log: string[] = [];
-    expect(await hostsCommand(io(log), { statePath: STATE, home: tempDir("connect-home") }, [])).toBe(0);
-    expect(log[0]).toContain("wsp host connect");
-  });
-
+describe("wsp host default", () => {
   it("moves the default to the alias named, and refuses an alias nothing is stored for", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "one" }, [box.url]);
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "two" }, [box.url]);
-    expect(await hostsCommand(io(), { statePath: STATE, home: box.home }, ["default", "two"])).toBe(0);
+    expect(await hostDefaultCommand(io(), { statePath: STATE, home: box.home }, ["two"])).toBe(0);
     expect(defaultHost(box.home)).toBe("two");
-    await expect(hostsCommand(io(), { statePath: STATE, home: box.home }, ["default", "three"])).rejects.toThrow(/three/);
-    await expect(hostsCommand(io(), { statePath: STATE, home: box.home }, ["default"])).rejects.toThrow(/usage/);
-    await expect(hostsCommand(io(), { statePath: STATE, home: box.home }, ["nonsense"])).rejects.toThrow(/usage/);
+    await expect(hostDefaultCommand(io(), { statePath: STATE, home: box.home }, ["three"])).rejects.toThrow(/three/);
+    await expect(hostDefaultCommand(io(), { statePath: STATE, home: box.home }, [])).rejects.toThrow(/usage/);
+    await expect(hostDefaultCommand(io(), { statePath: STATE, home: box.home }, ["two", "three"])).rejects.toThrow(/usage/);
   });
 });
 
@@ -635,9 +637,11 @@ describe("the command line's own environment", () => {
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
     const lines: string[] = [];
     const out: CliIO = { log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt };
-    expect(await cli(["host", "list"], out, runningWsp(), { WSP_HOME: box.home })).toBe(0);
+    expect(await cli(["hosts"], out, runningWsp(), { WSP_HOME: box.home })).toBe(0);
     expect(lines.join("\n")).toContain("box");
     expect(lines.join("\n")).toContain(box.url);
+    // A computer signed in to no account still reads what it paired with a code, and is told which line signs in.
+    expect(lines.join("\n")).toContain("wsp login");
   });
 });
 
@@ -655,3 +659,191 @@ describe("the tool server against a connected host", () => {
     }
   });
 });
+
+describe("a host on the account, reached with no code", () => {
+  /** The key the computer that linked the host signs an admission with, which the host trusts. */
+  const signerKey = newPlaceKeyPair();
+
+  /** One admission as a wsp already in signs it: the key admitted, the signer's, the moment, and the signature. */
+  const admissionFor = (device: string): { by: string; issuedAt: string; signature: string } => {
+    const by = keyFingerprint(signerKey.publicKey);
+    const issuedAt = "2026-09-22T00:00:00.000Z";
+    return { by, issuedAt, signature: signPlaceBytes(signerKey.privateKeyPem, deviceAdmissionTranscript(device, by, issuedAt)) };
+  };
+
+  /** A host of this process that is on an account: the key it trusts and the listing its beat learned, which a
+   * test moves under it. The home is this computer's, holding the key this computer signs with and the record wsp
+   * hosts wrote off the listing. */
+  async function accountBox(): Promise<{ url: string; home: string; devices: () => Promise<DeviceView[]>; listed: (rows: AccountDevice[]) => void; wsPort: number; authToken: string }> {
+    const { runtime, statePath } = testRuntime();
+    let listed: AccountDevice[] = [];
+    handle = await startHost({
+      runtime,
+      webDir: fakeWebDir(),
+      port: 0,
+      wsPort: 0,
+      admitted: { signer: () => ({ fingerprint: keyFingerprint(signerKey.publicKey), publicKey: signerKey.publicKey }), list: () => listed, refresh: async () => {} },
+    });
+    const up = handle;
+    const home = tempDir("connect-home");
+    // What wsp hosts writes for a host on the account: the address and the key off the listing, and no token.
+    writeHost(home, "box", { url: `http://127.0.0.1:${up.port}`, deviceId: "", deviceToken: "", hostKey: hostKeyHere(statePath), pairedAt: "2026-09-22T00:00:00.000Z", via: { kind: "account", hostId: "hbox1" } });
+    const laptop = deviceKeyHere(home);
+    listed = [{ id: "c_laptop", name: "the laptop", fingerprint: keyFingerprint(laptop.publicKey), admissions: [admissionFor(keyFingerprint(laptop.publicKey))] }];
+    return {
+      url: `http://127.0.0.1:${up.port}`,
+      home,
+      wsPort: up.wsPort,
+      authToken: up.authToken,
+      devices: async () => (await overHostToken(up.wsPort, up.authToken, "devices.list"))["devices"] as DeviceView[],
+      listed: rows => {
+        listed = rows;
+      },
+    };
+  }
+
+  it("proves this computer's key on the first dial, keeps the token the host answered and is listed there as an account device", async () => {
+    const box = await accountBox();
+    const client = await dialHost(STATE, { host: "box", home: box.home, env: {} });
+    expect((await client.request("workspaces.list")).ok).toBe(true);
+    client.close();
+
+    const kept = readHost(box.home, "box")!;
+    expect(kept.deviceId).toMatch(/^d_/);
+    expect(kept.deviceToken).toMatch(/\S/);
+    // The record keeps everything else it had: the road it came by, the address and the key it pinned.
+    expect(kept.via).toEqual({ kind: "account", hostId: "hbox1" });
+    const [device] = await box.devices();
+    expect(device).toMatchObject({ id: kept.deviceId, via: { kind: "account", relayDeviceId: "c_laptop", admittedBy: keyFingerprint(signerKey.publicKey) } });
+    // The next line takes the token the first one bought, and admits nobody again.
+    const second = await dialHost(STATE, { host: "box", home: box.home, env: {} });
+    second.close();
+    expect(await box.devices()).toHaveLength(1);
+    expect(readHost(box.home, "box")!.deviceId).toBe(kept.deviceId);
+  });
+
+  it("is re-admitted once when that host no longer holds this computer's token, and writes the fresh one", async () => {
+    const box = await accountBox();
+    const first = await dialHost(STATE, { host: "box", home: box.home, env: {} });
+    first.close();
+    const before = readHost(box.home, "box")!;
+    // A token that host never minted and no key it refuses: a state file put back from a copy, or a record carried
+    // over from a host that was rebuilt. The account still names this computer, so it proves its key and carries on.
+    writeHost(box.home, "box", { ...before, deviceToken: "a token no host minted" });
+
+    const again = await dialHost(STATE, { host: "box", home: box.home, env: {} });
+    expect((await again.request("workspaces.list")).ok).toBe(true);
+    again.close();
+    const kept = readHost(box.home, "box")!;
+    expect(kept.deviceId).not.toBe(before.deviceId);
+    expect((await box.devices()).map(d => d.id)).toContain(kept.deviceId);
+  });
+
+  it("writes no token into the record on a dial that spent a code there, since this computer proved no key for it", async () => {
+    const box = await accountBox();
+    const issued = await overHostToken(box.wsPort, box.authToken, "pair.issue");
+    const held = readHost(box.home, "box")!;
+    const client = await dialHost(STATE, { host: "box", home: box.home, env: {}, redeem: { code: issued["code"] as string, name: "the laptop", hostKey: held.hostKey! } });
+    expect((await client.request("workspaces.list")).ok).toBe(true);
+    client.close();
+
+    // The token a redeem bought belongs to the line that spent the code, which writes its own record; the account
+    // record stands as the listing wrote it until this computer proves its key at that host.
+    expect(readHost(box.home, "box")).toMatchObject({ deviceId: "", deviceToken: "" });
+  });
+
+  it("is not re-admitted at a host that revoked it and remembers the key, whatever admission the account still carries", async () => {
+    const box = await accountBox();
+    const first = await dialHost(STATE, { host: "box", home: box.home, env: {} });
+    first.close();
+    const gone = readHost(box.home, "box")!.deviceId;
+    const host = await dialHost(STATE, { aim: { kind: "url", url: box.url, token: box.authToken } });
+    expect(await host.request("devices.revoke", { deviceId: gone })).toMatchObject({ revoked: true });
+    host.close();
+
+    const refused = await dialHost(STATE, { host: "box", home: box.home, env: {} }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toContain(DEVICE_REVOKED_REFUSAL);
+    expect(await box.devices()).toEqual([]);
+  });
+
+  it("prints the host's own sentence when it will not admit this computer, and writes nothing", async () => {
+    const box = await accountBox();
+    // The account no longer holds this computer, so nothing there admits it: the host's own refusal is the answer.
+    box.listed([]);
+    const refused = await dialHost(STATE, { host: "box", home: box.home, env: {} }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toContain(DEVICE_AUTH_REFUSAL);
+    expect(readHost(box.home, "box")!.deviceToken).toBe("");
+    expect(await box.devices()).toEqual([]);
+  });
+
+  it("dials a host that proves another key once, since only a refused token is worth a second dial", async () => {
+    const other = await olderHost();
+    const home = tempDir("connect-moved");
+    deviceKeyHere(home);
+    // A record with a token and a key that host does not prove: the seal refuses before any frame of this
+    // computer's crosses, and proving the device key at the same seal would refuse for the same reason.
+    writeHost(home, "box", {
+      url: other.url,
+      deviceId: "d_1",
+      deviceToken: "t",
+      hostKey: keyFingerprint(newPlaceKeyPair().publicKey),
+      pairedAt: "2026-09-22T00:00:00.000Z",
+      via: { kind: "account", hostId: "hbox1" },
+    });
+    const refused = await dialHost(STATE, { host: "box", home, env: {} }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toBe(pairKeyRefusal(other.url));
+    expect(other.dials()).toBe(1);
+  });
+
+  it("reads an older host's refusal of that frame as an older wsp, and names the code road there", async () => {
+    // A host whose door knows no device.auth: it answers the frame with its request schema's own words, no kind
+    // on the frame and the unauthorized close behind it, which is what every wsp before this one does.
+    const older = await olderHost();
+    const home = tempDir("connect-older");
+    deviceKeyHere(home);
+    writeHost(home, "box", { url: older.url, deviceId: "", deviceToken: "", hostKey: older.hostKey, pairedAt: "2026-09-22T00:00:00.000Z", via: { kind: "account", hostId: "hbox1" } });
+    const refused = await dialHost(STATE, { host: "box", home, env: {} }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toBe(deviceAuthOldHostLine(older.url));
+    expect(refused!.message).toContain("wsp host pair");
+    expect(readHost(home, "box")!.deviceToken).toBe("");
+  });
+});
+
+/** A host of an older wsp, for the one case about what this computer reads off one: it proves its key as every host
+ * has since keys were pinned, seals what follows, and answers the frame it does not know with its schema's own
+ * refusal, no kind and the unauthorized close. */
+async function olderHost(): Promise<{ url: string; hostKey: string; dials: () => number }> {
+  const key = newPlaceKeyPair();
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  servers.push(server);
+  let dials = 0;
+  server.on("connection", ws => {
+    dials += 1;
+    let seal: Seal | undefined;
+    ws.on("message", raw => {
+      const frame = JSON.parse(openFrame(seal, raw)) as { id: number; op: string; nonce?: string; ephemeral?: string };
+      if (frame.op === "seal.open" && seal === undefined) {
+        const mine = freshEphemeral();
+        const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+        ws.send(
+          JSON.stringify({
+            id: frame.id,
+            ok: true,
+            nonce,
+            hostPublicKey: key.publicKey,
+            ephemeral: mine.publicKey,
+            signature: signPlaceBytes(key.privateKeyPem, placeLinkTranscript("host", SEAL_CLIENT, frame.nonce!, nonce, { challenger: frame.ephemeral!, answerer: mine.publicKey })),
+          }),
+        );
+        seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, frame.ephemeral!), SEAL_CLIENT), "host");
+        return;
+      }
+      // The words an older door answers a frame its schema does not know with: the schema's own, and no kind.
+      ws.send(seal!.seal(JSON.stringify({ id: frame.id, ok: false, error: "invalid_union at op" })));
+      ws.close(4401, UNAUTHORIZED);
+    });
+  });
+  await new Promise<void>(done => server.once("listening", () => done()));
+  const address = server.address();
+  return { url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`, hostKey: keyFingerprint(key.publicKey), dials: () => dials };
+}

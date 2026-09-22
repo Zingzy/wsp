@@ -3,16 +3,38 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH, deviceHeldRefusal } from "@wsp/protocol";
+import {
+  ACCOUNT_TICKET_REFUSAL,
+  ACCOUNT_UNSERVED,
+  DEVICE_ACCOUNT_UNSERVED,
+  DEVICE_AUTH_REFUSAL,
+  DEVICE_REVOKED_REFUSAL,
+  DEVICES_TICKET_REFUSAL,
+  HOST_STOPPING_CLOSE,
+  PAIR_CODE_ALPHABET,
+  PAIR_CODE_LENGTH,
+  PAIR_CODE_REFUSAL,
+  PAIR_ISSUE_REFUSAL,
+  PLACE_LINK_NONCE_BYTES,
+  SEAL_CLIENT,
+  SealOpenReply,
+  UNAUTHORIZED,
+  WS_PATH,
+  deviceAdmissionTranscript,
+  deviceHeldRefusal,
+  placeLinkTranscript,
+  type AccountDevice,
+} from "@wsp/protocol";
+import { freshEphemeral, makeSeal, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair } from "@wsp/keys";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
 import { newPlaceKeyPair } from "../src/places.js";
-import { serveRuntime, type RuntimeServer } from "../src/serve.js";
+import { serveRuntime, type AdmittedDevices, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
-import { WsClient } from "./ws-client.js";
+import { WsClient, type WireMsg } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
 let http: Server | undefined;
@@ -496,5 +518,199 @@ describe("who a bearer token names", () => {
     expect(await srv!.authorize(deviceToken)).toMatchObject({ kind: "device", device: { id: deviceId } });
     expect(await srv!.authorize("nope")).toBeUndefined();
     expect(await srv!.authorize(undefined)).toBeUndefined();
+  });
+});
+
+describe("a computer the account admitted", () => {
+  /** The wsp on a computer the host was linked from: the key it signs an admission with, which the host holds the
+   * fingerprint and the public half of in its own record. */
+  const laptopKey = newPlaceKeyPair();
+  const signerKey = newPlaceKeyPair();
+  const strangerKey = newPlaceKeyPair();
+
+  const keyOf = (pair: PlaceKeyPair): { fingerprint: string; publicKey: string } => ({ fingerprint: keyFingerprint(pair.publicKey), publicKey: pair.publicKey });
+
+  /** One admission, as a wsp already in signs it and as the relay carries it: no host is inside the bytes, so one
+   * stands at every host that trusts the signer. */
+  const admissionBy = (pair: PlaceKeyPair, device: string, issuedAt = "2026-09-22T00:00:00.000Z"): { by: string; issuedAt: string; signature: string } => {
+    const by = keyFingerprint(pair.publicKey);
+    return { by, issuedAt, signature: signPlaceBytes(pair.privateKeyPem, deviceAdmissionTranscript(device, by, issuedAt)) };
+  };
+
+  const accountDevice = (pair: PlaceKeyPair, admissions: { by: string; issuedAt: string; signature: string }[], id = "c_laptop"): AccountDevice => ({
+    id,
+    name: "the laptop",
+    fingerprint: keyFingerprint(pair.publicKey),
+    admissions,
+  });
+
+  /** What the host reads of the account: the key it trusts, the listing its last beat learned, and the one extra
+   * beat a miss asks for, counted here so a case can say what a miss cost. */
+  function account(opts: { signer?: PlaceKeyPair; devices?: AccountDevice[]; onRefresh?: () => AccountDevice[] | undefined } = {}): AdmittedDevices & { refreshes: number } {
+    let listed = opts.devices;
+    const door = {
+      refreshes: 0,
+      signer: () => (opts.signer === undefined ? undefined : keyOf(opts.signer)),
+      list: () => listed,
+      refresh: async () => {
+        door.refreshes += 1;
+        const learned = opts.onRefresh?.();
+        if (learned !== undefined) listed = learned;
+        await Promise.resolve();
+      },
+    };
+    return door;
+  }
+
+  async function servingAccount(admitted: AdmittedDevices): Promise<Runtime> {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, admitted });
+    return runtime;
+  }
+
+  /** What a native client does before it says who it is: the key agreement, checked, and the bytes its own
+   * signature has to cover, which are the transcript the host kept for the frame that follows. */
+  async function openSeal(c: WsClient): Promise<Uint8Array> {
+    const mine = freshEphemeral();
+    const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
+    const reply = SealOpenReply.parse(await c.request("seal.open", { nonce, ephemeral: mine.publicKey }));
+    expect(verifyPlaceBytes(reply.hostPublicKey, placeLinkTranscript("host", SEAL_CLIENT, nonce, reply.nonce, { challenger: mine.publicKey, answerer: reply.ephemeral }), reply.signature)).toBe(true);
+    c.seal = makeSeal(sealKeys(sharedSecret(mine.privateKey, reply.ephemeral), SEAL_CLIENT), "place");
+    return placeLinkTranscript("place", SEAL_CLIENT, reply.nonce, nonce, { challenger: reply.ephemeral, answerer: mine.publicKey });
+  }
+
+  /** One dial of a computer coming in through the account: the seal, then the key it proves and its signature over
+   * that seal's own transcript. `sign` is what a case bends to send a signature over other bytes. */
+  async function dialWith(pair: PlaceKeyPair, opts: { name?: string; sign?: (expect: Uint8Array) => string } = {}): Promise<{ client: WsClient; answer: WireMsg }> {
+    const client = await WsClient.connect(srv!.port);
+    const expect = await openSeal(client);
+    const answer = await client.request("device.auth", {
+      publicKey: pair.publicKey,
+      name: opts.name ?? "the laptop",
+      signature: opts.sign === undefined ? signPlaceBytes(pair.privateKeyPem, expect) : opts.sign(expect),
+    });
+    return { client, answer };
+  }
+
+  it("admits a computer whose key the account lists with an admission signed by the key this host trusts, and records the road it came by", async () => {
+    const runtime = await servingAccount(account({ signer: signerKey, devices: [accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))])] }));
+    const { client, answer } = await dialWith(laptopKey);
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    const deviceToken = answer["deviceToken"] as string;
+    // The socket is that device from the reply on, and it is a paired computer at the door: an account device is
+    // read exactly as one that redeemed a code.
+    expect((await client.request("workspaces.list")).ok).toBe(true);
+    expect(await client.request("workspaces.exec", { workspaceId: "ws_1", command: "ls" })).toMatchObject({ ok: false, error: deviceHeldRefusal("workspaces.exec") });
+    client.close();
+    const [device] = await runtime.devices.list();
+    expect(device).toMatchObject({
+      name: "the laptop",
+      via: { kind: "account", relayDeviceId: "c_laptop", fingerprint: keyFingerprint(laptopKey.publicKey), publicKey: laptopKey.publicKey, admittedBy: keyFingerprint(signerKey.publicKey) },
+    });
+    // The token it was handed is one this host takes on the ordinary road, as a redeemed one is.
+    expect(await srv!.authorize(deviceToken)).toMatchObject({ kind: "device", device: { id: device!.id } });
+  });
+
+  it("admits a computer an already admitted one signed for, and never one signed by a key it has not seen", async () => {
+    const runtime = await servingAccount(
+      account({
+        signer: signerKey,
+        devices: [
+          accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))]),
+          accountDevice(strangerKey, [admissionBy(laptopKey, keyFingerprint(strangerKey.publicKey))], "c_desk"),
+        ],
+      }),
+    );
+    const first = await dialWith(laptopKey);
+    expect(first.answer.ok).toBe(true);
+    first.client.close();
+    // The laptop's own key is one this host saw at an admission, so what it signs stands here too.
+    const second = await dialWith(strangerKey, { name: "the desk" });
+    expect(second.answer.ok, String(second.answer["error"])).toBe(true);
+    second.client.close();
+    expect((await runtime.devices.list()).map(d => d.via?.admittedBy)).toEqual([keyFingerprint(signerKey.publicKey), keyFingerprint(laptopKey.publicKey)]);
+  });
+
+  it("refuses in one sentence a key the account does not list, a computer no admission names, an admission signed by a key it does not trust and one whose signature does not stand", async () => {
+    const trusted = admissionBy(signerKey, keyFingerprint(laptopKey.publicKey));
+    const runtime = await servingAccount(
+      account({
+        signer: signerKey,
+        devices: [
+          accountDevice(laptopKey, []),
+          accountDevice(strangerKey, [admissionBy(strangerKey, keyFingerprint(strangerKey.publicKey))], "c_desk"),
+          // The signer this host trusts, over bytes that are not this device's: the fingerprints line up and the
+          // signature does not.
+          accountDevice(signerKey, [{ ...trusted, signature: trusted.signature }], "c_own"),
+        ],
+      }),
+    );
+    // A key nothing on the account holds.
+    const unlisted = await dialWith(newPlaceKeyPair());
+    expect(unlisted.answer).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL, kind: "auth" });
+    expect(await unlisted.client.closed()).toBe(4401);
+    // On the list and admitted by nobody.
+    const bare = await dialWith(laptopKey);
+    expect(bare.answer).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL, kind: "auth" });
+    // Admitted by a key this host never saw: a device can sign for itself and get in nowhere.
+    const itself = await dialWith(strangerKey, { name: "the desk" });
+    expect(itself.answer).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL, kind: "auth" });
+    // The signer's own bytes, over another device's fingerprint.
+    const bent = await dialWith(signerKey, { name: "the mac" });
+    expect(bent.answer).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL, kind: "auth" });
+    expect(await runtime.devices.list()).toEqual([]);
+  });
+
+  it("refuses a device signature that does not cover the seal this socket agreed, so an admission alone opens nothing", async () => {
+    const runtime = await servingAccount(account({ signer: signerKey, devices: [accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))])] }));
+    const elsewhere = await dialWith(laptopKey, { sign: () => signPlaceBytes(laptopKey.privateKeyPem, new TextEncoder().encode("another socket's bytes")) });
+    expect(elsewhere.answer).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL, kind: "auth" });
+    expect(await runtime.devices.list()).toEqual([]);
+  });
+
+  it("remembers the key of a device it revoked and admits it no more, whatever admission the account still carries", async () => {
+    const runtime = await servingAccount(account({ signer: signerKey, devices: [accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))])] }));
+    const first = await dialWith(laptopKey);
+    expect(first.answer.ok).toBe(true);
+    const id = first.answer["deviceId"] as string;
+    first.client.close();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await host.request("devices.revoke", { deviceId: id })).toMatchObject({ ok: true, revoked: true });
+    host.close();
+    const again = await dialWith(laptopKey);
+    expect(again.answer).toMatchObject({ ok: false, error: DEVICE_REVOKED_REFUSAL, kind: "auth" });
+    expect(await runtime.devices.list()).toEqual([]);
+    // The memory is the key, not the id the relay minted: the same computer signing in again is refused too.
+    expect(await runtime.devices.refuses(keyFingerprint(laptopKey.publicKey))).toBe(true);
+  });
+
+  it("asks the host for one more beat when the key is not on the list yet, and admits what that beat learned", async () => {
+    const approved = accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))]);
+    const door = account({ signer: signerKey, devices: [], onRefresh: () => [approved] });
+    await servingAccount(door);
+    const { client, answer } = await dialWith(laptopKey);
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    expect(door.refreshes).toBe(1);
+    client.close();
+  });
+
+  it("refuses device.auth on a host that is on no account, and on a socket that agreed no key", async () => {
+    await servingAccount(account({ devices: [] }));
+    const unlinked = await dialWith(laptopKey);
+    expect(unlinked.answer).toMatchObject({ ok: false, error: DEVICE_ACCOUNT_UNSERVED, kind: "auth" });
+    await srv!.close();
+
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, admitted: account({ signer: signerKey, devices: [accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))])] }) });
+    const bare = await WsClient.connect(srv.port);
+    const answer = await bare.request("device.auth", { publicKey: laptopKey.publicKey, name: "the laptop", signature: signPlaceBytes(laptopKey.privateKeyPem, new TextEncoder().encode("no seal")) });
+    expect(answer).toMatchObject({ ok: false, error: UNAUTHORIZED, kind: "auth" });
+  });
+
+  it("refuses device.auth on a socket already through the door, which is a second identity", async () => {
+    await servingAccount(account({ signer: signerKey, devices: [accountDevice(laptopKey, [admissionBy(signerKey, keyFingerprint(laptopKey.publicKey))])] }));
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await host.request("device.auth", { publicKey: laptopKey.publicKey, name: "the laptop", signature: signPlaceBytes(laptopKey.privateKeyPem, new TextEncoder().encode("x")) })).toMatchObject({ ok: false, error: DEVICE_AUTH_REFUSAL });
+    host.close();
   });
 });
