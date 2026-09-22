@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -205,6 +205,25 @@ describe("a host on this computer alone", () => {
       expect(refused.status, body).toBe(400);
       expect(JSON.parse(refused.body) as { error: string }).toEqual({ error: REQUEST_NOT_AN_OBJECT });
     }
+    expect(await runtime.workspaces.list()).toEqual([]);
+    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: JSON.stringify({ name: "after" }) });
+    expect(made.status).toBe(200);
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["after"]);
+  });
+
+  it("answers a body past the cap and a body that is no JSON in one sentence each, never the parser's own words", async () => {
+    const { handle: h, runtime } = await up();
+    await projectOn(runtime);
+    const own = { authorization: `Bearer ${h.authToken}` };
+
+    const big = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: JSON.stringify({ name: "x".repeat(70 * 1024) }) });
+    expect(big.status).toBe(413);
+    expect(JSON.parse(big.body) as { error: string }).toEqual({ error: REQUEST_BODY_TOO_LARGE });
+
+    const unparsed = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: "not json" });
+    expect(unparsed.status).toBe(400);
+    expect(JSON.parse(unparsed.body) as { error: string }).toEqual({ error: REQUEST_BODY_NOT_JSON });
+
     expect(await runtime.workspaces.list()).toEqual([]);
     const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: JSON.stringify({ name: "after" }) });
     expect(made.status).toBe(200);

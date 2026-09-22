@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -360,18 +360,24 @@ export function routeRefusal(route: string, caller: Caller | undefined): string 
   return op !== undefined && DEVICE_OPS.includes(op) ? undefined : deviceHeldRefusal(op ?? route);
 }
 
-/** A request's body as fields to read, or nothing when it parsed as JSON of another shape. The one reading a route
- * takes a body through, so no route reads a field off a null. */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | undefined> {
+/** A request's body as fields to read, or the status and the sentence the route answers instead: past the cap, no
+ * JSON at all, or JSON of another shape. The one reading a route takes a body through, so no route reads a field
+ * off a null and none of the three arrives as an exception the catch-all prints back to whoever sent it. */
+async function readJsonBody(req: IncomingMessage): Promise<{ body: Record<string, unknown> } | { status: number; error: string }> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 64 * 1024) throw new Error("body too large");
+    if (size > REQUEST_BODY_MAX_BYTES) return { status: 413, error: REQUEST_BODY_TOO_LARGE };
     chunks.push(chunk as Buffer);
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-  return isObjectFrame(parsed) ? parsed : undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    return { status: 400, error: REQUEST_BODY_NOT_JSON };
+  }
+  return isObjectFrame(parsed) ? { body: parsed } : { status: 400, error: REQUEST_NOT_AN_OBJECT };
 }
 
 /** Where a computer you own is told to dial this host, in the order its link tries them: the address the person
@@ -494,11 +500,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       if (req.method === "POST" && path === "/api/workspaces") {
-        const body = await readJsonBody(req);
-        if (body === undefined) {
-          sendJson(res, 400, { error: REQUEST_NOT_AN_OBJECT });
+        const read = await readJsonBody(req);
+        if (!("body" in read)) {
+          sendJson(res, read.status, { error: read.error });
           return;
         }
+        const body = read.body;
         const name = typeof body.name === "string" ? body.name.trim() : "";
         if (!name) {
           sendJson(res, 400, { error: "a workspace needs a name" });
