@@ -246,10 +246,17 @@ export function foldArchivedThreads<T extends ThreadTimestamps>(
   return { settled: shelf, archived };
 }
 
-/** The rows a thread's own agents opened, drawn under it rather than at their own place in the order: a lead and
- * its builders read as one piece of work. One pass over the sorted list, so a thread whose parent is not in this
- * list (another workspace's, or on the other side of the idle split) keeps the place the sort gave it. */
-export function nestSpawnedThreads<T extends { readonly id: string; readonly parentThreadId?: string | null | undefined }>(threads: readonly T[]): T[] {
+/** One thread with the rows its own agent opened under it, as deep as the opening went. */
+export interface ThreadNode<T> {
+  readonly thread: T;
+  readonly children: ReadonlyArray<ThreadNode<T>>;
+}
+
+/** The threads a thread's own agents opened, nested under it rather than at their own place in the order: a lead
+ * and its builders read as one piece of work, and a builder's own reviewers under the builder. One pass over the
+ * sorted list, so a thread whose parent is not in this list (another workspace's, or on the other side of the idle
+ * split) keeps the place the sort gave it, at the top. */
+export function threadForest<T extends { readonly id: string; readonly parentThreadId?: string | null | undefined }>(threads: readonly T[]): ThreadNode<T>[] {
   const spawned = new Map<string, T[]>();
   const held = new Set(threads.map(t => t.id));
   for (const thread of threads) {
@@ -257,20 +264,36 @@ export function nestSpawnedThreads<T extends { readonly id: string; readonly par
     if (parent === undefined || !held.has(parent) || parent === thread.id) continue;
     spawned.set(parent, [...(spawned.get(parent) ?? []), thread]);
   }
-  if (spawned.size === 0) return [...threads];
+  if (spawned.size === 0) return threads.map(thread => ({ thread, children: [] }));
   const under = new Set([...spawned.values()].flat().map(t => t.id));
-  const out: T[] = [];
   const drawn = new Set<string>();
-  const push = (thread: T): void => {
-    if (drawn.has(thread.id)) return;
+  const node = (thread: T): ThreadNode<T> | null => {
+    if (drawn.has(thread.id)) return null;
     drawn.add(thread.id);
-    out.push(thread);
-    for (const child of spawned.get(thread.id) ?? []) push(child);
+    return { thread, children: (spawned.get(thread.id) ?? []).flatMap(child => node(child) ?? []) };
+  };
+  const out: ThreadNode<T>[] = [];
+  const push = (thread: T): void => {
+    const made = node(thread);
+    if (made !== null) out.push(made);
   };
   for (const thread of threads) if (!under.has(thread.id)) push(thread);
   // Rows whose parents lead round in a circle are under no top row: they keep their own order at the end rather
   // than falling out of the list, since a thread the sidebar does not draw is a thread nobody can reach.
   for (const thread of threads) push(thread);
+  return out;
+}
+
+/** The same tree read top to bottom, for the surfaces that draw a flat list in tree order. */
+export function nestSpawnedThreads<T extends { readonly id: string; readonly parentThreadId?: string | null | undefined }>(threads: readonly T[]): T[] {
+  const out: T[] = [];
+  const walk = (nodes: ReadonlyArray<ThreadNode<T>>): void => {
+    for (const { thread, children } of nodes) {
+      out.push(thread);
+      walk(children);
+    }
+  };
+  walk(threadForest(threads));
   return out;
 }
 

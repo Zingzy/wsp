@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the sidebar's own screens say: the act that makes a workspace,
 // wherever it is offered; the first run, which is the whole window while this
-// wsp holds no project; the project rows; and the sheet that records one.
+// wsp holds no project; the project rows and the switcher over them; and the
+// sheet that records one.
 // Nothing here says what a workspace is made of: that pair of words is the
 // protocol's table (madeOfWord, portsWord), so a row in the app and a cell in
 // the command line's table cannot say two things about one workspace.
@@ -29,12 +30,20 @@ export const FIRST_RUN_WORDS = {
   noAgent: `No agent found on ${THIS_COMPUTER_WORD}. Install one, then come back.`,
 } as const;
 
-/** The project's own rows in the sidebar: its header's menu, the line under a project nobody has started work on,
- * and the row at the bottom that records another one. */
+/** The project's own rows in the sidebar: its menu, the leaf under a project nobody has started work on, the
+ * switcher menu's foot that records another one, and the one row the sidebar holds while this wsp has no project,
+ * which sends a person to the first run in the centre. */
 export const PROJECT_WORDS = {
   add: "Add a project",
+  new: "New project",
   remove: "Remove project",
   noWorkspaces: "No workspaces yet.",
+} as const;
+
+/** The project switcher at the head of the sidebar: the pick that shows every project, and its menu's search. */
+export const SWITCHER_WORDS = {
+  all: "All projects",
+  search: "Search projects",
 } as const;
 
 /** Why Create waits on the one question the dialog asks. */

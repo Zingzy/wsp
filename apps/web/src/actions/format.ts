@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, kindWords, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, kindWords, threadForgetRefusal, threadStateWord, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -30,6 +30,9 @@ export const WORKSPACE_WORDS = {
 /** What the creation log and the sidebar's creation row say before the runtime's first stage line lands; one
  * sentence in one place, since both surfaces stand in for the same silence. */
 export const CREATION_ASKED = "Asking wsp to start it.";
+/** The word a creation row's slot carries once the create was refused: the state table's own, so a thread that
+ * failed and a create that failed read as one word. */
+export const CREATION_FAILED = threadStateWord("failed");
 
 export const THREAD_WORDS = {
   stop: "Stop thread",

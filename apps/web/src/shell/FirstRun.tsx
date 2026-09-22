@@ -9,7 +9,7 @@
 // its line whether or not it holds a sentence, and the button keeps the label
 // Start and its width while a create runs, held and dimmed. Nothing on this
 // screen moves as it fills.
-import { useEffect, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { COPY_WORD, type InitAgent, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -23,6 +23,7 @@ import { carriesFiles, droppedFolder } from "../sidebar/folderDrag.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { FIRST_RUN_WORDS } from "../sidebar/words.js";
+import { onFirstRunFocusRequest } from "./shellRequests.js";
 
 export function FirstRun() {
   const api = useStore(s => s.api);
@@ -35,7 +36,11 @@ export function FirstRun() {
   const [agents, setAgents] = useState<readonly InitAgent[] | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const folderRef = useRef<HTMLInputElement>(null);
   const bridge = desktopBridge();
+
+  // The sidebar's one row on an empty wsp points here: the folder is the first thing this screen asks for.
+  useEffect(() => onFirstRunFocusRequest(() => folderRef.current?.focus()), []);
 
   // The agents on this computer, read the one way every surface reads them, so this screen and the computer's own
   // row in Settings cannot disagree about which agents are here.
@@ -103,6 +108,7 @@ export function FirstRun() {
           </label>
           <div className="relative w-full">
             <Input
+              ref={folderRef}
               id="first-run-folder"
               data-k="folder"
               nativeInput

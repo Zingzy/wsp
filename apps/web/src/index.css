@@ -1156,14 +1156,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --accent-foreground: #f7f9ff;
     --muted: #0a0a0a;
     --muted-foreground: #a3a3a3;
-    --border: rgb(255 255 255 / 8%);
+    /* The rails and the sidebar's edge at the structural tier, under the 10 percent edge every menu carries. */
+    --border: rgb(255 255 255 / 6%);
     --input: rgb(255 255 255 / 18%);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-whisper: var(--sidebar-muted-foreground);
     --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
+    /* Hover sits under the selected row's 7 percent, so the one lifted row stays the lifted one under the pointer. */
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 4%, transparent);
     --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
     --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
     --sidebar-border: var(--border);
