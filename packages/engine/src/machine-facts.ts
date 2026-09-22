@@ -46,6 +46,9 @@ export const HOME_READ = `printf "home %s\\n" "$HOME"`;
  * of the computer doing the sending. */
 export const ARCH_READ = `printf "arch %s\\n" "$(uname -m)"`;
 
+/** The line that asks the machine's memory in kB, the guest's own count rather than what its provider was asked for. */
+export const MEM_READ = 'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"';
+
 /** The lines that ask which login shell this login runs, by its name alone. The passwd entry is the truth and
  * getent runs no shell of the machine's, which is what lets the question be asked before anything is run in that
  * shell. Behind it `$SHELL`, which is the same truth by another road: sshd sets it to the login's shell for every
@@ -59,6 +62,12 @@ export const SHELL_READ = 'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -
 export function archOf(values: Record<string, string>): string | undefined {
   const arch = values["arch"];
   return arch === undefined || arch === "" ? undefined : arch;
+}
+
+/** What the machine said its memory is, in whole MB, or nothing where the line printed no figure. */
+export function memMbOf(values: Record<string, string>): number | undefined {
+  const kb = Number(values["memkb"]);
+  return Number.isFinite(kb) && kb > 0 ? Math.round(kb / 1024) : undefined;
 }
 
 /** The operating system as its maker names it: macOS by its product version, a Linux by its distribution's own

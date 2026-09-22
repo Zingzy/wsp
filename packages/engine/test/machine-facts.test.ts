@@ -3,7 +3,7 @@
 // machines: an Ubuntu box, a Mac, and one that answers with neither.
 import { describe, expect, it } from "vitest";
 import type { ExecResult } from "../src/machine.js";
-import { OS_READ, UPTIME_READ, osNameOf, readOsName, readValues, uptimeMsOf } from "../src/machine-facts.js";
+import { MEM_READ, OS_READ, UPTIME_READ, memMbOf, osNameOf, readOsName, readValues, uptimeMsOf } from "../src/machine-facts.js";
 
 /** What the lines print on an Ubuntu box: no product version, a distribution name, and the seconds /proc keeps. */
 const UBUNTU = "pretty Ubuntu 24.04.3 LTS\nmac \nkernel Linux 6.8.0-79-generic\nuptime 96521.42\nboot \nhome /home/dev\n";
@@ -33,6 +33,15 @@ describe("what a machine says it is", () => {
     expect(uptimeMsOf(readValues(MAC), 1_789_041_249_000 - 5_000)).toBe(0);
     expect(uptimeMsOf(readValues("uptime \nboot \n"), Date.now())).toBeUndefined();
     expect(uptimeMsOf({}, Date.now())).toBeUndefined();
+  });
+
+  it("reads the memory line in whole MB, and nothing where the line printed no figure", () => {
+    expect(memMbOf(readValues("memkb 4128768\n"))).toBe(4032);
+    expect(memMbOf(readValues("memkb 8060000\n"))).toBe(7871);
+    expect(memMbOf(readValues("memkb \n"))).toBeUndefined();
+    expect(memMbOf(readValues("memkb 0\n"))).toBeUndefined();
+    expect(memMbOf({})).toBeUndefined();
+    expect(MEM_READ.startsWith('printf "memkb ')).toBe(true);
   });
 
   it("one command asks for the name, and a machine that could not run it leaves the caller without one", async () => {

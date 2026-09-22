@@ -104,6 +104,9 @@ import {
   rollback as rollbackGolden,
   snapshotStorage,
   applyMachineContext,
+  MEM_READ,
+  memMbOf,
+  readValues,
   GUEST_TMP,
   GUEST_USER_ENV,
   landsBytes,
@@ -209,7 +212,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -4840,6 +4843,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       landed?.();
     };
     const notices: string[] = [];
+    const asked = record.size;
     // The computer the fork lands on, by the name its own row carries: the place a person picked, else the
     // provider word this host's machines wear, which is what every other surface names a fork's home by.
     const where = placeId === undefined ? places.wired : placeDoorOf().nameOf(placeId);
@@ -4903,6 +4907,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const fault = await pingDaemon(entry);
       report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", { notice: fault });
       void syncDaemon(entry);
+    }
+    // The provider's view echoes the memory asked for; a place's daemon already answers the size it applied.
+    if (placeId === undefined) {
+      const memMb = await entry.machine.exec(MEM_READ, { timeoutMs: INLINE_EXEC_MS }).then(
+        res => (res.exitCode === 0 ? memMbOf(readValues(res.stdout)) : `exit ${res.exitCode}${res.stderr.trim() === "" ? "" : `: ${res.stderr.trim().slice(-200)}`}`),
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      if (typeof memMb === "string") console.warn(`workspace ${record.id}: memory not read on ${entry.machine.id} (${memMb}); the row keeps ${sizeWord(record.size)}`);
+      else if (memMb !== undefined) {
+        // The kernel keeps a few percent back: 4032 MB read on a 4096 MB machine.
+        const offered = at.capabilities.sizes.find(s => Math.abs(s.memMb - memMb) <= s.memMb / 16);
+        record.size = { ...record.size, memMb: offered?.memMb ?? memMb };
+        if (record.size.cpu !== asked.cpu || record.size.memMb !== asked.memMb) {
+          const line = sizeGotLine(asked, record.size);
+          notices.push(line);
+          console.warn(`workspace ${record.id}: ${line}`);
+        }
+      }
     }
     // The project goes in before the workspace is ready: a copy without the work in it is not a workspace of that
     // project, so a clone that fails ends the create and the machine goes with it.

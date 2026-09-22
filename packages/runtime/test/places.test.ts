@@ -2358,6 +2358,25 @@ describe("a fork on a computer you joined", () => {
     expect((await placesOf()).find(p => p.default)!.id).toBe(placeId);
   });
 
+  it("sends no memory read to a fork there, whose container would count the whole computer, and keeps the size that computer applied", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const sent: string[] = [];
+    const exec = (cmd: string) => {
+      sent.push(cmd);
+      return { exitCode: 0, stdout: cmd.includes("/proc/meminfo") ? "memkb 16384000\n" : "", stderr: "" };
+    };
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c, undefined, exec) });
+    sockets.push(client.ws);
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    expect(sent.filter(c => c.includes("/proc/meminfo"))).toEqual([]);
+    expect(made).not.toHaveProperty("notice");
+    expect(await store.get("workspaces", made.id)).toMatchObject({ size: { cpu: 2, memMb: 4096 } });
+  });
+
   it("is served by that computer's daemon: the create says nothing of a daemon inside, the bring back's frames go up its link with the workspace named, and nothing is dialled", async () => {
     // Found on spoo, 2026-09-18: a workspace on a computer somebody owns runs no daemon of its own, so the create
     // printed "Daemon did not answer.", the row read Unreachable while exec answered from inside, and every bring

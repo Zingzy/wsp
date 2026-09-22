@@ -269,7 +269,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 - Keys (the Solari key, an Anthropic key) live in the person's `.env` and never reach a thread. A secret a thread needs is asked for through wsp, not typed into a terminal.
 - The account holds two machines at once. A third `new` or `fork` is refused; the person decides which workspace to pause.
 - A pause or a wake that does not return is stuck on the provider side; tell the person rather than retrying in a loop.
-- A workspace is the image's size unless `new` or `fork` is given `--size`; a size the provider does not offer is refused in one line that names the ones it does, with the rate of each. A build or a test run wants the largest memory offered: on 4 GB one build starves the machine.
+- A workspace is the image's size unless `new` or `fork` is given `--size`; its row says the size the machine has, and the created line says so when that is not the size asked. A size the provider does not offer is refused in one line that names the ones it does, with the rate of each. A build or a test run wants the largest memory offered: on 4 GB one build starves the machine.
 - An import cuts every secret-shaped file unless `--keep` names it; the plan's rows are the person's to answer before `--yes`.
 - The heavy rows and the sign-in choices in the recipe are the person's answers, put to them before anything is built.
 

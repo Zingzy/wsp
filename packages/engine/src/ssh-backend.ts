@@ -17,7 +17,7 @@ import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
-import { ARCH_READ, HOME_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -413,7 +413,7 @@ export const SSH_READ_SCRIPT = [
   'printf "shell %s\\n" "$shell"',
   `env -u BASH_ENV bash --noprofile --norc -c ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
-  'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
+  MEM_READ,
 ].join("\n");
 
 /** What the machine answers about itself every time a status is built: the system it runs, how long it has been up
@@ -437,7 +437,7 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
     if (folder !== undefined && folder !== "" && isPlainPath(folder)) stores[name] = folder;
   }
   const cpu = Number(values["cpu"] ?? 0);
-  const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
+  const memMb = memMbOf(values) ?? 0;
   const arch = archOf(values);
   // A name and nothing else: which shells a road may work through is that road's rule, not this reading's.
   const shell = values["shell"];
