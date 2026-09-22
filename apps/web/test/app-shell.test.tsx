@@ -424,18 +424,19 @@ describe("the header row", () => {
     expect(crumb().textContent).toBe("api/add a health route");
   });
 
-  it("the compose glyph sits in the search row, raises the request for the selected workspace, and leaves with it", async () => {
+  it("the compose glyph sits in the search row, raises the request for the selected workspace, and is held rather than gone without one", async () => {
     await mountShell();
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });
     expect(compose.closest("[data-sidebar-search]")).not.toBeNull();
     expect(banner().contains(compose)).toBe(false);
+    expect(compose.hasAttribute("disabled")).toBe(false);
     fireEvent.click(compose);
     expect(seen).toEqual(["ws_a"]);
     off();
     act(() => useStore.getState().select(null));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "New thread" })).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "New thread" }).hasAttribute("disabled")).toBe(true));
   });
 });
 

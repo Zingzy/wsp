@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The sidebar of the four nouns in a real Chromium, on the wireframe page's
+// fixed store: every one-line row (search, head, project, thread, fold, leaf)
+// is 28 px and every two-line row (workspace, creation) 44 px at three sidebar
+// widths and in the 390 px sheet; every row ends at one right edge; nothing in
+// the sidebar wears caps or letter-spacing; the head sits in the fixed header
+// over the scrolling tree; each child list's rail runs the height of its item
+// and stops at the tick on the last one; the state words read at AA on a flat
+// row and on the lifted row; a project row's plus is nothing at rest and there
+// on hover; the switcher's menu is the head's width, its rows 28 px, at rest
+// with no transform once open; and the whole is photographed on every screen
+// in both themes for a judge. Vite serves test/wireframe to Playwright's
+// browser, so like the shell layout test it runs only when asked for
+// (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Browser, Page } from "playwright";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { textContrast } from "./contrast";
+import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { startVite, type ViteChild } from "./vite-child";
+
+const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SHOTS_DIR = join(tmpdir(), "wsp-render");
+const THEMES = ["dark", "light"] as const;
+const WIDTHS = [220, 256, 480] as const;
+const ONE_LINE = 28;
+const TWO_LINE = 44;
+
+/** Every row of the sidebar by what it is, with its box and the box of the slot at its right edge. */
+interface RowRead {
+  id: string;
+  kind: "one" | "two";
+  height: number;
+  left: number;
+  right: number;
+  slotRight: number | null;
+}
+
+if (renderSkipped !== undefined) console.info(`wireframe layout render test skipped: ${renderSkipped}`);
+
+describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid out in Chromium", () => {
+  let vite: ViteChild | undefined;
+  let browser: Browser | undefined;
+  let page: Page | undefined;
+  let base = "";
+
+  beforeAll(async () => {
+    vite = await startVite(WEB_DIR, "/test/wireframe/index.html");
+    base = `${vite.base}/test/wireframe/index.html`;
+    browser = await launchRender();
+    page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    // Each case starts the page as a first visit: a pick one case stored is not the next one's.
+    await page.addInitScript(() => window.localStorage.clear());
+    mkdirSync(SHOTS_DIR, { recursive: true });
+  }, 60_000);
+
+  afterAll(() => stopRender(browser, vite?.child));
+
+  const url = (screen: string, theme: (typeof THEMES)[number], extra = ""): string => `${base}?screen=${screen}&theme=${theme}${extra}`;
+  const open = async (screen: string, theme: (typeof THEMES)[number], extra = "", waitFor = "[data-sidebar-row]"): Promise<void> => {
+    await page!.setViewportSize({ width: 1280, height: 800 });
+    await page!.goto(url(screen, theme, extra));
+    await page!.waitForSelector(waitFor);
+  };
+  const shot = async (name: string, selector?: string): Promise<string> => {
+    const path = join(SHOTS_DIR, `wireframe-${name}.png`);
+    if (selector === undefined) await page!.screenshot({ path });
+    else await page!.locator(selector).first().screenshot({ path });
+    console.info(`wireframe screenshot: ${path}`);
+    return path;
+  };
+
+  /** Every row in the sidebar's tree and its fixed header, read once. */
+  const rows = (): Promise<RowRead[]> =>
+    page!.evaluate(() => {
+      const els = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-search-row], [data-slot=sidebar] [data-k=project-switcher], [data-slot=sidebar] [data-sidebar-row], [data-slot=sidebar] [data-k=no-workspaces], [data-slot=sidebar] [data-thread-launch], [data-slot=sidebar] [data-k=new-project]")];
+      return els.map(el => {
+        const id = el.dataset["rowId"] ?? el.dataset["k"] ?? (el.hasAttribute("data-search-row") ? "search" : el.hasAttribute("data-thread-launch") ? "launch" : "?");
+        const box = el.getBoundingClientRect();
+        const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time], [data-workspace-state], [data-project-count], [data-creation-state]");
+        return { id, kind: id.startsWith("ws:") || id.startsWith("creating:") ? "two" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
+      });
+    });
+
+  const expectOneGrammar = (read: RowRead[], where: string): void => {
+    expect(read.length, where).toBeGreaterThan(2);
+    for (const row of read) expect(row.height, `${row.id} at ${where}`).toBe(row.kind === "two" ? TWO_LINE : ONE_LINE);
+    // Every row ends at one x whatever its depth: the tree takes its room from the left alone.
+    const rights = new Set(read.filter(row => row.id !== "search" && row.id !== "project-switcher").map(row => Math.round(row.right)));
+    expect([...rights], `right edges at ${where}`).toHaveLength(1);
+    const slots = new Set(read.flatMap(row => (row.slotRight === null ? [] : [Math.round(row.slotRight)])));
+    expect(slots.size, `slot edges at ${where}`).toBeLessThanOrEqual(1);
+  };
+
+  it("every one-line row is 28 px and every two-line row 44 px at 220, 256 and 480, every row and every slot ending at one x, in both themes", async () => {
+    for (const theme of THEMES) {
+      for (const width of WIDTHS) {
+        await open("sidebar", theme, `&sidebar=${width}`);
+        const sidebar = await page!.locator("[data-slot=sidebar]").first().boundingBox();
+        expect(Math.round(sidebar!.width)).toBe(width);
+        const read = await rows();
+        console.info(`rows at ${width} ${theme}: ${JSON.stringify(read.map(r => [r.id, r.height, Math.round(r.left)]))}`);
+        expectOneGrammar(read, `${width} ${theme}`);
+        // The depth reads in the left edge: 16 px a level.
+        const at = (id: string) => read.find(row => row.id === id)!.left;
+        expect(Math.round(at("ws:ws_copy") - at("project:pr_spoo"))).toBe(16);
+        expect(Math.round(at("thread:th_lead") - at("ws:ws_copy"))).toBe(16);
+        expect(Math.round(at("thread:th_build") - at("thread:th_lead"))).toBe(16);
+        expect(Math.round(at("thread:th_review") - at("thread:th_build"))).toBe(16);
+        expect(Math.round(at("ws:ws_fork") - at("thread:th_lead"))).toBe(16);
+        await shot(`sidebar-${width}-${theme}`, "[data-slot=sidebar]");
+      }
+      await open("sidebar", theme);
+      await shot(`sidebar-1280-${theme}`);
+    }
+  }, 120_000);
+
+  it("under one picked project the tree starts at its workspaces one level out, the head names the project, and the lifted row is the one selected three deep, in both themes", async () => {
+    for (const theme of THEMES) {
+      for (const width of WIDTHS) {
+        await open("sidebar-picked", theme, `&sidebar=${width}&pick=pr_spoo`, "[data-sidebar-row][data-active=true]");
+        const read = await rows();
+        expectOneGrammar(read, `picked ${width} ${theme}`);
+        expect(read.some(row => row.id.startsWith("project:"))).toBe(false);
+        expect(await page!.locator("[data-k=project-switcher] [data-switcher-name]").textContent()).toBe("spoo");
+        const lifted = await page!.locator("[data-sidebar-row][data-active=true]").evaluateAll(els => els.map(el => [el.dataset["rowId"], el.dataset["depth"]]));
+        expect(lifted).toEqual([["thread:th_review", "3"]]);
+        // The head carries the plus while it stands in for the project's row, at nothing until hovered.
+        expect(await page!.locator("[data-sidebar-search] [data-k=new-workspace]").evaluate(el => getComputedStyle(el).opacity)).toBe("0");
+        await shot(`sidebar-picked-${width}-${theme}`, "[data-slot=sidebar]");
+      }
+      await open("sidebar-picked", theme, "&pick=pr_spoo", "[data-sidebar-row][data-active=true]");
+      await shot(`sidebar-picked-1280-${theme}`);
+    }
+  }, 120_000);
+
+  it("the empty wsp holds the head, held, and one row pointing at the first run; one project alone still sits under All projects, in both themes", async () => {
+    for (const theme of THEMES) {
+      await open("sidebar-empty", theme, "", "[data-k=new-project]");
+      const empty = await rows();
+      expectOneGrammar(empty, `empty ${theme}`);
+      expect(empty.map(row => row.id)).toEqual(["search", "project-switcher", "new-project"]);
+      expect(await page!.locator("[data-k=project-switcher]").isDisabled()).toBe(true);
+      expect(await page!.locator("[data-slot=sidebar] button[aria-label='New thread']").isDisabled()).toBe(true);
+      expect(await page!.locator("[data-k=first-run]").count()).toBe(1);
+      expect(await page!.locator("[data-slot=sidebar]").first().textContent()).not.toMatch(/No projects yet|A project is a folder|Add a project/);
+      await shot(`sidebar-empty-1280-${theme}`);
+
+      await open("sidebar-one-project", theme);
+      const one = await rows();
+      expectOneGrammar(one, `one project ${theme}`);
+      expect(one.filter(row => row.id.startsWith("project:")).map(row => row.id)).toEqual(["project:pr_spoo"]);
+      expect(await page!.locator("[data-k=project-switcher] [data-switcher-name]").textContent()).toBe("All projects");
+      await shot(`sidebar-one-project-1280-${theme}`);
+    }
+  }, 90_000);
+
+  it("nothing in the sidebar wears caps or letter-spacing, and the head sits in the fixed header outside the scrolling tree", async () => {
+    await open("sidebar", "dark");
+    const dressed = await page!.locator("[data-sidebar-search] *, [data-sidebar-tree] *").evaluateAll(els =>
+      els
+        .map(el => ({ text: (el.textContent ?? "").trim().slice(0, 20), transform: getComputedStyle(el).textTransform, spacing: getComputedStyle(el).letterSpacing }))
+        .filter(read => read.transform !== "none" || read.spacing !== "normal"),
+    );
+    expect(dressed).toEqual([]);
+    expect(await page!.locator("[data-slot=sidebar-content] [data-k=project-switcher]").count()).toBe(0);
+    expect(await page!.locator("[data-slot=sidebar] [data-k=project-switcher]").count()).toBe(1);
+    expect(await page!.locator("[data-slot=sidebar-content] [data-sidebar-row]").count()).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("each child list draws its rail per item: the height of the item on every one but the last, 14 px to the tick on the last, the tick 6 by 1 at 14 px, in both themes", async () => {
+    for (const theme of THEMES) {
+      await open("sidebar", theme);
+      const rails = await page!.evaluate(() => {
+        const items = [...document.querySelectorAll<HTMLElement>("[data-sidebar-tree] ul li")].filter(li => getComputedStyle(li.parentElement!).marginLeft === "15px");
+        return items.map(li => {
+          const before = getComputedStyle(li, "::before");
+          const after = getComputedStyle(li, "::after");
+          return {
+            id: li.querySelector<HTMLElement>("[data-sidebar-row], [data-k=no-workspaces], [data-thread-launch]")?.dataset["rowId"] ?? "leaf",
+            last: li === li.parentElement!.lastElementChild,
+            height: li.getBoundingClientRect().height,
+            rail: parseFloat(before.height),
+            railWidth: before.width,
+            tick: { top: after.top, width: after.width, height: after.height },
+            ink: before.backgroundColor,
+          };
+        });
+      });
+      console.info(`rails at ${theme}: ${JSON.stringify(rails)}`);
+      expect(rails.length).toBeGreaterThan(6);
+      for (const item of rails) {
+        expect(item.railWidth, item.id).toBe("1px");
+        expect(item.tick, item.id).toEqual({ top: "14px", width: "6px", height: "1px" });
+        expect(item.ink, item.id).not.toBe("rgba(0, 0, 0, 0)");
+        if (item.last) expect(item.rail, `${item.id} is last`).toBe(14);
+        else expect(Math.round(item.rail), item.id).toBe(Math.round(item.height));
+      }
+    }
+  }, 60_000);
+
+  it("the state words read at 4.5 to 1 or better on a flat row and on the lifted row, in both themes", async () => {
+    for (const theme of THEMES) {
+      await open("sidebar", theme);
+      const flat = await textContrast(page!, "[data-slot=sidebar] [data-thread-state]");
+      expect(flat.length).toBeGreaterThan(1);
+      for (const ratio of flat) expect(ratio, `a state word on a flat row reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      await open("sidebar-picked", theme, "&pick=pr_spoo", "[data-sidebar-row][data-active=true]");
+      const lifted = await textContrast(page!, "[data-sidebar-row][data-active=true] [data-thread-state]");
+      expect(lifted).toHaveLength(1);
+      expect(lifted[0], `the lifted row's word reads at ${lifted[0]} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      await open("bring-back-paused", theme);
+      await page!.keyboard.press("Escape");
+      const stopped = await textContrast(page!, "[data-row-id='ws:ws_box'] [data-workspace-state]");
+      expect(await page!.locator("[data-row-id='ws:ws_box'] [data-workspace-state]").textContent()).toBe("Stopped");
+      expect(stopped[0], `Stopped reads at ${stopped[0]} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+      console.info(`${theme}: state words on flat rows ${flat.map(r => r.toFixed(2)).join(", ")}, on the lifted row ${lifted[0]!.toFixed(2)}, Stopped ${stopped[0]!.toFixed(2)} to 1`);
+    }
+  }, 90_000);
+
+  it("a project row's plus is nothing at rest and there on hover, and the row's name keeps its width between the two", async () => {
+    await open("sidebar", "dark");
+    const plus = page!.locator("[data-row-id='project:pr_spoo'] ~ [data-k=new-workspace]").first();
+    const name = page!.locator("[data-row-id='project:pr_spoo'] [data-project-name]");
+    expect(await plus.evaluate(el => getComputedStyle(el).opacity)).toBe("0");
+    const before = await name.boundingBox();
+    await page!.locator("[data-row-id='project:pr_spoo']").hover();
+    await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-row-id='project:pr_spoo'] ~ [data-k=new-workspace]")!).opacity === "1");
+    expect(await name.boundingBox()).toEqual(before);
+    // The compose glyph is the one add control at rest: one plus per project row, all at nothing, and nothing else.
+    const atRest = await page!.locator("[data-slot=sidebar] svg.lucide-plus").evaluateAll(els => els.map(el => getComputedStyle(el.closest("button")!).opacity));
+    expect(atRest.length).toBe(3);
+    expect(atRest.filter(opacity => opacity === "1")).toHaveLength(1);
+  }, 30_000);
+
+  it("the switcher's menu opens under the head at the head's width, its rows 28 px, and comes to rest with no transform, in both themes", async () => {
+    for (const theme of THEMES) {
+      await open("switcher-open", theme, "", "[data-project-switcher-menu]");
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).transform === "none");
+      const read = await page!.evaluate(() => {
+        const head = document.querySelector<HTMLElement>("[data-k=project-switcher]")!.getBoundingClientRect();
+        const popup = document.querySelector<HTMLElement>("[data-slot=popover-popup]")!;
+        const menu = popup.getBoundingClientRect();
+        const style = getComputedStyle(popup);
+        return {
+          head: { left: head.left, right: head.right, bottom: head.bottom },
+          menu: { left: menu.left, right: menu.right, top: menu.top },
+          radius: style.borderTopLeftRadius,
+          border: style.borderTopWidth,
+          options: [...popup.querySelectorAll<HTMLElement>("[role=option], [data-k=add-project-row]")].map(el => ({ text: el.textContent, height: el.getBoundingClientRect().height })),
+          field: popup.querySelector<HTMLElement>("[data-switcher-search]")!.closest("label")!.getBoundingClientRect().height,
+          expanded: document.querySelector("[data-k=project-switcher]")!.getAttribute("aria-expanded"),
+        };
+      });
+      console.info(`switcher menu at ${theme}: ${JSON.stringify(read)}`);
+      expect(Math.abs(read.menu.left - read.head.left)).toBeLessThan(1);
+      expect(Math.abs(read.menu.right - read.head.right)).toBeLessThan(1);
+      expect(Math.round(read.menu.top - read.head.bottom)).toBe(4);
+      expect(read.expanded).toBe("true");
+      expect(read.border).toBe("1px");
+      expect(read.options.map(option => option.text)).toEqual(["All projects", "spoo", "wsp", "landingspoo", "Add a project"]);
+      for (const option of read.options) expect(option.height).toBe(ONE_LINE);
+      expect(read.field).toBe(32);
+      await shot(`switcher-menu-${theme}`, "[data-slot=popover-popup]");
+      await shot(`switcher-open-1280-${theme}`);
+    }
+  }, 60_000);
+
+  it("at 390 the sidebar is a sheet with the same rows at the same heights, in both themes", async () => {
+    for (const theme of THEMES) {
+      for (const [screen, extra, first] of [
+        ["sidebar", "", "[data-sidebar-row]"],
+        ["sidebar-picked", "&pick=pr_spoo", "[data-sidebar-row][data-active=true]"],
+        ["sidebar-empty", "", "[data-k=new-project]"],
+      ] as const) {
+        await page!.setViewportSize({ width: 390, height: 844 });
+        await page!.goto(url(screen, theme, extra));
+        await page!.waitForSelector("[data-slot=sidebar-trigger]");
+        // At this width the right panel of the workspace the store opens on is a sheet over the whole page; Escape
+        // shuts it, and the trigger then opens the sidebar's own sheet.
+        await page!.keyboard.press("Escape");
+        await page!.waitForSelector("[data-slot=sheet-viewport]", { state: "detached" });
+        await page!.locator("[data-slot=sidebar-trigger]").first().click();
+        await page!.waitForSelector(`[data-slot=sidebar][data-mobile=true] ${first}`);
+        // The sheet slides in; its rows are read once it stands still.
+        await page!.waitForTimeout(400);
+        const read = await rows();
+        expectOneGrammar(read, `${screen} at 390 ${theme}`);
+        await shot(`${screen}-390-${theme}`);
+      }
+    }
+  }, 120_000);
+});

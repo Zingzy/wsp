@@ -20,6 +20,7 @@ function mount(over: Partial<SidebarThreadSnapshot> = {}) {
         time="3m"
         runs={{ workspace: "pricing page", where: "this Mac" }}
         under="pricing page"
+        depth={2}
         active={false}
         renaming={false}
         saving={false}
@@ -32,16 +33,19 @@ function mount(over: Partial<SidebarThreadSnapshot> = {}) {
   );
 }
 
+const row = (): HTMLElement => document.querySelector<HTMLElement>("[data-sidebar-row]")!;
 const state = (): string | null => document.querySelector("[data-thread-state]")?.textContent ?? null;
+const time = (): string | null => document.querySelector("[data-thread-time]")?.textContent ?? null;
 /** Any dot the row might draw: a round span, which is what a status dot was. */
-const dots = (): number => document.querySelectorAll("[data-thread-meta] .rounded-full, [data-thread-meta] [class*=animate-status]").length;
+const dots = (): number => document.querySelectorAll("[data-sidebar-row] .rounded-full, [data-sidebar-row] [class*=animate-status]").length;
 
 afterEach(cleanup);
 
-describe("a thread row's state", () => {
-  it("is one muted mono word and no dot, whatever the state", () => {
+describe("a thread row's one line", () => {
+  it("carries the state as one mono word in the slot and no dot, whatever the state, and the time only once the thread rests", () => {
     mount();
     expect(state()).toBe("Working");
+    expect(time()).toBeNull();
     expect(dots()).toBe(0);
     cleanup();
     mount({ asking: "Write out.txt in root (2 B)" });
@@ -51,23 +55,38 @@ describe("a thread row's state", () => {
     mount({ status: "failed" });
     expect(state()).toBe("Failed");
     expect(dots()).toBe(0);
-  });
-
-  it("says nothing at all on a settled thread: a row nobody is waiting on is what every other row is", () => {
+    cleanup();
     mount({ status: "completed" });
     expect(state()).toBeNull();
+    expect(time()).toBe("3m");
     expect(dots()).toBe(0);
   });
 
-  it("says nothing on a working row an agent opened, whose indent and opener say it already", () => {
-    mount({ parentThreadId: "th_lead" });
-    expect(state()).toBeNull();
-    // Its own words are still there: the workspace it runs in is dropped where it is the row above's, so where.
-    expect(document.querySelector("[data-thread-meta]")!.textContent).toContain("this Mac");
+  it("is the mark, the title and the slot, nothing else on its face: the project, the agent and who opened it ride the hover text", () => {
+    mount();
+    expect(row().textContent).toBe("fix the port listWorking");
+    expect(row().getAttribute("title")).toBe("Claude Code · spoo · you");
+    expect(row().dataset["depth"]).toBe("2");
+    const lead = row().firstElementChild!;
+    expect(lead.getAttribute("aria-hidden")).toBe("true");
+    expect(lead.querySelector("[data-harness-mark=claude]")).not.toBeNull();
+    expect(lead.nextElementSibling!.hasAttribute("data-thread-title")).toBe(true);
+    expect(screen.getByTitle("Claude Code · spoo · you")).toBe(row());
   });
 
-  it("carries the agent and its words in the row's own hover text, so a reader is given the line a person sees", () => {
+  it("a row an agent opened says Working too, and its hover text names the workspace it runs in and where", () => {
+    mount({ parentThreadId: "th_lead", startedBy: "agent", workspaceId: "ws_b" });
+    expect(state()).toBe("Working");
+    expect(row().getAttribute("title")).toBe("Claude Code · this Mac");
+  });
+
+  it("the state word reads at the prose tier and the time at the whisper, both in the row's mono", () => {
     mount();
-    expect(screen.getByLabelText("Claude Code · spoo · you")).toBeDefined();
+    expect(document.querySelector("[data-thread-state]")!.className).toContain("text-[var(--sidebar-prose)]");
+    expect(document.querySelector("[data-thread-state]")!.className).toContain("font-mono");
+    cleanup();
+    mount({ status: "completed" });
+    expect(document.querySelector("[data-thread-time]")!.className).toContain("text-[var(--top-row-meta)]");
+    expect(document.querySelector("[data-thread-time]")!.className).not.toContain("w-[3ch]");
   });
 });

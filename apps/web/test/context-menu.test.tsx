@@ -475,7 +475,10 @@ describe("a thread row's menu", () => {
     );
     await mountSidebar(api, "api");
     await waitFor(() => expect(screen.getByText("rebuild the index")).toBeDefined());
-    expect(rowOf("rebuild the index").className).toContain("pl-5");
+    // One step in under the thread that opened it, whichever workspace its session is filed against.
+    const lead = Number(rowOf("fix the port list").dataset["depth"]);
+    expect(lead).toBeGreaterThanOrEqual(0);
+    expect(Number(rowOf("rebuild the index").dataset["depth"])).toBe(lead + 1);
     rightClick(rowOf("rebuild the index"));
     await screen.findByRole("menu");
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");

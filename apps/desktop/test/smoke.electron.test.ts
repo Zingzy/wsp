@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, madeOfWord, pairToken } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, pairToken } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -658,8 +658,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is what the workspace is made of, in the protocol's own word for a copy of the folder.
-    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("clonefile"));
+    // Line two is the branch the seeded copy stands on.
+    expect(await row.locator("[data-workspace-meta]").textContent()).toBe("main");
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
@@ -1161,9 +1161,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
         expectOneGap(openGaps);
         expect(Math.abs(wordmarkDrop)).toBeLessThanOrEqual(CENTRED);
-        // The search row sits on the selected row's surface, so it reads apart from the bare glass beside it, and the word
-        // Search is still AA on it.
-        expect(shot.searchRow).not.toEqual(shot.glass);
+        // The search row is a plain row on the glass, no fill of its own, and the word Search is AA on it.
+        expect(shot.searchRow).toEqual(shot.glass);
         for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
 
         // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.
@@ -1188,7 +1187,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
         });
         expect(collapsed.toggleLeft).toBeCloseTo(page.toggleLeft, 1);
         expect(collapsed.crumbLeft).toBeCloseTo(page.lockupLeft, 1);
-        expect(collapsed.crumb).toBe("No workspace selected");
+        // Over the first run the header says nothing: that screen's own title says what is being made.
+        expect(collapsed.crumb).toBe("");
         expect(collapsed.region).toBe("drag");
         expect(collapsed.lockups).toBe(0);
         const collapsedFile = join(shots, `desktop-mac-collapsed-${desktop}.png`);

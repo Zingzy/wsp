@@ -2,9 +2,9 @@
 // The shell's chrome in a real Chromium: the sidebar toggle starts where the
 // search row does and the brand lockup one gap after it, the two top rows are
 // one height and start where the workspace rows do, the
-// search row sits on the selected row's surface with a hairline and opens the
-// palette without moving a row, a thread row's title keeps its room at the
-// default width, a status toast holds a long token inside its box, the
+// search row is a plain row that opens the palette without moving a row, a
+// thread row's title keeps its room at the default width with the agent's
+// mark before it and one slot after it, a status toast holds a long token inside its box, the
 // line for a provider out of reach is one muted mono line under the
 // search row, the line the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
@@ -20,8 +20,8 @@
 // each, without moving the shell under it, and at three sidebar widths the
 // workspace and thread rows keep one grammar: one height per row kind, the
 // state word in its slot at the right edge only off running, the meta line
-// in one order cut from the right, no import or export glyph, the thread
-// title up to a fixed time column, the Spaces body draws one workspace
+// cut from the right, no import or export glyph, the thread
+// title up to its one slot, the Spaces body draws one workspace
 // under its header with an icon per workspace centred at the sidebar's
 // bottom and no Workspaces header over it, a workspace's own theme paints
 // the sidebar's surface and its glyph in Spaces and nothing in the list, the
@@ -29,9 +29,9 @@
 // next one in from the other side while the header and the space bar hold
 // still, or swaps it with no travel for a reader who asked for less motion,
 // a mixed list of a local machine and two cloud ones keeps that one
-// grammar with the kind's glyph in the local lead, and the threads quiet for
+// grammar with no glyph in any lead, and the threads quiet for
 // over a day sit in an Archived group shut inside that workspace's idle
-// shelf, in the shelf header's own row grammar. Vite
+// shelf, in the fold row's own grammar. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -221,62 +221,65 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a thread row keeps twelve characters of a long title at the default width, the agent's bare mark and opener whole under it, rows one height", async () => {
+  it("a thread row keeps twelve characters of a long title at the default width, the agent's bare mark before it and one slot after it, rows one height", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
         els.map(el => {
           const title = el.querySelector<HTMLElement>("[data-thread-title]");
-          const meta = el.querySelector<HTMLElement>("[data-thread-meta]");
           const mark = el.querySelector<HTMLElement>("[data-harness-mark]");
-          const opener = mark?.nextElementSibling;
-          if (!title || !meta || !mark || !opener) return null;
+          const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time]");
+          if (!title || !mark || !slot) return null;
           const font = getComputedStyle(title);
           const ctx = document.createElement("canvas").getContext("2d")!;
           ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
           const markBox = mark.getBoundingClientRect();
-          const openerBox = opener.getBoundingClientRect();
+          const titleBox = title.getBoundingClientRect();
           const paint = getComputedStyle(mark);
           return {
             height: el.getBoundingClientRect().height,
             titleWidth: title.clientWidth,
             twelveChars: ctx.measureText((title.textContent ?? "").slice(0, 12)).width,
-            metaClipped: [meta, ...meta.querySelectorAll("*")].some(e => e.scrollWidth > e.clientWidth),
-            meta: `${meta.textContent ?? ""} (${meta.querySelector("[data-thread-provenance]")?.getAttribute("aria-label")})`,
+            title: title.textContent ?? "",
+            face: el.textContent ?? "",
+            slot: slot.textContent ?? "",
+            slotClipped: slot.scrollWidth > slot.clientWidth,
+            slotMono: /mono/i.test(getComputedStyle(slot).fontFamily),
+            hover: el.getAttribute("title"),
             mark: mark.getAttribute("data-harness-mark"),
             markSize: [markBox.width, markBox.height],
-            // The mark's centre against the opener word's centre: optically on the line, not hanging above it.
-            markOffset: markBox.y + markBox.height / 2 - (openerBox.y + openerBox.height / 2),
+            // The mark's centre against the title's centre: optically on the line, not hanging above it.
+            markOffset: markBox.y + markBox.height / 2 - (titleBox.y + titleBox.height / 2),
             markColor: paint.color,
-            openerColor: getComputedStyle(opener).color,
+            titleColor: font.color,
             bare: paint.backgroundColor === "rgba(0, 0, 0, 0)" && paint.borderTopWidth === "0px" && paint.boxShadow === "none",
           };
         }),
       );
       console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
-      expect(rows.map(r => r?.meta)).toEqual([
-        "Working·you (Claude Code · you)",
-        "cli (Claude Code · cli)",
-        "cli (Codex · cli)",
-        "you (Claude Code · you)",
-      ]);
+      // The agent, the project and who opened it ride the hover text; the face is the title and the slot alone.
+      expect(rows.map(r => r?.hover)).toEqual(["Claude Code · the-project · you", "Claude Code · the-project · cli", "Codex · the-project · cli", "Claude Code · the-project · you"]);
+      expect(rows[0]!.slot).toBe("Working");
+      for (const row of rows.slice(1)) expect(row!.slot).toMatch(/^(now|\d+[mhd])$/);
       for (const row of rows) {
+        expect(row!.face).toBe(`${row!.title}${row!.slot}`);
         expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
-        expect(row!.metaClipped).toBe(false);
-        // Bare marks of 13 to 16 px, centred on the words beside them, in a colour of their own, on nothing.
+        expect(row!.slotClipped).toBe(false);
+        expect(row!.slotMono).toBe(true);
+        // Bare marks of 13 to 16 px, centred on the title beside them, in a colour of their own, on nothing.
         for (const side of row!.markSize) {
           expect(side).toBeGreaterThanOrEqual(13);
           expect(side).toBeLessThanOrEqual(16);
         }
         expect(Math.abs(row!.markOffset)).toBeLessThan(1.5);
-        expect(row!.markColor).not.toBe(row!.openerColor);
         expect(row!.bare).toBe(true);
       }
-      // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's foreground.
+      // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's ink.
       const colours = new Map(rows.map(r => [r!.mark, r!.markColor]));
       expect(colours.size).toBe(2);
       expect(colours.get("claude")).not.toBe(colours.get("codex"));
       expect(new Set(rows.map(r => r!.height)).size).toBe(1);
+      expect(rows[0]!.height).toBe(28);
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar thread rows screenshot: ${path}`);
@@ -316,8 +319,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           const color = getComputedStyle(el).color;
           return {
             text: el.textContent ?? "",
-            // Which row is the working one comes from the row's own pill, not from where it sits in the list.
-            working: row.querySelector("[data-thread-meta] [aria-label=Working]") !== null,
+            // Which row is the working one comes from the row's own slot, not from where it sits in the list.
+            working: row.querySelector("[data-thread-state]")?.textContent === "Working",
             color,
             opaque: bytes(color)[3] === 255,
             gap: Math.abs(luminance(color) - luminance(backdrop(el))),
@@ -328,7 +331,6 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const [working, ...idles] = [...titles].sort((a, b) => Number(b.working) - Number(a.working));
       expect(titles.filter(t => t.working)).toHaveLength(1);
       expect(idles).toHaveLength(3);
-      expect(titles.map(t => t.opaque)).toEqual([true, true, true, true]);
       for (const idle of idles) {
         expect(idle.color).not.toBe(working!.color);
         expect(idle.gap).toBeLessThan(working!.gap);
@@ -383,15 +385,15 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
       // Shut, carrying its count, and under the idle shelf it belongs to rather than above it.
       expect(shut.archived.expanded).toBe("false");
-      expect(shut.archived.text).toBe("Archived (2)");
+      expect(shut.archived.text).toBe("Archived 2");
       expect(shut.idle.text).toBe("Idle");
       expect(shut.archived.y).toBeGreaterThan(shut.idle.y);
       // The two threads it holds are not drawn; the working row and the one idle row are.
       expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
       for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
-      // One row grammar with the header above it: same height, same left edge, same muted word, same rounding, and
-      // the group header is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
-      expect(shut.archived.height).toBe(32);
+      // One row grammar with the fold above it: same height, same left edge, same muted word, same rounding, and
+      // the fold is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
+      expect(shut.archived.height).toBe(28);
       expect(shut.archived.height).toBe(shut.idle.height);
       expect(shut.archived.x).toBe(shut.idle.x);
       expect(shut.archived.color).toBe(shut.idle.color);
@@ -503,8 +505,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const plain = await metaOf();
-      expect(plain[0]!.text).toContain("$0.110/hr");
-      expect(plain[0]!.text).not.toContain("helper");
+      // A cloud fork with no copy of a folder has no branch to name: its second line is empty, and never a figure.
+      expect(plain[0]!.text).toBe("");
 
       await page!.goto(`${base}?theme=${theme}&helper=1`);
       await page!.waitForSelector("[data-sidebar-row]");
@@ -1150,13 +1152,13 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     const TIERS = {
       "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
       "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
-      "the state word beside a thread": "[data-sidebar-row] .hidden.md\\:inline",
+      "the state word beside a thread": "[data-sidebar-row] [data-thread-state]",
       "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
     } as const;
-    // The first two carry words a person reads, so their bar is AA. The last two are the whisper the
-    // rows are designed around and sit under AA in both themes on purpose, so their bar is the ink
-    // their dark twin already ships: they are the tiers an alpha over a light surface loses.
-    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest"];
+    // The first three carry words a person reads, so their bar is AA. The last is the whisper the
+    // rows are designed around and sits under AA in both themes on purpose, so its bar is the ink
+    // its dark twin already ships: it is the tier an alpha over a light surface loses.
+    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest", "the state word beside a thread"];
     const read: Record<"dark" | "light", Record<string, number>> = { dark: {}, light: {} };
     for (const theme of ["dark", "light"] as const) {
       await open(theme);

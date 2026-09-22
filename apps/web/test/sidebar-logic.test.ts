@@ -15,6 +15,7 @@ import {
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
   nestSpawnedThreads,
+  threadForest,
   sidebarThreadOrder,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
@@ -26,7 +27,6 @@ import { currentWorkspaceId } from "../src/adapt/workspaces.js";
 import {
   compactTimeLabel,
   metaSentences,
-  glyphStateClass,
   holdsStateWord,
   stateSlotWord,
   daemonGoneLine,
@@ -191,11 +191,6 @@ describe("workspace row labels", () => {
     expect(stateSlotWord(local, absent)).toBe("No daemon");
   });
 
-  it("one rule maps a workspace's state to the row's kind glyph class: the success green while the machine runs, dimmed while it is paused, nothing for every other state", () => {
-    const states: WorkspaceState[] = ["running", "pausing", "paused", "waking", "unreachable", "gone"];
-    expect(states.map(state => glyphStateClass({ state }))).toEqual(["text-success-foreground", undefined, "opacity-50", undefined, undefined, undefined]);
-  });
-
   it("a row says its daemon is gone on the meta line, whatever kind of machine it is", () => {
     const local = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "local" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), outOfMemory: undefined });
@@ -357,6 +352,18 @@ describe("what a space walks", () => {
     expect(nestSpawnedThreads([spawned("loop", "2026-09-01T00:01:00Z", "loop")]).map(t => t.id)).toEqual(["loop"]);
     const pair = [spawned("a", "2026-09-01T00:01:00Z", "b"), spawned("b", "2026-09-01T00:02:00Z", "a")];
     expect(nestSpawnedThreads(pair).map(t => t.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("keeps the tree itself beside that order: each thread with the ones its agent opened under it, as deep as it went", () => {
+    const spawned = (id: string, startedAt: string, parentThreadId?: string) => ({ ...row(id, "running", startedAt), ...(parentThreadId !== undefined ? { parentThreadId } : {}) });
+    const threads = [spawned("lead", "2026-09-01T00:01:00Z"), spawned("builder", "2026-09-01T00:03:00Z", "lead"), spawned("reviewer", "2026-09-01T00:05:00Z", "builder"), spawned("orphan", "2026-09-01T00:02:00Z", "gone")];
+    const shape = (nodes: ReadonlyArray<{ thread: { id: string }; children: ReadonlyArray<unknown> }>): unknown => nodes.map(node => [node.thread.id, shape(node.children as ReadonlyArray<{ thread: { id: string }; children: ReadonlyArray<unknown> }>)]);
+    expect(shape(threadForest(threads))).toEqual([
+      ["lead", [["builder", [["reviewer", []]]]]],
+      ["orphan", []],
+    ]);
+    // The flat order is the same tree read top to bottom, so the two can never disagree.
+    expect(nestSpawnedThreads(threads).map(t => t.id)).toEqual(["lead", "builder", "reviewer", "orphan"]);
   });
 
   it("shows the selected workspace, and the first in the sidebar's order while what is selected is not one", () => {
