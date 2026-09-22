@@ -1081,6 +1081,14 @@ describe("runtime session index", () => {
     });
     return { adapter, starts };
   };
+  /** Two behaviours under one agent, picked by the turn's own prompt: a thread runs on the agent its rows carry,
+   * so a turn that hangs or dies before init is that agent's own turn doing it and not a second agent resuming
+   * the session it wrote. */
+  const onPrompt = (prompt: string, one: HarnessAdapterFactory, rest: HarnessAdapterFactory): HarnessAdapterFactory => (...args) => {
+    const takes = one(...args);
+    const every = rest(...args);
+    return { ...every, start: o => (o.prompt === prompt ? takes.start(o) : every.start(o)) };
+  };
   /** A turn that announces itself and never settles: the host goes down under it. */
   const HUNG_ID = "55555555-5555-4555-8555-555555555555";
   const hung: HarnessAdapterFactory = () => ({
@@ -1132,7 +1140,9 @@ describe("runtime session index", () => {
     await rt1.sessions.start(ws.id, { prompt: "first", harness: "hung" });
     await rt1.close();
 
-    const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });
+    // The thread ran on hung and goes on running on hung: the agent a thread's rows carry is the one its next
+    // turn runs on, and this host answers for it again after the restart.
+    const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung: t.adapter } });
     await (await rt2.sessions.start(ws.id, { prompt: "second", resume: HUNG_ID })).finished;
     await (await rt2.sessions.start(ws.id, { prompt: "third", resume: HUNG_ID })).finished;
     const starts = (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.start");
@@ -1161,14 +1171,13 @@ describe("runtime session index", () => {
   });
 
   it("a resume after a turn the transport cut stamps afterCut; a turn that failed with an exit code, or finished, leaves the next start plain", async () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: cutting, dying } });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: onPrompt("dies", dying, cutting) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "cut" })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume: CUT_ID })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "third", resume: CUT_ID })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "dies", resume: CUT_ID, harness: "dying" })).finished;
-    // Named again: a start with no agent would take the one the project last used, which is the dying one.
-    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID, harness: "claude" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "dies", resume: CUT_ID })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID })).finished;
     const starts = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start");
     expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["cut", undefined], ["second", true], ["third", undefined], ["fifth", undefined]]);
     // a fresh thread has no previous turn
@@ -1215,12 +1224,12 @@ describe("runtime session index", () => {
 
   it("a resumed turn that dies before init keeps the resume id on its row: the harness answered that id in an earlier turn", async () => {
     const store = memoryStore();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, dying } });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: onPrompt("again", dying, turns().adapter) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const [first] = await rt.sessions.list(ws.id);
     const resume = first!.claudeSessionId!;
-    await (await rt.sessions.start(ws.id, { prompt: "again", resume, harness: "dying" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "again", resume })).finished;
     const rows = await rt.sessions.list(ws.id);
     expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["first", "failed", first!.threadId, resume]]);
     await rt.close();

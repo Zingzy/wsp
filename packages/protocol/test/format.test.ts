@@ -1888,17 +1888,20 @@ describe("the words a relayed permission prompt shows", () => {
 
   it("the access menu says what a pick does to the turn running now, before the pick is made", () => {
     expect(accessReachLine(true)).toBe("Applies to the turn running now");
-    expect(accessReachLine(false)).toBe("Applies from your next message");
+    expect(accessReachLine(false)).toBe("Applies from the thread's next turn");
     // Said of the pick, not of a failure: the line stands over the list before anything has been picked.
     for (const moves of [true, false]) expect(accessReachLine(moves)).not.toMatch(/could not|failed|unsupported/);
   });
 
   it("a pick a harness said it would take and then refused is a refusal in two halves, inside the slot's one line", () => {
     expect(ACCESS_REFUSED_WORDS.said).toBe("The turn refused it.");
-    expect(ACCESS_REFUSED_WORDS.fix).toBe("Your next message carries it.");
+    expect(ACCESS_REFUSED_WORDS.fix).toBe("The next turn runs at it.");
     expect(ACCESS_REFUSED_LINE).toBe(`${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`);
-    // Both halves: what happened, then what to do about it, which is the shape every refusal in this app has.
-    expect(ACCESS_REFUSED_WORDS.fix).toMatch(/next message/);
+    // Both halves: what happened, then where the pick stands, which is the shape every refusal in this app has. A
+    // message carries no access, so neither half may say one does.
+    expect(ACCESS_REFUSED_WORDS.fix).toMatch(/next turn/);
+    expect(ACCESS_REFUSED_LINE).not.toMatch(/message/);
+    expect(accessReachLine(false)).not.toMatch(/message/);
     // The slot is one line that truncates from the right; the render test measures the paint, this holds the budget
     // the measurement was against, so the half carrying the answer is never the half that is cut.
     expect(ACCESS_REFUSED_LINE.length).toBeLessThan(54);

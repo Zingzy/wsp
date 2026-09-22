@@ -2141,9 +2141,13 @@ describe("wsp verbs over the host", () => {
     // A send that names nothing keeps the thread's own access rather than dropping back to the adapter's default.
     expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, permissionMode: access });
     expect(claude.starts.at(-1)!.model).toBeUndefined();
-    const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "--access", "acceptEdits", "now think");
+    const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "now think");
     expect(changed.code).toBe(0);
-    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: "acceptEdits" });
+    // The access is not among them: the thread keeps its own, whichever door the message came through.
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: access });
+    const named = await run("send", thread!.threadId!, "--access", "acceptEdits", "and now");
+    expect(named.code).toBe(3);
+    expect(named.io.errors).toEqual(['--access belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
 
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
@@ -3486,7 +3490,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: run's --agent on send, threads' --tree on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
     // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.

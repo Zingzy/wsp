@@ -78,6 +78,8 @@ const view: ChatThreadView = {
   shellCwd: null,
   harness: null,
   model: null,
+  agent: null,
+  permissionMode: null,
 };
 
 const handle = { view, hydrated: true, busy: false, sending: false, fresh: true, resume: null, thread: "t1", threadKey: "t1", named: null } as unknown as ChatThreadHandle;

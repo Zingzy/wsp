@@ -1391,6 +1391,21 @@ export function noAdapterLine(harness: string, agents: readonly string[]): strin
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
 }
 
+/** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on
+ * and the harness session those turns wrote, which another agent would open as a transcript of its own, at its own
+ * access; the agent is picked where a thread is opened, so a second one is a second thread. */
+export function threadRunsOnLine(agent: string, asked: string): string {
+  return `this thread runs on ${agent}; open a new thread to run ${asked}`;
+}
+
+/** The refusal of a send that names a thread and, beside it, a harness session that is not one of that thread's
+ * turns: the named thread is the one the message goes into and its own session is what the turn resumes, so a
+ * session of another thread, or one no thread here ran, would put another transcript under this thread's id and
+ * read that transcript's access as this thread's. The sentence says back the two ids the caller gave and no more. */
+export function resumeNotOfThreadLine(resume: string, thread: string): string {
+  return `session ${resume} is not a turn of thread ${threadWord(thread)}; a send into a thread resumes that thread's own session`;
+}
+
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
 export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
 
@@ -2959,19 +2974,22 @@ export function permissionModeOptionLabel(modeLabel: string): string {
 }
 
 /** What the access picker says over its list while a turn is running: what a pick does to that turn, read before the
- * pick rather than under the box after it. A harness that takes a mode change mid-turn puts the pick to the turn in
- * front of the person, the prompt it is stopped on included; one that does not keeps the pick for the next message. */
+ * pick rather than under the box after it. A pick goes onto the thread's record through the access verb either way;
+ * a harness that takes a mode change mid-turn puts it to the turn in front of the person too, the prompt it is
+ * stopped on included, and one that does not leaves that turn at its mode, so the thread's next turn is the first
+ * at the pick. */
 export function accessReachLine(movesRunningTurn: boolean): string {
-  return movesRunningTurn ? "Applies to the turn running now" : "Applies from your next message";
+  return movesRunningTurn ? "Applies to the turn running now" : "Applies from the thread's next turn";
 }
 
 /** What the composer says under the box when an access pick the harness's own row said would reach the running turn
- * came back refused: the two halves every refusal in this app has, what happened and then what to do about it. It
- * stands only for a refusal the harness actually answered with, never for one the menu said before the pick, so
- * nobody reads the same sentence twice. Short because that slot is one line the width of the box and it truncates
- * from the right: 54 characters is what fits at the window this app is smallest in (measured 2026-09-08, 364 px of
- * slot at a 1200 px viewport), and a refusal cut before its second half is no use. */
-export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "Your next message carries it." } as const;
+ * came back refused: the two halves every refusal in this app has, what happened and then where the pick stands,
+ * which is on the thread's record for its next turn. It stands only for a refusal the harness actually answered
+ * with, never for one the menu said before the pick, so nobody reads the same sentence twice. Short because that
+ * slot is one line the width of the box and it truncates from the right: 54 characters is what fits at the window
+ * this app is smallest in (measured 2026-09-08, 364 px of slot at a 1200 px viewport), and a refusal cut before its
+ * second half is no use. */
+export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "The next turn runs at it." } as const;
 
 /** Those two halves as the one line that slot holds. */
 export const ACCESS_REFUSED_LINE = `${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`;
