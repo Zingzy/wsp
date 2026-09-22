@@ -1142,7 +1142,7 @@ function shapeFault(expected: MachineShape, actual: MachineShape): string | unde
 
 /** Dirs the golden image already provides on every fresh fork; re-vaulting
  * them is dead weight, and extracting them with --recursive-unlink would
- * delete the fork's own copies first (the claude install lives in .local). */
+ * delete the fork's own copies first (the image's uv, pipx and pnpm installs live in .local). */
 const VAULT_SKIP = new Set([".local", ".cache", ".npm"]);
 
 /** One RFC 1123 label: lowercase alphanumerics and hyphens, at most 63 chars, hyphen-free at both ends. */

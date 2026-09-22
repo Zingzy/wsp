@@ -8,7 +8,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_FLOOR, HOME_BIN, TOOL_PREFIX } from "@wsp/catalog";
+import { BASE_FLOOR, TOOL_PREFIX } from "@wsp/catalog";
 import {
   probePath,
   HOMEBREW_PREFIX,
@@ -585,16 +585,15 @@ describe("the PATH every script of the job exports", () => {
     for (const value of exported) {
       expect(value === PROBE || value === `${PROBE}:$PATH` || value === '"/usr/local/bin:$PATH"', value).toBe(true);
     }
-    // The harness binary is the one install that lands there, the directory its own row's bins names; the job sends that line once and runs it once.
-    const harness = `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`;
-    expect(scripts.filter(c => c.includes("/root/.local/bin")).map(c => c.split("\n").find(l => l.includes("/root/.local/bin")))).toEqual([
-      // The one other line that names it: the login shell's PATH written into a file on that computer, which the
-      // daemon and this job both stopped resolving a command through.
-      expect.stringContaining(PROFILE_PATH_FILE),
-      // The install is the last line of the agent's script, so one of the two carries the closing quote of the guard that runs the step in its own session.
-      expect.stringContaining(harness),
-      expect.stringContaining(harness),
-    ]);
+    // No line names /root/.local/bin, a folder every workspace there writes, but the login shell's PATH written into
+    // a file on that computer, which the daemon and this job both stopped resolving a command through.
+    expect(scripts.flatMap(c => c.split("\n")).filter(l => l.includes("/root/.local/bin"))).toEqual([expect.stringContaining(PROFILE_PATH_FILE)]);
+    // The harness lands in a folder of the job's own PATH, and its check runs under that PATH, so the check finds it.
+    const harness = plan.steps.find(s => s.id === "agents/claude")!;
+    expect(PROBE.split(":")).toContain(/^install -D -m 0755 \S+ (\S+)\/claude'?$/m.exec(harness.cmd)?.[1]);
+    const checks = calls.filter(c => c.includes("claude --version"));
+    expect(checks.length).toBeGreaterThan(0);
+    for (const check of checks) expect(check.startsWith(pathLine(PROBE)), check).toBe(true);
   });
 
   it("is the tools PATH for the image build, which is root's own machine and shares its home with nobody", () => {

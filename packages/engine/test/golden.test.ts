@@ -5,7 +5,7 @@ import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
-import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
+import { CLAUDE_INSTALL, CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, TOOLS_PATH, type ToolInstall } from "../src/golden-import.js";
@@ -1625,10 +1625,10 @@ describe("golden import stages", () => {
     const agents = (["claude", "codex"] as const).map(id => ({ id: `agents/${id}`, ...AGENT_INSTALLERS[id]! }));
     const builder = await prepareBuilder({ backend, setup: GOLDEN_SETUP, fetch, import: importOf({ agents }) });
     const runs = cmds.filter(c => c.includes("claude-code-releases/"));
-    // Once as the setup line, once as the Claude Code row; the same text both times, whole and under the same lines.
+    // Once as the setup line, once as the Claude Code row, whose text is the setup's less the removal under the home.
     expect(runs.map(r => r.includes(NODE_PATH_LINE))).toEqual([false, true]);
-    for (const [run, path] of [[runs[0]!, []], [runs[1]!, [NODE_PATH_LINE]]] as const) {
-      expect(run).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, ...path, GOLDEN_SETUP].join("\n"))} &`);
+    for (const [run, path, script] of [[runs[0]!, [], GOLDEN_SETUP], [runs[1]!, [NODE_PATH_LINE], CLAUDE_INSTALL]] as const) {
+      expect(run).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, ...path, script].join("\n"))} &`);
       expect(run).toMatch(/while \[ \$t -lt 900 \]/);
       expect(run).not.toMatch(/\|\s*(bash|sh)\b/);
       const at = (needle: string) => { const i = run.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
@@ -1640,7 +1640,7 @@ describe("golden import stages", () => {
     expect(codex).toHaveLength(1);
     expect(codex[0]).toContain(`${ROAD_STEPS.npm.env.join("\n")}\n`);
     expect(codex[0]!.indexOf(ROAD_STEPS.npm.env[0]!)).toBeLessThan(codex[0]!.indexOf("npm install -g @openai/codex@"));
-    expect(builder.setupSha).toBe(createHash("sha256").update(`${GOLDEN_SETUP}\n${GOLDEN_SETUP}\n${AGENT_INSTALLERS["codex"]!.install}`).digest("hex"));
+    expect(builder.setupSha).toBe(createHash("sha256").update(`${GOLDEN_SETUP}\n${CLAUDE_INSTALL}\n${AGENT_INSTALLERS["codex"]!.install}`).digest("hex"));
   });
 
   it("a failure's reason is Homebrew's Error: line, not the advice line that follows it", async () => {
@@ -2361,6 +2361,23 @@ describe("golden import stages", () => {
       expect(cmds[0]).toBe(FREE_KB_CMD);
       // Both agents are still on the image, but the recipe stopped asking for them, so their checks leave the smoke.
       expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version", recipe: SNAPSHOT });
+    });
+
+    it("an update of an image sealed with the harness under the home takes that file off, so the one it installs in /usr/local/bin is the one every PATH finds", async () => {
+      const { backend, ran, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      await applyDelta(machine, deltaOf({ retired: [], retiredOnImage: [] }), { setup: GOLDEN_SETUP, previousSmoke: "true", previousBase: head.base, fetch });
+      // The machine's disk as the scripts it ran leave it, from an image whose harness sits first on TOOLS_PATH.
+      const disk = new Set(["/root/.local/bin/claude"]);
+      for (const { script } of ran) {
+        for (const line of script.split("\n")) {
+          const removed = /^rm -f (\S+)$/.exec(line)?.[1];
+          if (removed !== undefined) disk.delete(removed);
+          const installed = /^install -D -m 0755 \S+ ([^\s']+)/.exec(line)?.[1];
+          if (installed !== undefined) disk.add(installed);
+        }
+      }
+      expect([...disk]).toEqual(["/usr/local/bin/claude"]);
     });
 
     it("a delta carries the head's pins onto the rows it leaves alone, and the rows it runs again record what they read now", async () => {
