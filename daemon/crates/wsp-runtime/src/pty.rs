@@ -333,6 +333,23 @@ mod tests {
         }
     }
 
+    /// The stub on disk, executable and closed here, and the spawn of it retried while the file is busy: any
+    /// fork in this test binary while a stub is open for writing hands the child that descriptor until it execs,
+    /// and an exec of that stub reads ETXTBSY until the last such descriptor is closed.
+    fn spawn_stub<T>(stub: &Path, text: &str, mut spawn: impl FnMut() -> io::Result<T>) -> T {
+        const TRIES: u32 = 20;
+        const GAP: std::time::Duration = std::time::Duration::from_millis(5);
+        std::fs::write(stub, text).unwrap();
+        std::fs::set_permissions(stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for _ in 1..TRIES {
+            match spawn() {
+                Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => std::thread::sleep(GAP),
+                taken => return taken.unwrap(),
+            }
+        }
+        spawn().unwrap()
+    }
+
     #[test]
     fn the_size_is_two_numbers_on_one_line_and_reads_back_as_it_was_written() {
         assert_eq!(size_line(100, 40), "100 40\n");
@@ -386,11 +403,10 @@ mod tests {
     async fn the_helper_is_started_with_all_three_pipes_and_the_line_it_was_given() {
         let dir = tempfile::tempdir().unwrap();
         let stub = dir.path().join("stub.sh");
-        std::fs::write(&stub, "#!/bin/sh\necho \"$@\"\necho 'a refusal of its own' >&2\nexec cat\n").unwrap();
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
         let broker = broker_line("/sbin/wsp-init", &ask());
         let args = helper_argv(Path::new("/wsp"), "wsp-a", Path::new("/wsp/run/wsp-a/pty-1.pid"), &broker);
-        let (mut helper, mut input, mut output) = start(&stub, &args).unwrap();
+        let text = "#!/bin/sh\necho \"$@\"\necho 'a refusal of its own' >&2\nexec cat\n";
+        let (mut helper, mut input, mut output) = spawn_stub(&stub, text, || start(&stub, &args));
 
         input.write_all(b"typed\n").await.unwrap();
         input.flush().await.unwrap();
@@ -485,14 +501,36 @@ mod tests {
     async fn a_wait_on_the_helper_drops_its_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let stub = dir.path().join("stub.sh");
-        std::fs::write(&stub, "#!/bin/sh\nexec cat\n").unwrap();
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut cmd = Command::new(&stub);
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        let mut child = cmd.spawn().unwrap();
+        let mut child = spawn_stub(&stub, "#!/bin/sh\nexec cat\n", || {
+            let mut cmd = Command::new(&stub);
+            cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+            cmd.spawn()
+        });
         assert!(child.stdin.is_some(), "a child started with a piped stdin holds it");
         let _ = tokio::time::timeout(std::time::Duration::from_millis(100), child.wait()).await;
         assert!(child.stdin.is_none(), "the wait left this child's stdin in place");
         let _ = child.start_kill();
+    }
+
+    /// A stub another thread holds open for writing is a file no exec in this process may run, which is what a
+    /// fork racing another case's write leaves behind; the spawn takes it the moment that thread closes it.
+    #[tokio::test]
+    async fn a_stub_another_thread_holds_open_for_writing_is_spawned_once_it_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("stub.sh");
+        let held = stub.clone();
+        let (opened, holding) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let open = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&held).unwrap();
+            opened.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            drop(open);
+        });
+        holding.recv().unwrap();
+        let broker = broker_line("/sbin/wsp-init", &ask());
+        let args = helper_argv(Path::new("/wsp"), "wsp-a", Path::new("/wsp/run/wsp-a/pty-1.pid"), &broker);
+        let (mut helper, _input, _output) = spawn_stub(&stub, "#!/bin/sh\nexit 0\n", || start(&stub, &args));
+        assert!(helper.wait().await.unwrap().success(), "the stub spawned once the thread writing it closed its file");
+        holder.join().unwrap();
     }
 }
