@@ -4,7 +4,7 @@
 import { gunzipSync } from "node:zlib";
 import { tarOf } from "@wsp/engine";
 import type { GoldenManifest, ProjectGolden, ProjectPlan } from "@wsp/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -141,6 +141,56 @@ describe("a project golden", () => {
     await expect(rt.workspaces.snapshot("ws_nope")).rejects.toThrow("no such workspace");
     expect(backend.snapshots).toEqual([]);
     expect(await rt.golden.projects()).toEqual([]);
+  });
+
+  /** The provider refusing every snapshot the way Solari does, with no request id, and df under /root answering `df`. */
+  function refusing(backend: StubBackend, df: { exitCode: number; stdout: string; stderr: string }): void {
+    backend.beforeSnapshot = () => {
+      throw Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502 });
+    };
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.startsWith("df -Pk /root") ? df : plain(m, cmd));
+  }
+  const ANSWER = String.raw`502 Failed to snapshot sandbox \(no request id from the provider, at \S+\)`;
+
+  it("a refused snapshot of a disk 97 percent full names the disk and the provider's answer, keeps the provider's kind and status, logs the line, and changes nothing", async () => {
+    const { rt, advance, backend, store } = await setup();
+    const ws = await loaded(rt, advance);
+    refusing(backend, { exitCode: 0, stdout: "20342400 20971520\n", stderr: "" });
+    const before = await store.get("workspaces", ws.id);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const said = new RegExp(`^task was not snapshotted: its disk is 97 percent full \\(19\\.4 of 20 GB\\) and the provider answered ${ANSWER}; free space on it or delete the workspace, then snapshot again$`);
+    try {
+      await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, message: expect.stringMatching(said) });
+      expect(warn.mock.calls.map(c => String(c[0]))).toContainEqual(expect.stringMatching(said));
+    } finally {
+      warn.mockRestore();
+    }
+    expect(await store.get("workspaces", ws.id)).toEqual(before);
+    expect(before).toMatchObject({ firstLife: true });
+    expect(backend.machines[0]!.execLog.filter(c => c.startsWith("df -Pk /root"))).toHaveLength(1);
+    expect(backend.snapshots).toEqual([]);
+    expect(await rt.golden.projects()).toEqual([]);
+  });
+
+  it("a refused snapshot of a disk 41 percent full says the disk is not the reason, one whose df fails says why, and one whose df answers no size says what it printed", async () => {
+    const { rt, advance, backend } = await setup();
+    const ws = await loaded(rt, advance);
+    refusing(backend, { exitCode: 0, stdout: "8598400 20971520\n", stderr: "" });
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({
+      kind: "snapshotUnavailable",
+      status: 502,
+      message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; its disk is 41 percent full \\(8\\.2 of 20 GB\\), so the disk is not the reason$`)),
+    });
+    refusing(backend, { exitCode: 1, stdout: "", stderr: "df: /root: No such file or directory" });
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({
+      message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; the disk could not be read \\(df failed: df: /root: No such file or directory\\)$`)),
+    });
+    refusing(backend, { exitCode: 0, stdout: "123 0\n", stderr: "" });
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({
+      message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; the disk could not be read \\(df answered 123 0\\)$`)),
+    });
+    expect(backend.snapshots).toEqual([]);
   });
 
   it("a fork of a project golden boots from its snapshot as the root version's kind and size, carries the project, and its own snapshot still lists under that version", async () => {

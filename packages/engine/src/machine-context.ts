@@ -13,7 +13,7 @@ import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
 import { TOOLS_PATH } from "./golden-import.js";
-import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
+import { TOOLS_DISK_FLOOR, dfKbCmd } from "./golden-tools.js";
 import type { ImportResult } from "./golden.js";
 import type { Machine } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
@@ -202,7 +202,7 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS, path: string = TOO
     `export PATH=${path}:$PATH`,
     "echo WSP_CTX",
     'echo "KERNEL $(uname -r 2>/dev/null)"',
-    `echo "DISK $(df -Pk ${h} 2>/dev/null | awk 'NR==2{print $2, $4}')"`,
+    `echo "DISK $({ ${dfKbCmd(["size", "free"], h)}; } 2>/dev/null)"`,
     "if grep -qw overlay /proc/filesystems 2>/dev/null; then echo OVERLAY yes; else echo OVERLAY no; fi",
     'for b in docker podman tmux fish brew; do if command -v "$b" >/dev/null 2>&1; then echo "HAS $b"; fi; done',
     `if [ -f ${e}/profile.d/wsp-golden.sh ]; then echo "HAS golden-path"; fi`,
