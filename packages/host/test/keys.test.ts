@@ -532,17 +532,22 @@ describe("the key a run is asked for is the one its own provider reads", () => {
     // The build beside a serving host runs in that host's own init job, on the provider that host started on: the
     // word on this line reaches no runtime of this run's, so it is refused rather than dropped.
     const lock = { pid: 4242, port: 3000, wsPort: 3001, startedAt: "2026-09-22T00:00:00.000Z" };
-    const asked = (values: { provider?: string }, env: Record<string, string> = {}): string | undefined =>
-      providerBesideRefusal(lock, optsFor({ ...values, state }, { ...env, WSP_HOME: home }), "solari")?.message;
-    expect(asked({ provider: "box" })).toBe(`wsp init: the wsp host serving ${state} (pid 4242) runs this build and forks on solari, not box. Drop --provider, or take that host down and start it again with wsp up --provider box.`);
+    const asked = (values: { provider?: string }, env: Record<string, string> = {}): string | undefined => {
+      const opts = optsFor({ ...values, state }, { ...env, WSP_HOME: home });
+      return providerBesideRefusal(lock, opts, "solari", upCommandFor(opts, { ...values, state }))?.message;
+    };
+    // The way back is the line this run composes for every other handover, so it carries the --state this init was
+    // given: following it serves the state file the sentence names and not this computer's default one.
+    expect(asked({ provider: "box" })).toBe(`wsp init: the wsp host serving ${state} (pid 4242) runs this build and forks on solari, not box. Drop --provider, or take that host down and start it again with wsp up --state '${state}' --provider 'box'.`);
     // The provider that host already forks on is the build that was asked for, so there is nothing to say.
     expect(asked({ provider: "solari" })).toBeUndefined();
     expect(asked({})).toBeUndefined();
     // The word its machines wear is what is compared: a stand-in serving in place of that cloud is that cloud.
     expect(asked({ provider: "fake" }, { WSP_FAKE_AS: "solari" })).toBeUndefined();
-    expect(asked({ provider: "fake" })).toBe(`wsp init: the wsp host serving ${state} (pid 4242) runs this build and forks on solari, not fake. Drop --provider, or take that host down and start it again with wsp up --provider fake.`);
+    expect(asked({ provider: "fake" })).toBe(`wsp init: the wsp host serving ${state} (pid 4242) runs this build and forks on solari, not fake. Drop --provider, or take that host down and start it again with wsp up --state '${state}' --provider 'fake'.`);
     // A host that does not say where it forks is a host of an earlier build: nothing to compare and nothing said.
-    expect(providerBesideRefusal(lock, optsFor({ provider: "box", state }, { WSP_HOME: home }), undefined)).toBeUndefined();
+    const quiet = optsFor({ provider: "box", state }, { WSP_HOME: home });
+    expect(providerBesideRefusal(lock, quiet, undefined, upCommandFor(quiet, { provider: "box", state }))).toBeUndefined();
   });
 
   it("puts a typed key to the picked provider's own probe, with that provider's own key header", async () => {

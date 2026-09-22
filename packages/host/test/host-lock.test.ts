@@ -178,8 +178,10 @@ describe("serve takes host.lock next to the state file", () => {
     const errors: string[] = [];
     const code = await cli(["init", "--provider", "box", "--state", statePath], { ...quietIO, error: line => errors.push(line) });
     expect(code).toBe(3);
+    // The wsp up the sentence hands over is this run's own line, so it names the state file this home keeps its
+    // host under: without the --state it would start a host on this computer's default state file instead.
     expect(errors).toEqual([
-      `wsp init: the wsp host serving ${statePath} (pid ${process.pid}) runs this build and forks on solari, not box. Drop --provider, or take that host down and start it again with wsp up --provider box.`,
+      `wsp init: the wsp host serving ${statePath} (pid ${process.pid}) runs this build and forks on solari, not box. Drop --provider, or take that host down and start it again with wsp up --state '${statePath}' --provider 'box'.`,
     ]);
     // Refused before the run opens: the host is still serving and nothing of the build was read or booted.
     expect((await fetch(`http://127.0.0.1:${first.port}/`)).status).toBe(200);

@@ -990,21 +990,23 @@ interface BesideHost {
 /** The refusal a provider named on this line meets beside a serving host: that host runs the build, on the provider
  * it forks on, and a word on this line reaches no runtime of this run's. Nothing where it already forks where the
  * line names, which is the build that was asked for, and nothing where the host does not say which provider it is.
- * The word is compared and not the name typed, so a stand-in named for a cloud reads as that cloud on both sides. */
-export function providerBesideRefusal(lock: HostLock, opts: SharedOpts, forksOn: string | undefined): Error | undefined {
+ * The word is compared and not the name typed, so a stand-in named for a cloud reads as that cloud on both sides.
+ * The way back is this run's own wsp up line, composed where every other one this file hands over is, so it names
+ * the state file, the ports and the provider as they were typed rather than the provider alone. */
+export function providerBesideRefusal(lock: HostLock, opts: SharedOpts, forksOn: string | undefined, upCommand: string): Error | undefined {
   const given = opts.provider;
   if (given === undefined || forksOn === undefined || forksOn === wiredProviderId(opts.providerEnv)) return undefined;
   return usageRefusal(
     `wsp init: the wsp host serving ${opts.statePath} (pid ${lock.pid}) runs this build and forks on ${forksOn}, not ${given}`,
-    `Drop --provider, or take that host down and start it again with wsp up --provider ${given}.`,
+    `Drop --provider, or take that host down and start it again with ${upCommand}.`,
   );
 }
 
 /** Opens the door of the host serving this state, or refuses with the way back that needs no pid. The place, the price
  * and the builder disk come from that host: it owns the places, so a terminal that named none (or another) still
  * asks the person about the machine the build will really boot. `on` is the place --on named; absent, the host's
- * default place. */
-async function besideHost(lock: HostLock, opts: SharedOpts, on?: string): Promise<BesideHost> {
+ * default place. `upCommand` is the wsp up line this run was given, which the provider refusal hands over. */
+async function besideHost(lock: HostLock, opts: SharedOpts, upCommand: string, on?: string): Promise<BesideHost> {
   const statePath = opts.statePath;
   const refuse = (why: string): Error => Object.assign(new Error(initRefusal(lock, statePath, why)), { kind: "conflict" });
   let client: HostClient;
@@ -1019,9 +1021,10 @@ async function besideHost(lock: HostLock, opts: SharedOpts, on?: string): Promis
   }
   try {
     const setup = InitSetup.parse((await client.request<{ setup: unknown }>("init.get", on === undefined ? {} : { on })).setup);
-    // The line before anything about that host's state: a provider this build cannot land on is the person's own to
-    // fix, whether or not the host could build at all, so they read the word they typed and not a second round.
-    const refused = providerBesideRefusal(lock, opts, setup.forksOn);
+    // Before anything this run judges about that host: a provider this build cannot land on is the person's own to
+    // fix, whether or not the host could build at all, so they read the word they typed and not a second round. A
+    // place --on named that the host cannot build at is refused by the request above, and is read before this one.
+    const refused = providerBesideRefusal(lock, opts, setup.forksOn, upCommand);
     if (refused !== undefined) throw refused;
     const job = setup.job;
     if (job !== null && !initJobOver(job.phase)) throw refuse(`a setup is already running there (${job.phase})`);
@@ -1124,7 +1127,7 @@ async function init(
   // A host already serving this state file is the process that writes it and holds the provider, so this run asks
   // its screens and hands the build to that host. Read before the opening: a refusal here is the whole run, and it
   // reads better without a banner over it. Nothing is asked for a key: the host has the one that builds.
-  const beside = held === undefined ? undefined : await besideHost(held, opts, flags.on);
+  const beside = held === undefined ? undefined : await besideHost(held, opts, flags.upCommand, flags.on);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const { keys, env: providerEnv } =
     beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noSolari: "offer", checkSaved: true });
