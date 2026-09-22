@@ -1294,7 +1294,7 @@ describe("golden import stages", () => {
     expect(results[0]!.tools[1]).not.toHaveProperty("road");
   });
 
-  it("a catalog tool this computer has no row for installs by its catalog road on the guest: the current release is fetched, the road recorded, and the tally says the road is unmeasured", async () => {
+  it("a catalog tool this computer has no row for installs by its catalog road on the guest: the pinned asset is downloaded, the road recorded, and the tally says the road is unmeasured", async () => {
     const { backend, cmds, fetch, inline } = backendFor([
       ["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.101.0\n`, stderr: "" }],
     ]);

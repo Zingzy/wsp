@@ -1125,7 +1125,7 @@ describe("catalog rows", () => {
     expect(cmd("tools/catalog/gh")).toContain("name='gh'");
     expect(cmd("tools/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("tools/catalog/ffmpeg")).toMatch(/\napt-get install -y -qq ffmpeg$/);
-    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL })}`);
+    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install}`);
     expect(t.installs.some(i => i.id === "tools/homebrew")).toBe(false);
     expect(t.skipped).toEqual([]);
     expect(t.base).toEqual([]);
@@ -1222,7 +1222,7 @@ describe("catalog rows", () => {
     // The recorded sum of an older tag decides nothing: the catalog's own sum is checked before the unpack.
     expect(gh).not.toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
     expect(gh).toContain('echo "$sha  $tmp/$asset" | sha256sum -c - >/dev/null');
-    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL, version: KUBECTL.version, pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })}`);
+    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install}`);
   });
 });
 

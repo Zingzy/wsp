@@ -585,15 +585,15 @@ describe("the PATH every script of the job exports", () => {
     for (const value of exported) {
       expect(value === PROBE || value === `${PROBE}:$PATH` || value === '"/usr/local/bin:$PATH"', value).toBe(true);
     }
-    // The harness binary is the one install that lands there, where its row's bins names and where the vendor's
-    // own installer wrote it before the pin; the job sends that line once and runs it once.
+    // The harness binary is the one install that lands there, the directory its own row's bins names; the job sends that line once and runs it once.
     const harness = `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`;
     expect(scripts.filter(c => c.includes("/root/.local/bin")).map(c => c.split("\n").find(l => l.includes("/root/.local/bin")))).toEqual([
       // The one other line that names it: the login shell's PATH written into a file on that computer, which the
       // daemon and this job both stopped resolving a command through.
       expect.stringContaining(PROFILE_PATH_FILE),
-      harness,
-      harness,
+      // The install is the last line of the agent's script, so one of the two carries the closing quote of the guard that runs the step in its own session.
+      expect.stringContaining(harness),
+      expect.stringContaining(harness),
     ]);
   });
 

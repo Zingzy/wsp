@@ -4,7 +4,7 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -139,7 +139,7 @@ describe("catalog", () => {
     expect(standingPin({ road: "release", repo: "cli/cli" })).toBeUndefined();
     expect(standingPin({ road: "vendor", cask: KUBECTL, pin })).toEqual(pin);
     expect(standingPin({ road: "npm", package: "bun", version: "1.4.0" })).toBeUndefined();
-    // The road without its record is what a first run installs: the current release, no check.
+    // The road without its record is what a first run installs: the pin goes, the version and assets the row names stay.
     expect(unpinned({ road: "release", repo: "cli/cli", pin })).toEqual({ road: "release", repo: "cli/cli" });
     expect(unpinned({ road: "release", repo: "cli/cli", version: "v2.86.0", pin })).toEqual({ road: "release", repo: "cli/cli", version: "v2.86.0" });
     expect(unpinned({ road: "npm", package: "bun" })).toEqual({ road: "npm", package: "bun" });
@@ -150,16 +150,19 @@ describe("catalog", () => {
     expect(release).toContain(pinCheckLine("$asset", "$tag", pin.sha256));
     // A cask checks the sum it pins for the arch, whatever a recipe recorded, so its first install is checked too.
     for (const cask of LINUX_CASKS) {
-      const line = cask.install({ road: "vendor", cask, version: cask.version });
+      const line = cask.install;
       expect(line, cask.bin).toContain(`x86_64) a=`);
       expect(line, cask.bin).toContain(cask.sha256.x86_64);
       expect(line, cask.bin).toContain(cask.sha256.aarch64);
       expect(line, cask.bin).toContain('| sha256sum -c - >/dev/null');
       expect(line, cask.bin).not.toContain('[ "$sum" =');
+      // The version line reads the cask's own, the one its two sums belong to, so a row asking for another version moves nothing.
       expect(line, cask.bin).toContain(`ver='${cask.version}'`);
+      expect(ROAD_MODULES.vendor.install({ road: "vendor", cask, version: "1.0.0" }, cask.bin), cask.bin).toContain(`ver='${cask.version}'`);
+      expect(ROAD_MODULES.vendor.install({ road: "vendor", cask, pin: { tag: "1.0.0", sha256: "a".repeat(64) } }, cask.bin), cask.bin).toContain(`ver='${cask.version}'`);
     }
     // The vendor's current version is asked of nobody: no cask reads a version off the network.
-    for (const cask of LINUX_CASKS) expect(cask.install({ road: "vendor", cask }), cask.bin).not.toContain('ver="$(');
+    for (const cask of LINUX_CASKS) expect(cask.install, cask.bin).not.toContain('ver="$(');
     // The words are the protocol's, so the reason line a person reads is the one the format test pins.
     expect(pinCheckLine("x", "y", "z")).toContain(pinMismatchLine("x", "y", "z", "${sum:0:12}"));
   });
@@ -341,8 +344,8 @@ describe("catalog", () => {
     // A release road with no tag installs nothing: nothing in the catalog fetches the current release any more.
     expect(ROAD_MODULES.release.install({ road: "release", repo: "cli/cli" }, "gh")).toEqual({ note: "names no release tag; name the version" });
     expect(gh).not.toContain('[ "$sum" =');
-    expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install({ road: "vendor", cask: GCLOUD }));
-    expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL }));
+    expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install);
+    expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install);
     // The floor runs before Homebrew or the release machinery exist on the machine.
     for (const e of BASE_FLOOR) expect(["brew", "release", "vendor"], e.id).not.toContain(e.installRoad.road);
   });
@@ -411,16 +414,16 @@ describe("catalog", () => {
     for (const road of ["brew", "apt", "script", "release", "vendor"] as const) expect(ROAD_MODULES[road].at, road).toBeUndefined();
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }, "spoo")).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }, "spoo")).not.toContain('[ "$sum" =');
-    // No version: a pin fixes the tag and is checked, as a vendor install does; none at all takes the current release.
+    // No version: a pin fixes the tag and is checked, as a vendor install does; with neither there is no release to read and the row is noted.
     expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain("releases/tags/v2.86.0");
     expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
     expect(line({ road: "release" }, "spoo")).toEqual({ note: "no GitHub release to install from" });
     expect(off({ road: "release" }, "spoo")).toEqual({ cmd: "rm -f /usr/local/bin/'spoo'" });
-    // A vendor's download is the cask's own script, at the road's version when it names one, else the pinned or current one.
+    // A vendor's download is the cask's own script, whatever version the row carries.
     const gcloud: InstallRoad = { road: "vendor", cask: GCLOUD, version: "575.0.0" };
-    expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install(gcloud), { cmd: GCLOUD.uninstall }, "gcloud"]);
+    expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install, { cmd: GCLOUD.uninstall }, "gcloud"]);
     const kubectl: InstallRoad = { road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } };
-    expect(line(kubectl)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } }));
+    expect(line(kubectl)).toBe(KUBECTL.install);
     // A cask's own sum rides every install of it, so the bytes are checked whether or not a recipe recorded a pin.
     expect(line(kubectl)).toContain(KUBECTL.sha256.x86_64);
     // apt rows wait on the one index read; purge takes what the package alone pulled in.
@@ -528,10 +531,10 @@ describe("catalog", () => {
       `  aarch64) plat=linux-arm64 sha=${catalog.CLAUDE_CODE.sha256.aarch64} ;;`,
       '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
       "esac",
+      "trap 'rm -f /tmp/claude' EXIT",
       `curl -o /tmp/claude "https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`,
       'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
       `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
-      "rm -f /tmp/claude",
     ].join("\n"));
     for (const arch of ["x86_64", "aarch64"] as const) expect(catalog.CLAUDE_CODE.sha256[arch], arch).toMatch(/^[0-9a-f]{64}$/);
     // The row installs into the one directory it names, at the version its own text fixes, so a copy gets that version.
@@ -545,11 +548,33 @@ describe("catalog", () => {
     for (const e of CATALOG) expect(installLine(e), e.id).not.toMatch(/\bbash "\$f"/);
   });
 
+  it("the agent's install leaves no download behind on a refused sum: it runs here with its target moved and one digit of the sum flipped", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-agent-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    // A local file stands in for the vendor's 215 MB download, so the refusal is read without touching the network.
+    writeFileSync(join(dir, "served"), "not the agent's binary\n");
+    const flip = (sha: string) => (sha.startsWith("0") ? "1" : "0") + sha.slice(1);
+    const download = join(dir, "download");
+    const installed = join(dir, "bin", "claude");
+    // The script road's step carries `set -euo pipefail`, pinned above, so a refused sum ends the script where it stands.
+    const script = `set -euo pipefail\n${catalog.GOLDEN_SETUP}`
+      .replace(`${HOME_BIN}/claude`, installed)
+      .replaceAll("/tmp/claude", download)
+      .replace(`"https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`, `"file://${join(dir, "served")}"`)
+      .replaceAll(catalog.CLAUDE_CODE.sha256.x86_64, flip(catalog.CLAUDE_CODE.sha256.x86_64))
+      .replaceAll(catalog.CLAUDE_CODE.sha256.aarch64, flip(catalog.CLAUDE_CODE.sha256.aarch64));
+    const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("sha256sum");
+    expect(existsSync(download)).toBe(false);
+    expect(existsSync(installed)).toBe(false);
+  });
+
   it("no road line spells curl's flags itself: the function is their one home", () => {
     const own = /\bcurl +-[A-Za-z]*[fsSL]\b/;
     const lines = [
       ...CATALOG.map(e => installLine(e)),
-      ...LINUX_CASKS.flatMap(c => [c.install({ road: "vendor", cask: c }), c.install({ road: "vendor", cask: c, version: "1.0.0", pin: { tag: "1.0.0", sha256: "a".repeat(64) } })]),
+      ...LINUX_CASKS.map(c => c.install),
       ROAD_MODULES.release.install({ road: "release", repo: "cli/cli", go: "github.com/cli/cli/v2/cmd/gh" }, "gh"),
       ROAD_MODULES.release.install({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "b".repeat(64) } }, "spoo"),
       catalog.UV_INSTALL,

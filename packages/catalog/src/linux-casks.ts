@@ -6,10 +6,6 @@
 // tools stage reads. Neither vendor is asked what its current version is: a
 // bump is an edit of the two fields below, read the way uv's pin is read.
 import { shellQuote } from "@wsp/protocol";
-import { type InstallRoad, versionOf } from "./roads.js";
-
-/** The vendor road as a row carries it: this cask, the row's version where it names one, the recorded pin. */
-export type VendorRoad = Extract<InstallRoad, { road: "vendor" }>;
 
 export interface LinuxCask {
   /** The command the install puts on PATH. */
@@ -22,13 +18,13 @@ export interface LinuxCask {
   version: string;
   /** That version's download per arch, as the sums below were read. */
   sha256: { x86_64: string; aarch64: string };
-  /** One bash script for the road as the row carries it: at the version the road installs at, checked against the sum this cask pins. */
-  install(road: VendorRoad): string;
+  /** One bash script: the version this cask pins, downloaded and checked against the sum it pins for the arch. */
+  install: string;
   uninstall: string;
 }
 
-/** The version the script installs: the road's own, which every catalog row carries, else the cask's pin. */
-const verLine = (road: VendorRoad, version: string): string => `ver=${shellQuote(versionOf(road) ?? version)}`;
+/** The version the script installs, which is the cask's own: the two sums beside it are that version's downloads. */
+const verLine = (version: string): string => `ver=${shellQuote(version)}`;
 
 const PRELUDE = ["set -euo pipefail", 'arch="$(uname -m)"', 'tmp="$(mktemp -d /tmp/wsp-cask-XXXXXX)"', "trap 'rm -rf \"$tmp\"' EXIT"];
 /** This vendor's own word for the arch, and the sum it pins for that arch's download, read together. */
@@ -54,20 +50,19 @@ export const GCLOUD: LinuxCask = {
   bin: "gcloud",
   from: "Google's Linux release",
   detail: "from Google's Linux release, at the version and sum the catalog pins",
-  install: road =>
-    [
-      ...PRELUDE,
-      ARCH("x86_64", "arm", GCLOUD_PIN.sha256),
-      `[ "$a" != arm ] || command -v python3 >/dev/null || { echo "Error: gcloud on arm needs python3 on the machine; Google's arm tarball bundles none" >&2; exit 1; }`,
-      verLine(road, GCLOUD_PIN.version),
-      'pkg="google-cloud-cli-$ver-linux-$a.tar.gz"',
-      'curl -o "$tmp/$pkg" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"',
-      'echo "$sha  $tmp/$pkg" | sha256sum -c - >/dev/null',
-      `rm -rf ${GCLOUD_HOME}`,
-      'tar -xzf "$tmp/$pkg" -C /opt',
-      ...GCLOUD_BINS.map(b => `ln -sf ${GCLOUD_HOME}/bin/${b} /usr/local/bin/${b}`),
-      'echo "WSP_ROAD release $pkg $sha $ver"',
-    ].join("\n"),
+  install: [
+    ...PRELUDE,
+    ARCH("x86_64", "arm", GCLOUD_PIN.sha256),
+    `[ "$a" != arm ] || command -v python3 >/dev/null || { echo "Error: gcloud on arm needs python3 on the machine; Google's arm tarball bundles none" >&2; exit 1; }`,
+    verLine(GCLOUD_PIN.version),
+    'pkg="google-cloud-cli-$ver-linux-$a.tar.gz"',
+    'curl -o "$tmp/$pkg" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$pkg"',
+    'echo "$sha  $tmp/$pkg" | sha256sum -c - >/dev/null',
+    `rm -rf ${GCLOUD_HOME}`,
+    'tar -xzf "$tmp/$pkg" -C /opt',
+    ...GCLOUD_BINS.map(b => `ln -sf ${GCLOUD_HOME}/bin/${b} /usr/local/bin/${b}`),
+    'echo "WSP_ROAD release $pkg $sha $ver"',
+  ].join("\n"),
   uninstall: `rm -rf ${GCLOUD_HOME} ${GCLOUD_BINS.map(b => `/usr/local/bin/${b}`).join(" ")}`,
 };
 
@@ -86,16 +81,15 @@ export const KUBECTL: LinuxCask = {
   bin: "kubectl",
   from: "Kubernetes release",
   detail: "kubectl only, from the Kubernetes release; Docker itself has no Linux build",
-  install: road =>
-    [
-      ...PRELUDE,
-      ARCH("amd64", "arm64", KUBECTL_PIN.sha256),
-      verLine(road, KUBECTL_PIN.version),
-      'curl -o "$tmp/kubectl" "https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"',
-      'echo "$sha  $tmp/kubectl" | sha256sum -c - >/dev/null',
-      'install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl',
-      'echo "WSP_ROAD release kubectl-$ver-linux-$a $sha $ver"',
-    ].join("\n"),
+  install: [
+    ...PRELUDE,
+    ARCH("amd64", "arm64", KUBECTL_PIN.sha256),
+    verLine(KUBECTL_PIN.version),
+    'curl -o "$tmp/kubectl" "https://dl.k8s.io/release/$ver/bin/linux/$a/kubectl"',
+    'echo "$sha  $tmp/kubectl" | sha256sum -c - >/dev/null',
+    'install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl',
+    'echo "WSP_ROAD release kubectl-$ver-linux-$a $sha $ver"',
+  ].join("\n"),
   uninstall: "rm -f /usr/local/bin/kubectl",
 };
 

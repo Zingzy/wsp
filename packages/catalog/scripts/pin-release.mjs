@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// The built package, so the pick below is the catalog's own and not a copy of it: build the catalog before running this.
+import { ASSET_ARCH, ASSET_SKIPPED } from "../dist/index.js";
 
 const [repo, tag] = process.argv.slice(2);
 const named = Object.fromEntries(process.argv.slice(4).map(a => a.split("=")));
@@ -21,11 +23,10 @@ if (repo === undefined || tag === undefined) {
   process.exit(3);
 }
 
-// The pick the release road makes on the machine: a Linux asset for the arch,
-// skipping sums, signatures, other managers' packages and archives it cannot
-// unpack, first match wins. Kept in step with releaseInstall in road-modules.ts.
-const ARCH_PATTERNS = { x86_64: /amd64|x86_64|x64/i, aarch64: /arm64|aarch64/i };
-const SKIPPED = /\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\.zst|json)$/i;
+// The pick the release road makes on the machine, off the road's own two patterns: a Linux asset for the arch,
+// skipping what is never the build, first match wins.
+const ARCH_PATTERNS = Object.fromEntries(Object.entries(ASSET_ARCH).map(([arch, pat]) => [arch, new RegExp(pat, "i")]));
+const SKIPPED = new RegExp(ASSET_SKIPPED, "i");
 const CHECKSUMS = /(checksums?|sha256sums?)/i;
 
 const release = JSON.parse(execFileSync("gh", ["api", `repos/${repo}/releases/tags/${tag}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));

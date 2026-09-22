@@ -113,13 +113,13 @@ export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/${CLAUDE_CONFIG_REL}`;
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
 
 /** Claude Code by the vendor's own Linux binary at the version the owner's Mac runs, checksummed against the sums
- * that version's manifest publishes (https://downloads.claude.ai/claude-code-releases/2.1.257/manifest.json, the
+ * that version's manifest publishes (https://downloads.claude.ai/claude-code-releases/2.1.280/manifest.json, the
  * glibc platform keys linux-x64 and linux-arm64, which are the sums the vendor's own installer checks). */
 export const CLAUDE_CODE = {
-  version: "2.1.257",
+  version: "2.1.280",
   sha256: {
-    x86_64: "9a64bda9d8722a1fa05bef9a5961d07e0331b99597eda9e2f6a732f3a0ff7f05",
-    aarch64: "22f7d48f17193952c3c2d0b8bf2f31db2cd08fd5fb09a374fa321496b711d017",
+    x86_64: "1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b",
+    aarch64: "92f2b4fd05d0bdcf7b9a0d4e0ecef4a1e4b368b290cd8fd07cff9a50013f45a2",
   },
 } as const;
 
@@ -134,10 +134,11 @@ export const CLAUDE_INSTALL = [
   `  aarch64) plat=linux-arm64 sha=${CLAUDE_CODE.sha256.aarch64} ;;`,
   '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
   "esac",
+  // The trap stands ahead of the download so the file goes whichever way the script leaves, a refused sum included.
+  "trap 'rm -f /tmp/claude' EXIT",
   `curl -o /tmp/claude "${CLAUDE_DOWNLOADS}/${CLAUDE_CODE.version}/$plat/claude"`,
   'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
   `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
-  "rm -f /tmp/claude",
 ].join("\n");
 
 /** What the image build runs to put the harness on a first-life builder, recorded in the manifest as setupSha; the

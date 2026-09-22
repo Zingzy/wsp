@@ -454,6 +454,14 @@ function goLines(goAt: string, name: string): string[] {
 /** The module at a version, for the fall-through: its own where it names one, else the tag the road installs at. */
 const goAtTag = (go: string | undefined, tag: string): string | undefined => (go === undefined || go.includes("@") ? go : `${go}@${tag}`);
 
+/** The words an arch's Linux build carries in an asset's name, as one extended regular expression per arch: the
+ * words the release road greps a listing for below, and the ones the pin script reads to record a sum, so the file
+ * a machine picks and the file that was hashed are the same one. */
+export const ASSET_ARCH: { readonly x86_64: string; readonly aarch64: string } = { x86_64: "amd64|x86_64|x64", aarch64: "arm64|aarch64" };
+/** The endings that are never the build: sums, signatures, notes, other managers' packages, and archives no unpack
+ * line below reads. Read by the release road's grep and by the pin script, as the arch words above are. */
+export const ASSET_SKIPPED = "\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$";
+
 /** A tool from its repository: the asset the catalog recorded for this arch, downloaded from the tag's own download
  * address, its sha256 checked before anything it carries is unpacked, and its binary put in /usr/local/bin. Nothing
  * is read off the API and no listing is grepped: the file's name and its sum stand in the catalog. An arch the
@@ -501,12 +509,12 @@ function releaseInstall(name: string, repo: string, tag: string, pin: string | u
     `name=${shellQuote(name)}`,
     `tag=${shellQuote(tag)}`,
     'arch="$(uname -m)"',
-    'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
+    `case "$arch" in x86_64) pat="${ASSET_ARCH.x86_64}" ;; aarch64) pat="${ASSET_ARCH.aarch64}" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac`,
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
     `release="$(curl ${shellQuote(`https://api.github.com/repos/${repo}/releases/tags/${tag}`)} || true)"`,
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
-    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$' | head -1 || true)"`,
+    `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '${ASSET_SKIPPED}' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
     '  asset="${url##*/}"',
     '  curl -o "$tmp/$asset" "$url"',
@@ -546,7 +554,7 @@ const vendor: RoadModule<Road<"vendor">> = {
   roots: ["/opt", "/usr/local/bin"],
   bins: () => [LOCAL_BIN],
   shown: r => r.cask.from,
-  install: r => r.cask.install(r),
+  install: r => r.cask.install,
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
   bin: r => r.cask.bin,
@@ -569,12 +577,9 @@ const apt: RoadModule<Road<"apt">> = {
 
 const script: RoadModule<Road<"script">> = {
   words: "by its own installer",
-  // A vendor's own installer: every script the catalogue carries unpacks under /usr/local or /opt, installs by apt,
-  // or writes under the machine's home, which is the /root every workspace on a computer somebody owns shares.
+  // Every script this road carries unpacks under /usr/local or /opt, installs by apt, or writes under the machine's home, the /root every workspace on a computer somebody owns shares.
   roots: ["/usr", "/opt", "/root"],
-  // Every script is its vendor's own and they link where they please: five of the catalogue's land in
-  // /usr/local/bin, docker's apt half in /usr/bin, rustup in the cargo home and Claude Code's installer under
-  // the machine's home, so the directories ride each script's own row and the module reads them off it.
+  // Each script puts its commands where its own vendor puts them and no two share a directory, so the directories ride each script's row and the module reads them off it.
   bins: (r, homes = OWN_HOMES) => homeBins(r.bins ?? [], homes),
   // A row whose installer writes into a manager's own command folder writes into that manager's folder under the
   // prefix once the job tells it so, which no PATH names, so its commands are linked from there as the manager's
