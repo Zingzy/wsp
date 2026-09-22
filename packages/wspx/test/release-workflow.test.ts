@@ -13,6 +13,7 @@ const builderConfig = readFileSync(join(repo, "apps", "desktop", "electron-build
 const macJob = workflow.slice(workflow.indexOf("\n  mac:\n"), workflow.indexOf("\n  linux:\n"));
 const linuxJob = workflow.slice(workflow.indexOf("\n  linux:\n"), workflow.indexOf("\n  npm:\n"));
 const npmJob = workflow.slice(workflow.indexOf("\n  npm:\n"), workflow.indexOf("\n  publish:\n"));
+const publishJob = workflow.slice(workflow.indexOf("\n  publish:\n"));
 const daemonJob = workflow.slice(workflow.indexOf("\n  daemon:\n"), workflow.indexOf("\n  draft:\n"));
 /** The names bundle-env.mjs writes into a job's environment, which is where every job reads them from. */
 const envNames = bundleEnv("0.1.5")
@@ -32,13 +33,18 @@ describe("the release workflow", () => {
     expect(workflow).toContain("workflow_dispatch:\n    inputs:\n      dry_run:\n");
     expect(workflow).toContain("type: boolean\n        default: true");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}");
-    for (const step of ["Attach the binaries to the draft", "Publish"]) expect(npmJob).toContain(`name: ${step}\n        if: \${{ !inputs.dry_run }}`);
+    expect(npmJob).toContain("name: Publish\n        if: ${{ !inputs.dry_run }}");
+    // The job that can mint the identity token writes nothing here, so the binaries are attached from the job that
+    // flips the draft instead.
+    expect(npmJob).not.toContain("gh release upload");
+    expect(publishJob).toContain("name: Attach the binaries to the draft");
+    expect(publishJob).toContain("gh release upload \"$GITHUB_REF_NAME\" daemon-bins/*/wsp-daemon-* --clobber");
     expect(npmJob).toContain("needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success')");
   });
 
   it("builds one static daemon per target the host names, uploads each under the artifact name the host spells, and places all of them before every build", () => {
     // Each Linux binary is built natively on its own chip's runner, so the static link needs no cross toolchain.
-    const runners: Record<string, string> = { "x86_64-unknown-linux-musl": "ubuntu-latest", "aarch64-unknown-linux-musl": "ubuntu-24.04-arm", "aarch64-apple-darwin": "macos-14", "x86_64-apple-darwin": "macos-14" };
+    const runners: Record<string, string> = { "x86_64-unknown-linux-musl": "ubuntu-24.04", "aarch64-unknown-linux-musl": "ubuntu-24.04-arm", "aarch64-apple-darwin": "macos-14", "x86_64-apple-darwin": "macos-14" };
     for (const target of DAEMON_TARGETS) {
       const row = daemonJob.slice(daemonJob.indexOf(`- target: ${target.triple}\n`));
       expect(row.length).toBeGreaterThan(0);
@@ -46,7 +52,7 @@ describe("the release workflow", () => {
     }
     expect(daemonJob).toContain(`name: ${daemonArtifactName("${{ matrix.target }}")}`);
     expect(daemonJob).toContain("./scripts/libseccomp-archive.sh musl");
-    expect(daemonJob).toContain('LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin');
+    expect(daemonJob).toContain('LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin');
     expect(daemonJob).not.toContain("zig");
     // Every job that builds the command or the app reads the binaries back first, through the one script.
     for (const job of [macJob, linuxJob, npmJob]) {
@@ -70,6 +76,8 @@ describe("the release workflow", () => {
     // credential could arrive by and neither is allowed to appear.
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(workflow).not.toContain("pnpm release");
+    // npm's own latest dist-tag would move under the identity token, so the version it installs is exact.
+    expect(npmJob).toMatch(/npm install -g npm@\d+\.\d+\.\d+\n/);
     expect(workflow).toContain("--draft");
     expect(workflow).toContain("--draft=false");
   });
@@ -101,7 +109,7 @@ describe("the release workflow", () => {
     expect(macJob).not.toContain("dist/mac");
   });
 
-  it("hands the signing secrets by name to the step that builds, the certificate's to the step that checks, and no value anywhere", () => {
+  it("hands the signing secrets by name to the step that builds, tells the step that checks whether one signed, and no value anywhere", () => {
     const [header, ...steps] = macJob.split("\n      - ");
     const secretOf = (name: string) => `${name}: \${{ secrets.${name} }}`;
     const build = steps.find(step => step.startsWith("name: Build the bundles"));
@@ -111,8 +119,15 @@ describe("the release workflow", () => {
       const assignments = workflow.split("\n").filter(line => line.includes(`${name}:`)).map(line => line.trim());
       expect(new Set(assignments)).toEqual(new Set([secretOf(name)]));
     }
-    expect(check).toContain(secretOf("CSC_LINK"));
-    for (const name of SIGNING_SECRETS.filter(name => name !== "CSC_LINK")) expect(check).not.toContain(name);
+    // The check step reads whether an identity signed and never the certificate itself, so no test's environment
+    // carries its bytes.
+    expect(check).toContain("WSP_SIGNED: ${{ secrets.CSC_LINK != '' && '1' || '' }}");
+    for (const name of SIGNING_SECRETS) expect(check).not.toContain(secretOf(name));
+    expect(check).not.toMatch(/secrets\.(CSC_KEY|APPLE)/);
+    // The test that reads whether an identity signed reads the name this step sets, so the two move as one.
+    const signing = readFileSync(join(repo, "apps", "desktop", "test", "signing.test.ts"), "utf8");
+    expect(signing).toContain("WSP_SIGNED");
+    expect(signing).not.toContain("CSC_LINK");
     for (const part of [header, ...steps.filter(step => step !== build && step !== check)]) expect(part).not.toMatch(/secrets\.(CSC|APPLE)/);
     expect(workflow).not.toContain("Developer ID Application:");
   });

@@ -37,18 +37,18 @@ env:
 jobs:
   daemon-rust:
     name: Format, lint, test, build, wire suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
         working-directory: daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain from rust-toolchain.toml
         run: |
           rustup toolchain install
           rustup show
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -67,11 +67,11 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Lints
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Tests
-        run: cargo test
+        run: cargo test --locked
       - name: Release build
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: C compiler for the musl target, and libseccomp built against musl
         # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides. The static
         # binary links a libseccomp built against musl, since the distribution's archive is glibc's.
@@ -79,7 +79,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools gperf
           ./scripts/libseccomp-archive.sh musl
       - name: Static musl build
-        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --locked --release --target x86_64-unknown-linux-musl
       # The tests above run a glibc debug build, where every C symbol resolves and nothing is thrown away. The
       # shipped binary is static musl under fat link time optimisation, where a weakly declared C symbol that
       # nothing pulls out of the archive resolves to address zero and the first call to it takes the process
@@ -87,7 +87,7 @@ jobs:
       # that touches the disk runs its own tests in the shipped profile too. One crate, since the whole suite in
       # this profile costs minutes of link time for nothing the job above does not already cover.
       - name: The runtime's tests in the shipped profile
-        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl -p wsp-runtime
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --locked --release --target x86_64-unknown-linux-musl -p wsp-runtime
       # The live cases drive the kernel as root, so they run on a box and nowhere else, and a box carries no
       # toolchain to build them with. Built here as static test executables and uploaded beside the daemon, so
       # the proof on a box is a download and a run rather than a Rust install on a computer serving something.
@@ -97,9 +97,9 @@ jobs:
       # gate: the runs above read them ignored.
       - name: The live test executables for a box
         run: |
-          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl \
+          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --locked --release --target x86_64-unknown-linux-musl \
             -p wsp-daemon-bin --test runtime_live --no-run --message-format=json > /tmp/runtime-live.json
-          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl \
+          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --locked --release --target x86_64-unknown-linux-musl \
             -p wsp-runtime --lib --no-run --message-format=json > /tmp/wsp-runtime-lib.json
           built=$(jq -r 'select(.executable != null) | select(.target.name == "runtime_live") | .executable' /tmp/runtime-live.json | tail -1)
           test -n "$built"
@@ -112,7 +112,7 @@ jobs:
             file "$made-x86_64-unknown-linux-musl"
             sha256sum "$made-x86_64-unknown-linux-musl" > "$made-x86_64-unknown-linux-musl.sha256"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-live-x86_64-unknown-linux-musl
           path: |
@@ -121,10 +121,10 @@ jobs:
             daemon/wsp_runtime-tests-x86_64-unknown-linux-musl
             daemon/wsp_runtime-tests-x86_64-unknown-linux-musl.sha256
           if-no-files-found: error
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -157,20 +157,20 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
     defaults:
       run:
         working-directory: daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain from rust-toolchain.toml
         run: |
           rustup toolchain install
           rustup target add ${{ matrix.target }}
           rustup show
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -189,11 +189,11 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
+          LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"
           file "wsp-daemon-$TARGET"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: The binary staged, as the command stages it
@@ -207,7 +207,7 @@ jobs:
         run: |
           sha256sum "wsp-daemon-$TARGET" > "wsp-daemon-$TARGET.sha256"
           cat "wsp-daemon-$TARGET.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wsp-daemon-${{ matrix.target }}
           path: |

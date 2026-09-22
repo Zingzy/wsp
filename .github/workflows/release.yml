@@ -19,9 +19,11 @@ on:
         type: boolean
         default: true
 
+# A job holds the grant its own steps use and no other, and no job holds the identity token beside a write on the
+# repository: a compromised dependency compiling in the daemon, mac or linux job runs under a read token, and the one
+# job that can mint the identity token npm trusts writes nothing here.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 env:
   NODE_VERSION: "22"
@@ -37,7 +39,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
@@ -48,13 +50,13 @@ jobs:
       run:
         working-directory: daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain from rust-toolchain.toml
         run: |
           rustup toolchain install
           rustup target add ${{ matrix.target }}
           rustup show
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -77,14 +79,14 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
+            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           else
-            cargo build --release --target "$TARGET" -p wsp-daemon-bin
+            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           fi
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"
           file "wsp-daemon-$TARGET"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wsp-daemon-${{ matrix.target }}
           path: daemon/wsp-daemon-${{ matrix.target }}
@@ -93,14 +95,16 @@ jobs:
   draft:
     name: Draft release
     if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: The tag and the manifests say the same version
@@ -127,12 +131,14 @@ jobs:
     name: macOS disk image
     needs: [draft, daemon]
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -142,7 +148,7 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -164,10 +170,11 @@ jobs:
           pnpm --filter @wsp/desktop run build:mac
       # The screen smoke measures a real Mac's window and fails on a hosted runner's display; it runs in the merge
       # gate on a Mac. Here each bundle's signature and the packaged tree are checked without a screen, and with a
-      # certificate the check insists on a notarized, stapled bundle.
+      # certificate the check insists on a notarized, stapled bundle. It reads whether one signed from WSP_SIGNED, so
+      # the certificate's bytes stay in the environment of the build step and reach no test.
       - name: Check the packaged trees
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
+          WSP_SIGNED: ${{ secrets.CSC_LINK != '' && '1' || '' }}
         run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts
       - name: Name the disk image after the release, and copy it to the name that never moves
         run: |
@@ -187,13 +194,15 @@ jobs:
   linux:
     name: Linux AppImage
     needs: [draft, daemon]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -202,7 +211,7 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -232,26 +241,29 @@ jobs:
     needs: [draft, daemon]
     # On a dry run the draft is skipped and this still runs, to stage the package with the four binaries.
     if: ${{ !cancelled() && needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # Read because a block that names one grant sets every other to none and the checkout needs it; no write of any
+    # kind, so the job that builds every workspace package can publish and can touch nothing here.
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           registry-url: https://registry.npmjs.org
       # Trusted publishing: the package on npm trusts this repository and this
       # workflow file, so the runner's identity token is the credential and no
-      # npm token exists anywhere. It needs an npm newer than node 22 ships.
-      - run: npm install -g npm@latest
+      # npm token exists anywhere. It needs an npm newer than node 22 ships, at
+      # an exact version, since the latest dist-tag moves under that token.
+      - run: npm install -g npm@12.0.2
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wsp-daemon-*
           path: daemon-bins
@@ -263,11 +275,6 @@ jobs:
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
-      - name: Attach the binaries to the draft
-        if: ${{ !inputs.dry_run }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
       - name: Publish
         if: ${{ !inputs.dry_run }}
         run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
@@ -275,8 +282,21 @@ jobs:
   publish:
     name: Publish the release
     needs: [draft, mac, linux, npm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
+      # The binaries are attached here and not from the job that publishes to npm, so no job holds the identity
+      # token and a write on this repository at once.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: wsp-daemon-*
+          path: daemon-bins
+      - name: Attach the binaries to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
       - name: Turn the draft into a release
         env:
           GH_TOKEN: ${{ github.token }}

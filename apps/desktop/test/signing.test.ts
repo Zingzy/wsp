@@ -80,7 +80,9 @@ const withEveryDaemon = (name: string): string =>
   unstaged.length === 0 ? name : `${name} (skipped: no daemon staged at ${unstaged.map(daemonSourceFor).join(", ")}; packages/wspx/scripts/daemon-binary.mjs places one)`;
 const macTree = packaged().find(tree => tree.targets.every(target => target.startsWith("darwin")));
 const macApp = macTree === undefined ? "" : dirname(dirname(resourcesIn(macTree)));
-const signedByIdentity = Boolean(process.env["CSC_LINK"]);
+/** Whether an identity signed the bundles, which the release job says: the certificate itself reaches the step that
+ * builds and no test's environment, so its bytes are not in this process. */
+const signedByIdentity = process.env["WSP_SIGNED"] === "1";
 
 /** The slices this machine can start: its own, and the other where Rosetta answers for it. */
 function startable(targets: readonly string[]): MacTarget[] {
