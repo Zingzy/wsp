@@ -11,7 +11,7 @@ const served = (boot: BootPayload): string =>
 
 describe("bootLineOf", () => {
   it("reads the object off a page the host served, on loopback and beyond it", () => {
-    const here: BootPayload = { wsPort: 4410, token: "a-token", wsPath: "/ws", paired: true, version: "0.2.0", statePath: "/Users/me/.wsp/state.json" };
+    const here: BootPayload = { wsPort: 4410, tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.2.0", statePath: "/Users/me/.wsp/state.json" };
     expect(bootLineOf(served(here))).toEqual(here);
     const away: BootPayload = { wsPath: "/ws", paired: false, version: "0.2.0" };
     expect(bootLineOf(served(away))).toEqual(away);
@@ -29,7 +29,7 @@ describe("bootLineOf", () => {
   it("is the expression the host replaces, so the line it writes is the line a reader finds", () => {
     const html = `<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>`;
     expect(BOOT_SCRIPT.test(html)).toBe(true);
-    const boot: BootPayload = { wsPath: "/ws", paired: true, version: "0.2.0", token: "a-token" };
+    const boot: BootPayload = { wsPath: "/ws", paired: true, version: "0.2.0", tokenHash: "a".repeat(64) };
     expect(bootLineOf(html.replace(BOOT_SCRIPT, () => `<script>window.__WSP__ = ${JSON.stringify(boot)};</script>`))).toEqual(boot);
   });
 });

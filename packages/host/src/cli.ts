@@ -29,7 +29,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -55,12 +55,13 @@ import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, widthOf, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, builtOn, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
+import type { ServedAt } from "./init-serve.js";
 import { askFirst } from "./init-first.js";
 import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, dialAddress, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -870,6 +871,7 @@ export function terminalInitIO(json = false): InitIO {
     open: systemOpener(os),
     signals: process,
     exit: code => process.exit(code),
+    atExit: fn => void process.once("exit", fn),
     ...(json ? { json: (record: Record<string, unknown>) => void process.stdout.write(`${JSON.stringify(record)}\n`) } : {}),
   };
 }
@@ -950,7 +952,8 @@ interface BesideHost {
   client: HostClient;
   place: string;
   pricing: InitPricing;
-  appUrl: string;
+  /** Where the app that host already serves answers. */
+  at: ServedAt;
 }
 
 /** Opens the door of the host serving this state, or refuses with the way back that needs no pid. The place, the price
@@ -979,7 +982,7 @@ async function besideHost(lock: HostLock, statePath: string, on?: string): Promi
       client,
       place: setup.place.name,
       pricing: { rateUsdPerHour: () => price.rateUsdPerHour, defaultSize: price.size, ...(price.builderDiskGb !== undefined ? { builderDiskGb: price.builderDiskGb } : {}) },
-      appUrl: `http://${authority(dialAddress(lock), lock.port)}`,
+      at: { port: lock.port, address: lock.address },
     };
   } catch (e) {
     client.close();
@@ -1025,7 +1028,7 @@ const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: strin
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
  * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
-async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
+async function handOffTo(beside: BesideHost, statePath: string, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
     unattended: !interactive,
@@ -1037,7 +1040,7 @@ async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolea
     output: screen.output,
   });
   const fork = typeof step === "symbol" ? undefined : step.fork;
-  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.rebuild === true ? { rebuild: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
+  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.rebuild === true ? { rebuild: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), app: { at: beside.at, runDir: hostRunDir(statePath), interactive } });
 }
 
 /** How a line that says this computer forks nothing offers the way out of it: the variable the row a key typed here
@@ -1158,7 +1161,7 @@ async function init(
           }),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv, links }, say),
-        ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, screen, o.interactive, flags) } : {}),
+        ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, opts.statePath, screen, o.interactive, flags) } : {}),
       },
       screen,
     );
@@ -1849,10 +1852,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   "host devices": {
     page: "host",
     usage: "wsp host devices [revoke <id>]",
-    about: "the computers paired with this host; revoke takes one back out",
+    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on another computer this one is paired with",
     json: false,
-    host: "hostSide",
-    cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
+    host: "aimed",
+    cliOnly: "lists and takes away the computers that may drive a host, from that host's terminal or from a computer paired with it; which computers hold a token is the person's to read and cut, never a thread's",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
   },
   "host connect": {
@@ -2298,7 +2301,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, usage: command.usage, about: command.about, page: command.page, options: optionsFor(words), cliOnly: command.cliOnly })),
   // The two lines a word of the host page opens: they print inside their parent's usage, so they carry no page of
   // their own to print on, and they are here for the parity table and for the flags they take.
-  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's" },
   { words: "host clients revoke", options: optionsFor("host clients revoke"), page: "host" as const, usage: "wsp host clients revoke <id>", about: "sign one computer out of your relay account", cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
 ];
 
@@ -2334,7 +2337,7 @@ export function hostPage(): string {
     pageLines("host"),
     "",
     ...wrap(
-      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair and devices hand out and take back the codes that let another computer drive a host, and they run at that host's own terminal; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
+      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair hands out the code that lets another computer drive a host, and it runs at that host's own terminal; devices lists the computers that took one and takes one back out, from that terminal or from any computer paired with the host; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
       HELP_WIDTH,
       "",
     ),
@@ -2371,7 +2374,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "state", on: SHARED_WORDS, says: `the state file: this word first, else WSP_HOME's state.json, else ./.wsp/state.json when the current directory is a checkout of wsp, else state.json in the home the running host serves` },
   { name: "port", on: ["up"], says: `the app port (default ${DEFAULT_PORT}); the runtime websocket port follows ${WS_PORT_OFFSET} above it` },
   { name: "ws-port", on: ["up"], says: `the runtime websocket port on its own (default ${DEFAULT_WS_PORT}); --port alone moves both` },
-  { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). On any other address the page is served without the host token and every client pairs for a device token of its own` },
+  { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). No page carries the host's token on any address: the desktop attaches by the token file beside the state, the browser wsp init opens is let in by init, and every other browser pairs for a device token of its own` },
   { name: "advertise", on: ["up"], says: "the address every machine dials this host at, whatever kind it is; each kind answers for its own machines without it" },
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },

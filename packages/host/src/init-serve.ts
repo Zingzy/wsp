@@ -3,9 +3,13 @@
 // port pair the app binds, settled before anything is built, and the address
 // handed over once it serves. Both the golden road and the local one read
 // these, so the port refusal and the opened line are written once.
+import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import { cancel, log } from "@clack/prompts";
+import { writeOwn } from "@wsp/own-file";
 import { PORT_TAKEN_REFUSAL, authority, isLoopback, portTakenLine, portsPickedLine, stateFileLine, type AppPorts, type PortsAsked } from "@wsp/protocol";
 import { dialAddress } from "./host-lock.js";
 import { choosePorts, type PortProbes } from "./ports.js";
@@ -40,13 +44,20 @@ export interface ServedAt {
   address: string | undefined;
 }
 
+/** What the browser is handed instead of the address: a page only this login can read, since the address carries
+ * the code that lets that browser in and a process argument is every process's to read. */
+const escaped = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const openingPage = (url: string): string => `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${escaped(url)}"><title>wsp</title><a href="${escaped(url)}">Open wsp</a>\n`;
+
 /** The app's address once the run has something to open: opened here on a terminal the person is at, printed (with
  * the ssh forward when that address answers on this computer alone) under --yes or over ssh. The forward follows
  * the address the url carries, so a host bound beyond this computer is offered as it stands and a wildcard, which
- * the url hands over at loopback, still gets one. */
-export async function openApp(url: string, at: ServedAt, io: Pick<InitIO, "output" | "env" | "open">, interactive: boolean, logLine?: string): Promise<void> {
+ * the url hands over at loopback, still gets one. The browser is opened on a page in the host's run folder that
+ * sends it to the address, mode 0600 and gone at this run's exit, so the code in the address rides no process
+ * argument; the printed line carries the address itself, into the person's own terminal. */
+export async function openApp(url: string, at: ServedAt, io: Pick<InitIO, "output" | "env" | "open" | "atExit">, interactive: boolean, o: { runDir: string; logLine?: string }): Promise<void> {
   const out = { output: io.output };
-  const under = logLine === undefined ? [] : [logLine];
+  const under = o.logLine === undefined ? [] : [o.logLine];
   if (!interactive || overSsh(io.env)) {
     const dialed = dialAddress(at);
     const lines = [`Open ${url}`];
@@ -54,6 +65,10 @@ export async function openApp(url: string, at: ServedAt, io: Pick<InitIO, "outpu
     log.step([...lines, ...under].join("\n"), out);
     return;
   }
-  const opened = await io.open(url);
+  const name = `open-${randomBytes(6).toString("hex")}.html`;
+  writeOwn(o.runDir, name, openingPage(url));
+  const page = join(o.runDir, name);
+  io.atExit?.(() => rmSync(page, { force: true }));
+  const opened = await io.open(page);
   log.step([`${opened ? "Opened" : "Open"} ${url}`, ...under].join("\n"), out);
 }

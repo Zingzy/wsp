@@ -157,7 +157,7 @@ describe("the workspace the address opens on", () => {
 
   it("remembers each workspace the person selects, under the state file the boot object names, and never a creation row", async () => {
     hash("");
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, token: "t", statePath: "/Users/dev/.wsp/state.json" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, wsPath: "/ws", paired: true, version: "0.0.0", statePath: "/Users/dev/.wsp/state.json" };
     await refreshed(rows());
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
     useStore.getState().select("ws_a", "thr_1");

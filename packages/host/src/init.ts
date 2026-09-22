@@ -69,6 +69,7 @@ import { SIGN_IN_CAP_MS, builderLink, flowHooks, noteOutcomes, signInStage, stag
 import { handoffStage } from "./init-handoff.js";
 import { vaultRows, vaultStage } from "./init-vault.js";
 import { type PortProbes } from "./ports.js";
+import { hostRunDir } from "./host-lock.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { CallbackRelay } from "./relay.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
@@ -86,6 +87,9 @@ export interface InitIO {
   signals: { on(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown };
   /** Ends the process; the real one is process.exit. */
   exit(code: number): void;
+  /** Runs once as this process ends, however it ends; the real one is process.once("exit"). Absent, nothing is
+   * left for the end to clean. */
+  atExit?(fn: () => void): void;
   /** One machine-readable object per line for whoever is driving the run, under --json; absent, nothing is
    * printed this way and every line is the prose above. */
   json?(record: Record<string, unknown>): void;
@@ -1662,9 +1666,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return result;
   }
   const at = { port: handle.port, address: opts.address };
-  const url = appUrl(at, opened?.id);
-  runLog.note(`app ${url}`);
-  await openApp(url, at, io, interactive, logLine());
+  // The address the browser opens on carries a code init minted for it, so that browser is the owner's; the log
+  // keeps the address without it.
+  runLog.note(`app ${appUrl(at, opened?.id)}`);
+  await openApp(appUrl(at, opened?.id, await handle.hereCode()), at, io, interactive, { runDir: hostRunDir(opts.statePath), logLine: logLine() });
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   await closeRelay();
   return { ...result, handle };

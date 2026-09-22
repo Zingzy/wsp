@@ -1140,8 +1140,8 @@ describe("the row's third line", () => {
 });
 
 describe("a window on another computer while the wsp it shows is asleep", () => {
-  const served = (token: string | undefined) => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", ...(token === undefined ? {} : { token }) };
+  const served = (here: boolean) => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { wsPort: 7788, tokenHash: "a".repeat(64) } : {}) };
   };
 
   afterEach(() => {
@@ -1149,7 +1149,7 @@ describe("a window on another computer while the wsp it shows is asleep", () => 
   });
 
   it("reads the asleep line under the search row in the prose mono, never as an alert, and only on a page the host did not serve on this computer", async () => {
-    served(undefined);
+    served(false);
     await mount(fakeApi([API], [status(API)]), "api");
     expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull();
     act(() => useStore.getState().setConn("reconnecting"));
@@ -1165,7 +1165,7 @@ describe("a window on another computer while the wsp it shows is asleep", () => 
   });
 
   it("the rows on the sleeping computer take no green and keep an empty state slot, while a workspace at a provider keeps the word it was last known by", async () => {
-    served(undefined);
+    served(false);
     const MAC = { ...view("ws_mac", "this Mac"), kind: "local" as const };
     await mount(fakeApi([MAC, WEB], [status(MAC), status(WEB)]), "this Mac");
     const glyph = (name: string) => [...rowOf(name).querySelector("[data-workspace-lead] svg")!.classList];
@@ -1182,7 +1182,7 @@ describe("a window on another computer while the wsp it shows is asleep", () => 
   });
 
   it("says nothing of the kind on the computer the host runs on, where the page carries the host's own token", async () => {
-    served("t_local");
+    served(true);
     await mount(fakeApi([API], [status(API)]), "api");
     act(() => useStore.getState().setConn("reconnecting"));
     await waitFor(() => expect(useStore.getState().conn).toBe("reconnecting"));

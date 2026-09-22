@@ -2,6 +2,7 @@
 // The door a computer somebody owns dials: a second listener on the wildcard,
 // the same page with no token in it, the same runtime behind it, and the one
 // port a place file can name for good.
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -89,27 +90,29 @@ async function bootOf(port: number): Promise<BootPayload> {
 }
 
 describe("the door a host opens for computers you own", () => {
-  it("sits the offset above the app port, serves the page with no token on it, and keeps the token on the loopback page", async () => {
+  it("sits the offset above the app port, serves the page with no digest on it, and keeps the token's digest on the loopback page", async () => {
     const port = await freePair();
     const h = await up({ port, door: "open" });
     expect(h.door.port()).toBe(port + PLACE_PORT_OFFSET);
     expect(DEFAULT_PLACE_PORT).toBe(DEFAULT_PORT + PLACE_PORT_OFFSET);
     const door = await bootOf(port + PLACE_PORT_OFFSET);
-    expect(door.token).toBeUndefined();
+    expect(door.tokenHash).toBeUndefined();
     expect(door.paired).toBe(false);
     const own = await bootOf(port);
-    expect(own.token).toBe(h.authToken);
+    expect(own.tokenHash).toBe(createHash("sha256").update(h.authToken).digest("hex"));
     expect(own.paired).toBe(true);
   });
 
   it("asks a request on the door for a paired device's token and reaches the one runtime over its own port", async () => {
     const port = await freePair();
-    await up({ port, door: "open" });
+    const h = await up({ port, door: "open" });
     const refused = await fetch(`http://127.0.0.1:${port + PLACE_PORT_OFFSET}/api/workspaces`);
     expect(refused.status).toBe(401);
     expect((await refused.json()).error).toBe(API_UNAUTHORIZED);
-    // The same route on the person's own port needs nothing, since reaching it already means being on this computer.
-    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`)).status).toBe(200);
+    // The same route on the person's own port asks for a token too, and takes the host's own off the file beside
+    // the state: reaching a loopback port is not being the person.
+    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`)).status).toBe(401);
+    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } })).status).toBe(200);
     const ws = new WebSocket(`ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`);
     await new Promise<void>((done, fail) => {
       ws.once("open", () => done());

@@ -303,7 +303,7 @@ async function start({ name, fixture, for: keepLogIn }) {
     daemon: await daemonBinaryHere(),
     // Asked only where the fixture has one: a fixture of forks alone has no row here to read, and a word about a
     // workspace that is not in it would be a word about nothing.
-    ...(Object.values(state.workspaces).some(w => w.kind === "local") ? { reach: await localReach(host.base) } : {}),
+    ...(Object.values(state.workspaces).some(w => w.kind === "local") ? { reach: await localReach(host.base, readFileSync(host.tokenPath, "utf8").trim()) } : {}),
     signedIn: key,
     startedAt: new Date().toISOString(),
   };

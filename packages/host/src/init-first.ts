@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
 import type { Platform } from "@wsp/collect";
-import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, thisComputer, thisComputerLine, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, openingHash, plural, THIS_COMPUTER, thisComputer, thisComputerLine, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { dialAddress } from "./host-lock.js";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
@@ -229,9 +229,10 @@ export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "creat
   }
 }
 
-/** The app's address, on the workspace just forked when there is one. Through the same rule every local client
- * dials by, so an init told to bind one address opens the browser there rather than at a loopback nothing answers. */
-export const appUrl = (at: { port: number; address?: string }, workspaceId?: string): string =>
-  `http://${authority(dialAddress(at), at.port)}/${workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
+/** The app's address, on the workspace just forked when there is one, carrying the code that lets the browser it
+ * opens in when the run minted one. Through the same rule every local client dials by, so an init told to bind one
+ * address opens the browser there rather than at a loopback nothing answers. */
+export const appUrl = (at: { port: number; address?: string }, workspaceId?: string, code?: string): string =>
+  `http://${authority(dialAddress(at), at.port)}/${code !== undefined ? openingHash(code, workspaceId) : workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

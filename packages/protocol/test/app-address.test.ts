@@ -4,7 +4,7 @@
 // after its first fork, the app writes the others as the person moves, and the
 // app's store reads all three back.
 import { describe, expect, it } from "vitest";
-import { addressFromHash, appHash, workspaceHash } from "../src/index.js";
+import { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash } from "../src/index.js";
 
 describe("the workspace a page opens on", () => {
   it("round-trips an id through the hash", () => {
@@ -47,5 +47,29 @@ describe("the screen a workspace's next thread is written on", () => {
     expect(addressFromHash("#w/new")).toEqual({ workspaceId: "new" });
     expect(addressFromHash(appHash({ workspaceId: "ws/new" }))).toEqual({ workspaceId: "ws/new" });
     expect(addressFromHash("#w/ws_a1b2/t/thr_9/new")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9/new" });
+  });
+});
+
+describe("the code wsp init puts in the address of the page it opens", () => {
+  it("rides the end of the hash beside the workspace, and alone when there is no workspace", () => {
+    expect(openingHash("7K3MQP2X", "ws_a1b2")).toBe("#w/ws_a1b2/c/7K3MQP2X");
+    expect(openingHash("7K3MQP2X")).toBe("#c/7K3MQP2X");
+    expect(pairingCodeOf("#w/ws_a1b2/c/7K3MQP2X")).toEqual({ code: "7K3MQP2X", rest: "#w/ws_a1b2" });
+    expect(pairingCodeOf("#c/7K3MQP2X")).toEqual({ code: "7K3MQP2X", rest: "" });
+  });
+
+  it("is not part of what the address names, so the workspace and the thread read as they would without it", () => {
+    expect(addressFromHash("#w/ws_a1b2/c/7K3MQP2X")).toEqual({ workspaceId: "ws_a1b2" });
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9/c/7K3MQP2X")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9" });
+    expect(addressFromHash("#w/ws_a1b2/new/c/7K3MQP2X")).toEqual({ workspaceId: "ws_a1b2", fresh: true });
+    expect(addressFromHash("#c/7K3MQP2X")).toBeUndefined();
+  });
+
+  it("reads no code off a hash carrying none, an empty one, or the app's own hashes", () => {
+    expect(pairingCodeOf("#w/ws_a1b2")).toBeUndefined();
+    expect(pairingCodeOf("#w/ws_a1b2/c/")).toBeUndefined();
+    expect(pairingCodeOf("#c/")).toBeUndefined();
+    expect(pairingCodeOf("#gallery")).toBeUndefined();
+    expect(pairingCodeOf("")).toBeUndefined();
   });
 });

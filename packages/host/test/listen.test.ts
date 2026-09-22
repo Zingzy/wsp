@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What changes when the host binds an address other than this computer's own:
-// the page carries no token, the JSON routes ask for a paired device's, the
-// lock and the address lines name the address, and the runtime answers on the
-// app's own port at WS_PATH. A box on a relay binds this computer alone and is
-// reached down both roads at once, so there it is what a request carries that
-// decides, not what the host bound.
+// What the page carries about this computer and what the JSON routes ask for:
+// the loopback page carries the digest of the host's token and never the
+// token, a page beyond it carries no digest, every JSON route asks for a
+// token, the lock and the address lines name the address, and the runtime
+// answers on the app's own port at WS_PATH. A box on a relay binds this
+// computer alone and is reached down both roads at once, so there it is what a
+// request carries that decides, not what the host bound.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { tmpdir } from "node:os";
@@ -153,8 +155,9 @@ async function redeem(port: number, code: string): Promise<{ deviceToken?: strin
   return reply as { deviceToken?: string; error?: string };
 }
 
-/** A code, minted the way wsp host pair does: over a socket holding the host's own token. */
-async function pairCode(wsPort: number, token: string): Promise<string> {
+/** A code, minted the way wsp host pair does: over a socket holding the host's own token. `here` is the code wsp
+ * init mints for the browser it opens. */
+async function pairCode(wsPort: number, token: string, here = false): Promise<string> {
   const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
   await new Promise<void>((done, fail) => {
     ws.once("open", () => done());
@@ -166,24 +169,45 @@ async function pairCode(wsPort: number, token: string): Promise<string> {
       ws.send(JSON.stringify(frame));
     });
   await ask({ id: 1, op: "auth", token });
-  const issued = await ask({ id: 2, op: "pair.issue" });
+  const issued = await ask({ id: 2, op: "pair.issue", ...(here ? { here: true } : {}) });
   ws.close();
   return issued["code"] as string;
 }
 
+const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
+
 describe("a host on this computer alone", () => {
-  it("inlines its own token in the page and says the page is paired", async () => {
+  it("inlines the digest of its own token in the page, never the token, and says the page is paired", async () => {
     const { handle: h } = await up();
     const boot = await bootOf(h.port);
-    expect(boot.token).toBe(h.authToken);
+    expect(boot.tokenHash).toBe(digestOf(h.authToken));
+    expect(boot).not.toHaveProperty("token");
+    expect(JSON.stringify(boot)).not.toContain(h.authToken);
     expect(boot.paired).toBe(true);
     expect(boot.wsPath).toBe(WS_PATH);
   });
 
-  it("answers the JSON routes with nothing in the way, as every local tool expects", async () => {
+  it("answers a bare JSON route 401, since any login on this computer reaches the port, and 200 with the host's own bearer", async () => {
     const { handle: h } = await up();
-    const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`);
-    expect(res.status).toBe(200);
+    const bare = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`);
+    expect(bare.status).toBe(401);
+    expect((await bare.json()) as { error: string }).toEqual({ error: API_UNAUTHORIZED });
+    const own = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } });
+    expect(own.status).toBe(200);
+  });
+
+  it("reads the browser wsp init let in as the owner on the routes, and a browser wsp host pair let in as a paired computer", async () => {
+    const { handle: h, runtime } = await up();
+    const callers: (Caller | undefined)[] = [];
+    const listing = runtime.status.list.bind(runtime.status);
+    vi.spyOn(runtime.status, "list").mockImplementation(async (o, caller) => {
+      callers.push(caller);
+      return listing(o, caller);
+    });
+    const init = await redeem(h.port, await pairCode(h.wsPort, h.authToken, true));
+    const byHand = await redeem(h.port, await pairCode(h.wsPort, h.authToken));
+    for (const token of [init.deviceToken!, byHand.deviceToken!]) expect((await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+    expect(callers).toEqual([undefined, "paired"]);
   });
 
   it("serves the runtime on the app's own port at WS_PATH as well as on its own port", async () => {
@@ -205,11 +229,11 @@ describe("a host on this computer alone", () => {
 });
 
 describe("a page at a name this host does not answer at", () => {
-  it("reads no token out of the page and nothing off the JSON routes, though it reached the loopback port", async () => {
+  it("reads no digest out of the page and nothing off the JSON routes, though it reached the loopback port", async () => {
     const { handle: h } = await up();
     const foreignHost = { Host: `evil.example:${h.port}` };
     const boot = await rawBootOf(h.port, foreignHost);
-    expect(boot.token).toBeUndefined();
+    expect(boot.tokenHash).toBeUndefined();
     expect(boot.paired).toBe(false);
 
     const listed = await raw(h.port, { path: "/api/workspaces", headers: foreignHost });
@@ -221,13 +245,13 @@ describe("a page at a name this host does not answer at", () => {
     const { handle: h } = await up();
     for (const host of [`127.0.0.1:${h.port}`, `localhost:${h.port}`, `[::1]:${h.port}`, "127.0.0.1:54321"]) {
       const boot = await rawBootOf(h.port, { Host: host });
-      expect(boot.token, host).toBe(h.authToken);
+      expect(boot.tokenHash, host).toBe(digestOf(h.authToken));
       expect(boot.paired, host).toBe(true);
     }
     // A name is never this computer, however it begins: a rebinding attacker registers what it likes.
     for (const host of [`evil.example:${h.port}`, "wsp.example", `127.evil.example:${h.port}`, `[2001:db8::5]:${h.port}`]) {
       const boot = await rawBootOf(h.port, { Host: host });
-      expect(boot.token, host).toBeUndefined();
+      expect(boot.tokenHash, host).toBeUndefined();
       expect(boot.paired, host).toBe(false);
     }
   });
@@ -253,10 +277,12 @@ describe("a page at a name this host does not answer at", () => {
     expect(JSON.parse(refused.body) as { error: string }).toEqual({ error: crossOriginRefusal("http://evil.example", `127.0.0.1:${h.port}`) });
     expect(await runtime.workspaces.list()).toEqual([]);
 
-    // The page at the name this host answers at, and the command line, which sends no Origin at all.
-    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { Origin: `http://127.0.0.1:${h.port}` }, body: JSON.stringify({ name: "from the page" }) });
+    // The page at the name this host answers at, and the command line, which sends no Origin at all; both carry
+    // the host's own token, which is what names them.
+    const own = { authorization: `Bearer ${h.authToken}` };
+    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: { ...own, Origin: `http://127.0.0.1:${h.port}` }, body: JSON.stringify({ name: "from the page" }) });
     expect(made.status).toBe(200);
-    const typed = await raw(h.port, { method: "POST", path: "/api/workspaces", body: JSON.stringify({ name: "from a tool" }) });
+    const typed = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: JSON.stringify({ name: "from a tool" }) });
     expect(typed.status).toBe(200);
     expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["from the page", "from a tool"]);
   });
@@ -287,7 +313,7 @@ describe("what a page carries about this computer", () => {
       const boot = await rawBootOf(h.port, headers);
       expect(boot.statePath, JSON.stringify(headers)).toBeUndefined();
       expect(boot.wsPort, JSON.stringify(headers)).toBeUndefined();
-      expect(boot.token, JSON.stringify(headers)).toBeUndefined();
+      expect(boot.tokenHash, JSON.stringify(headers)).toBeUndefined();
       expect(boot.paired, JSON.stringify(headers)).toBe(false);
       // The page still dials the origin it came from, which is the one road a paired device has.
       expect(boot.wsPath, JSON.stringify(headers)).toBe(WS_PATH);
@@ -304,10 +330,10 @@ describe("what a page carries about this computer", () => {
 });
 
 describe("a host that listens beyond this computer", () => {
-  it("serves the page with no token and paired false", async () => {
+  it("serves the page with no digest and paired false", async () => {
     const { handle: h } = await up("0.0.0.0");
     const boot = await bootOf(h.port);
-    expect(boot.token).toBeUndefined();
+    expect(boot.tokenHash).toBeUndefined();
     expect(boot.paired).toBe(false);
     expect(boot.wsPath).toBe(WS_PATH);
   });
@@ -347,7 +373,7 @@ describe("a host that listens beyond this computer", () => {
     expect(((await listed.json()) as { workspaces: { name: string }[] }).workspaces.map(w => w.name)).toEqual(["lead"]);
     expect(callers).toEqual(["paired"]);
 
-    // The host's own road is nobody in particular, exactly as it was: the page on this computer names no road.
+    // The host's own token is nobody in particular, exactly as it was: the person's own road names no road.
     await h.close();
     const { handle: mine, runtime: here } = await up();
     const own: (Caller | undefined)[] = [];
@@ -356,7 +382,7 @@ describe("a host that listens beyond this computer", () => {
       own.push(caller);
       return ownList(o, caller);
     });
-    expect((await fetch(`http://127.0.0.1:${mine.port}/api/workspaces`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${mine.port}/api/workspaces`, { headers: { authorization: `Bearer ${mine.authToken}` } })).status).toBe(200);
     expect(own).toEqual([undefined]);
   });
 
@@ -469,7 +495,7 @@ describe("a host that listens beyond this computer", () => {
     const { handle: h } = await up("0.0.0.0");
     for (const headers of [{}, THROUGH_CONNECTOR]) {
       const boot = await bootOf(h.port, headers);
-      expect(boot.token).toBeUndefined();
+      expect(boot.tokenHash).toBeUndefined();
       expect(boot.paired).toBe(false);
     }
   });
@@ -566,12 +592,12 @@ describe("a host on loopback that a relay carries traffic to", () => {
     return { h: handle, lines, runtime };
   }
 
-  it("serves its own computer's app the token in the page, exactly as it did before it was linked", async () => {
+  it("serves its own computer's app the token's digest in the page, exactly as it did before it was linked", async () => {
     const { h } = await linkedBox("relay-here");
     const boot = await bootOf(h.port);
-    expect(boot.token).toBe(h.authToken);
+    expect(boot.tokenHash).toBe(digestOf(h.authToken));
     expect(boot.paired).toBe(true);
-    expect((await fetch(`http://127.0.0.1:${h.port}/api/workspaces`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } })).status).toBe(200);
   });
 
   it("takes the pairing road on a request the connector forwarded, and the local road on one it did not, down the one port", async () => {
@@ -581,14 +607,14 @@ describe("a host on loopback that a relay carries traffic to", () => {
     // Both readings on the one host, since telling them apart is the whole of what this does: a host that answers
     // the same way to both has no rule at all.
     const forwarded = await bootOf(port, THROUGH_CONNECTOR);
-    expect(forwarded.token).toBeUndefined();
+    expect(forwarded.tokenHash).toBeUndefined();
     expect(forwarded.paired).toBe(false);
     expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: THROUGH_CONNECTOR })).status).toBe(401);
 
     const local = await bootOf(port);
-    expect(local.token).toBe(h.authToken);
+    expect(local.tokenHash).toBe(digestOf(h.authToken));
     expect(local.paired).toBe(true);
-    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } })).status).toBe(200);
 
     // The one road in for the forwarded request still works: a code from the host's own terminal buys a device token.
     const code = await pairCode(h.wsPort, h.authToken);
@@ -632,14 +658,14 @@ describe("a host on loopback that a relay carries traffic to", () => {
     // and this host's reading has to hold for what actually arrives.
     for (const header of [["Cf-Connecting-Ip", "203.0.113.7"], ["Cf-Ray", "8e0f4a1b2c3d4e5f-BOM"]] as const) {
       const boot = await rawBootOf(h.port, { [header[0]]: header[1] });
-      expect(boot.token, header[0]).toBeUndefined();
+      expect(boot.tokenHash, header[0]).toBeUndefined();
       expect(boot.paired, header[0]).toBe(false);
     }
   });
 });
 
 describe("wsp up --no-relay on a linked box", () => {
-  it("serves its own computer the token, and stops the connector an earlier run left running", async () => {
+  it("serves its own computer the token's digest, and stops the connector an earlier run left running", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-listen-norelay-"));
     dirs.push(dir);
     const statePath = join(dir, "state.json");
@@ -652,7 +678,7 @@ describe("wsp up --no-relay on a linked box", () => {
     handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime(), relay: false });
 
     const boot = await bootOf(handle.port);
-    expect(boot.token).toBe(handle.authToken);
+    expect(boot.tokenHash).toBe(digestOf(handle.authToken));
     expect(boot.paired).toBe(true);
     expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, { headers: THROUGH_CONNECTOR })).status).toBe(401);
     await gone;

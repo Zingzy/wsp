@@ -5,8 +5,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -39,8 +39,8 @@ export interface HostOptions {
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default DEFAULT_WS_PORT. */
   wsPort?: number;
-  /** The address both servers bind. Default LOOPBACK; anything else serves the page with no token inlined and asks
-   * every JSON route for a paired device's token. */
+  /** The address both servers bind. Default LOOPBACK; anything else serves a page that pairs for a device token of
+   * its own. No page on any address carries the host's token, and every JSON route asks for a token. */
   listen?: string;
   /** The address the person named with --advertise. It leads the addresses a computer you own is told to dial,
    * since somebody who names an address has said which one the other end can reach; what this computer answers on
@@ -109,6 +109,9 @@ export interface HostHandle extends WorkspaceRoads {
   port: number;
   wsPort: number;
   authToken: string;
+  /** A pairing code whose device is read as the owner: what wsp init mints for the browser it opens, through the
+   * handle it holds as it makes the first workspace, so the person who ran init never meets a pair screen. */
+  hereCode(): Promise<string>;
   /** The door a computer you own dials: opened on the first ask and held open for this host's life, since a place
    * file on another computer names its port for good. */
   door: PlaceDoorControl & { close(): Promise<void>; port(): number | undefined };
@@ -384,8 +387,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const { bundlerFor, addProject, createWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
 
   const address = opts.listen ?? LOOPBACK;
-  // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
-  // routes need nothing. Beyond it the page pairs for a device token first and every JSON route asks for one.
+  // Reaching the loopback port is not being the person: another login on this computer reaches it too. The loopback
+  // page carries the digest of the token for the shell to compare and never the token; beyond it the page pairs
+  // for a device token first. Every JSON route asks for a token on every address.
   const boundHere = isLoopback(address);
   let rtServer: RuntimeServer;
 
@@ -413,12 +417,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   // `here` is false on the door a computer you own dials: that page is the pairing screen and carries nothing of
-  // this computer, neither the token nor the state file's path nor the runtime's own port, whatever the address
-  // this host bound says. The loopback page writes the port first, where the desktop shell's probe reads it.
+  // this computer, neither the token's digest nor the state file's path nor the runtime's own port, whatever the
+  // address this host bound says. The loopback page writes the port first, where the desktop shell's probe reads it.
   const page = (here: boolean): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
     return loadPage(webDir, {
-      ...(here ? { wsPort: rtServer.port, token: authToken } : {}),
+      ...(here ? { wsPort: rtServer.port, tokenHash: tokenDigest(authToken) } : {}),
       wsPath: WS_PATH,
       paired: here,
       version: VERSION,
@@ -427,14 +431,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   };
 
-  /** Who a request to the JSON routes is, or nothing when it is nobody: on this computer anyone who reached the port
-   * is the person, beyond it only a paired device's token in an Authorization header. The runtime server owns the one
-   * reading of a token, and a token scoped to a thread names that thread here exactly as it does on a socket, so the
-   * routes are no wider a road into this host than the protocol is. */
-  const callerOf = async (req: IncomingMessage, here: boolean): Promise<{ caller?: Caller } | undefined> => {
+  /** Who a request to the JSON routes is, or nothing when it is nobody: the token in an Authorization header and
+   * nothing else, on the loopback port as on every other, since reaching a port on this computer is what any login
+   * here can do. The runtime server owns the one reading of a token, and a token scoped to a thread names that
+   * thread here exactly as it does on a socket, so the routes are no wider a road into this host than the protocol
+   * is. The browser wsp init let in holds a device token read as the owner, here as on the socket. */
+  const callerOf = async (req: IncomingMessage): Promise<{ caller?: Caller } | undefined> => {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
-    if (who === undefined) return here ? {} : undefined;
-    if (who.kind !== "device") return {};
+    if (who === undefined) return undefined;
+    if (who.kind !== "device" || who.device.here === true) return {};
     const scope = who.device.scope;
     // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
     // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
@@ -460,7 +465,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         sendPage();
         return;
       }
-      const who = path.startsWith("/api/") ? await callerOf(req, here) : {};
+      const who = path.startsWith("/api/") ? await callerOf(req) : {};
       if (who === undefined) {
         sendJson(res, 401, { error: API_UNAUTHORIZED });
         return;
@@ -518,8 +523,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const server = createServer(handler(req => boundHere && !throughConnector(req) && isLoopback(hostnameAsked(req) ?? "")));
 
   // The door a computer you own dials: a second listener on the wildcard, built from the same request handler with
-  // the page's token withheld, whose upgrades reach the one runtime. Its port is fixed rather than stepped over,
-  // since the place file on the other computer names it for good and a fallback port could never be dialled.
+  // the page's digest and ports withheld, whose upgrades reach the one runtime. Its port is fixed rather than
+  // stepped over, since the place file on the other computer names it for good and a fallback port could never be
+  // dialled.
   // Zero asks the operating system for any free port, and the offset above it would be a privileged one, so that
   // pair stays zero, which is the rule the app's own port pair already reads.
   const asked = opts.port ?? DEFAULT_PORT;
@@ -676,6 +682,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     port,
     wsPort: rtServer.port,
     authToken,
+    hereCode: async () => (await rt.devices.issue({ now: Date.now(), ttlMs: PAIR_CODE_TTL_MS, here: true })).code,
     door: {
       open: openDoor,
       port: () => doorAt,

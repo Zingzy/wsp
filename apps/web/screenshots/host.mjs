@@ -169,7 +169,7 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   child.stderr?.on("data", d => log.push(String(d)));
   const said = () => (logPath === undefined ? log.join("") : `the host's log is at ${logPath}`);
   const base = `http://127.0.0.1:${port}`;
-  const answer = { child, base, log, env };
+  const answer = { child, base, log, env, tokenPath: join(dirname(statePath), "host-token") };
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`the host exited with ${child.exitCode} before it served:\n${said()}`);
@@ -185,8 +185,8 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
  * listing, which is the one reading that says whether its daemon answered. A lab prints it, since a daemon that
  * never started is the one fault a tester can neither work around nor see the cause of: every pane reads
  * unreachable and nothing on the screen says why. */
-export async function localReach(base) {
-  const answered = await fetch(`${base}/api/workspaces`).then(
+export async function localReach(base, token) {
+  const answered = await fetch(`${base}/api/workspaces`, { headers: { authorization: `Bearer ${token}` } }).then(
     r => (r.ok ? r.json() : undefined),
     () => undefined,
   );
