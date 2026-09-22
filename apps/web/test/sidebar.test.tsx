@@ -1529,11 +1529,16 @@ describe("the add roads", () => {
     expect(pluses.map(plus => [plus.dataset["k"], plus.dataset["project"]])).toEqual([["new-workspace", "pr_1"], ["new-workspace", "pr_2"]]);
     for (const plus of pluses) expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
     // The one glyph a row keeps at rest on a width with no pointer is the selected workspace row's chevron; the
-    // rest of the hover glyphs, the chevron on every other row among them, read as nothing there too.
+    // rest of the hover glyphs, the chevron on every other row among them, are not drawn there, so none is a tap.
     const chevron = screen.getByRole("button", { name: "Collapse api" });
     expect(chevron.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    expect(chevron.className).toContain("max-md:hidden");
+    expect(chevron.className).toContain("max-md:peer-data-[active=true]/menu-button:flex");
     expect(chevron.className).toContain("max-md:peer-data-[active=true]/menu-button:opacity-100");
-    for (const plus of pluses) expect(plus.className).not.toContain("peer-data-[active=true]/menu-button:opacity-100");
+    for (const plus of pluses) {
+      expect(plus.className).toContain("max-md:hidden");
+      expect(plus.className).not.toContain("max-md:peer-data-[active=true]/menu-button:");
+    }
     expect(document.querySelectorAll("svg.lucide-plus")).toHaveLength(2);
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     expect(screen.queryByText(/ADD A PROJECT/)).toBeNull();

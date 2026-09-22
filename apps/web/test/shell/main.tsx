@@ -101,7 +101,12 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
 });
-const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+// The second workspace's copy is on a branch, so its row carries the meta line the two branchless rows have not.
+const cloud: WorkspaceView[] = [
+  view("ws_a", "api"),
+  { ...view("ws_b", "web", "napping"), copy: { road: "clonefile", path: "/root/web", source: "/root/web", base: "abc", branch: "lockfile-bump", carried: "deps-and-config" } },
+  { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" },
+];
 // ?vault=1: the napping workspace's last nap could not store a vault, so its row says the machine has no backup
 // since the day of the one that stands and the Machine tab names the cap the export was cut against.
 if (params.get("vault") === "1") Object.assign(cloud[1]!, { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: vaultOverCapLine(677_178_573, 209_715_200) });

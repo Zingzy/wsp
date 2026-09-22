@@ -9,8 +9,9 @@
 // row and on the lifted row; the one lifted row stands off the ground on both
 // sides, on light by a darker fill with a hairline edge; a project row's plus
 // is nothing at rest and there on hover, and on the phone's sheet every hover
-// glyph is nothing at rest but the selected workspace row's chevron; every row
-// fades its fill and ink in 150 ms; the leaf under an empty project is a
+// glyph is nothing at rest and no tap target but the selected workspace row's
+// chevron, which takes its tap; every row fades its fill and ink in 150 ms;
+// the leaf under an empty project is a
 // sentence in the sans; the held compose glyph still answers a hover with its
 // tooltip; the switcher's menu is the head's width, its rows 28 px, at rest
 // with no transform once open; the desktop foot names this computer; and the
@@ -436,6 +437,22 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
         // The one plus a row may carry on its face is the empty app's New project row, which is a row and not a glyph.
         const pluses = await page!.locator("[data-slot=sidebar][data-mobile=true] svg.lucide-plus").evaluateAll(els => els.map(el => el.closest("button")!).filter(button => button.dataset["k"] !== "new-project").map(button => getComputedStyle(button).opacity));
         expect(pluses.filter(opacity => opacity !== "0")).toEqual([]);
+        // A glyph that is not drawn takes no tap either: at a hidden plus's own box, 20 px wide, the tap lands on the
+        // row under it, or on the head beside its chevron, and the one chevron drawn, the selected workspace row's,
+        // takes its own. The glyph's box is read from its row's right edge, on the row's first line.
+        const tapAt = (selector: string, fromRight: number) =>
+          page!.evaluate(
+            ([selector, fromRight]: readonly [string, number]) => {
+              const target = document.querySelector<HTMLElement>(`[data-slot=sidebar][data-mobile=true] ${selector}`)!;
+              const box = target.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.right - fromRight, box.top + 14);
+              return { onTarget: hit?.closest("[data-sidebar-row], [data-k=project-switcher]") === target, glyph: hit?.closest("[data-sidebar=menu-action]")?.getAttribute("aria-label") ?? null };
+            },
+            [selector, fromRight] as const,
+          );
+        if (screen === "sidebar") expect(await tapAt("[data-row-id^='project:']", 18), `${screen} at 390 ${theme}, a tap at a project row's plus`).toEqual({ onTarget: true, glyph: null });
+        if (screen === "sidebar-picked") expect(await tapAt("[data-k=project-switcher]", 40), `${screen} at 390 ${theme}, a tap beside the head's chevron`).toEqual({ onTarget: true, glyph: null });
+        for (const [label] of lifted) expect(await tapAt("[data-row-id^='ws:'][data-active=true]", 18), `${screen} at 390 ${theme}, a tap at the selected row's chevron`).toEqual({ onTarget: false, glyph: label });
         await shot(`${screen}-390-${theme}`);
         if (screen === "sidebar") {
           // A tap on another workspace moves the one chevron with the selection.

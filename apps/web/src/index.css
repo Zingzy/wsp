@@ -1015,7 +1015,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --sidebar-row-hover: var(--color-zinc-25);
   --sidebar-row-active: var(--color-white);
   /* The phone's sheet is a portal that reads these root copies, so the lifted row and the rails are declared on
-     both, as the sidebar's own block declares them. */
+     both, as the sidebar's own block declares them. The gallery's active row is the one other reader of the
+     selected fill on the root. */
   --sidebar-row-selected: var(--color-zinc-100);
   --sidebar-row-edge: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   --sidebar-border: var(--border);

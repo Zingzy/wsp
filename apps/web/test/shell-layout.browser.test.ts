@@ -1137,21 +1137,25 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   // less contrast over a light surface than over a dark one, so the two themes have to be measured
   // against each other and not only against a floor: with one light token behind them the tiers
   // read 4.62, 4.47, 2.68 and 2.10 to 1 where the dark side's read 8.33, 5.43, 4.35 and 3.00.
-  // A sentence drawn in the whisper tier is not a count: the offline line is one, and so are the line
+  // A sentence drawn in the whisper tier is not a branch: the offline line is one, and so are the line
   // for what the runtime is doing to a daemon and the one for a drop with memory near full. They take
-  // the prose ink, which clears AA on both surfaces, while the counts beside them keep the whisper.
-  it("a sentence in a row's meta line takes the prose ink and reads at AA in both themes, and the counts beside it keep the whisper", async () => {
+  // the prose ink, which clears AA on both surfaces, while the branch a row's meta line carries keeps
+  // the whisper, and a row whose copy has no branch has no meta line at all.
+  it("a sentence in a row's meta line takes the prose ink and reads at AA in both themes, and the branch beside it keeps the whisper", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&offline=1`);
       await page!.waitForSelector("[data-sidebar-offline]");
+      // The one row on a branch draws the line, and the branchless rows draw none.
+      const metaLines = await page!.locator("[data-app-sidebar] [data-row-id^='ws:']").evaluateAll(rows => rows.map(row => [row.getAttribute("data-row-id"), row.querySelector("[data-workspace-meta]")?.textContent ?? null]));
+      expect(metaLines).toEqual([["ws:ws_a", null], ["ws:ws_b", "lockfile-bump"], ["ws:ws_c", null]]);
       const prose = await textContrast(page!, "[data-sidebar-offline]");
-      const counts = await textContrast(page!, "[data-app-sidebar] [data-workspace-meta]");
-      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")}, the counts beside it at ${counts.map(r => r.toFixed(2)).join(", ")} to 1`);
+      const branches = await textContrast(page!, "[data-app-sidebar] [data-workspace-meta]");
+      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")}, the branch beside it at ${branches.map(r => r.toFixed(2)).join(", ")} to 1`);
       expect(prose.length).toBeGreaterThan(0);
       for (const ratio of prose) expect(ratio, `the offline sentence reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
-      // The counts stay the whisper they were: this raises the sentences, not the tier.
-      expect(counts.length).toBeGreaterThan(0);
-      for (const ratio of counts) expect(ratio, `a count reads at ${ratio} in ${theme}`).toBeLessThan(4.5);
+      // The branch stays the whisper it was: this raises the sentences, not the tier.
+      expect(branches.length).toBe(1);
+      for (const ratio of branches) expect(ratio, `the branch reads at ${ratio} in ${theme}`).toBeLessThan(4.5);
     }
   }, 60_000);
 

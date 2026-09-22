@@ -40,10 +40,12 @@ export const ROW_LEAD_CLASS = "flex size-3.5 shrink-0 items-center justify-cente
  * slot at the row's right edge, where the word or the count yields to them, rather than taking room off the row. */
 export const GLYPH_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
 /** A glyph the hover puts beside a row is nothing at rest at every width. The kit stands it up under its md
- * breakpoint, where a phone's sheet would then show every plus and chevron at once. */
-export const HOVER_GLYPH_CLASS = "opacity-0";
-/** The one glyph a width with no pointer keeps at rest: the selected workspace row's collapse chevron. */
-export const SELECTED_ROW_GLYPH_CLASS = `${HOVER_GLYPH_CLASS} max-md:peer-data-[active=true]/menu-button:opacity-100`;
+ * breakpoint, where a phone's sheet would then show every plus and chevron at once; under that width it is not
+ * drawn at all, so a control nobody can see is neither a tap target nor a tab stop. */
+export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
+/** The one glyph a width with no pointer keeps at rest, drawn and taking the tap: the selected workspace row's
+ * collapse chevron. Worn over the hover glyph's class, which it overrides under the breakpoint. */
+export const SELECTED_ROW_GLYPH_CLASS = "max-md:peer-data-[active=true]/menu-button:flex max-md:peer-data-[active=true]/menu-button:opacity-100";
 
 /** A child list of the tree: 15 px in, so its rail runs under the centre of the parent's lead (the 8 px inset plus
  * half the 14 px mark), no gap between rows, so the rail segments read as one line. */
