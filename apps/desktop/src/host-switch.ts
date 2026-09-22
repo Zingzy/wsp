@@ -2,15 +2,17 @@
 // The window moves between hosts. The app's own host is one session and every
 // saved host another; whichever the window is on is what the origin gate on
 // every bridge call reads, so a page from anywhere else is answered nothing.
-// The hosts are the hosts file wsp host connect writes, read and written through
-// the one module the command line uses, so wsp host list and the Hosts menu are one
-// list. The app's own host is never stopped by a move: a person who comes back
-// finds it as they left it. A road to a host is one entry in ROADS: how it is
-// opened the first time, how a saved one is reached again, and what it holds
-// open; adding a road is its entry and nothing else here.
-import { connectCommand, disconnectCommand, aliasFrom, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
+// The hosts are the records wsp login writes off the account and wsp host
+// connect writes for a code, read and written through the one module the
+// command line uses, so wsp hosts and the Hosts menu are one list, less this
+// computer's own record on the account, which the row for here is. The app's
+// own host is never stopped by a move: a person who comes back finds it as
+// they left it. A road to a host is one entry in ROADS: how it is opened the
+// first time, how a saved one is reached again, and what it holds open;
+// adding a road is its entry and nothing else here.
+import { accountHosts, accountRecords, aimedHost, connectCommand, disconnectCommand, dialHost, aliasFrom, hostRoadWord, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostEntry, type HostRecord } from "@wsp/host";
 import { HOST_WORDS, PAIR_CODE_LENGTH, PAIR_NO_KEY_REFUSAL, isUrl, readJoinToken, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
-import type { HostSession } from "./host-lifecycle.js";
+import { portOf, remoteSession, type HostSession } from "./host-lifecycle.js";
 import { forwardKey, type SshRoad } from "./ssh-road.js";
 
 export interface SwitcherDeps {
@@ -27,6 +29,7 @@ export interface SwitcherDeps {
   log(line: string): void;
   connect?: typeof connectCommand;
   disconnect?: typeof disconnectCommand;
+  dial?: typeof dialHost;
   ssh?: SshRoad;
 }
 
@@ -79,7 +82,6 @@ interface Road<A extends HostConnectAsk = HostConnectAsk> {
 
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const text = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const portOf = (url: string): number => Number(new URL(url).port) || 80;
 const isAuth = (e: unknown): boolean => (e as { kind?: unknown }).kind === "auth";
 const failed = (at: FieldAt, e: unknown): Refusal => ({ ok: false, at, error: text(e) });
 
@@ -107,6 +109,7 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
   const io: CliIO = { log: deps.log, error: deps.log, ask: refuse, askSecret: refuse };
   const connect = deps.connect ?? connectCommand;
   const disconnect = deps.disconnect ?? disconnectCommand;
+  const dial = deps.dial ?? dialHost;
   const opts = { statePath: deps.statePath, home: deps.home };
 
   const direct: Road<Extract<HostConnectAsk, { road: "direct" }>> = {
@@ -155,7 +158,26 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
   /** A record the command line wrote carries no road and is an address. */
   const roadOf = (record: HostRecord): Road => ROADS[record.road ?? "direct"] as Road;
 
-  const sessionOf = (alias: string, record: HostRecord, url: string): HostSession => ({ url, port: portOf(url), owned: false, remote: true, alias, label: record.label ?? alias, deviceToken: record.deviceToken, close: async () => {} });
+  /** A record off the account, dialled once before the window moves: the first dial admits this computer over
+   * there and a token that host no longer takes is renewed on the same road the command line takes, so the page
+   * is handed one that opens. What the dial wrote under the alias is what the session carries. A record from a
+   * pairing code is moved to as it always was. */
+  const admitted = async (alias: string, record: HostRecord): Promise<HostRecord> => {
+    if (hostRoadWord(record) !== "account") return record;
+    // The name goes through the rule every verb reads which host it runs against by, so a record holding a token
+    // and no key for the host is refused here as it is there rather than dialled.
+    (await dial(deps.statePath, { aim: aimedHost(deps.statePath, { host: alias, home: deps.home }), home: deps.home })).close();
+    return readHost(deps.home, alias) ?? record;
+  };
+
+  /** What the menu lists: every host this computer holds, less its own record on the account. The account record
+   * whose host id is the one in this computer's relay record is this computer, which the row for here already is,
+   * and a row for it would dial this computer through the relay and admit it as a device of itself. */
+  const elsewhere = (): HostEntry[] => {
+    const away = new Set(accountHosts(deps.statePath, deps.home).map(held => held.alias));
+    const account = new Set(accountRecords(deps.home).map(held => held.alias));
+    return listHosts(deps.home).filter(entry => away.has(entry.alias) || !account.has(entry.alias));
+  };
   const moveTo = async (session: HostSession, hash?: string): Promise<void> => {
     current = session;
     deps.log(`on ${session.label} at ${session.url}`);
@@ -167,7 +189,7 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
     view: () => ({
       here: deps.here,
       current: current.alias ?? null,
-      hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
+      hosts: elsewhere().map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
     }),
     token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
     async to(alias, hash) {
@@ -176,9 +198,10 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
           await moveTo(deps.local, hash);
           return { ok: true };
         }
-        const record = readHost(deps.home, alias);
-        if (record === undefined) throw new Error(noSuchHostLine(alias, deps.home));
-        await moveTo(sessionOf(alias, record, await roadOf(record).reach(alias, record)), hash);
+        const held = readHost(deps.home, alias);
+        if (held === undefined) throw new Error(noSuchHostLine(alias, deps.home));
+        const record = await admitted(alias, held);
+        await moveTo(remoteSession(alias, record, await roadOf(record).reach(alias, record)), hash);
         return { ok: true };
       } catch (e) {
         return failed("url", e);
@@ -190,13 +213,13 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       if (held !== undefined) return held;
       try {
         const opened = await road.open(ask);
-        // The same road wsp host connect takes, so the record is the one wsp host list lists and wsp host forget takes away.
+        // The same road wsp host connect takes, so the record is the one wsp hosts lists and wsp host forget takes away.
         await connect(io, opts, { code: opened.code, name: opened.alias }, [opened.url]);
         const record = readHost(deps.home, opened.alias);
         if (record === undefined) throw new Error(`wsp host connect wrote no record for ${opened.alias}`);
         const remembered: HostRecord = { ...record, label: opened.label, road: opened.road, ...(opened.ssh !== undefined ? { ssh: opened.ssh } : {}) };
         writeHost(deps.home, opened.alias, remembered);
-        await moveTo(sessionOf(opened.alias, remembered, opened.url));
+        await moveTo(remoteSession(opened.alias, remembered, opened.url));
         return { ok: true };
       } catch (e) {
         return failed(road.at(e), e);

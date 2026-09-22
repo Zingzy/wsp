@@ -37,7 +37,7 @@ import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
 import { makeDevices, memoryStore } from "@wsp/runtime";
-import { DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, type DeviceView } from "@wsp/protocol";
+import { ADDRESS_NEXT_START, DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, type DeviceView } from "@wsp/protocol";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
@@ -759,14 +759,19 @@ describe("wsp hosts", () => {
     expect(relay.calls.some(c => c.line === "GET /hosts" && c.token === "client-token")).toBe(true);
   });
 
-  it("writes no record for an account host that has said no key, prints it as not up yet and refuses a line aimed at it", async () => {
+  it("writes no record for an account host that has said no key, prints its address as waiting on its next start and refuses a line aimed at it", async () => {
     const { relay, statePath, home, dir } = await signedIn();
     // A host beating from a wsp from before it sent its key: it says where it is and nothing about what it proves.
     relay.hosts = [{ id: "hattic", name: "attic", hostname: "hattic.boxes.example", hostKey: null, lastSeen: new Date().toISOString() }];
     const log: string[] = [];
     expect(await hostsCommand(io(log), { statePath, home }, deps(dir))).toBe(0);
 
-    expect(log.find(line => line.startsWith("attic"))).toContain(NOT_UP_YET);
+    // The host is beating, so the row calls it up and says its address waits on the next start over there: one
+    // row says one thing.
+    const row = log.find(line => line.startsWith("attic"))!;
+    expect(row).toContain(ADDRESS_NEXT_START);
+    expect(row).not.toContain(NOT_UP_YET);
+    expect(row).toMatch(/\bup /);
     // Nothing to dial and nothing to pin: a record here would send this computer's token at whatever answers.
     expect(readHost(home, "attic")).toBeUndefined();
     // The refusal is the one for a name this computer holds nothing under, which names the listing and not a code.

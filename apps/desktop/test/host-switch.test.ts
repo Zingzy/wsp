@@ -5,8 +5,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
-import { HOST_WORDS, PAIR_NO_KEY_REFUSAL, readJoinToken } from "@wsp/protocol";
+import { dialHost, listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
+import { HOST_WORDS, PAIR_NO_KEY_REFUSAL, hostNoKeyLine, readJoinToken } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostSession } from "../src/host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type SwitcherDeps } from "../src/host-switch.js";
@@ -41,6 +41,36 @@ function local(): HostSession & { closes: number } {
 }
 
 const record = (url: string, over: Partial<HostRecord> = {}): HostRecord => ({ url, deviceId: "d_1", deviceToken: "tok-1", pairedAt: "2026-09-11T10:00:00.000Z", ...over });
+
+/** A record wsp hosts wrote off the account's listing, which is every host both computers are signed in to. */
+const accountRecord = (url: string, over: Partial<HostRecord> = {}): HostRecord => record(url, { hostKey: "SHA256:box", via: { kind: "account", hostId: "hbox1" }, ...over });
+
+/** A socket that carries nothing: what the window asks a dial for is the token, not a conversation. */
+const stubClient = (): Awaited<ReturnType<typeof dialHost>> => ({
+  request: async <T extends Record<string, unknown>>(): Promise<T> => ({}) as T,
+  events: async () => {},
+  onFrame: () => () => {},
+  closed: Promise.resolve(),
+  closeWords: () => "",
+  close: () => {},
+  terminate: () => {},
+});
+
+/** The command line's dial as the window uses it: it writes the token the host answered this computer's key with
+ * into the record under that alias, which is what the real one does on the admit road. */
+function admittingDial(home: string, answered: { deviceId: string; deviceToken: string }): { dial: typeof dialHost; dialled: string[] } {
+  const dialled: string[] = [];
+  return {
+    dialled,
+    dial: async (_statePath, opts = {}) => {
+      const aim = opts.aim;
+      if (aim?.kind !== "alias") throw new Error(`the window dialled ${JSON.stringify(aim)} rather than a saved host`);
+      dialled.push(aim.alias);
+      writeHost(home, aim.alias, { ...aim.record, ...answered });
+      return stubClient();
+    },
+  };
+}
 
 /** What wsp host pair prints as one word: the code and the fingerprint of the key that host proves. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
@@ -127,6 +157,63 @@ describe("hostSwitcher", () => {
     expect(await switcher.to("box")).toEqual({ ok: true });
     expect(d.opened.at(-1)).toBe("http://127.0.0.1:14400");
     expect(switcher.view().current).toBe("box");
+  });
+
+  it("dials a host on the account once before the move, so a token it no longer takes is renewed and the page is handed the fresh one", async () => {
+    const d = deps();
+    writeHost(d.home, "box", accountRecord("https://hbox1.boxes.example", { deviceId: "", deviceToken: "" }));
+    const { dial, dialled } = admittingDial(d.home, { deviceId: "d_2", deviceToken: "tok-fresh" });
+    const switcher = hostSwitcher({ ...d, dial });
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    expect(dialled).toEqual(["box"]);
+    expect(switcher.current()).toMatchObject({ url: "https://hbox1.boxes.example", remote: true, alias: "box", deviceToken: "tok-fresh" });
+    expect(switcher.token()).toBe("tok-fresh");
+    // The record carries what the host answered, so the next launch opens on it with no dial of its own.
+    expect(readHost(d.home, "box")).toMatchObject({ deviceId: "d_2", deviceToken: "tok-fresh" });
+  });
+
+  it("a host on the account that refuses this computer says so under the address, and the window stays where it was", async () => {
+    const d = deps();
+    writeHost(d.home, "box", accountRecord("https://hbox1.boxes.example"));
+    const dial: typeof dialHost = async () => {
+      throw Object.assign(new Error("this host admits no device under that key"), { kind: "auth" });
+    };
+    const switcher = hostSwitcher({ ...d, dial });
+    expect(await switcher.to("box")).toEqual({ ok: false, at: "url", error: "this host admits no device under that key" });
+    expect(switcher.current()).toBe(d.local);
+    expect(d.loaded).toEqual([]);
+  });
+
+  it("refuses a record on the account holding a token and no key for the host before any dial, as every verb does", async () => {
+    const d = deps();
+    writeHost(d.home, "box", accountRecord("https://hbox1.boxes.example", { hostKey: undefined }));
+    const { dial, dialled } = admittingDial(d.home, { deviceId: "d_2", deviceToken: "tok-fresh" });
+    const switcher = hostSwitcher({ ...d, dial });
+    expect(await switcher.to("box")).toEqual({ ok: false, at: "url", error: hostNoKeyLine("box") });
+    expect(dialled).toEqual([]);
+    expect(switcher.current()).toBe(d.local);
+    expect(d.loaded).toEqual([]);
+  });
+
+  it("does not list this computer's own host on the account, which the row for this computer already is", () => {
+    const dir = home();
+    const d = deps({ home: dir, statePath: join(dir, "state.json") });
+    writeFileSync(join(dir, "relay.json"), JSON.stringify({ relayUrl: "https://relay.example", hostId: "hmac", token: "host-relay-token", name: "macbook", linkedAt: "2026-09-20T09:00:00.000Z" }));
+    writeHost(dir, "macbook", accountRecord("https://hmac.boxes.example", { via: { kind: "account", hostId: "hmac" } }));
+    writeHost(dir, "box", accountRecord("https://hbox1.boxes.example"));
+    writeHost(dir, "lan", record("http://192.168.1.9:4400"));
+    expect(hostSwitcher(d).view().hosts.map(h => h.alias)).toEqual(["box", "lan"]);
+  });
+
+  it("moves to a host paired with a code with no dial at all, which is the road every saved host took before accounts", async () => {
+    const d = deps();
+    writeHost(d.home, "box", record("http://127.0.0.1:14400"));
+    const { dial, dialled } = admittingDial(d.home, { deviceId: "d_2", deviceToken: "tok-fresh" });
+    const switcher = hostSwitcher({ ...d, dial });
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    expect(dialled).toEqual([]);
+    expect(switcher.current()).toMatchObject({ alias: "box", deviceToken: "tok-1" });
+    expect(readHost(d.home, "box")).toMatchObject({ deviceId: "d_1", deviceToken: "tok-1" });
   });
 
   it("a switch to a host this computer never paired with is refused in one sentence and moves nothing", async () => {

@@ -2,7 +2,7 @@
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { defaultHomeIn, devCheckoutState, dialAddress, homeNamed, hostTokenFor, lockPathFor, ownPid, serve, servingHost, type CliIO, type HostLock, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
@@ -52,6 +52,8 @@ export interface OpenHostOptions {
   openUrl?: UrlOpener;
   /** How this process is started again, for the wsp tools the init job writes into an agent's config: the shim. */
   running?: RunningWsp;
+  /** How a host on the account is dialled, which is the command line's own dial. */
+  dial?: typeof dialHost;
 }
 
 function canListen(port: number): Promise<boolean> {
@@ -78,6 +80,17 @@ async function bootAt(at: string): Promise<BootPayload | undefined> {
 export async function probeHost(port: number): Promise<PortState> {
   if ((await bootAt(authority(LOOPBACK, port))) !== undefined) return "wsp";
   return (await canListen(port)) ? "free" : "other";
+}
+
+/** Which port a url answers on, read by every session built from an address rather than from a port this app
+ * bound: a url with no port is the scheme's own. */
+export const portOf = (url: string): number => Number(new URL(url).port) || 80;
+
+/** A session on a host on another computer: the address it answers at now, which a road that forwards may have
+ * moved, what the window and the menu call it, and the device token the shell holds for it and hands the page
+ * over the bridge. Written once, since the window reaches such a host by opening on it and by moving to it. */
+export function remoteSession(alias: string, record: HostRecord, url: string): HostSession {
+  return { url, port: portOf(url), owned: false, remote: true, alias, label: record.label ?? alias, deviceToken: record.deviceToken, close: async () => {} };
 }
 
 function attached(port: number, url: string): HostSession {
@@ -150,12 +163,54 @@ export async function locateHost(opts: Launch): Promise<Located> {
   return { home, ...(session !== undefined ? { session } : {}) };
 }
 
+/** How long this window's one dial at the marked host waits. A line at a terminal gives a relayed road fifteen
+ * seconds, which is a window with nothing in it for that long; a person who opened the app is watching it, so a
+ * host that has not answered is one the window opens without, with the host's own sentence in the log. The floor
+ * under it is what that road was measured to hold: an edge whose tunnel has just come up answers a first frame at
+ * 5.8 s, so anything shorter calls a box that is alive dead and opens here instead of where the mark says. */
+const MARKED_DIAL_MS = 8_000;
+
+/** The host somewhere else this window opens on when nothing serves here: the alias the rule every line with no
+ * name on it takes, which is the marked default whichever road it came by, else the one host on the account this
+ * computer can reach. It is read through that same rule, so a record holding a token and no key for the host is
+ * refused here as every verb refuses it, and dialled once, which admits this computer over there and hands the
+ * page a token that opens. Nothing where the rule names no alias, where several hosts on the account stand and
+ * none is marked, or where the one it named refused or did not answer; the window starts a host here as it always
+ * did and the sentence is logged, since the screen that would ask which host is the first run's. */
+async function accountSession(opts: OpenHostOptions): Promise<HostSession | undefined> {
+  const home = wspHome();
+  const alias = aimedAlias(opts.statePath, home);
+  if (alias === undefined) {
+    const aim = accountAim(opts.statePath, home);
+    if (aim.kind === "several") opts.io.error(severalAccountHostsLine(aim.aliases));
+    return undefined;
+  }
+  try {
+    const aim = aimedHost(opts.statePath, { host: alias, home });
+    (await (opts.dial ?? dialHost)(opts.statePath, { aim, home, deadlineMs: MARKED_DIAL_MS })).close();
+  } catch (e) {
+    opts.io.error(`${e instanceof Error ? e.message : String(e)}; this window is opening on the host here instead`);
+    return undefined;
+  }
+  // What the dial left under that alias: the device token the host answered this computer's key with, which a
+  // record off the account's listing held none of until now.
+  const record = readHost(home, alias);
+  if (record === undefined) return undefined;
+  // Nothing is served on this computer, so the runtime the setup gate built goes away rather than lingering
+  // behind the window, which is the rule that gate applies when it has nothing to show.
+  await opts.runtime?.close();
+  return remoteSession(alias, record, record.url);
+}
+
 /** Attaches to the host already serving this state file, which its lock names
- * and this window has proof of, else starts one the way the wsp bin does.
- * Defaults held by anything else give way to free ports. */
+ * and this window has proof of, else opens on the host a line with no name on
+ * it takes, else starts one the way the wsp bin does. Defaults held by
+ * anything else give way to free ports. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
   if (held !== undefined) return held;
+  const away = await accountSession(opts);
+  if (away !== undefined) return away;
   const defaultsFree = (opts.port === 0 || (await canListen(opts.port))) && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
   const ports = defaultsFree ? { port: opts.port, wsPort: opts.wsPort } : { port: 0, wsPort: 0 };
   const handle = await serve(opts.io, {

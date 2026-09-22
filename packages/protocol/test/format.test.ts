@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   HOST_BEAT_MS,
+  ADDRESS_NEXT_START,
   NOT_UP_YET,
   NO_HOSTS_LINE,
   hostAliasHeldLine,
@@ -1973,6 +1974,15 @@ describe("the one listing of the hosts a computer can reach", () => {
     // A host reached by a code says nothing about itself until it is dialled, so its state is left empty rather
     // than read as away.
     expect(cells[3]).toEqual(["box", "http://192.168.1.9:4400", "code", "", "d_2", "", "SHA256:bbb", ""]);
+  });
+
+  it("says a host that is beating with no address yet waits on its next start, so one row says one thing", () => {
+    // A host on the account beating from a wsp from before it sent the key every dial holds it to: the address is
+    // withheld until a beat carries the key, and the state column already calls it up.
+    const cells = hostsTable([{ host: "attic", via: "account", awayMs: 30_000, connector: "2026.7.1" }]);
+    expect(cells[1]).toEqual(["attic", ADDRESS_NEXT_START, "account", "up 30s", "", "2026.7.1", "", ""]);
+    // A host that has never beaten is not up at all, and its row says that instead.
+    expect(hostsTable([{ host: "attic", via: "account", awayMs: null }])[1]![1]).toBe(NOT_UP_YET);
   });
 
   it("calls a host up inside two beats and away after them, since one missed beat is a slow minute", () => {
