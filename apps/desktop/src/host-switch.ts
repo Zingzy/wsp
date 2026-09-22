@@ -4,12 +4,13 @@
 // every bridge call reads, so a page from anywhere else is answered nothing.
 // The hosts are the records wsp login writes off the account and wsp host
 // connect writes for a code, read and written through the one module the
-// command line uses, so wsp hosts and the Hosts menu are one list. The app's
+// command line uses, so wsp hosts and the Hosts menu are one list, less this
+// computer's own record on the account, which the row for here is. The app's
 // own host is never stopped by a move: a person who comes back finds it as
 // they left it. A road to a host is one entry in ROADS: how it is opened the
 // first time, how a saved one is reached again, and what it holds open;
 // adding a road is its entry and nothing else here.
-import { connectCommand, disconnectCommand, dialHost, aliasFrom, hostRoadWord, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
+import { accountHosts, accountRecords, aimedHost, connectCommand, disconnectCommand, dialHost, aliasFrom, hostRoadWord, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostEntry, type HostRecord } from "@wsp/host";
 import { HOST_WORDS, PAIR_CODE_LENGTH, PAIR_NO_KEY_REFUSAL, isUrl, readJoinToken, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
 import { portOf, remoteSession, type HostSession } from "./host-lifecycle.js";
 import { forwardKey, type SshRoad } from "./ssh-road.js";
@@ -163,8 +164,19 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
    * pairing code is moved to as it always was. */
   const admitted = async (alias: string, record: HostRecord): Promise<HostRecord> => {
     if (hostRoadWord(record) !== "account") return record;
-    (await dial(deps.statePath, { aim: { kind: "alias", alias, record }, home: deps.home })).close();
+    // The name goes through the rule every verb reads which host it runs against by, so a record holding a token
+    // and no key for the host is refused here as it is there rather than dialled.
+    (await dial(deps.statePath, { aim: aimedHost(deps.statePath, { host: alias, home: deps.home }), home: deps.home })).close();
     return readHost(deps.home, alias) ?? record;
+  };
+
+  /** What the menu lists: every host this computer holds, less its own record on the account. The account record
+   * whose host id is the one in this computer's relay record is this computer, which the row for here already is,
+   * and a row for it would dial this computer through the relay and admit it as a device of itself. */
+  const elsewhere = (): HostEntry[] => {
+    const away = new Set(accountHosts(deps.statePath, deps.home).map(held => held.alias));
+    const account = new Set(accountRecords(deps.home).map(held => held.alias));
+    return listHosts(deps.home).filter(entry => away.has(entry.alias) || !account.has(entry.alias));
   };
   const moveTo = async (session: HostSession, hash?: string): Promise<void> => {
     current = session;
@@ -177,7 +189,7 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
     view: () => ({
       here: deps.here,
       current: current.alias ?? null,
-      hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
+      hosts: elsewhere().map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
     }),
     token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
     async to(alias, hash) {

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dialHost, listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
-import { HOST_WORDS, PAIR_NO_KEY_REFUSAL, readJoinToken } from "@wsp/protocol";
+import { HOST_WORDS, PAIR_NO_KEY_REFUSAL, hostNoKeyLine, readJoinToken } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostSession } from "../src/host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type SwitcherDeps } from "../src/host-switch.js";
@@ -182,6 +182,27 @@ describe("hostSwitcher", () => {
     expect(await switcher.to("box")).toEqual({ ok: false, at: "url", error: "this host admits no device under that key" });
     expect(switcher.current()).toBe(d.local);
     expect(d.loaded).toEqual([]);
+  });
+
+  it("refuses a record on the account holding a token and no key for the host before any dial, as every verb does", async () => {
+    const d = deps();
+    writeHost(d.home, "box", accountRecord("https://hbox1.boxes.example", { hostKey: undefined }));
+    const { dial, dialled } = admittingDial(d.home, { deviceId: "d_2", deviceToken: "tok-fresh" });
+    const switcher = hostSwitcher({ ...d, dial });
+    expect(await switcher.to("box")).toEqual({ ok: false, at: "url", error: hostNoKeyLine("box") });
+    expect(dialled).toEqual([]);
+    expect(switcher.current()).toBe(d.local);
+    expect(d.loaded).toEqual([]);
+  });
+
+  it("does not list this computer's own host on the account, which the row for this computer already is", () => {
+    const dir = home();
+    const d = deps({ home: dir, statePath: join(dir, "state.json") });
+    writeFileSync(join(dir, "relay.json"), JSON.stringify({ relayUrl: "https://relay.example", hostId: "hmac", token: "host-relay-token", name: "macbook", linkedAt: "2026-09-20T09:00:00.000Z" }));
+    writeHost(dir, "macbook", accountRecord("https://hmac.boxes.example", { via: { kind: "account", hostId: "hmac" } }));
+    writeHost(dir, "box", accountRecord("https://hbox1.boxes.example"));
+    writeHost(dir, "lan", record("http://192.168.1.9:4400"));
+    expect(hostSwitcher(d).view().hosts.map(h => h.alias)).toEqual(["box", "lan"]);
   });
 
   it("moves to a host paired with a code with no dial at all, which is the road every saved host took before accounts", async () => {

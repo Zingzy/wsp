@@ -2,7 +2,7 @@
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { accountAim, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
@@ -163,38 +163,47 @@ export async function locateHost(opts: Launch): Promise<Located> {
   return { home, ...(session !== undefined ? { session } : {}) };
 }
 
-/** The host on the account this window opens on when nothing serves here: the one record the rule every verb
- * comes by names, dialled once so this computer is admitted over there and the page is handed a token that
- * opens. Nothing where the account names no host this computer can reach, where several stand and none is
- * marked, or where the one it named refused or did not answer; the window starts a host here as it always did,
- * and the sentence is logged, since the screen that would ask which host is the first run's. */
+/** How long this window's one dial waits. A line at a terminal gives a relayed road fifteen seconds, which is a
+ * window with nothing in it for that long; a person who opened the app is watching it, so a host that has not
+ * answered in a few seconds is one the window opens without, with the host's own sentence in the log. */
+const ACCOUNT_DIAL_MS = 4_000;
+
+/** The host somewhere else this window opens on when nothing serves here: the alias the rule every line with no
+ * name on it takes, which is the marked default whichever road it came by, else the one host on the account this
+ * computer can reach. It is read through that same rule, so a record holding a token and no key for the host is
+ * refused here as every verb refuses it, and dialled once, which admits this computer over there and hands the
+ * page a token that opens. Nothing where the rule names no alias, where several hosts on the account stand and
+ * none is marked, or where the one it named refused or did not answer; the window starts a host here as it always
+ * did and the sentence is logged, since the screen that would ask which host is the first run's. */
 async function accountSession(opts: OpenHostOptions): Promise<HostSession | undefined> {
   const home = wspHome();
-  const aim = accountAim(opts.statePath, home);
-  if (aim.kind === "several") {
-    opts.io.error(severalAccountHostsLine(aim.aliases));
+  const alias = aimedAlias(opts.statePath, home);
+  if (alias === undefined) {
+    const aim = accountAim(opts.statePath, home);
+    if (aim.kind === "several") opts.io.error(severalAccountHostsLine(aim.aliases));
     return undefined;
   }
-  if (aim.kind === "none") return undefined;
   try {
-    (await (opts.dial ?? dialHost)(opts.statePath, { aim: { kind: "alias", alias: aim.alias, record: aim.record }, home })).close();
+    const aim = aimedHost(opts.statePath, { host: alias, home });
+    (await (opts.dial ?? dialHost)(opts.statePath, { aim, home, deadlineMs: ACCOUNT_DIAL_MS })).close();
   } catch (e) {
     opts.io.error(`${e instanceof Error ? e.message : String(e)}; this window is opening on the host here instead`);
     return undefined;
   }
-  // What the dial left under that alias: the device token the host answered this computer's key with, which the
-  // record held none of until now.
-  const record = readHost(home, aim.alias) ?? aim.record;
+  // What the dial left under that alias: the device token the host answered this computer's key with, which a
+  // record off the account's listing held none of until now.
+  const record = readHost(home, alias);
+  if (record === undefined) return undefined;
   // Nothing is served on this computer, so the runtime the setup gate built goes away rather than lingering
   // behind the window, which is the rule that gate applies when it has nothing to show.
   await opts.runtime?.close();
-  return remoteSession(aim.alias, record, record.url);
+  return remoteSession(alias, record, record.url);
 }
 
 /** Attaches to the host already serving this state file, which its lock names
- * and this window has proof of, else opens on the host the account names, else
- * starts one the way the wsp bin does. Defaults held by anything else give way
- * to free ports. */
+ * and this window has proof of, else opens on the host a line with no name on
+ * it takes, else starts one the way the wsp bin does. Defaults held by
+ * anything else give way to free ports. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
   if (held !== undefined) return held;

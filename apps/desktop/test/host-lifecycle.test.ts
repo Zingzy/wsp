@@ -6,7 +6,8 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dialHost, localWiring, localWorkFolder, makeRuntime, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
+import { dialHost, localWiring, localWorkFolder, makeRuntime, setDefaultHost, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
+import { hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -202,17 +203,21 @@ describe("openHost", () => {
     terminate: () => {},
   });
 
-  /** The command line's dial as this window uses it: it admits this computer at the host it was aimed at and
-   * writes the token that host answered into the record, which is what the real one does. */
-  function admittingDial(answered: { deviceId: string; deviceToken: string } = { deviceId: "d_2", deviceToken: "tok-fresh" }): { dial: typeof dialHost; dialled: string[] } {
+  /** The command line's dial as this window uses it, with the window it was given: handed an answer it writes that
+   * token into the record under the alias it was aimed at, which is what the real one does on the admit road, and
+   * handed none it only opens, which is every record that already holds a token. */
+  function admittingDial(answered?: { deviceId: string; deviceToken: string }): { dial: typeof dialHost; dialled: string[]; windows: (number | undefined)[] } {
     const dialled: string[] = [];
+    const windows: (number | undefined)[] = [];
     return {
       dialled,
+      windows,
       dial: async (_statePath, opts = {}) => {
         const aim = opts.aim;
         if (aim?.kind !== "alias") throw new Error(`the window dialled ${JSON.stringify(aim)} rather than a saved host`);
         dialled.push(aim.alias);
-        writeHost(opts.home ?? home, aim.alias, { ...aim.record, ...answered });
+        windows.push(opts.deadlineMs);
+        if (answered !== undefined) writeHost(opts.home ?? home, aim.alias, { ...aim.record, ...answered });
         return stubClient();
       },
     };
@@ -224,11 +229,15 @@ describe("openHost", () => {
 
   it("opens on the one host the account names, after one dial that admits this computer there, and starts no host here", async () => {
     writeHost(home, "box", accountRecord());
-    const { dial, dialled } = admittingDial();
+    const { dial, dialled, windows } = admittingDial({ deviceId: "d_2", deviceToken: "tok-fresh" });
     const runtime = testRuntime();
     const closed = vi.spyOn(runtime, "close");
     session = await openWith(dial, [], runtime);
     expect(dialled).toEqual(["box"]);
+    // A person is watching an empty window while this dial waits, so it takes a few seconds rather than the
+    // fifteen a line at a terminal gives a relayed road, and a box that is asleep costs that much and no more.
+    expect(windows[0]).toBeGreaterThan(0);
+    expect(windows[0]).toBeLessThan(5_000);
     // The runtime the setup gate built serves nothing here, so it goes rather than lingering behind the window.
     expect(closed).toHaveBeenCalledOnce();
     expect(session).toMatchObject({ url: "https://hbox1.boxes.example", owned: false, remote: true, alias: "box", label: "box", deviceToken: "tok-fresh" });
@@ -258,12 +267,34 @@ describe("openHost", () => {
     expect(lines.join("\n")).toContain(severalAccountHostsLine(["attic", "box"]));
   });
 
+  it("opens on the marked host when the account names several, which is where every line with no name goes", async () => {
+    writeHost(home, "box", accountRecord());
+    writeHost(home, "attic", accountRecord({ url: "https://hattic.boxes.example", hostKey: "SHA256:attic", via: { kind: "account", hostId: "hattic" } }));
+    setDefaultHost(home, "attic");
+    const { dial, dialled } = admittingDial({ deviceId: "d_3", deviceToken: "tok-attic" });
+    session = await openWith(dial);
+    expect(dialled).toEqual(["attic"]);
+    expect(session).toMatchObject({ url: "https://hattic.boxes.example", owned: false, remote: true, alias: "attic", deviceToken: "tok-attic" });
+    expect(existsSync(join(home, "host.lock"))).toBe(false);
+  });
+
   it("starts a host here for a record paired with a code, which is no host on the account", async () => {
     writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
     const { dial, dialled } = admittingDial();
     session = await openWith(dial);
     expect(dialled).toEqual([]);
     expect(session).toMatchObject({ owned: true, remote: false });
+  });
+
+  it("opens on the marked host when a code paired it, since the mark is the mark whichever road it came by", async () => {
+    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+    setDefaultHost(home, "lan");
+    const { dial, dialled } = admittingDial();
+    session = await openWith(dial);
+    expect(dialled).toEqual(["lan"]);
+    // The record already holds the token a code bought, so the dial admits nothing and the page is handed that one.
+    expect(session).toMatchObject({ url: "http://192.168.1.9:4400", owned: false, remote: true, alias: "lan", deviceToken: "tok-lan" });
+    expect(existsSync(join(home, "host.lock"))).toBe(false);
   });
 
   it("starts a host here and prints the host's own sentence when the account's host refuses this computer", async () => {
@@ -277,6 +308,16 @@ describe("openHost", () => {
     expect(lines.join("\n")).toContain("this host admits no device under that key");
     // The record is left as it was: the window said what happened and opened here, and the Hosts menu still holds it.
     expect(existsSync(join(home, "hosts", "box.json"))).toBe(true);
+  });
+
+  it("refuses a record holding a token and no key for the host before it dials, as every line aimed at one is refused", async () => {
+    writeHost(home, "box", accountRecord({ deviceToken: "tok-held", hostKey: undefined }));
+    const lines: string[] = [];
+    const { dial, dialled } = admittingDial({ deviceId: "d_2", deviceToken: "tok-fresh" });
+    session = await openWith(dial, lines);
+    expect(dialled).toEqual([]);
+    expect(session).toMatchObject({ owned: true, remote: false });
+    expect(lines.join("\n")).toContain(hostNoKeyLine("box"));
   });
 
   it("starts the host on a free port and serves the app with the digest of its token, never the token", async () => {
