@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, HOME_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, GOLDEN_SETUP, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -1388,7 +1388,7 @@ describe("agentInstallsFor", () => {
 
   it("takes each agent off the way its line put it on: the global uninstalled, the checkout removed, the pinned binary's one file deleted", () => {
     // The harness is one file the install line names, so the inverse is that file and no vendor uninstaller.
-    expect(agentUninstall(AGENT_INSTALLERS["claude"]!)).toEqual({ cmd: `rm -f ${HOME_BIN}/claude` });
+    expect(agentUninstall(AGENT_INSTALLERS["claude"]!)).toEqual({ cmd: `rm -f ${LOCAL_BIN}/claude` });
     expect(agentUninstall(AGENT_INSTALLERS["codex"]!)).toEqual({ cmd: `${NODE_PATH_LINE}\nnpm uninstall -g @openai/codex` });
     expect(agentUninstall(AGENT_INSTALLERS["aider"]!)).toEqual({ cmd: "uv tool uninstall aider-chat" });
     expect(agentUninstall(AGENT_INSTALLERS["hermes"]!)).toEqual({ cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" });

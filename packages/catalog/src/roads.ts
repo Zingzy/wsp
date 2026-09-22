@@ -100,9 +100,11 @@ export function versionOf<R extends { road: string; version?: string; pin?: Tool
 
 /** The guest's home directory: every machine runs as root. */
 export const GUEST_HOME = "/root";
-/** Where a road that installs under the machine's own home links its commands: the installers below write into it
- * and the road modules answer with it, so the path has one home. */
+/** Where uv and pipx link their commands on a machine wsp forked, which is their own default there. */
 export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
+/** Where every pinned binary lands, and every manager links its commands on a computer somebody owns: on every job's
+ * PATH, a box's included, and read-only inside every workspace on a box. */
+export const LOCAL_BIN = "/usr/local/bin";
 /** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
 export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** Claude Code's config dir on the guest under the guest home, which the pack rewrites `.claude/` to. */
@@ -125,8 +127,8 @@ export const CLAUDE_CODE = {
 
 const CLAUDE_DOWNLOADS = "https://downloads.claude.ai/claude-code-releases";
 
-/** The binary alone, in the folder the vendor's installer links its launcher into: that installer reads the current
- * version off the network before it downloads, which is the road the pin above closes. */
+/** The binary alone, since the vendor's installer reads the current version off the network, in the folder every
+ * pinned binary lands in: the home a box shares with its workspaces is off its job's PATH and each can write it. */
 export const CLAUDE_INSTALL = [
   'arch="$(uname -m)"',
   'case "$arch" in',
@@ -138,7 +140,7 @@ export const CLAUDE_INSTALL = [
   "trap 'rm -f /tmp/claude' EXIT",
   `curl -o /tmp/claude "${CLAUDE_DOWNLOADS}/${CLAUDE_CODE.version}/$plat/claude"`,
   'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
-  `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
+  `install -D -m 0755 /tmp/claude ${LOCAL_BIN}/claude`,
 ].join("\n");
 
 /** What the image build runs to put the harness on a first-life builder, recorded in the manifest as setupSha; the
