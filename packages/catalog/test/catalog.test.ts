@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
-import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, HOME_BIN, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -194,6 +194,7 @@ describe("catalog", () => {
     expect(fixesVersion({ road: "script", script: "x", version: "6.3.3" })).toBe(true);
     for (const id of ["swift", "playwright", "hermes", "gh", "bazel", "gcloud", "kubectl"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(true);
     for (const id of ["rust", "yarn", "op"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(false);
+    expect(fixesVersion(catalogEntry("claude")!.installRoad)).toBe(true);
     // A catalog row installs at the catalog's tag whatever version a recipe row asks for: the engine's plan test
     // pins the note the row gets, and the road itself never moves.
     expect(versionOf(catalogEntry("gh")!.installRoad)).toBe("v2.101.0");
@@ -516,43 +517,31 @@ describe("catalog", () => {
     expect(out.split("\n").filter(l => l !== "")).toEqual(["--connect-timeout", "15", "--speed-limit", "1", "--speed-time", "60", "--retry", "1", "--fail", "--silent", "--show-error", "--location", "-o", "/tmp/x", "https://example.test/a b"]);
   });
 
-  it("a vendor installer is downloaded to a file through the curl function, checked to be a shell script, then run from the file: never piped into a shell", () => {
-    const s = catalog.installerScript("https://vendor.test/install.sh");
-    expect(s).toBe([
-      'f="$(mktemp)"',
-      `trap 'rm -f "$f"' EXIT`,
-      `curl -o "$f" 'https://vendor.test/install.sh'`,
-      `test "$(head -c 2 "$f")" = '#!' || { echo 'Error: what https://vendor.test/install.sh served is not a shell script' >&2; exit 1; }`,
-      'bash "$f" </dev/null',
+  it("the default agent is the vendor's own binary at a pinned version, checked against the sums its manifest publishes, and no road runs a vendor installer", () => {
+    expect(catalog.GOLDEN_SETUP).toBe(catalog.CLAUDE_INSTALL);
+    expect(catalog.CLAUDE_CODE.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(catalog.GOLDEN_SETUP).toBe([
+      'arch="$(uname -m)"',
+      'case "$arch" in',
+      `  x86_64) plat=linux-x64 sha=${catalog.CLAUDE_CODE.sha256.x86_64} ;;`,
+      `  aarch64) plat=linux-arm64 sha=${catalog.CLAUDE_CODE.sha256.aarch64} ;;`,
+      '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+      "esac",
+      `curl -o /tmp/claude "https://downloads.claude.ai/claude-code-releases/${catalog.CLAUDE_CODE.version}/$plat/claude"`,
+      'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
+      `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
+      "rm -f /tmp/claude",
     ].join("\n"));
-    expect(s).not.toMatch(/\|\s*(bash|sh)\b/);
-    expect(s).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
-    expect(catalog.GOLDEN_SETUP).toBe(catalog.installerScript("https://claude.ai/install.sh"));
-  });
-
-  it("the downloaded installer runs only when what curl saved starts with a shebang; an empty or HTML body fails on its own Error line, runs nothing and leaves no file", () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-installer-"));
-    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    // A curl stand-in that saves the body the test hands it where -o points, as the real one saves what the vendor serves.
-    writeFileSync(join(dir, "curl"), '#!/bin/sh\nwhile [ "$1" != "-o" ]; do shift; done\nprintf "%s" "$BODY" > "$2"\n', { mode: 0o755 });
-    const run = (body: string) =>
-      spawnSync("bash", ["-c", `set -euo pipefail\n${CURL_NET}\n${catalog.installerScript("https://vendor.test/install.sh")}`], {
-        encoding: "utf8",
-        env: { ...process.env, BODY: body, TMPDIR: dir, PATH: `${dir}:${process.env["PATH"] ?? ""}` },
-      });
-    for (const body of ["", "<html>signed out</html>"]) {
-      const r = run(body);
-      expect(r.status, body).toBe(1);
-      expect(r.stdout, body).toBe("");
-      expect(r.stderr.trim(), body).toBe("Error: what https://vendor.test/install.sh served is not a shell script");
-      expect(readdirSync(dir), body).toEqual(["curl"]);
-    }
-    // The installer reads nothing from stdin: a pipe would have handed it the rest of its own text.
-    const ran = run('#!/bin/sh\necho "ran with $(cat | wc -c | tr -d \' \') bytes on stdin"\n');
-    expect(ran.stderr).toBe("");
-    expect(ran.status).toBe(0);
-    expect(ran.stdout).toBe("ran with 0 bytes on stdin\n");
-    expect(readdirSync(dir)).toEqual(["curl"]);
+    for (const arch of ["x86_64", "aarch64"] as const) expect(catalog.CLAUDE_CODE.sha256[arch], arch).toMatch(/^[0-9a-f]{64}$/);
+    // The row installs into the one directory it names, at the version its own text fixes, so a copy gets that version.
+    const claude = catalogEntry("claude")!;
+    const road = claude.installRoad;
+    expect(road).toEqual({ road: "script", script: catalog.GOLDEN_SETUP, version: catalog.CLAUDE_CODE.version, bins: [HOME_BIN] });
+    expect(fixesVersion(road)).toBe(true);
+    expect(roadModule(road).bins(road as never)).toEqual([HOME_BIN]);
+    // Nothing downloads a script and runs it any more: the module that did is gone with the road.
+    expect("installerScript" in catalog).toBe(false);
+    for (const e of CATALOG) expect(installLine(e), e.id).not.toMatch(/\bbash "\$f"/);
   });
 
   it("no road line spells curl's flags itself: the function is their one home", () => {

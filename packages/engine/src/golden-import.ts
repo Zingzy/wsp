@@ -1437,15 +1437,20 @@ const UV_INSTALL_LINE = /^uv tool install .*?([\w.-]+)==[\w.-]+$/m;
 /** The Node major the catalog's own row pins, for an install that runs on node and names no floor of its own. */
 const CATALOG_NODE_MAJOR = Number(catalogToolFor("node")?.major?.version ?? 0);
 
+/** The one file a pinned binary's install line puts on the machine, which is its inverse. */
+const INSTALLED_BINARY_LINE = /^install -D -m 0755 \S+ (\S+)$/m;
+
 /** The inverse of an installer, read off its install line: an npm global is
- * uninstalled, a uv tool uninstalled, Hermes's checkout and venv removed;
- * anything else (Claude Code's own installer) has no inverse and is noted. */
+ * uninstalled, a uv tool uninstalled, Hermes's checkout and venv removed, a
+ * pinned binary's one file taken off; anything else is noted. */
 export function agentUninstall(installer: AgentInstaller): { cmd: string } | { note: string } {
   const npm = NPM_INSTALL_LINE.exec(installer.install);
   if (npm !== null) return { cmd: `${NODE_PATH_LINE}\nnpm uninstall -g ${npm[1]}` };
   const uv = UV_INSTALL_LINE.exec(installer.install);
   if (uv !== null) return { cmd: `uv tool uninstall ${uv[1]}` };
   if (installer.install.includes("/root/.hermes/")) return { cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" };
+  const binary = INSTALLED_BINARY_LINE.exec(installer.install);
+  if (binary !== null) return { cmd: `rm -f ${binary[1]}` };
   return { note: `${installer.name} has no uninstaller; left on the machine` };
 }
 

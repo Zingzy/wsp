@@ -1372,10 +1372,11 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const agents = [{ id: "agents/claude", ...AGENT_INSTALLERS["claude"]! }, { id: "agents/codex", ...AGENT_INSTALLERS["codex"]! }];
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ agents, recipe }) });
-    // The vendor's installer takes the current release, so its row is marked latest; the npm install names its version, so a copy gets the same.
-    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude", pin: { tag: "2.1.3", latest: true } }, { id: "agents/codex", pin: { tag: "0.153.0" } }]);
+    // Both lines name the version they install, so both pins are fixed and no row reads as installing latest.
+    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude", pin: { tag: "2.1.3" } }, { id: "agents/codex", pin: { tag: "0.153.0" } }]);
     const closing = stages.find(s => s.startsWith("installing-harness:Claude Code, Codex installed"))!;
-    expect(closing).toContain("; pinned: Codex 0.153.0; installs latest on every place: Claude Code 2.1.3 by its own installer; ");
+    expect(closing).toContain("; pinned: Claude Code 2.1.3, Codex 0.153.0; ");
+    expect(closing).not.toContain("installs latest on every place");
   });
 
   it("the tools stage stamps the pin a release install recorded on the ledger's digest, so the sealed version says which release the row is fixed to", async () => {
@@ -1619,11 +1620,11 @@ describe("golden import stages", () => {
     }
   });
 
-  it("the setup line and the catalog's own agent installers run under the guard with the road lines: Claude's downloads to a file, checks it and runs it with no pipe into a shell, Codex's npm carries the fetch clock", async () => {
+  it("the setup line and the catalog's own agent installers run under the guard with the road lines: the harness binary is downloaded, checked against its pinned sum and installed with no pipe into a shell, Codex's npm carries the fetch clock", async () => {
     const { backend, cmds, fetch } = backendFor();
     const agents = (["claude", "codex"] as const).map(id => ({ id: `agents/${id}`, ...AGENT_INSTALLERS[id]! }));
     const builder = await prepareBuilder({ backend, setup: GOLDEN_SETUP, fetch, import: importOf({ agents }) });
-    const runs = cmds.filter(c => c.includes("claude.ai/install.sh"));
+    const runs = cmds.filter(c => c.includes("claude-code-releases/"));
     // Once as the setup line, once as the Claude Code row; the same text both times, whole and under the same lines.
     expect(runs.map(r => r.includes(NODE_PATH_LINE))).toEqual([false, true]);
     for (const [run, path] of [[runs[0]!, []], [runs[1]!, [NODE_PATH_LINE]]] as const) {
@@ -1631,9 +1632,9 @@ describe("golden import stages", () => {
       expect(run).toMatch(/while \[ \$t -lt 900 \]/);
       expect(run).not.toMatch(/\|\s*(bash|sh)\b/);
       const at = (needle: string) => { const i = run.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
-      expect(at(CURL_NET)).toBeLessThan(at('curl -o "$f"'));
-      expect(at('curl -o "$f"')).toBeLessThan(at('head -c 2 "$f"'));
-      expect(at('head -c 2 "$f"')).toBeLessThan(at('bash "$f" </dev/null'));
+      expect(at(CURL_NET)).toBeLessThan(at("curl -o /tmp/claude"));
+      expect(at("curl -o /tmp/claude")).toBeLessThan(at("sha256sum -c -"));
+      expect(at("sha256sum -c -")).toBeLessThan(at("install -D -m 0755 /tmp/claude"));
     }
     const codex = cmds.filter(c => c.includes("npm install -g @openai/codex@"));
     expect(codex).toHaveLength(1);

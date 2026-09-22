@@ -10,7 +10,7 @@
 // /opt for a computer somebody owns, whose daemon resolves no command through
 // a folder the workspaces there can write.
 import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
-import { APT_ENV, GUEST_HOME, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
+import { APT_ENV, GUEST_HOME, HOME_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -106,7 +106,6 @@ const listedVersion = (list: string, pkg: string): string => `${list} 2>/dev/nul
 /** The directories a road links the commands it installs into, named once: what a module answers as its `bins`,
  * and what a script row on the catalog names for the installer it carries. */
 export const LOCAL_BIN = "/usr/local/bin";
-export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
 const CARGO_HOME = `${GUEST_HOME}/.cargo`;
 export const CARGO_BIN = `${CARGO_HOME}/bin`;
 const GO_BIN = `${GUEST_HOME}/go/bin`;

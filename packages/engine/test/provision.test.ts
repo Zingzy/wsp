@@ -8,7 +8,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_FLOOR, TOOL_PREFIX } from "@wsp/catalog";
+import { BASE_FLOOR, HOME_BIN, TOOL_PREFIX } from "@wsp/catalog";
 import {
   probePath,
   HOMEBREW_PREFIX,
@@ -585,10 +585,15 @@ describe("the PATH every script of the job exports", () => {
     for (const value of exported) {
       expect(value === PROBE || value === `${PROBE}:$PATH` || value === '"/usr/local/bin:$PATH"', value).toBe(true);
     }
+    // The harness binary is the one install that lands there, where its row's bins names and where the vendor's
+    // own installer wrote it before the pin; the job sends that line once and runs it once.
+    const harness = `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`;
     expect(scripts.filter(c => c.includes("/root/.local/bin")).map(c => c.split("\n").find(l => l.includes("/root/.local/bin")))).toEqual([
-      // The one line that names it: the login shell's PATH written into a file on that computer, which the
+      // The one other line that names it: the login shell's PATH written into a file on that computer, which the
       // daemon and this job both stopped resolving a command through.
       expect.stringContaining(PROFILE_PATH_FILE),
+      harness,
+      harness,
     ]);
   });
 

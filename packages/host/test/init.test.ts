@@ -2009,7 +2009,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude-code-releases/") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
     };
@@ -2024,7 +2024,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude-code-releases/") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       const made = backend.create.bind(backend);
       backend.create = async spec => {
         const machine = await made(spec);
@@ -2252,7 +2252,7 @@ describe("wsp init, flags and no terminal", () => {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {
-        if (!cmd.includes("claude.ai/install.sh")) return guestAnswer(cmd);
+        if (!cmd.includes("claude-code-releases/")) return guestAnswer(cmd);
         duringPrepare = { out: f.io.output.write, err: f.io.stderr.write };
         f.io.stderr.write("heartbeat for builder m1 not written: ETIMEDOUT\n");
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
@@ -2279,7 +2279,7 @@ describe("wsp init, flags and no terminal", () => {
     const f = fake({ yes: true });
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude-code-releases/") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
       return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
@@ -3031,7 +3031,7 @@ describe("wsp init, a signal during prepare", () => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
         // The signal lands inside the agents install, which then finishes on its own; the kill waits until told.
-        if (cmd.includes("claude.ai/install.sh")) {
+        if (cmd.includes("claude-code-releases/")) {
           const kill = m.kill.bind(m);
           m.kill = async () => {
             await held;

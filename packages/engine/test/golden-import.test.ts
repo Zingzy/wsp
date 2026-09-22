@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, GOLDEN_SETUP, HOME_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -22,6 +22,7 @@ import {
   CURRENT_LTS,
   NODE_RELEASES,
   agentInstallsFor,
+  agentUninstall,
   agentOwning,
   brewfileFor,
   copiedLoginDests,
@@ -1371,18 +1372,27 @@ describe("agentInstallsFor", () => {
       expect(a.smoke, name).toMatch(/--version/);
       expect(a.install, name).not.toMatch(/\|\s*(ba)?sh\b/);
       expect(a.install, name).not.toMatch(/@latest\b/);
-      // The harness vendor's own installer is unpinned by design; every other agent's line names a version.
-      if (a.install !== GOLDEN_SETUP) expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
+      // Every agent's line names the version it installs, the harness vendor's binary included.
+      expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d|\/\d+\.\d+\.\d+\//);
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
-    // The vendor's installer takes the current release, so its pin reads the command's own version and marks it latest.
-    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: false, words: "by its own installer" } });
+    // The harness installs at the version its own text fixes, so a copy built from the pin gets that version.
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: true, words: "by its own installer" } });
     // The road each line walks, which is what bounds a step that runs it on a computer somebody owns.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script" });
     expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
     expect(AGENT_INSTALLERS["hermes"]!.pin).toEqual({ read: expect.stringContaining("'hermes' --version"), fixed: true, words: "by its own installer" });
     // Engines floors as the registry states them at the pinned versions.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined });
+  });
+
+  it("takes each agent off the way its line put it on: the global uninstalled, the checkout removed, the pinned binary's one file deleted", () => {
+    // The harness is one file the install line names, so the inverse is that file and no vendor uninstaller.
+    expect(agentUninstall(AGENT_INSTALLERS["claude"]!)).toEqual({ cmd: `rm -f ${HOME_BIN}/claude` });
+    expect(agentUninstall(AGENT_INSTALLERS["codex"]!)).toEqual({ cmd: `${NODE_PATH_LINE}\nnpm uninstall -g @openai/codex` });
+    expect(agentUninstall(AGENT_INSTALLERS["aider"]!)).toEqual({ cmd: "uv tool uninstall aider-chat" });
+    expect(agentUninstall(AGENT_INSTALLERS["hermes"]!)).toEqual({ cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" });
+    expect(agentUninstall({ name: "Nothing", install: "echo hi", smoke: "nothing --version", road: "script" })).toEqual({ note: "Nothing has no uninstaller; left on the machine" });
   });
 
   it("installs only the ticked agents, in recipe order, each from the catalog's table", () => {
