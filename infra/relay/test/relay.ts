@@ -3,6 +3,7 @@
 // the Worker's handler called in this process, and the one road out of the
 // Worker (the Cloudflare account API and GitHub) answered from a table the
 // test arms. Nothing here reaches a network.
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,7 @@ import { Miniflare } from "miniflare";
 import { afterAll } from "vitest";
 import type { Env } from "../src/env.js";
 import { handle, type Deps } from "../src/index.js";
-import { SESSION_COOKIE } from "../src/tokens.js";
+import { SESSION_COOKIE, readToken } from "../src/tokens.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const MIGRATIONS_DIR = join(here, "..", "migrations");
@@ -215,17 +216,34 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
 /** The Cloudflare API's own envelope, which every answer of theirs carries. */
 export const cfOk = (result: unknown): unknown => ({ success: true, errors: [], messages: [], result });
 
+/** A fingerprint in the shape the keys package prints for a key, made of nothing but a name: the relay reads the
+ * shape and holds no key to check it against, so a test needs no key either. */
+export const fingerprintFor = (name: string): string => `SHA256:${createHash("sha256").update(name).digest("base64").replace(/=+$/, "")}`;
+
+/** What a signed-in wsp posts to admit a computer: the admitted key, the signer's key, the time and the signature.
+ * The relay stores and forwards these bytes and verifies none of them, so the signature here is a marker a test
+ * reads back rather than anything a key made. */
+export function fakeAdmission(device: string, by: string, issuedAt = "2026-09-11T12:00:00.000Z"): { device: string; by: string; issuedAt: string; signature: string } {
+  return { device, by, issuedAt, signature: Buffer.from(`${by} admits ${device}`).toString("base64") };
+}
+
 /** The whole device code flow for one host or one client, as the tests that start from a linked host need it:
  * the code, the sign in, the approval and the poll that hands the token over. `who.from` is the address the start
- * is made from, which the relay counts its caps under: a case that starts several links gives each its own. */
+ * is made from, which the relay counts its caps under: a case that starts several links gives each its own. A
+ * client's start carries the fingerprint of its device key, as wsp login sends one. */
 export async function linkedVia(
   relay: RelayHarness,
   kind: "host" | "client",
   name: string,
   who: { login: string; githubId: string; cookie?: string; from?: string },
-): Promise<{ token: string; hostId?: string; cookie: string }> {
+): Promise<{ token: string; id: string; hostId?: string; fingerprint?: string; cookie: string }> {
+  const fingerprint = kind === "client" ? fingerprintFor(name) : undefined;
   const start = (await (
-    await relay.fetch("/link/start", { method: "POST", body: JSON.stringify({ kind, name }), ...(who.from !== undefined ? { headers: { "cf-connecting-ip": who.from } } : {}) })
+    await relay.fetch("/link/start", {
+      method: "POST",
+      body: JSON.stringify({ kind, name, ...(fingerprint !== undefined ? { fingerprint } : {}) }),
+      ...(who.from !== undefined ? { headers: { "cf-connecting-ip": who.from } } : {}),
+    })
   ).json()) as { code: string; pollToken: string };
   const cookie = who.cookie ?? (await signIn(relay, who.login, who.githubId));
   const page = await typeCode(relay, start.code, cookie);
@@ -236,7 +254,14 @@ export async function linkedVia(
     body: new URLSearchParams({ code: start.code, stamp }).toString(),
   });
   const answer = (await (await relay.fetch("/link/poll", { method: "POST", body: JSON.stringify({ pollToken: start.pollToken }) })).json()) as { token: string; hostId?: string };
-  return { token: answer.token, ...(answer.hostId !== undefined ? { hostId: answer.hostId } : {}), cookie };
+  const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
+  return {
+    token: answer.token,
+    id: claims?.subject ?? "",
+    ...(answer.hostId !== undefined ? { hostId: answer.hostId } : {}),
+    ...(fingerprint !== undefined ? { fingerprint } : {}),
+    cookie,
+  };
 }
 
 /** The code typed on the verify page, which is what the relay renders the approve form for: the page's address
