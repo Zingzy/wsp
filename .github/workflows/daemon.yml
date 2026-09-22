@@ -144,10 +144,13 @@ jobs:
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon
 
   # The two Linux daemons this head would ship, uploaded on every run so staging one on another computer is a
-  # download from the run that built the head instead of a release dispatched by hand. The build and the artifact
-  # names are the release job's, so daemon-binary.mjs reads an artifact from either the same way. Each binary is
-  # staged through that script before it goes up, so the refusal of a musl binary that names a shared library runs
-  # on the bytes uploaded, and the sha256 travels beside it.
+  # download from the run that built the head instead of a release dispatched by hand. Outside a run that is
+  # `node packages/wspx/scripts/daemon-binary.mjs --from-run <id>` naming this run: the script reads the run's
+  # record, refuses a head repository or a head commit that is not the checkout's, and downloads the artifacts
+  # itself, since a fork's pull request runs the fork's copy of this file and any condition written here is the
+  # fork's to delete. The build and the artifact names are the release job's, so that script reads an artifact
+  # from either the same way. Each binary is staged through that script before it goes up, so the refusal of a musl
+  # binary that names a shared library runs on the bytes uploaded, and the sha256 travels beside it.
   daemon-artifacts:
     name: Linux daemon ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
