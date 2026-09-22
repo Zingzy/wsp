@@ -160,6 +160,37 @@ describe("a project golden", () => {
     expect(again.snapshotId).not.toBe(golden.snapshotId);
   });
 
+  it("a fork of a project image that carries the project clones nothing and installs nothing: the checkout is at its path already", async () => {
+    const { rt, advance, backend } = await setup();
+    const ws = await loaded(rt, advance);
+    const golden = await rt.workspaces.snapshot(ws.id);
+    expect(golden.projects.map(p => p.dest)).toEqual([ws.project.path]);
+    // The disk already holds the checkout, so git refuses a clone into it and the lockfile there would name an
+    // install: a fork that ran either of them is the failure this guards.
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => {
+      if (cmd.includes("git clone")) return { exitCode: 128, stdout: "", stderr: `fatal: destination path '${ws.project.path}' already exists and is not an empty directory` };
+      if (cmd.startsWith("ls -A")) return { exitCode: 0, stdout: "pnpm-lock.yaml\npackage.json\n", stderr: "" };
+      return plain(m, cmd);
+    };
+    const fork = await rt.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-a" });
+    const machine = backend.machines.find(m => m.id === fork.machineId)!;
+    expect(machine.execLog.join("\n")).not.toContain("git clone");
+    expect(machine.execLog.join("\n")).not.toContain("pnpm install");
+    expect(fork.project.path).toBe(ws.project.path);
+  });
+
+  it("a fork of a project image that carries another project's checkout still clones: the rule reads the path, not the word --from", async () => {
+    const { rt, advance, backend } = await setup();
+    const ws = await loaded(rt, advance);
+    const golden = await rt.workspaces.snapshot(ws.id);
+    const other = await projectOn(rt, "default", "https://github.com/dev/other.git");
+    expect(other.path).not.toBe(ws.project.path);
+    const fork = await rt.workspaces.create({ project: other.id, golden: golden.snapshotId, name: "other-task" });
+    const machine = backend.machines.find(m => m.id === fork.machineId)!;
+    expect(machine.execLog.join("\n")).toContain(`git clone https://github.com/dev/other.git ${other.path}`);
+  });
+
   it("over the wire: workspaces.snapshot replies with the project golden, projectGoldens.list with every one, and a refusal carries its kind", async () => {
     const { rt, advance } = await setup();
     const ws = await loaded(rt, advance);

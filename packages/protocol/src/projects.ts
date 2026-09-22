@@ -184,6 +184,14 @@ export function registeredLine(dest: string): string {
   return `${folderName(dest)} registered at ${dest}; nothing was copied.`;
 }
 
+/** Whether a project image already holds this project's checkout, so a fork of it clones and installs nothing: the
+ * image records every project that was on the disk and the path each sat at, and a fork of the whole disk comes up
+ * with all of them where they were. Read off the snapshot a fork names and never off the project's own record,
+ * which says nothing about which image a given workspace was forked from. */
+export function imageCarriesCheckout(projects: readonly WorkspaceProject[] | undefined, path: string): boolean {
+  return projects !== undefined && projects.some(p => p.dest === path);
+}
+
 /** What a fork of a project golden starts with, after the created line; nothing for an image carrying none. */
 export function projectsInPlace(projects: readonly WorkspaceProject[]): string {
   return projects.length === 0 ? "" : ` with ${projects.map(p => p.name).join(", ")} in place`;
