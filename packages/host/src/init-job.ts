@@ -56,6 +56,10 @@ export interface InitJobDeps {
   /** The provider whose key the setup's own key step asks for, by the word WSP_PROVIDER holds; nothing where this
    * host's provider reads no key at all. The step reads whether one is held out of keysHeld by this word. */
   keyProvider(): string | undefined;
+  /** The provider this host forks on, under the word its machines are stamped with, read at each ask as the pricing
+   * is: a key saved while this host serves moves both. A terminal run beside this host reads it off the setup to
+   * say where the provider it was handed is another one, since the build runs here and this is where it lands. */
+  forksOn(): string;
   /** Whether the provider takes this key, asked before it is saved: the provider module the key is being saved for
    * makes one cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
   checkKey(key: string, provider?: string): Promise<KeyCheck>;
@@ -286,6 +290,7 @@ export class InitJobs implements InitDoor {
       agents,
       pricing: pricing === undefined ? null : { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize), ...(pricing.builderDiskGb !== undefined ? { builderDiskGb: pricing.builderDiskGb } : {}) },
       ...(built !== undefined ? { place: { id: built.place, name: built.name } } : {}),
+      forksOn: this.deps.forksOn(),
       ...(buildRefusal !== undefined ? { buildRefusal } : {}),
       job: this.view(),
     };

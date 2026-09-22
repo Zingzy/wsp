@@ -182,6 +182,10 @@ export const InitSetup = z.object({
   pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number(), builderDiskGb: z.number().positive().optional() }).nullable(),
   /** The place the build boots on: the one the ask named, else the default place; absent with `pricing` null. */
   place: z.object({ id: z.string(), name: z.string() }).optional(),
+  /** The provider this host forks on, under the word its machines are stamped with: where every workspace it makes
+   * lands, and what `wsp up --provider` moves. A run beside this host reads it to say so where the provider it was
+   * given is another one. Absent on a host of an earlier build, which says nothing about where it forks. */
+  forksOn: z.string().optional(),
   /** Why no build can start here, in the runtime's one sentence for it: no place runs workspaces, or several do and
    * none is the default. Present exactly when `pricing` is null, so the sheet and the command line read the same
    * refusal. */
