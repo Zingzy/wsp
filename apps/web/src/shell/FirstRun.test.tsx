@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FIRST_WORKSPACE_ROAD, madeOfWord, type InitAgent, type InitSetup, type PlaceView, type ProjectView } from "@wsp/protocol";
+import { COPY_WORD, madeOfWord, type InitAgent, type InitSetup, type PlaceView, type ProjectView } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { FirstRun, landsLine } from "./FirstRun.js";
@@ -133,19 +133,16 @@ describe("the first run on this Mac", () => {
     await settle();
     expect(k("lands").textContent).toBe("");
     fireEvent.change(t.folder(), { target: { value: "/tmp/repo" } });
-    // The computer, then the word for the road the create takes, which today is the folder itself.
-    expect(k("lands").textContent).toBe(landsLine([HERE], FIRST_WORKSPACE_ROAD));
-    expect(k("lands").textContent).toBe("This Mac · in this folder");
+    // The computer, then what the workspace is: a copy of the folder, from the first piece of work on.
+    expect(k("lands").textContent).toBe(landsLine([HERE]));
+    expect(k("lands").textContent).toBe("This Mac · a copy");
   });
 
-  it("writes no road of its own: the word follows the default the runtime reads, so a copy reads as a copy", () => {
-    // The screen passes the one home of that default; this is that line read with the other road, which is what
-    // the day the ruling makes the first workspace a copy will hand it.
-    expect(landsLine([HERE], "clonefile")).toBe("This Mac · a copy");
-    expect(landsLine([HERE], "worktree")).toBe("This Mac · a copy");
-    expect(landsLine([HERE], "in-place")).toBe("This Mac · in this folder");
-    // And the word is the protocol's, not one spelled here.
-    expect(landsLine([HERE], FIRST_WORKSPACE_ROAD)).toContain(madeOfWord(FIRST_WORKSPACE_ROAD));
+  it("writes no road of its own: the word is the protocol's, the one every row a copy becomes carries", () => {
+    expect(landsLine([HERE])).toContain(COPY_WORD);
+    expect(landsLine([HERE])).toBe(`This Mac · ${madeOfWord("clonefile")}`);
+    expect(landsLine([HERE])).toBe(`This Mac · ${madeOfWord("worktree")}`);
+    expect(landsLine([])).toBe(COPY_WORD);
   });
 
   it("opens Settings with the Add a computer sheet from its second door", async () => {

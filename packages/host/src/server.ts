@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, worksInPlace } from "@wsp/protocol";
+import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -310,13 +310,13 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
       // the same sentence the command line uses when there are several.
       const all = await rt.projects.list(caller);
       // A road that names none is forking, so the projects it can mean are the ones on a computer that forks: a
-      // folder worked in place here is a workspace of its own and is never what a fork was asked for.
-      const held = named === undefined ? all.filter(p => !worksInPlace(kindForComputer(p.computer))) : all;
+      // folder here is copied, never forked, and is never what a fork was asked for.
+      const held = named === undefined ? all.filter(p => !copiesFolder(kindForComputer(p.computer))) : all;
       const project = named === undefined ? held[0] : held.find(p => p.id === named || p.name === named);
       if (project === undefined || (named === undefined && held.length !== 1)) throw new Error(held.length === 0 ? NO_PROJECT_YET : nameTheProjectLine(held.map(p => p.name)));
       const head = goldenHead(await rt.golden.get());
-      // A project worked in place forks nothing, so it needs no image; every other computer's copy does.
-      if (!head && !worksInPlace(kindForComputer(project.computer))) throw new NoGoldenError();
+      // A copy of a folder here forks nothing, so it needs no image; every other computer's copy does.
+      if (!head && !copiesFolder(kindForComputer(project.computer))) throw new NoGoldenError();
       return rt.workspaces.create(
         {
           project: project.id,
@@ -333,6 +333,23 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
     planProject: source => bundlerFor(source).plan(),
     importProject: o => rt.projects.import({ ...o, bundler: bundlerFor(o.source) }),
   };
+}
+
+/** The JSON routes by the op each stands for on the socket, so the door a paired device meets here is the door it
+ * meets there: a route added later names its op on this table and is held by the same list, and until it does a
+ * paired device is refused it by its own name. */
+export const ROUTE_OPS: Readonly<Record<string, string>> = {
+  "GET /api/workspaces": "status.list",
+  "POST /api/workspaces": "workspaces.create",
+};
+
+/** What a caller is refused a route with, or nothing: a computer the person paired is held to the list of ops a
+ * device may send, read by the op the route stands for and answered in the sentence the socket answers with. A
+ * route with no op of its own is shut to such a device, so a route added later cannot be forgotten open. */
+export function routeRefusal(route: string, caller: Caller | undefined): string | undefined {
+  if (caller !== "paired") return undefined;
+  const op = ROUTE_OPS[route];
+  return op !== undefined && DEVICE_OPS.includes(op) ? undefined : deviceHeldRefusal(op ?? route);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -451,6 +468,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       const who = path.startsWith("/api/") ? await callerOf(req) : {};
       if (who === undefined) {
         sendJson(res, 401, { error: API_UNAUTHORIZED });
+        return;
+      }
+      // Before dispatch, by the op the route stands for: a paired device is held to the same list on both doors.
+      const held = routeRefusal(`${req.method} ${path}`, who.caller);
+      if (held !== undefined) {
+        sendJson(res, 401, { error: held });
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {

@@ -11,13 +11,13 @@ import { fmtSize, kindWords, NO_PROVIDER_LINE } from "@wsp/protocol";
 import { localShape, NoProviderBackend } from "@wsp/engine";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
+import { cli, localWiring, makeRuntime, noClaudeKeyNote, up } from "../src/cli.js";
 import { stateWriterHere } from "../src/version.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { noProviderStorageLine } from "../src/storage.js";
 import type { HostHandle } from "../src/server.js";
 import { fakeSsh } from "../../runtime/test/fake-ssh.js";
-import { PAGE, captured } from "./verbs-fixture.js";
+import { PAGE, captured, copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
 runsFromItsOwnFolder();
@@ -59,7 +59,7 @@ describe("a computer with no machine provider key", () => {
       backend: new NoProviderBackend(),
       store: jsonFileStore(statePath, stateWriterHere()),
       adapters: {},
-      local: localWiring(home),
+      local: localWiring(home, undefined, fakeDaemonStart, statePath, copyingFake()),
       ssh: fakeSsh().wiring,
       hostId: "box:h1",
     });
@@ -69,9 +69,10 @@ describe("a computer with no machine provider key", () => {
   }
 
   it("serves with no key and nothing asked, records no workspace, and lists the one a project here makes", async () => {
-    // The whole real wiring, provider module and all, brought up with no key in the environment.
+    // The whole real wiring, provider module and all, brought up with no key in the environment. The copy road
+    // alone is the fake, since every workspace here is a copy and this checkout stages no daemon binary.
     const served = captured();
-    handle = await up(served, { port: 0, wsPort: 0, statePath, webDir });
+    handle = await up(served, { port: 0, wsPort: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake())) });
     expect(handle).toBeDefined();
     expect(served.errors).toEqual([]);
     // A workspace is one project's copy, so a start records none and the first line says what records one.

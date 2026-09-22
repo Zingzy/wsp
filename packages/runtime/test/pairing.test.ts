@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
+import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH, deviceHeldRefusal } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
 import { newPlaceKeyPair } from "../src/places.js";
@@ -115,7 +115,8 @@ describe("pairing codes", () => {
     const paired = await client.request("pair.redeem", { code, name: "laptop" });
     const answer = await client.request("pair.issue");
     expect(paired.ok).toBe(true);
-    expect(answer).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    // The device door reads the op before the switch does, so a paired computer meets the door's own sentence.
+    expect(answer).toMatchObject({ ok: false, error: deviceHeldRefusal("pair.issue") });
     client.close();
   });
 
@@ -223,7 +224,7 @@ describe("the code wsp init mints for the browser it opens", () => {
     expect(await browser.request("pair.issue")).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
     const laptop = await WsClient.connect(srv!.port);
     expect((await laptop.request("pair.redeem", { code: await codeFrom(), name: "laptop" })).ok).toBe(true);
-    expect(await laptop.request("pair.issue", { here: true })).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    expect(await laptop.request("pair.issue", { here: true })).toMatchObject({ ok: false, error: deviceHeldRefusal("pair.issue") });
     // A spent code is spent: the second browser to try it is refused.
     const again = await WsClient.connect(srv!.port);
     expect(await again.request("pair.redeem", { code: here, name: "another" })).toMatchObject({ ok: false, error: PAIR_CODE_REFUSAL });

@@ -31,7 +31,7 @@ import { HERE } from "./recipe-fixture.js";
 const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -98,7 +98,7 @@ describe("the MCP server over the host", () => {
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every call that makes one needs a project first; one project here, so
     // new takes the work alone.
@@ -143,7 +143,7 @@ describe("the MCP server over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"]): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
+    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath, {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -349,7 +349,7 @@ describe("the MCP server over the host", () => {
     ]);
     // The listing's own words say a workspace need not be a machine, so a caller holding only the tools reads it here.
     const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
-    expect(served).toContain("on the computer the app runs on it is the project's own folder, worked in place");
+    expect(served).toContain("on the computer the app runs on it is a copy of the project's folder beside it");
 
     const opened = await call("run", { workspace: "mac", task: "say pong" });
     expect(opened.isError).toBe(false);

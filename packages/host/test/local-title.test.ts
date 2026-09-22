@@ -12,7 +12,7 @@ import { HARNESS_ADAPTERS, createRuntime, memoryStore, type HarnessAdapterFactor
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { stubBackend } from "./stub-backend.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
 
 const SESSION = "44444444-4444-4444-8444-444444444444";
 const MADE = "Named through the store a shell reads";
@@ -79,7 +79,7 @@ describe("the title a thread on this computer gets", () => {
   });
 
   it("is asked of the binary under the store the person's own shell would read, in the mode that still reads their sign-in", async () => {
-    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: store });
+    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: store }, fakeDaemonStart, undefined, copyingFake());
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
@@ -104,7 +104,7 @@ describe("the title a thread on this computer gets", () => {
   it("names no store and no sandbox when the person's shell names none, so the binary reads its own default and their Keychain login", async () => {
     // Claude keys its Keychain item by whether CLAUDE_CONFIG_DIR is set, so setting it to the default folder hides a
     // claude.ai login (measured on 2.1.257); IS_SANDBOX is a machine's fact and this computer is not one.
-    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` });
+    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` }, fakeDaemonStart, undefined, copyingFake());
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

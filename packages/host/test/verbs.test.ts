@@ -9,8 +9,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -26,7 +26,7 @@ import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
-import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
 runsFromItsOwnFolder();
@@ -103,12 +103,12 @@ describe("wsp verbs over the host", () => {
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
     store = memoryStore();
-    copier = fakeCopier();
+    copier = copyingFake();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}), daemonChannel: daemon.open });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), daemonChannel: daemon.open });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -140,8 +140,8 @@ describe("wsp verbs over the host", () => {
    * work alone until a case records a second. */
   let cloud: ProjectView;
 
-  /** A project on this computer and its workspace: a workspace here is a folder of the person's worked in place,
-   * so a test that wants one records a repo of its own first. */
+  /** A project on this computer and its workspace: a workspace here is a copy of a folder of the person's, so a
+   * test that wants one records a repo of its own first. */
   async function macProject(name: string): Promise<{ code: number; io: Captured; folder: string }> {
     const folder = realpathSync(mkdtempSync(join(dir, `repo-${name}-`)));
     execFileSync("git", ["init", "-q", folder]);
@@ -177,7 +177,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -192,7 +192,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const [ws] = await rt.workspaces.list();
     expect(ws).toMatchObject({ name: "alpha", golden: head(SEALED_GOLDEN).snapshotId, phase: "running" });
-    expect(io.lines).toEqual([`created alpha ${ws!.id} with ${ws!.project.name} at ${ws!.project.path}`]);
+    expect(io.lines).toEqual([`created alpha ${ws!.id}, a copy of ${ws!.project.name} at ${ws!.project.path}`]);
     expect(io.streamed).toContain("\n");
     expect(io.errors).toEqual([]);
 
@@ -277,18 +277,19 @@ describe("wsp verbs over the host", () => {
     expect(listed.io.lines[0]!.split("\n").slice(1).every(r => r.includes("alpha"))).toBe(true);
   });
 
-  it("a project on the computer the app runs on is worked in place, and that project has one workspace", async () => {
+  it("a project on the computer the app runs on gets a copy of its folder for every piece of work, the first included, and the created line names the copy", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-here-")));
     execFileSync("git", ["init", "-q", folder]);
     const project = await projectOn(rt, HERE_PLACE_ID, folder);
     const { code, io } = await run("new", project.name, "mac");
     expect(code, io.errors.join("\n")).toBe(0);
-    expect(io.lines[0]).toBe(`created mac ${(await rt.workspaces.list()).find(w => w.name === "mac")!.id} with ${project.name} at ${folder}`);
+    expect(io.lines[0]).toBe(`created mac ${(await rt.workspaces.list()).find(w => w.name === "mac")!.id}, a copy of ${project.name} at ${copyPathFor(folder, "mac")}`);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
-    // The second piece of work on that project is a copy of the folder at a sibling path.
+    expect(copier.asks.map(a => a.to)).toEqual([copyPathFor(folder, "mac")]);
+    // The second piece of work on that project is a second copy at its own sibling path.
     const again = await run("new", project.name, "other");
     expect(again.code, again.io.errors.join("\n")).toBe(0);
-    expect(copier.asks.map(a => a.to)).toEqual([copyPathFor(folder, "other")]);
+    expect(copier.asks.map(a => a.to)).toEqual([copyPathFor(folder, "mac"), copyPathFor(folder, "other")]);
     expect((await rt.workspaces.list()).find(w => w.name === "other")!.copy?.road).toBe("clonefile");
     // A word that names no project is refused with the ones there are.
     const nowhere = await run("new", "srv", "x");
@@ -310,9 +311,9 @@ describe("wsp verbs over the host", () => {
     const cloned = { ...shape, portBase: 3100, copy: { road: "clonefile" as const, path: "/Users/dev/wsp-qr-codes", source: "/Users/dev/wsp", base: "abc", branch: "main", carried: "deps-and-config" as const } };
     expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, 3100, hostPlatform())]);
     expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "worktree" } }, new Map(), shares)[4]).toBe(madeOfWord("worktree"));
-    // The folder worked in place holds no port base of its own, so the cell says the ports alone.
-    const { portBase: _none, ...inPlace } = { ...cloned, copy: { ...cloned.copy, road: "in-place" as const } };
-    expect(workspaceLine(inPlace, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("in-place"), portsWord(shares, undefined, hostPlatform())]);
+    // A copy whose record carries no port base says the ports alone.
+    const { portBase: _none, ...noBase } = cloned;
+    expect(workspaceLine(noBase, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, undefined, hostPlatform())]);
     // A computer whose copies each get a network of their own says that instead.
     expect(workspaceLine(cloned, new Map(), { copies: true, ownNetwork: true }).slice(4, 6)).toEqual([madeOfWord("clonefile"), "own network"]);
     // A fork has no copy of a folder on this computer, so both cells are empty.
@@ -341,8 +342,8 @@ describe("wsp verbs over the host", () => {
         expect.stringMatching(/^ws_/),
         here.name,
         expect.stringMatching(/^this (?:Mac|computer)$/),
-        madeOfWord("in-place"),
-        portsWord({ copies: true, ownNetwork: false }, undefined, hostPlatform()),
+        madeOfWord("clonefile"),
+        expect.stringMatching(/^shares this (?:Mac|computer)'s ports, PORT \d+$/),
         expect.stringMatching(/^\d+ cores · \d+ GB$/),
         expect.stringMatching(/^\S+$/),
       ],
@@ -533,14 +534,14 @@ describe("wsp verbs over the host", () => {
     // A fork is a child of the workspace it was forked from: the record says so, and a bring back from it reads
     // that parent's own branch as the base its work lands in.
     expect(forks[0]!.parentWorkspaceId).toBe(alpha!.id);
-    expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id} with ${forks[0]!.project.name} at ${forks[0]!.project.path}`]);
+    expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id}, a copy of ${forks[0]!.project.name} at ${forks[0]!.project.path}`]);
 
     const sent = await run("fork", alpha!.id, "--name", "worker", "--send", "build it");
     expect(sent.code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
-    expect(sent.io.lines).toEqual([`created worker ${worker.id} with ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(sent.io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
@@ -2024,7 +2025,7 @@ describe("wsp verbs over the host", () => {
       expect(inferred.code).toBe(0);
       const opened = (await rt.sessions.list()).find(t => t.prompt === "hello from the repo")!;
       expect(opened.workspaceId).toBe(spoo!.id);
-      expect(claude.starts.at(-1)!.cwd).toBe(folder);
+      expect(claude.starts.at(-1)!.cwd).toBe(copyPathFor(folder, "spoo"));
       // A workspace named on the line still wins over the folder the run is in.
       const named = await run("run", "beta", "--agent", "claude", "named anyway");
       expect(named.code, named.io.errors.join("\n")).toBe(0);
@@ -2048,18 +2049,18 @@ describe("wsp verbs over the host", () => {
     }
   });
 
-  it("a project worked in place takes none of the words a fork takes, and says which to drop", async () => {
+  it("a copy of a folder here takes none of the words a fork takes, and says which to drop", async () => {
     const folder = realpathSync(mkdtempSync(join(dir, "repo-flags-")));
     execFileSync("git", ["init", "-q", folder]);
     const here = await projectOn(rt, HERE_PLACE_ID, folder);
     for (const [word, value] of [["--from", "snap_p"], ["--size", "2x4"]] as const) {
       const said = await run("new", here.name, "work", word, value);
       expect(said.code).toBe(EXIT_CODES.usage);
-      expect(said.io.errors[0]).toContain(worksInPlaceTakesNone(here.name, [word]));
+      expect(said.io.errors[0]).toContain(copyTakesNone(here.name, [word]));
     }
     const engined = await run("new", here.name, "work", "--engine");
     expect(engined.code).toBe(EXIT_CODES.usage);
-    expect(engined.io.errors[0]).toContain(worksInPlaceTakesNone(here.name, ["--engine"]));
+    expect(engined.io.errors[0]).toContain(copyTakesNone(here.name, ["--engine"]));
     // Nothing was made by any of the three, so the folder is still free for the workspace that names none of them.
     expect((await rt.workspaces.list()).filter(w => w.project.id === here.id)).toEqual([]);
     expect((await run("new", here.name, "work")).code).toBe(0);
@@ -2594,7 +2595,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
-    expect(io.lines).toEqual([`created worker ${worker.id} with ${worker.project.name} at ${worker.project.path}`, `thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
 
     const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
@@ -3130,16 +3131,16 @@ describe("wsp verbs over the host", () => {
     expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
   });
 
-  it("a failing exec says the folder the host ran it in, which on this computer is the project worked in place", async () => {
+  it("a failing exec says the folder the host ran it in, which on this computer is the copy beside the project's folder", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-exec-")));
     execFileSync("git", ["init", "-q", folder]);
     const here = await projectOn(rt, HERE_PLACE_ID, folder);
     await run("new", here.name, "mac");
     const local = await run("exec", "mac", "--", "false");
     expect(local.code).toBe(1);
-    expect(local.io.errors).toEqual([`ran in ${folder}`]);
+    expect(local.io.errors).toEqual([`ran in ${copyPathFor(folder, "mac")}`]);
     const raw = await run("exec", "mac", "--json", "--", "false");
-    expect(json(raw.io).at(-1)).toEqual({ exitCode: 1, cwd: folder });
+    expect(json(raw.io).at(-1)).toEqual({ exitCode: 1, cwd: copyPathFor(folder, "mac") });
     rmSync(folder, { recursive: true, force: true });
   });
 

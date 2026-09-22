@@ -79,7 +79,7 @@ function seedLocalWorkspace(home: string): void {
     defaultBranch: "main",
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
-  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
+  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: `${folder}-first`, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
   writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
@@ -658,8 +658,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is what the workspace is made of, in the protocol's own word for the folder worked where it sits.
-    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("in-place"));
+    // Line two is what the workspace is made of, in the protocol's own word for a copy of the folder.
+    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("clonefile"));
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);

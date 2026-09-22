@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The relay: a directory and an introducer, never in the middle of the
-// conversation. It knows which boxes a person owns and where each answers,
-// and that is all it can know: no pairing code, no device token and no byte
-// of a thread passes through here. Adding a route is one row in the table
-// below and one function beside the ones it sits with.
-import { clientDelete, clientList } from "./clients.js";
+// conversation. It knows which boxes a person owns, where each answers and
+// which key each proves, which computers signed in and which of them a
+// computer already in admitted, and that is all it can know: no pairing code,
+// no device token, no private key and no byte of a thread passes through
+// here, and an admission is bytes it carries and cannot make. Adding a route
+// is one row in the table below and one function beside the ones it sits with.
+import { clientAdmit, clientDelete, clientList } from "./clients.js";
 import type { Env } from "./env.js";
-import { hostDelete, hostHeartbeat, hostList, hostTunnel } from "./hosts.js";
+import { hostAdd, hostDelete, hostHeartbeat, hostList, hostTunnel } from "./hosts.js";
 import { linkApprove, linkCallback, linkPoll, linkStart, linkTyped, linkVerify } from "./link.js";
 import { Refusal } from "./refusal.js";
 
@@ -46,8 +48,10 @@ const ROUTES: readonly Route[] = [
   { method: "POST", path: "/link/approve", handle: linkApprove },
   { method: "POST", path: "/link/poll", handle: linkPoll },
   { method: "GET", path: "/hosts", handle: hostList },
+  { method: "POST", path: "/hosts", handle: hostAdd },
   { method: "GET", path: "/clients", handle: clientList },
   { method: "DELETE", path: "/clients/:id", handle: clientDelete },
+  { method: "POST", path: "/clients/:id/admissions", handle: clientAdmit },
   { method: "POST", path: "/hosts/:id/tunnel", handle: hostTunnel },
   { method: "POST", path: "/hosts/:id/heartbeat", handle: hostHeartbeat },
   { method: "DELETE", path: "/hosts/:id", handle: hostDelete },
