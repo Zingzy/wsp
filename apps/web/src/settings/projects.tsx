@@ -9,7 +9,7 @@ import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button, DANGER_BUTTON } from "../components/ui/button.js";
+import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
@@ -71,7 +71,10 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
           title: project.name,
           description: [sourceWord(project.source), computer === null ? undefined : PROJECTS_WORDS.on(computer)].filter((word): word is string => word !== undefined).join(" · "),
           mono: true,
-          ...(count === 0 ? {} : { word: String(count), wordClass: "fact" as const }),
+          // A project nothing stands on reads 0: the count is loaded, and a blank where a sibling reads 3 is a
+          // fact nobody can tell from a fact that never arrived.
+          word: String(count),
+          wordClass: "fact" as const,
           open: () => ctx.go({ kind: "project", id: project.id }),
           attrs: { "data-project-row": project.id },
         };
@@ -113,7 +116,7 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, toast }:
             <AlertDialogDescription data-k="remove-project-sentence">{line}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>{WHERE_WORDS.cancel}</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{WHERE_WORDS.cancel}</AlertDialogClose>
             <Button data-k="remove-project-confirm" variant="destructive" disabled={busy} onClick={remove}>
               {PROJECTS_WORDS.remove}
             </Button>

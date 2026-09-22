@@ -9,11 +9,15 @@
 // never both, so a page's rhythm is one height per card.
 //
 // Below 640 px there is no room for a title, a sentence and a value on one
-// line, and no hover to read a cut word on: so a row's slot moves under its
-// description, its description takes two lines held whether it needs them or
-// not, and a line puts its value under its label with two lines for it. Every
-// row and every line takes the one taller height at that width, so nothing is
-// cut and no card is ragged.
+// line, and no hover to read a cut word on: so a description takes two lines
+// there, held whether it needs them or not, and a line puts its value under
+// its label with two lines for it. A value is the one thing whose length is
+// not bounded, so a card holding a row with one puts every slot in that card
+// on a line of its own under the description and stands its rows at 88; a
+// card whose slots are buttons and chevrons keeps them beside the text and
+// stands at 64. A description gets the room the slot leaves it: two lines of
+// the whole width where the slot has moved under it, three of the narrower
+// box where it stands beside it. One height per card either way, nothing cut.
 import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
@@ -24,10 +28,12 @@ import { FACT, VALUE } from "./format.js";
 export type WordClass = "value" | "fact";
 const WORD_CLASS: Record<WordClass, string> = { value: VALUE, fact: FACT };
 
-/** The height every row stands, whatever its words, and the taller one every row takes below 640 px, where the
- * slot has moved under a description that holds two lines. A line stands at one height too, and at the taller one
- * below 640 px, where whatever is at its right stands under its label instead. */
-export const ROW_CLASS = "h-13 max-sm:h-22";
+/** The height every row stands, whatever its words, and the two it takes below 640 px: the shorter where its slot
+ * stays beside a two-line description, the taller where the slot has moved under it. A line stands at one height
+ * too, and at the taller one below 640 px, where whatever is at its right stands under its label instead. */
+export const ROW_CLASS = "h-13";
+export const NARROW_ROW_CLASS = "max-sm:h-16";
+export const DROPPED_ROW_CLASS = "max-sm:h-22";
 export const LINE_CLASS = "h-8 max-sm:h-12";
 
 /** One row of a settings page as data: its words, which the search reads, and the slot's render. */
@@ -87,6 +93,8 @@ export function itemWords(item: SettingsItem): string[] {
 /** Two lines of the words' own line height below 640 px, held whether they take one line or two, wrapped on a
  * space and cut at the second: the room a description and a value each get where no hover can read a cut word. */
 const TWO_LINES_NARROW = "max-sm:line-clamp-2 max-sm:min-h-[2lh] max-sm:whitespace-normal";
+/** Three of them, for a description that has kept the slot beside it and so has a narrower box to say itself in. */
+const THREE_LINES_NARROW = "max-sm:line-clamp-3 max-sm:min-h-[3lh] max-sm:whitespace-normal";
 
 const CARD_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
 const TITLE_CLASS = "text-[13px] leading-4 text-foreground";
@@ -108,11 +116,11 @@ export function Card({ id, head, under, children }: { id: string; head?: ReactNo
   );
 }
 
-/** One row: the title over its description at the left, the slot at the right edge. Below 640 px the slot stands
- * on a line of its own under the description, the word at its left and the control at its right, and the
- * description holds two lines there, so neither a word nor a sentence is cut where there is no hover to read it on. */
-export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, attrs }: Omit<SettingsRowData, "kind">) {
-  const drops = word !== undefined || control !== undefined;
+/** One row: the title over its description at the left, the slot at the right edge. Where the card drops below
+ * 640 px the slot stands on a line of its own under the description, the word at its left and the control at its
+ * right, and the description holds two lines of the whole width; where it does not, the slot keeps its place and
+ * the description holds three of the narrower box. Either way nothing is cut where no hover can read it. */
+export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn("flex min-w-0 max-w-[60%] shrink items-center gap-3", drops && (word === undefined ? "max-sm:w-full max-sm:max-w-full max-sm:justify-end" : "max-sm:w-full max-sm:max-w-full max-sm:justify-between"))}>
@@ -127,7 +135,7 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
     );
   const body = (
     <>
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+      <div className={cn("flex min-w-0 flex-1 flex-col justify-center gap-0.5", !drops && "max-sm:gap-0")}>
         <span className="flex min-w-0 items-center gap-2">
           <span data-settings-title className={cn(TITLE_CLASS, "truncate")}>
             {title}
@@ -138,23 +146,25 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
             </span>
           )}
         </span>
-        <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", TWO_LINES_NARROW)} title={description}>
+        <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", drops ? TWO_LINES_NARROW : THREE_LINES_NARROW)} title={description}>
           {description}
         </span>
       </div>
       {slot}
     </>
   );
-  const rowClass = cn("flex items-center gap-4 px-4", ROW_CLASS, drops && "max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1");
+  const rowClass = cn("flex items-center gap-4 px-4", ROW_CLASS, drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
+  // Marked, so the height a row stands at below 640 px is read off the row rather than worked out a second time.
+  const dropMark = drops ? { "data-settings-drops": "" } : {};
   if (open !== undefined) {
     return (
-      <button type="button" data-settings-row={id} className={cn(rowClass, OPENS_CLASS)} onClick={open} {...attrs}>
+      <button type="button" data-settings-row={id} className={cn(rowClass, OPENS_CLASS)} onClick={open} {...dropMark} {...attrs}>
         {body}
       </button>
     );
   }
   return (
-    <div data-settings-row={id} className={rowClass} {...attrs}>
+    <div data-settings-row={id} className={rowClass} {...dropMark} {...attrs}>
       {body}
     </div>
   );
@@ -199,22 +209,37 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
   );
 }
 
+/** How long a description may be and still say itself in the three narrow lines a slot standing beside it leaves.
+ * A count of characters is a proxy for a width only the browser knows, so it is deliberately short of what the
+ * box holds; the render test walks every row of every screen at 390 and fails on a word its box cannot hold,
+ * which is what actually holds this honest. */
+const NARROW_DESCRIPTION_BUDGET = 56;
+
+/** Whether a card puts its slots under their descriptions below 640 px, every row of it at once so the card is
+ * one height: a row holding a value, whose length is not bounded, or a description with more to say than the
+ * narrower box beside a slot holds. */
+export const cardDrops = (items: ReadonlyArray<SettingsItem>): boolean =>
+  items.some(item => item.kind === "row" && (item.word !== undefined || item.description.length > NARROW_DESCRIPTION_BUDGET));
+
 /** A card's items drawn from their data: the one renderer every page and the search page share. */
 export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
   return (
     <>
-      {cards.map(card => (
-        <Card key={card.id} id={card.id} head={card.head} under={card.under}>
-          {card.items.map(item => {
-            if (item.kind === "line") {
-              const { kind: _line, ...line } = item;
-              return <Line key={item.id} {...line} />;
-            }
-            const { kind: _row, ...row } = item;
-            return <Row key={item.id} {...row} />;
-          })}
-        </Card>
-      ))}
+      {cards.map(card => {
+        const drops = cardDrops(card.items);
+        return (
+          <Card key={card.id} id={card.id} head={card.head} under={card.under}>
+            {card.items.map(item => {
+              if (item.kind === "line") {
+                const { kind: _line, ...line } = item;
+                return <Line key={item.id} {...line} />;
+              }
+              const { kind: _row, ...row } = item;
+              return <Row key={item.id} {...row} drops={drops} />;
+            })}
+          </Card>
+        );
+      })}
     </>
   );
 }

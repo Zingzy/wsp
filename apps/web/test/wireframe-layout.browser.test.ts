@@ -17,11 +17,14 @@
 // with no transform once open; the desktop foot names this computer; and the
 // whole is photographed on every screen in both themes for a judge. The
 // settings page follows, on the same page: every row 52 px and every line 32,
-// the settings sidebar's rows 28 with one lifted, every row 88 at 390 and
-// every line 48 with its right side under its label, no label, word, sentence
-// or value cut or spilling its box at that width, no caps, no cut segment, no sideways scroll, the
-// muted words at AA, a held control further down the opacity ramp than a live
-// one, the sub-rows holding their room so picking a group moves no row below
+// the settings sidebar's rows 28 with one lifted, at 390 a card whose rows
+// hold a value standing them at 88 with the slot under the description and
+// every other card at 64, every line 48 with its right side under its label,
+// no label, word, sentence or value cut or spilling its box at that width, no
+// caps, no cut segment, no sideways scroll, the muted words at AA, a held
+// control further down the opacity ramp than a live one, no group row lifted
+// while the results stand and a dimmed row standing back by opacity on both
+// sides, the sub-rows holding their room so picking a group moves no row below
 // it, the Light pick drawing the page light, Restore defaults only off the
 // defaults, the region right of the sidebar whole with the panel back on the
 // chord, and the one-field sheet's geometry over Computers. A computer's page
@@ -503,7 +506,8 @@ const SETTINGS_SCREENS = [
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
 const ROW = 52;
-const NARROW_ROW = 88;
+const NARROW_ROW = 64;
+const NARROW_DROPPED_ROW = 88;
 const LINE = 32;
 const NARROW_LINE = 48;
 /** The computers whose page is photographed to its foot, in a window tall enough to hold the whole of it. */
@@ -515,9 +519,9 @@ const FOOT_SIZES = [
 
 /** Every row, line and sidebar row of a settings screen, with its height and what it holds. */
 interface SettingsRead {
-  rows: { id: string; height: number; card: string; fill: string; spills: boolean }[];
+  rows: { id: string; height: number; card: string; fill: string; spills: boolean; drops: boolean }[];
   lines: { id: string; height: number; spills: boolean }[];
-  sidebarRows: { id: string; height: number; active: boolean }[];
+  sidebarRows: { id: string; height: number; active: boolean; dimmed: boolean; opacity: number }[];
   cutSegments: string[];
   /** Every word, sentence and value whose box cannot hold it: the ones a person would read cut short. */
   cutWords: string[];
@@ -571,6 +575,8 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         card: el.closest<HTMLElement>("[data-settings-card]")?.dataset["settingsCard"] ?? "?",
         fill: getComputedStyle(el).backgroundColor,
         spills: spills(el),
+        // A card drops its slots below 640 px where one of its rows needs the width, and then every row of it does.
+        drops: el.hasAttribute("data-settings-drops"),
       }));
       const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({
         id: el.dataset["settingsLine"] ?? "?",
@@ -583,7 +589,13 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
         .map(el => `${(el.textContent ?? "").trim()} [${el.scrollWidth}/${el.clientWidth} ${el.scrollHeight}/${el.clientHeight}]`);
       const opacity = (selector: string): number[] => [...document.querySelectorAll<HTMLElement>(selector)].map(el => Number(getComputedStyle(el).opacity));
-      const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => ({ id: el.dataset["rowId"] ?? "?", height: box(el).height, active: el.dataset["active"] === "true" }));
+      const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => ({
+        id: el.dataset["rowId"] ?? "?",
+        height: box(el).height,
+        active: el.dataset["active"] === "true",
+        dimmed: el.hasAttribute("data-dimmed"),
+        opacity: Number(getComputedStyle(el).opacity),
+      }));
       const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
       const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
         .filter(el => getComputedStyle(el).textTransform !== "none" || getComputedStyle(el).letterSpacing !== "normal")
@@ -607,7 +619,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     // description holding two lines; a line is 32, or 48 there where its value stands under its label.
     for (const row of got.rows) {
       expect(row.fill, `${row.id} at ${where} carries no fill of its own`).toBe("rgba(0, 0, 0, 0)");
-      expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? NARROW_ROW : ROW);
+      expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? (row.drops ? NARROW_DROPPED_ROW : NARROW_ROW) : ROW);
       expect(row.spills, `${row.id} at ${where} holds what it says`).toBe(false);
     }
     for (const line of got.lines) {
@@ -620,6 +632,9 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     expect(got.scroll.page, `sideways scroll at ${where}`).toBeLessThanOrEqual(got.scroll.client);
     // A control nobody can press stands further down the opacity ramp than every live one beside it.
     for (const held of got.opacities.held) for (const live of got.opacities.live) expect(held, `a held control at ${where} against a live one`).toBeLessThan(live);
+    // A row with no match for the typed text stands back by opacity, which reads the same way on both sides; an
+    // ink swap read brighter than the rest ink on dark and did nothing on light.
+    for (const row of got.sidebarRows) expect(row.opacity, `${row.id} at ${where}`).toBe(row.dimmed ? 0.5 : 1);
   };
 
   it("every row is 52 px and every line 32, the sidebar rows 28 with exactly one lifted, no caps, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
@@ -631,7 +646,8 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         // ones that are, so a judge reading the shots and a reader of the report see the same list.
         console.info(`${screen} ${theme}: rows ${JSON.stringify(got.rows.map(r => [r.id, r.height]))}, lines ${JSON.stringify(got.lines.map(l => [l.id, l.height]))}, cut ${JSON.stringify(got.cutWords)}`);
         expectGrammar(got, `${screen} ${theme} 1280`, false);
-        expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(1);
+        // While the results stand in the centre no row is the page, so the search screen lifts none.
+        expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(screen === "settings-search" ? 0 : 1);
         // The muted words read at AA on both sides: descriptions, state words and the sub-heads.
         const ratios = await textContrast(page!, "[data-settings-page] [data-settings-description], [data-settings-page] [data-settings-word], [data-settings-page] [data-settings-head], [data-settings-page] [data-settings-mark]");
         for (const ratio of ratios) expect(ratio, `muted text on ${screen} ${theme} reads at ${ratio}`).toBeGreaterThanOrEqual(4.5);
@@ -640,7 +656,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("at 390 every row stands at 88 with its slot under a two-line description, every line at 48 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
+  it("at 390 a card holding a value stands its rows at 88 with the slot under a two-line description and every other card at 64, every line at 48 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         if (screen === "settings-search") continue;
@@ -650,7 +666,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         // Nothing a person reads is cut at a width with no hover to read the whole on.
         expect(got.cutWords, `words cut at ${screen} ${theme} 390`).toEqual([]);
         if (screen === "settings-appearance") {
-          expect(got.rows.map(row => row.height)).toEqual([NARROW_ROW, NARROW_ROW, NARROW_ROW]);
+          expect(got.rows.map(row => row.height)).toEqual([NARROW_DROPPED_ROW, NARROW_DROPPED_ROW, NARROW_DROPPED_ROW]);
           // The segment's whole words at this width, which is why the size segments read App and Ghostty file.
           expect(await page!.locator("[data-settings-row=terminal-size] [role=radio]").allTextContents()).toEqual(["App", "Ghostty file"]);
         }

@@ -23,6 +23,10 @@ import type { SettingsItem } from "./rows.js";
 import { useSettingsAt, useSettingsContext } from "./settingsContext.js";
 import { atId, groupOf, sameAt, useSettingsStore, type SettingsAt } from "./settingsStore.js";
 
+/** How far a row with no match for the typed text stands back. Opacity, not another ink: the sidebar's rest ink
+ * is darker than its muted ink on the dark side, so dimming by ink read brighter there and did nothing on light. */
+const DIMMED = "opacity-50";
+
 /** Brings the row a search result names into view once its page is drawn. */
 function revealItem(id: string): void {
   let tries = 0;
@@ -45,6 +49,9 @@ export function SettingsSidebar() {
   const groups = drawnGroups();
   const openGroup = groupOf(at);
   const matches = search === "" ? null : new Map(groups.map(group => [group.id, searchGroup(group, ctx, search)] as const));
+  // While the results stand in the centre no row is the page, so none is lifted; on the phone the results are in
+  // this sheet and the centre keeps the page it was on, which stays lifted.
+  const lifting = matches === null || isMobile;
 
   const go = (next: SettingsAt): void => {
     ctx.go(next);
@@ -128,7 +135,7 @@ export function SettingsSidebar() {
       <li key={group.id} className="flex flex-col">
         <SidebarMenuButton
           size="sm"
-          isActive={sameAt(at, groupAt)}
+          isActive={lifting && sameAt(at, groupAt)}
           data-sidebar-row
           data-row-id={`group:${group.id}`}
           data-k={`settings-${group.id}`}
@@ -136,8 +143,8 @@ export function SettingsSidebar() {
           {...(dimmed ? { "data-dimmed": "" } : {})}
           onClick={() => go(groupAt)}
           // The group whose page is a sub-page reads in the foreground ink without a fill; a group with no match
-          // for the typed text dims to the muted ink.
-          className={cn(ONE_LINE_ROW_CLASS, open && !sameAt(at, groupAt) && "text-sidebar-foreground", dimmed && "text-sidebar-muted-foreground")}
+          // for the typed text stands back by DIMMED, never by another ink.
+          className={cn(ONE_LINE_ROW_CLASS, open && !sameAt(at, groupAt) && "text-sidebar-foreground", dimmed && DIMMED)}
         >
           <Glyph className="size-3.5" />
           <span className="min-w-0 flex-1 truncate">{group.name}</span>
@@ -147,7 +154,7 @@ export function SettingsSidebar() {
             {under.map(sub => (
               <li key={atId(sub.at)}>
                 {/* A sub-row dims with its group: lit under a dimmed head it reads as the one thing that matched. */}
-                <SidebarMenuButton size="sm" isActive={sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && "text-sidebar-muted-foreground")}>
+                <SidebarMenuButton size="sm" isActive={lifting && sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && DIMMED)}>
                   <span className="min-w-0 flex-1 truncate">{sub.name}</span>
                 </SidebarMenuButton>
               </li>

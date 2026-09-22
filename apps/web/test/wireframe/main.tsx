@@ -379,6 +379,7 @@ const api = {
   hostTerminalConfig: async () => ({ files: [] }),
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
+  devicesRevoke: async () => {},
   // A dial that answers, so a computer's page draws Try now beside when it last answered.
   dialPlace: async (placeId: string) => {
     const place = computers.find(row => row.id === placeId)!;

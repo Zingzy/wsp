@@ -149,7 +149,12 @@ describe("search", () => {
     // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
     expect(dimmed).toEqual(["group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"]);
-    expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("text-sidebar-muted-foreground");
+    // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
+    // dark side, so an ink swap read brighter there and did nothing at all on light.
+    expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("opacity-50");
+    expect(document.querySelector<HTMLElement>("[data-row-id='group:computers']")?.className).not.toContain("text-sidebar-muted-foreground");
+    // No row is the page while the results stand in the centre, so none is lifted.
+    expect(liftedRowIds()).toEqual([]);
     fireEvent.change(field(), { target: { value: "zzz" } });
     expect(document.querySelector("[data-k=nothing-matches]")?.textContent).toBe(SETTINGS_WORDS.nothingMatches);
     // A project matches by its name, the one word on its row a person searches for.
@@ -158,6 +163,7 @@ describe("search", () => {
     fireEvent.keyDown(field(), { key: "Escape" });
     expect(field().value).toBe("");
     expect(pageAt()).toBe("appearance");
+    expect(liftedRowIds()).toEqual(["group:appearance"]);
     expect(useStore.getState().settingsOpen).toBe(true);
     // With the field empty the same key closes Settings, through the dispatcher.
     fireEvent.keyDown(field(), { key: "Escape" });

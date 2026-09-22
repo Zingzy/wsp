@@ -12,7 +12,7 @@
 // host holds its key or a workspace stands on it. A list that named an
 // account nobody had bought, with an hourly price beside it, read as a bill.
 import { useState } from "react";
-import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, placeSpendLine, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
@@ -202,6 +202,11 @@ function agentRows(agents: readonly AgentLine[], here: boolean, computer: string
   });
 }
 
+/** What a computer has cost, as its own line: the month's figure and the hourly rate, both the protocol's. The
+ * count of workspaces the rate is spread over is not said, since the rate already is what is running there and a
+ * line that ends "now across 0 workspaces" wraps at a phone's width to say nothing. */
+const spendLine = (spend: PlaceSpend): string => `${spentThisMonth(spend.monthUsd)} · ${fmtRate(spend.rateUsdPerHour)}`;
+
 /** Where a workspace of a project on this computer would land, for the Ports row: the first project the host holds
  * on it, since every workspace there reads the same two flags. */
 function landingOn(ctx: SettingsContext, place: PlaceView): WorkspaceLanding | null {
@@ -219,9 +224,8 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
   const held = keyHeld(place.name, ctx.reads.setup);
   const image = held ? (view?.image ?? null) : null;
   const spend = ctx.reads.spend.find(row => row.place === place.id);
-  const count = holding.workspaces.length;
   const facts: SettingsItem[] = [
-    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: placeSpendLine(spend, count), attrs: { "data-k": "spend" } }]),
+    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }]),
     // Until the host has answered there is no fact to say; not built yet is drawn only once the read came back empty.
     ...(!held || view === null
       ? []
@@ -295,7 +299,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     ...(place.shape === undefined ? [] : [{ kind: "line" as const, id: "size", label: WHERE_WORDS.size, value: fmtSize(place.shape, placeCpuWord(place)), attrs: { "data-k": "size" } }]),
     ...(place.diskFreeBytes === undefined ? [] : [{ kind: "line" as const, id: "disk-free", label: WHERE_WORDS.diskFree, value: fmtBytes(place.diskFreeBytes), attrs: { "data-k": "disk-free" } }]),
     ...(here || place.joinedAt === undefined ? [] : [{ kind: "line" as const, id: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(ctx.now - Date.parse(place.joinedAt))), attrs: { "data-k": "joined" } }]),
-    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: placeSpendLine(spend, holding.workspaces.length), attrs: { "data-k": "spend" } }]),
+    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }]),
   ];
   // The dial's answer replaces the description while it stands, one line with the whole on hover; a wsp that
   // cannot dial says so there and draws no button.

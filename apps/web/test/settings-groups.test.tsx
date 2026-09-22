@@ -10,7 +10,7 @@ import type { DeviceView, PlaceView, ProjectView, WorkspaceView } from "@wsp/pro
 import { DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
@@ -47,7 +47,8 @@ describe("Projects", () => {
     expect(descriptionOf("pr_spoo")).toBe("/Users/dev/spoo");
     expect(wordOf("pr_spoo")).toBe("2");
     expect(descriptionOf("pr_landing")).toBe("dev/landing · on spoo");
-    expect(wordOf("pr_landing")).toBeUndefined();
+    // A loaded zero is a fact: a blank where a sibling reads 2 cannot be told from a count that never arrived.
+    expect(wordOf("pr_landing")).toBe("0");
     fireEvent.click(screen.getByRole("button", { name: PROJECTS_WORDS.add }));
     await waitFor(() => expect(document.querySelector("[data-k=add-project]")).not.toBeNull());
     act(() => useSettingsStore.getState().closeAddProject());
@@ -119,7 +120,7 @@ describe("Projects", () => {
 describe("Devices", () => {
   it("lists one row per unscoped device with paired and seen, names this browser, and Revoke asks, calls the host and rereads", async () => {
     const revoked: string[] = [];
-    let devices: DeviceView[] = [device("d_1", "zingzy-laptop"), device("d_2", "Safari on iPhone", { here: true }), device("d_3", "a thread's token", { scope: { kind: "thread", workspaceId: "ws_a", threadId: "th_1", rootThreadId: "th_1" } })];
+    let devices: DeviceView[] = [device("d_1", "zingzy-laptop"), device("d_2", "Safari on iPhone", { here: true, lastSeenAt: new Date().toISOString() }), device("d_3", "a thread's token", { scope: { kind: "thread", workspaceId: "ws_a", threadId: "th_1", rootThreadId: "th_1" } })];
     await mount(
       {
         devicesList: async () => devices,
@@ -132,6 +133,8 @@ describe("Devices", () => {
     );
     expect(rowTitles()).toEqual(["zingzy-laptop", DEVICES_WORDS.thisBrowser]);
     expect(descriptionOf("d_1")).toMatch(/^paired Sep 1 \d\d:\d\d · seen 1[12] min ago$/);
+    // A device heard from inside the minute says so in words rather than as a span of zero.
+    expect(descriptionOf("d_2")).toMatch(/^paired Sep 1 \d\d:\d\d · seen just now$/);
     expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).toContain("font-mono");
     // The door to the confirmation is neutral where it stands and red only under the pointer; the act itself, in
     // the dialog, is the one red thing at rest.
@@ -152,6 +155,14 @@ describe("Devices", () => {
     act(() => useSettingsStore.getState().go({ kind: "group", group: "account" }));
     await settle();
     expect(document.body.textContent).not.toContain(DEVICES_WORDS.thisBrowser);
+  });
+
+  it("holds Revoke and says why in the row where this wsp carries no such request", async () => {
+    await mount({ devicesList: async () => [device("d_1", "zingzy-laptop")] } as Partial<Api>, "devices");
+    const revoke = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=revoke]")!;
+    expect(revoke().disabled).toBe(true);
+    expect(revoke().hasAttribute("title")).toBe(false);
+    expect(descriptionOf("d_1")).toMatch(new RegExp(`· ${WHERE_WORDS.notYet}$`));
   });
 
   it("says one line where nothing is paired, and one where a page served on a ticket socket is refused the list", async () => {

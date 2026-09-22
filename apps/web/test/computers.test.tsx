@@ -515,7 +515,9 @@ describe("the cloud's page", () => {
     ).api;
     useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
     await mountComputers(api, { kind: "computer", id: "solari" });
-    expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr now across 2 workspaces");
+    // The rate is what is running there, so the count of workspaces it is spread over is not said again: the
+    // clause wrapped the value onto a second line at a phone's width to add nothing.
+    expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr");
     expect(lineValue("image-facts")).toBe("v2 · 4.2 GB · 2 sign-ins");
     expect(lineValue("image-built")).toMatch(/^Sep 12 \d\d:\d\d · from this Mac$/);
     expect(document.querySelector("[data-k='edit-image']")?.textContent).toBe(IMAGE_WORDS.edit);

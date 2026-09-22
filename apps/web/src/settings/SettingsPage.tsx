@@ -17,7 +17,7 @@ import { ComputerPage } from "./computers.js";
 import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
 import { ProjectPage } from "./projects.js";
-import { Card, Cards, Line, Row, ROW_CLASS } from "./rows.js";
+import { Card, cardDrops, Cards, Line, Row, ROW_CLASS } from "./rows.js";
 import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
 import { useSettingsReads } from "./settingsReads.js";
 import { atId, useSettingsStore, type SettingsAt } from "./settingsStore.js";
@@ -36,26 +36,29 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
   }
   return (
     <>
-      {found.map(({ group, items }) => (
-        <Card
-          key={group.id}
-          id={`search-${group.id}`}
-          head={
-            <button type="button" data-k={`search-group-${group.id}`} className="text-left transition-colors duration-150 hover:text-foreground" onClick={() => ctx.go({ kind: "group", group: group.id })}>
-              {group.name}
-            </button>
-          }
-        >
-          {items.map(item => {
-            if (item.kind === "line") {
-              const { kind: _line, ...line } = item;
-              return <Line key={item.id} {...line} />;
+      {found.map(({ group, items }) => {
+        const drops = cardDrops(items);
+        return (
+          <Card
+            key={group.id}
+            id={`search-${group.id}`}
+            head={
+              <button type="button" data-k={`search-group-${group.id}`} className="text-left transition-colors duration-150 hover:text-foreground" onClick={() => ctx.go({ kind: "group", group: group.id })}>
+                {group.name}
+              </button>
             }
-            const { kind: _row, ...row } = item;
-            return <Row key={item.id} {...row} />;
-          })}
-        </Card>
-      ))}
+          >
+            {items.map(item => {
+              if (item.kind === "line") {
+                const { kind: _line, ...line } = item;
+                return <Line key={item.id} {...line} />;
+              }
+              const { kind: _row, ...row } = item;
+              return <Row key={item.id} {...row} drops={drops} />;
+            })}
+          </Card>
+        );
+      })}
     </>
   );
 }

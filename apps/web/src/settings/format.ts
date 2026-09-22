@@ -149,6 +149,8 @@ export const DEVICES_WORDS = {
   title: "Devices",
   thisBrowser: "this browser",
   paired: (when: string, seen: string): string => `paired ${when} · seen ${seen} ago`,
+  /** A device this wsp heard from inside the minute: the span reads 0 min, which says nothing a person asked. */
+  pairedNow: (when: string): string => `paired ${when} · seen just now`,
   revoke: "Revoke",
   revokeTitle: (name: string): string => `Revoke ${name}?`,
   revokeDescription: "It can no longer reach this wsp until it pairs again.",
