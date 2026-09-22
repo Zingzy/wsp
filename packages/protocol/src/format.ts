@@ -1664,6 +1664,11 @@ export function nameDeletingRefusal(name: string): string {
   return `${name} is being deleted; wait for the delete to finish, then fork it again`;
 }
 
+/** A delete whose machine the provider still reads after two asks: the record stays, so the machine is still named. */
+export function deleteRefusedLine(name: string, machineId: string, state: MachineState): string {
+  return `${name}'s machine ${machineId} is still ${state} after two asks; run wsp delete again or delete it at the provider`;
+}
+
 /** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
 export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 
@@ -3238,6 +3243,19 @@ export type BuilderReading = MachineState | "unread";
  * that the reply carried none and when it landed, never an empty id. */
 export function providerAnswerLine(a: ProviderAnswer): string {
   return `${a.status} ${a.message} (${a.requestId !== undefined ? `request ${a.requestId}` : `no request id from the provider, at ${a.at}`})`;
+}
+
+/** What df read of a machine's root disk before a snapshot was asked for, or why it read nothing. */
+export type DiskUse = { kind: "use"; usedBytes: number; sizeBytes: number } | { kind: "unknown"; reason: string };
+
+/** A workspace snapshot the provider refused: its answer, and the disk read before the ask, named the reason only at
+ * the danger tier the disk meter uses. */
+export function snapshotRefusedLine(name: string, answer: ProviderAnswer, disk: DiskUse): string {
+  const answered = `the provider answered ${providerAnswerLine(answer)}`;
+  if (disk.kind === "unknown") return `${name} was not snapshotted: ${answered}; the disk could not be read (${disk.reason})`;
+  const full = `its disk is ${Math.floor((disk.usedBytes / disk.sizeBytes) * 100)} percent full (${fmtBytesOf(disk.usedBytes, disk.sizeBytes)})`;
+  if (diskTone(disk.usedBytes, disk.sizeBytes) === "danger") return `${name} was not snapshotted: ${full} and ${answered}; free space on it or delete the workspace, then snapshot again`;
+  return `${name} was not snapshotted: ${answered}; ${full}, so the disk is not the reason`;
 }
 
 /** The snapshotting stage's line after one refused attempt with another to come: which attempt, what the provider
