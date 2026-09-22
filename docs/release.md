@@ -37,10 +37,13 @@ checkout of `main` on a computer with the Solari key in `.env`.
    line, naming the commit it points at, and it checks the tag against every
    `package.json` that carries a version and stops with both numbers in the
    line when they disagree, so a tag on a side branch, or one pushed before
-   step 5, fails here instead of shipping. A run started by hand from the
-   Actions tab is always the dry run, whatever ref it runs on: the four
-   daemon binaries are built and the command line package is staged with
-   them, and nothing is drafted, attached or published.
+   step 5, fails here instead of shipping. That check runs from the tree the
+   tag points at, so it stops a tag pushed by hand on the wrong commit and not
+   a credential that strips the check from a commit before tagging it; the
+   ruleset on `refs/tags/v*` is the control against that credential. A run
+   started by hand from the Actions tab is always the dry run, whatever ref it
+   runs on: the four daemon binaries are built and the command line package
+   is staged with them, and nothing is drafted, attached or published.
    Then a macOS runner builds `apps/desktop` as one universal
    bundle carrying both chips, signs it (see
    [Signing the mac bundles](#signing-the-mac-bundles)), checks both slices of

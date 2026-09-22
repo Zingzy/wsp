@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DAEMON_TARGETS, daemonArtifactName } from "@wsp/host";
 import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
 
@@ -22,6 +24,51 @@ const envNames = bundleEnv("0.1.5")
   .map(line => line.slice(0, line.indexOf("=")));
 /** What signs and notarizes the mac bundles, by the names electron-builder reads them under. */
 const SIGNING_SECRETS = ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
+const made: string[] = [];
+
+afterEach(() => {
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+/** The shell one step of a job runs, taken out of the block the runner hands to bash. */
+function stepScript(job: string, name: string): string {
+  const at = job.indexOf(`- name: ${name}\n`);
+  expect(at, name).toBeGreaterThan(-1);
+  const body = job.slice(job.indexOf("run: |\n", at) + "run: |\n".length).split("\n");
+  const lines: string[] = [];
+  for (const line of body) {
+    if (line.trim() !== "" && !line.startsWith(" ".repeat(10))) break;
+    lines.push(line.slice(10));
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** A gh of its own answering the read of the release served as latest, and recording every `gh release` call so a
+ * case reads whether the draft was ever flipped. */
+function stubGh(answer: string): string {
+  return `#!/bin/sh\ncase "$1 $2" in\n  "api repos/Zingzy/wsp/releases/latest") ${answer} ;;\nesac\ncase "$1" in release) echo "$*" >> edits ;; esac\n`;
+}
+
+/** That step as the runner runs it, `bash -e` with that gh first on PATH, in a checkout of its own carrying the
+ * scripts the step calls, so nothing is written into this one. They are copied and not linked: node reads a main
+ * module through its real path, and a script reached by a link would not know it was run as one. */
+function runStep(script: string, gh: string): { status: number; said: string; edits: string } {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-publish-"));
+  made.push(dir);
+  writeFileSync(join(dir, "gh"), gh);
+  chmodSync(join(dir, "gh"), 0o755);
+  cpSync(join(repo, "packages", "wspx", "scripts"), join(dir, "packages", "wspx", "scripts"), { recursive: true });
+  mkdirSync(join(dir, "packages", "protocol", "src"), { recursive: true });
+  cpSync(join(repo, "packages", "protocol", "src", "semver.mjs"), join(dir, "packages", "protocol", "src", "semver.mjs"));
+  writeFileSync(join(dir, "step.sh"), script);
+  const ran = spawnSync("bash", ["-e", "step.sh"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}`, GITHUB_REF_NAME: "v0.3.0", GITHUB_REPOSITORY: "Zingzy/wsp" },
+  });
+  const edits = join(dir, "edits");
+  return { status: ran.status ?? -1, said: `${ran.stdout}${ran.stderr}`, edits: existsSync(edits) ? readFileSync(edits, "utf8") : "" };
+}
 
 describe("the release workflow", () => {
   it("runs on a pushed release tag, and by hand as a dry run with no box to untick", () => {
@@ -58,6 +105,34 @@ describe("the release workflow", () => {
     expect(publishJob).toContain('node packages/wspx/scripts/latest-flag.mjs "$GITHUB_REF_NAME" "$current"');
     expect(publishJob).toContain('gh release edit "$GITHUB_REF_NAME" --draft=false $flag');
     expect(publishJob).not.toContain("--latest");
+  });
+
+  it("reads no release served as latest off the 404 and not off an empty answer, and publishes as latest", () => {
+    // gh writes the error body to stdout and exits 1, so an empty answer is never what a repository with no latest
+    // release looks like.
+    const notFound = `printf '{"message":"Not Found"}\\n'; echo 'gh: Not Found (HTTP 404)' >&2; exit 1`;
+    const ran = runStep(stepScript(publishJob, "Turn the draft into a release, latest where its version says so"), stubGh(notFound));
+    expect(ran.status, ran.said).toBe(0);
+    expect(ran.said).toContain("(none): --latest");
+    expect(ran.edits.trim()).toBe("release edit v0.3.0 --draft=false --latest");
+  });
+
+  it("fails on any other failure of that read and leaves the release a draft", () => {
+    const badGateway = `printf '{"message":"Bad gateway"}\\n'; echo 'gh: Bad gateway (HTTP 502)' >&2; exit 1`;
+    const ran = runStep(stepScript(publishJob, "Turn the draft into a release, latest where its version says so"), stubGh(badGateway));
+    expect(ran.status).not.toBe(0);
+    expect(ran.said).toContain("HTTP 502");
+    // The step stops on the read that failed and says so, rather than handing the error body on and failing later
+    // under a sentence about a tag nobody named.
+    expect(ran.said).not.toContain("not a release tag");
+    expect(ran.edits).toBe("");
+  });
+
+  it("reads the tag it is served and hands it to the flag script", () => {
+    const ran = runStep(stepScript(publishJob, "Turn the draft into a release, latest where its version says so"), stubGh("echo v0.2.0"));
+    expect(ran.status, ran.said).toBe(0);
+    expect(ran.edits.trim()).toBe("release edit v0.3.0 --draft=false --latest");
+    expect(ran.said).toContain("v0.3.0 against the release served as latest (v0.2.0): --latest");
   });
 
   it("builds one static daemon per target the host names, uploads each under the artifact name the host spells, and places all of them before every build", () => {

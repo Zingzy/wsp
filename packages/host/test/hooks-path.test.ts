@@ -120,6 +120,20 @@ describe("what the prepare script wires", () => {
     expect(readdirSync(folder).sort()).toEqual(HOOKS);
   });
 
+  it("sweeps a half written hook whose install died and leaves one whose install is still running", () => {
+    const dir = withAForeignBranch();
+    const folder = folderOf(dir);
+    wire(dir);
+    // A pid that ran and exited, which is what an install that died leaves in the name it was writing under.
+    const dead = execFileSync("sh", ["-c", "echo $$"], { encoding: "utf8" }).trim();
+    const gone = `pre-commit.${dead}.writing`;
+    const going = `pre-commit.${process.pid}.writing`;
+    for (const half of [gone, going]) writeFileSync(join(folder, half), "#!/bin/sh\nexit 1\n");
+    wire(dir);
+    expect(existsSync(join(folder, gone))).toBe(false);
+    expect(readdirSync(folder).sort()).toEqual([...HOOKS, going].sort());
+  });
+
   it("reads origin/main where a clone carries no main branch of its own", () => {
     const origin = withAForeignBranch();
     const clone = join(temporary("wsp-hooks-clone-"), "clone");

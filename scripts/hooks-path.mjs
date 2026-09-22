@@ -16,9 +16,10 @@ import { join } from "node:path";
 const SOURCE = ".githooks";
 const FOLDER = "wsp-hooks";
 /** Each hook lands under a name of its own and is renamed over the hook's, so a second install running at the same
- * moment in another worktree never leaves a half written file where git reads a hook; a name of this shape is one
- * such install's and is left where it is when the folder is swept. */
+ * moment in another worktree never leaves a half written file where git reads a hook; the pid in the name is what
+ * says whether that install is still going. */
 const WRITING = `.${process.pid}.writing`;
+const HALF_WRITTEN = /\.(\d+)\.writing$/;
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 
@@ -29,6 +30,20 @@ function reads(ref) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Whether a name is an install's half written hook and that install is still running, which is the one thing the
+ * sweep leaves alone. A pid that answers nothing was an install that died and its file is swept with the rest. */
+function beingWritten(name) {
+  const found = HALF_WRITTEN.exec(name);
+  if (found === null) return false;
+  try {
+    process.kill(Number(found[1]), 0);
+    return true;
+  } catch (e) {
+    // A running process someone else owns answers EPERM; only a pid nothing answers to is gone.
+    return e.code === "EPERM";
   }
 }
 
@@ -54,7 +69,7 @@ function wire() {
     renameSync(writing, join(folder, name));
   }
   for (const gone of readdirSync(folder)) {
-    if (!names.includes(gone) && !gone.endsWith(".writing")) rmSync(join(folder, gone), { recursive: true, force: true });
+    if (!names.includes(gone) && !beingWritten(gone)) rmSync(join(folder, gone), { recursive: true, force: true });
   }
   try {
     git("config", "core.hooksPath", folder);

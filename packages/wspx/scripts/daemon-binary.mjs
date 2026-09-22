@@ -155,5 +155,10 @@ function main(args) {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main(process.argv.slice(2));
+  try {
+    await main(process.argv.slice(2));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  }
 }

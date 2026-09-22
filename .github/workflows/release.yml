@@ -8,6 +8,10 @@ name: release
 # site links. A run started by hand is the dry run and there is no box to untick:
 # the daemon binaries are built and uploaded as artifacts and the command line
 # package is staged with them, and nothing is drafted, attached or published.
+# The tag runs the workflow of the commit it points at, so the check that the
+# commit stands on main's own line holds against a tag pushed by hand on the
+# wrong commit, not against a credential that strips the check from a commit
+# first; the ruleset on refs/tags/v* is the control against that credential.
 on:
   push:
     tags:
@@ -305,7 +309,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || echo)"
+          # gh prints the API's error body on stdout and exits 1, so a repository serving no latest release is told
+          # apart by the 404 its stderr names and never by an empty answer; any other failure stops here and leaves
+          # the release a draft rather than guessing that nothing is served.
+          if ! current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> latest-error.txt)"; then
+            grep -q "HTTP 404" latest-error.txt || { cat latest-error.txt >&2; exit 1; }
+            current=""
+          fi
           flag="$(node packages/wspx/scripts/latest-flag.mjs "$GITHUB_REF_NAME" "$current")"
           echo "$GITHUB_REF_NAME against the release served as latest (${current:-none}): $flag"
           gh release edit "$GITHUB_REF_NAME" --draft=false $flag

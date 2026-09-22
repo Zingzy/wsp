@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,6 +86,15 @@ describe("the check between the tag and the manifests", () => {
     git(root, "tag", "v0.1.4");
     expect(manifestMismatches(root, "0.1.4")).toEqual([{ file: join("apps", "desktop", "package.json"), version: "0.1.3" }]);
     expect(() => checkTag(root, "v0.1.4", "main")).toThrow(/tag v0\.1\.4 says 0\.1\.4, apps\/desktop\/package\.json says 0\.1\.3/);
+  });
+
+  it("says one sentence for a tag that is not here, not git's own block", () => {
+    const root = fakeRepo({ "packages/wspx": { name: "@zingzy/wsp", version: "0.1.4" } });
+    expect(() => checkTag(root, "v9.9.9", "main")).toThrow("no tag v9.9.9 in this checkout; fetch the tag before asking what it names");
+    const script = join(repo, "packages", "wspx", "scripts", "tag-version.mjs");
+    const ran = spawnSync("node", [script, "v99.99.99"], { encoding: "utf8" });
+    expect(ran.status).toBe(1);
+    expect(ran.stderr.trim()).toBe("no tag v99.99.99 in this checkout; fetch the tag before asking what it names");
   });
 
   it("fails on the tag before it reads a repository at all", () => {

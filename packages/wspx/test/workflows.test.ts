@@ -2,15 +2,18 @@
 // What every workflow in this repository is held to, whatever it runs: each action pinned to a commit sha, each job
 // holding the grant its own steps use and no other, each cargo line taking the lockfile as it stands, and each
 // runner image and toolchain named at a version nothing moves under a run.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
-const NAMES = ["release.yml", "ci.yml", "daemon.yml"] as const;
 const read = (...path: string[]): string => readFileSync(join(repo, ...path), "utf8");
-const workflows = NAMES.map(name => ({ name, text: read(".github", "workflows", name) }));
+/** Every workflow the folder carries, so a file added later is held to the rules below without an edit here. */
+const workflows = readdirSync(join(repo, ".github", "workflows"))
+  .filter(name => /\.ya?ml$/.test(name))
+  .sort()
+  .map(name => ({ name, text: read(".github", "workflows", name) }));
 /** A `uses:` line the run time cannot move: a full commit sha, and the version it was resolved from beside it, which
  * is what the update service rewrites as a pair. */
 const PINNED = /^ *- uses: [\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
@@ -41,12 +44,15 @@ function grants(block: string, indent: string): Record<string, string> {
 }
 
 describe("every workflow's actions, grants, cargo lines and images", () => {
+  it("reads every workflow the folder carries, so a file added later meets these rules unnamed", () => {
+    expect(workflows.map(w => w.name)).toContain("release.yml");
+    expect(workflows.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("pins every action to a commit sha with the version beside it, and names what moves them", () => {
-    for (const { name, text } of workflows) {
-      const uses = text.split("\n").filter(line => line.includes("uses:"));
-      expect(uses.length, name).toBeGreaterThan(0);
-      for (const line of uses) expect(line, `${name}: ${line}`).toMatch(PINNED);
-    }
+    const uses = workflows.flatMap(({ name, text }) => text.split("\n").filter(line => line.includes("uses:")).map(line => ({ name, line })));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const { name, line } of uses) expect(line, `${name}: ${line}`).toMatch(PINNED);
     const dependabot = read(".github", "dependabot.yml");
     expect(dependabot).toContain("package-ecosystem: github-actions");
     expect(dependabot).toContain("interval: weekly");
@@ -75,11 +81,9 @@ describe("every workflow's actions, grants, cargo lines and images", () => {
   });
 
   it("takes the lockfile as it stands on every cargo line that resolves one", () => {
-    for (const { name, text } of workflows) {
-      const lines = text.split("\n").filter(line => /\bcargo (build|test|clippy)\b/.test(line));
-      expect(lines.length, name).toBeGreaterThan(0);
-      for (const line of lines) expect(line, `${name}: ${line}`).toContain("--locked");
-    }
+    const lines = workflows.flatMap(({ name, text }) => text.split("\n").filter(line => /\bcargo (build|test|clippy)\b/.test(line)).map(line => ({ name, line })));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const { name, line } of lines) expect(line, `${name}: ${line}`).toContain("--locked");
   });
 
   it("names a runner image, since a moving one is a different machine each run", () => {

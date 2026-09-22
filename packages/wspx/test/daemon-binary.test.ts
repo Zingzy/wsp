@@ -185,6 +185,13 @@ describe("the run a daemon binary staged outside a workflow run comes from", () 
     expect(existsSync(staged)).toBe(false);
   });
 
+  it("says a refusal in one sentence, with no stack under it", () => {
+    const { bin } = stubGh({});
+    const ran = run(bin, "--from-artifacts", artifacts());
+    expect(ran.ok).toBe(false);
+    expect(ran.said).toBe("outside a workflow run the daemon binaries come from --from-run <id>, which checks the run and downloads it");
+  });
+
   it("downloads nothing when the run it is told to read was built elsewhere or on another commit", () => {
     for (const record of [
       { head_repository: { full_name: "someone/wsp" }, head_sha: HEAD },

@@ -30,12 +30,22 @@ export function manifestMismatches(repo, version) {
     .filter(manifest => manifest.version !== version);
 }
 
+/** The commit a tag names, or one sentence saying the tag is not here: git answers a missing ref with a block of
+ * its own on stderr, and a refusal is one line. */
+function commitOf(git, tag) {
+  try {
+    return git(["rev-parse", "--verify", "--quiet", `${tag}^{commit}`]).trim();
+  } catch {
+    throw new Error(`no tag ${tag} in this checkout; fetch the tag before asking what it names`);
+  }
+}
+
 /** The commit a release tag points at, and whether the line named by `ref` carries it. First parents only: a
  * commit inside a branch someone merged is reachable from main without main ever having taken it, so the read and
  * the sentence below agree only on the line main walked itself. */
 function tagOnLine(repo, tag, ref) {
-  const git = args => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
-  const commit = git(["rev-parse", `${tag}^{commit}`]).trim();
+  const git = args => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const commit = commitOf(git, tag);
   return { commit, on: git(["rev-list", "--first-parent", ref]).split("\n").includes(commit) };
 }
 
