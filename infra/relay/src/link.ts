@@ -7,7 +7,7 @@
 // on a computer already in, whose approval carries the admission it signed. The
 // code is spent by the approval and the token by the first poll that takes it.
 import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
-import { accountByProvider, accountOf, approveLink, clientKeyed, deleteLink, deleteRunOutClient, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+import { accountByProvider, accountOf, approveLink, clientKeyed, clientsOf, deleteLink, deleteRunOutClient, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { boxNamedRefusal, clientFor, signedByBearer, signedInSince } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
@@ -31,6 +31,9 @@ type LinkKind = (typeof LINK_KINDS)[number];
 
 /** What the sign-in stamp carries: the page the person came from and goes back to, whose address holds no code. */
 const VERIFY_PAGE = "verify";
+
+/** Its own purpose word, so no approve stamp signs a computer out and no sign-out stamp approves a code. */
+export const SIGN_OUT_STAMP = "sign-out";
 
 const isExpired = (row: LinkRow, now: number): boolean => Date.parse(row.expires_at) <= now;
 
@@ -91,7 +94,7 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
 }
 
 /** Whoever this browser is signed in as here, or nobody. */
-async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undefined> {
+export async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undefined> {
   const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
   return account === undefined ? undefined : await accountOf(ctx.env, account);
 }
@@ -111,7 +114,15 @@ async function toSignIn(ctx: Ctx): Promise<Response> {
  * opens this same page and approves nothing until that person types a code they were given. */
 export async function linkVerify(ctx: Ctx): Promise<Response> {
   const who = await signedIn(ctx);
-  return who === undefined ? toSignIn(ctx) : codePage(who.login);
+  return who === undefined ? toSignIn(ctx) : accountPage(ctx, who);
+}
+
+/** Each sign-out is stamped for its own id and this account, so a form handed on or pointed elsewhere signs nothing out. */
+export async function accountPage(ctx: Ctx, who: { id: string; login: string }): Promise<Response> {
+  const now = ctx.deps.now();
+  const rows = await clientsOf(ctx.env, who.id);
+  const computers = await Promise.all(rows.map(async row => ({ ...row, stamp: await mintStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_OUT_STAMP, row.id, now, who.id) })));
+  return codePage(who.login, computers);
 }
 
 /** The code the person typed on that page. The approve form it renders is stamped for this account, so the
@@ -162,13 +173,18 @@ const standingSince = (ctx: Ctx): string => new Date(signedInSince(ctx.deps.now(
  * read it, and the poll reads it where two codes approved under one key met the index. */
 async function keyHeldRefusal(ctx: Ctx, accountId: string, fingerprint: string | null): Promise<Refusal | undefined> {
   const held = await clientKeyed(ctx.env, accountId, fingerprint, standingSince(ctx));
-  return held === undefined ? undefined : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, then run wsp login again`);
+  return held === undefined
+    ? undefined
+    : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, or from ${ctx.url.origin}/link/verify in your browser, then run wsp login again`);
 }
 
+/** No form on the page carries a bearer, so a request with one is a program's and reads JSON on a page's road too. */
+export const carriesBearer = (req: Request): boolean => req.headers.has("authorization");
+
 /** The person says yes, on the page or from a wsp already in. The code is spent here, once, whichever gets there
- * first. A request carrying a bearer is a wsp's, since the page's form carries none. */
+ * first. */
 export async function linkApprove(ctx: Ctx): Promise<Response> {
-  if (ctx.req.headers.has("authorization")) return approveFromWsp(ctx);
+  if (carriesBearer(ctx.req)) return approveFromWsp(ctx);
   const form = new URLSearchParams(await bodyText(ctx));
   const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
   const who = account === undefined ? undefined : await accountOf(ctx.env, account);

@@ -5,12 +5,15 @@
 // away is what kills the token, and its admissions go with it. An admission
 // is bytes a computer already in signed for another computer's key; the relay
 // keeps them for the boxes to verify and holds no key that could make one.
-import { admissionOf, jsonBody } from "./body.js";
+// A computer whose token was lost is signed out from the relay's page instead.
+import { admissionOf, bodyText, jsonBody } from "./body.js";
 import { admissionsByClient, clientOf, clientsOf, deleteClient, insertAdmission, type ClientRow } from "./db.js";
 import { clientFor, signedByBearer } from "./hosts.js";
 import { newId } from "./ids.js";
 import type { Ctx } from "./index.js";
+import { SIGN_OUT_STAMP, accountPage, carriesBearer, signedIn } from "./link.js";
 import { refuse } from "./refusal.js";
+import { readStamp } from "./tokens.js";
 
 /** The listing wsp login prints: which computers hold a token for this account, which key each signed in with,
  * and who admitted each to the boxes. The signer is named where the account holds a computer under that key. */
@@ -47,6 +50,19 @@ export async function clientDelete(ctx: Ctx): Promise<Response> {
   const row = await clientOn(ctx, who.account);
   await deleteClient(ctx.env, row.id);
   return Response.json({ deleted: true });
+}
+
+/** For a computer whose token is lost: the browser's GitHub session and the page's stamp gate it, never a device key. */
+export async function clientSignOut(ctx: Ctx): Promise<Response> {
+  if (carriesBearer(ctx.req)) throw refuse(400, "this is the page's sign-out, which takes the browser's sign-in and no token; with a token, wsp logout <id> signs a computer out");
+  const who = await signedIn(ctx);
+  if (who === undefined) throw refuse(401, `sign in first: open ${ctx.url.origin}/link/verify`);
+  const id = ctx.params["id"]!;
+  const stamped = await readStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_OUT_STAMP, new URLSearchParams(await bodyText(ctx)).get("stamp") ?? undefined, ctx.deps.now(), who.id);
+  if (stamped !== id) throw refuse(403, `that form did not come from this relay's page, or it is older than fifteen minutes; open ${ctx.url.origin}/link/verify again`);
+  const row = await clientOn(ctx, who.id);
+  await deleteClient(ctx.env, row.id);
+  return accountPage(ctx, who);
 }
 
 /** An admission for a computer already on the account, which signed in on the page and was admitted by nobody, or

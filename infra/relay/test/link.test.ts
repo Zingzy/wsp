@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { readToken } from "../src/tokens.js";
+import { mintStamp, readToken } from "../src/tokens.js";
 import { RELAY_ORIGIN, fakeAdmission, fingerprintFor, firstCookie, linkedVia, relayHarness, signIn, typeCode, type RelayHarness } from "./relay.js";
 
 /** A start, from an address of its own where the case makes several: the relay counts its caps per source, and a
@@ -29,6 +29,12 @@ const approveFromWsp = (relay: RelayHarness, token: string, code: string, admiss
   relay.fetch("/link/approve", { method: "POST", headers: bearer(token), body: JSON.stringify({ code, admission }) });
 
 const count = async (relay: RelayHarness, table: string): Promise<number> => ((await relay.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()) as { n: number }).n;
+
+/** The approval the page posts for a code, with the stamp the page rendered for it. */
+async function approveOnPage(relay: RelayHarness, code: string, cookie: string): Promise<Response> {
+  const stamp = /name="stamp" value="([^"]+)"/.exec(await (await typeCode(relay, code, cookie)).text())?.[1] ?? "";
+  return relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, stamp }).toString() });
+}
 
 describe("the device code flow", () => {
   it("hands a host a code, the page to open and a poll token nothing but its hash is kept of", async () => {
@@ -665,12 +671,6 @@ describe("an approval from a signed-in wsp, carrying the admission it signed", (
 });
 
 describe("a key is one computer's on an account", () => {
-  /** The approval the page posts for a code, with the stamp the page rendered for it. */
-  async function approveOnPage(relay: RelayHarness, code: string, cookie: string): Promise<Response> {
-    const stamp = /name="stamp" value="([^"]+)"/.exec(await (await typeCode(relay, code, cookie)).text())?.[1] ?? "";
-    return relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, stamp }).toString() });
-  }
-
   const linkRow = async (relay: RelayHarness, code: string): Promise<{ state: string; account_id: string | null; admission: string | null }> =>
     (await relay.db.prepare("SELECT state, account_id, admission FROM link_codes WHERE code = ?").bind(code).first()) as { state: string; account_id: string | null; admission: string | null };
 
@@ -681,9 +681,11 @@ describe("a key is one computer's on an account", () => {
 
     const refused = await approveOnPage(relay, again.code, mac.cookie);
     expect(refused.status).toBe(409);
-    const said = ((await refused.json()) as { error: string }).error;
+    expect(refused.headers.get("content-type")).toContain("text/html");
+    const said = await refused.text();
     expect(said).toContain("the Mac");
     expect(said).toContain(`wsp logout ${mac.id}`);
+    expect(said).toContain(`or from ${RELAY_ORIGIN}/link/verify in your browser`);
     expect(await linkRow(relay, again.code)).toEqual({ state: "pending", account_id: null, admission: null });
     expect(await (await poll(relay, again.pollToken)).json()).toEqual({ state: "pending" });
     expect(await count(relay, "clients")).toBe(1);
@@ -715,6 +717,7 @@ describe("a key is one computer's on an account", () => {
     const said = ((await refused.json()) as { error: string }).error;
     expect(said).toContain("the Mac");
     expect(said).toContain(`wsp logout ${mac.id}`);
+    expect(said).toContain(`or from ${RELAY_ORIGIN}/link/verify in your browser`);
     expect(await linkRow(relay, claim.code)).toEqual({ state: "pending", account_id: null, admission: null });
     expect(await (await poll(relay, claim.pollToken)).json()).toEqual({ state: "pending" });
     expect(await count(relay, "clients")).toBe(2);
@@ -774,5 +777,122 @@ describe("a key is one computer's on an account", () => {
     expect(await count(relay, "clients")).toBe(2);
     expect(await count(relay, "admissions")).toBe(0);
     expect((await relay.fetch("/clients", { headers: bearer(answer.token) })).status).toBe(200);
+  });
+});
+
+describe("the page signs a computer out, and admits nobody", () => {
+  /** The stamp the page rendered into one computer's sign-out form. */
+  const signOutStamp = (html: string, id: string): string => new RegExp(`action="/clients/${id}/signout">\\s*<input type="hidden" name="stamp" value="([^"]+)"`).exec(html)?.[1] ?? "";
+
+  const signOut = (relay: RelayHarness, id: string, stamp: string, headers: Record<string, string>): Promise<Response> =>
+    relay.fetch(`/clients/${id}/signout`, { method: "POST", headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ stamp }).toString() });
+
+  const accountId = async (relay: RelayHarness, login: string): Promise<string> => ((await relay.db.prepare("SELECT id FROM accounts WHERE login = ?").bind(login).first()) as { id: string }).id;
+
+  it("lists the account's computers with their keys, signs the second out with that page's stamp, and approves a sign-in under the freed key", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    const sam = await linkedVia(relay, "client", "sam's Mac", { login: "sam", githubId: "7" });
+    expect((await relay.fetch(`/clients/${desk.id}/admissions`, { method: "POST", headers: bearer(mac.token), body: JSON.stringify(fakeAdmission(desk.fingerprint!, mac.fingerprint!)) })).status).toBe(200);
+
+    const page = await relay.fetch("/link/verify", { headers: { cookie: mac.cookie } });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('name="code"');
+    for (const one of [mac, desk]) {
+      expect(html).toContain(one.id);
+      expect(html).toContain(one.fingerprint!);
+      expect(signOutStamp(html, one.id)).not.toBe("");
+    }
+    expect(html).toContain("the Mac");
+    expect(html).toContain("the desk");
+    expect(html).not.toContain(sam.id);
+
+    // The desk lost its client file, so its token is gone with it; the browser signs it out.
+    const out = await signOut(relay, desk.id, signOutStamp(html, desk.id), { cookie: mac.cookie });
+    expect(out.status).toBe(200);
+    expect(out.headers.get("content-type")).toContain("text/html");
+    const after = await out.text();
+    expect(after).toContain(mac.id);
+    expect(after).not.toContain(desk.id);
+    expect((await relay.db.prepare("SELECT id FROM clients WHERE account_id = ?").bind(await accountId(relay, "maya")).all()).results).toEqual([{ id: mac.id }]);
+    expect(await count(relay, "admissions")).toBe(0);
+    expect((await relay.fetch("/clients", { headers: bearer(desk.token) })).status).toBe(401);
+
+    // wsp login on the desk again, under the same key: the page approves it, and admits it to nothing.
+    const again = (await (await startFrom(relay, "client", "the desk", "10.0.0.2", desk.fingerprint!)).json()) as { code: string; pollToken: string };
+    expect((await approveOnPage(relay, again.code, mac.cookie)).status).toBe(200);
+    const answer = (await (await poll(relay, again.pollToken)).json()) as { state: string; token: string };
+    expect(answer.state).toBe("approved");
+    const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
+    expect((await relay.db.prepare("SELECT name, fingerprint FROM clients WHERE id = ?").bind(claims!.subject).first()) as Record<string, string>).toEqual({ name: "the desk", fingerprint: desk.fingerprint });
+    expect(await count(relay, "admissions")).toBe(0);
+  });
+
+  it("signs nothing out on a stamp for another account or another computer, a stamp of the wrong purpose, no session or a bearer", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const desk = await linkedVia(relay, "client", "the desk", { login: "maya", githubId: "4242", cookie: mac.cookie });
+    const sam = await linkedVia(relay, "client", "sam's Mac", { login: "sam", githubId: "7" });
+    expect((await relay.fetch(`/clients/${desk.id}/admissions`, { method: "POST", headers: bearer(mac.token), body: JSON.stringify(fakeAdmission(desk.fingerprint!, mac.fingerprint!)) })).status).toBe(200);
+    const mine = await (await relay.fetch("/link/verify", { headers: { cookie: mac.cookie } })).text();
+    const deskStamp = signOutStamp(mine, desk.id);
+    const now = relay.deps.now();
+    const key = relay.env.RELAY_SIGNING_KEY;
+    const samsStamp = await mintStamp(key, "sign-out", desk.id, now, await accountId(relay, "sam"));
+    const approveStamp = await mintStamp(key, "approve", desk.id, now, await accountId(relay, "maya"));
+
+    const tries: [string, () => Promise<Response>, number][] = [
+      // Maya's page handed to Sam's browser: the stamp is bound to Maya's account.
+      ["a stamp for another account", () => signOut(relay, desk.id, deskStamp, { cookie: sam.cookie }), 403],
+      // A stamp for the desk that Sam's account was given, posted from Sam's browser.
+      ["a stamp minted for another account", () => signOut(relay, desk.id, samsStamp, { cookie: sam.cookie }), 403],
+      ["a stamp for another computer", () => signOut(relay, desk.id, signOutStamp(mine, mac.id), { cookie: mac.cookie }), 403],
+      ["an approve stamp", () => signOut(relay, desk.id, approveStamp, { cookie: mac.cookie }), 403],
+      ["no session", () => signOut(relay, desk.id, deskStamp, {}), 401],
+      ["a bearer", () => signOut(relay, desk.id, deskStamp, { cookie: mac.cookie, authorization: `Bearer ${mac.token}` }), 400],
+    ];
+    for (const [what, send, status] of tries) {
+      const res = await send();
+      expect(res.status, what).toBe(status);
+      expect(await count(relay, "clients"), what).toBe(3);
+      expect(await count(relay, "admissions"), what).toBe(1);
+    }
+
+    // A sign-out stamp is no approval: minted for a code, it approves nothing.
+    const code = (await (await startFrom(relay, "client", "the laptop", "10.0.0.2")).json()) as { code: string; pollToken: string };
+    const asApproval = await relay.fetch("/link/approve", {
+      method: "POST",
+      headers: { cookie: mac.cookie, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ code: code.code, stamp: await mintStamp(key, "sign-out", code.code, now, await accountId(relay, "maya")) }).toString(),
+    });
+    expect(asApproval.status).toBe(403);
+    expect(await (await poll(relay, code.pollToken)).json()).toEqual({ state: "pending" });
+  });
+
+  it("renders a refusal on a page's road as a page with its status, and keeps every other road's refusal in JSON", async () => {
+    const relay = await relayHarness();
+    const mac = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+
+    const signedOut = await relay.fetch(`/clients/${mac.id}/signout`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "stamp=x" });
+    expect(signedOut.status).toBe(401);
+    expect(signedOut.headers.get("content-type")).toContain("text/html");
+    expect(await signedOut.text()).toContain("sign in first");
+
+    const callback = await relay.fetch("/link/callback?code=gh_code&state=forged");
+    expect(callback.status).toBe(400);
+    expect(callback.headers.get("content-type")).toContain("text/html");
+    expect(await callback.text()).toContain("that sign-in did not start in this browser");
+
+    const polled = await poll(relay, "no-such-token");
+    expect(polled.status).toBe(404);
+    expect(polled.headers.get("content-type")).toContain("application/json");
+    expect(((await polled.json()) as { error: string }).error).toContain("waiting on no link");
+
+    // The approve route is a page's and a wsp's: the wsp's refusal is read by a program, and stays JSON.
+    const fromWsp = await approveFromWsp(relay, mac.token, "ZZZZ9999", fakeAdmission(mac.fingerprint!, mac.fingerprint!));
+    expect(fromWsp.status).toBe(410);
+    expect(fromWsp.headers.get("content-type")).toContain("application/json");
   });
 });
