@@ -40,6 +40,7 @@ import {
 import type { ImportResult } from "../src/golden.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { EXEC_ENV, TOOLS_PATH } from "../src/golden-import.js";
+import { dfKbCmd } from "../src/golden-tools.js";
 
 const bash = promisify(execFile);
 
@@ -443,6 +444,7 @@ describe("the guest scripts on a local bash", () => {
 
   it("the probe prints its markers, the kernel and the disk, and names each hook the person's file claims", async () => {
     const roots = fakeGuest();
+    expect(probeCommand(roots)).toContain(dfKbCmd(["size", "free"], roots.home));
     let probe = parseProbe((await run(probeCommand(roots))).stdout)!;
     expect(probe).toBeDefined();
     expect(probe.kernel).toBeTruthy();

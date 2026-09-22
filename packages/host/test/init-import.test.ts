@@ -12,7 +12,7 @@ import { join, relative } from "node:path";
 import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
 import { NODE_RELEASES, planFiles, type PlannedFile, type StagedFile } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
+import { CLAUDE_INSTALL, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 
@@ -1114,7 +1114,7 @@ describe("importFor", () => {
     expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/manager/npm", "tools/npm/bun"]);
     expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     expect(imp.agents.map(a => [a.id, a.install, a.smoke])).toEqual([
-      ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
+      ["agents/claude", CLAUDE_INSTALL, GOLDEN_SMOKE],
       ["agents/codex", expect.stringContaining("npm install -g @openai/codex@"), "codex --version"],
     ]);
     expect(imp.skippedAgents).toEqual([]);

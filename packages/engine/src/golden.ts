@@ -88,7 +88,7 @@ const isSnapshotRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kin
 /** The provider's answer as the failure line reports it. A refusal carries its status; a failure that came with none
  * (a job the far side failed, a link that dropped) is reported as the provider's 500, since the provider's side is
  * where it stopped. */
-const answerOf = (e: unknown): ProviderAnswer => {
+export const answerOf = (e: unknown): ProviderAnswer => {
   const { status, requestId } = e as { status?: number; requestId?: string };
   return { status: status ?? (isSnapshotRefusal(e) ? 502 : 500), message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
 };
