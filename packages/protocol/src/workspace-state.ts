@@ -58,15 +58,15 @@ export interface WorkspaceKindWords {
   metrics: ReadingRoad;
   /** Where the Processes tab's list is read, which the same rule holds for. */
   processes: ReadingRoad;
-  /** Which kinds of project source a workspace of this kind can hold: this computer works a folder of the person's
-   * own in place, a machine wsp forks clones a repo into itself, and a machine wsp only reaches takes neither yet.
+  /** Which kinds of project source a workspace of this kind can hold: this computer copies a folder of the person's
+   * own, a machine wsp forks clones a repo into itself, and a machine wsp only reaches takes neither yet.
    * The one table every road that records a project or makes a workspace reads, so no road decides for itself
    * what a computer can be given. */
   projectSources: readonly ProjectSource["kind"][];
-  /** Whether a workspace of this kind is the project's own folder worked where it sits rather than a copy of it:
-   * this computer alone. Its own word and not a reading of the sources above, since a computer that clones also
-   * takes a folder on this computer as a source, seeded onto the clone, and would otherwise read as in place. */
-  worksInPlace: boolean;
+  /** Whether a workspace of this kind is a copy of a folder on this computer, made by directory and forking no
+   * image: this computer alone. Its own word and not a reading of the sources above, since a computer that clones
+   * also takes a folder on this computer as a source, seeded onto the clone, and would otherwise read as one. */
+  copiesFolder: boolean;
   /** Whether the agents on a machine of this kind could drive this host at all, which is what says the spawn switch
    * means anything there. A fork's agents reach the host over the road a scoped token opens; this computer answers
    * no request relayed from a machine, and a machine somebody already owns is handed no wsp to drive one with, so
@@ -127,9 +127,9 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], worksInPlace: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], worksInPlace: true, agents: false, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], worksInPlace: false, agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: false, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], copiesFolder: false, agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 
 /**

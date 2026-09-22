@@ -11,8 +11,12 @@ import {
   ProjectCopy,
   WorkspaceView,
   copyPathFor,
-  FIRST_WORKSPACE_ROAD,
+  CopyRoad,
+  CopyVerbRoad,
+  COPY_WORD,
   folderSlug,
+  IN_PLACE_ROAD,
+  inPlaceRecordLine,
   madeOfWord,
   portsWord,
   thisComputer,
@@ -78,15 +82,22 @@ describe("what a row says about a copy's network", () => {
 });
 
 describe("what a row says a workspace is made of", () => {
-  it("is the folder itself for the in-place road and a copy for both roads that make one", () => {
-    expect(madeOfWord("in-place")).toBe("in this folder");
+  it("is a copy for both roads, the one word the first-run screen reads before any road is taken", () => {
     expect(madeOfWord("clonefile")).toBe("a copy");
     expect(madeOfWord("worktree")).toBe("a copy");
+    expect(COPY_WORD).toBe("a copy");
   });
 
-  it("has one home for the road a first piece of work here takes, which the runtime and the first-run screen both read", () => {
-    expect(FIRST_WORKSPACE_ROAD).toBe("in-place");
-    expect(madeOfWord(FIRST_WORKSPACE_ROAD)).toBe("in this folder");
+  it("has no road for a folder worked in place: a record does not parse the word, the verb's report still does, and the boot sentence names the record", () => {
+    expect(CopyRoad.options).toEqual(["clonefile", "worktree"]);
+    expect(CopyRoad.safeParse(IN_PLACE_ROAD).success).toBe(false);
+    expect(ProjectCopy.safeParse({ road: IN_PLACE_ROAD, path: "/Users/dev/repo", source: "/Users/dev/repo", base: "", branch: "", carried: "nothing" }).success).toBe(false);
+    // The daemon's copy verb keeps the word on its wire, so the contract with a daemon already out there stands.
+    expect(CopyVerbRoad.parse(IN_PLACE_ROAD)).toBe("in-place");
+    expect(CopyReport.safeParse({ ...report, road: IN_PLACE_ROAD }).success).toBe(true);
+    expect(inPlaceRecordLine("ws_1a2b3c4d", "/Users/dev/repo")).toBe(
+      'workspace ws_1a2b3c4d was recorded as /Users/dev/repo worked in place, and every workspace here is a copy now: it is not served, wsp new "<what you are working on>" makes a copy of the project, and the record goes when the state file is moved aside',
+    );
   });
 });
 

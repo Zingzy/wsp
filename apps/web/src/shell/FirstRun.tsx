@@ -10,7 +10,7 @@
 // Start and its width while a create runs, held and dimmed. Nothing on this
 // screen moves as it fills.
 import { useEffect, useState, type DragEvent, type KeyboardEvent } from "react";
-import { FIRST_WORKSPACE_ROAD, madeOfWord, type CopyRoad, type InitAgent, type PlaceView } from "@wsp/protocol";
+import { COPY_WORD, type InitAgent, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { FOLDER_GHOST } from "../files/FolderPathField.js";
@@ -143,7 +143,7 @@ export function FirstRun() {
         {/* The slot stands from the first paint and is empty until a folder is named: what this piece of work will
             be, in the words the row it becomes will carry. */}
         <span className={cn(FACT, "mt-4 min-h-4 truncate")} data-k="lands">
-          {folder.trim() === "" ? "" : landsLine(places, FIRST_WORKSPACE_ROAD)}
+          {folder.trim() === "" ? "" : landsLine(places)}
         </span>
         {/* The agents line says what was found here, and its absence is the one thing that holds Start. Two lines
             of height from the first paint, filled to as many as the list takes and cut at the second: six agents
@@ -167,11 +167,9 @@ export function FirstRun() {
   );
 }
 
-/** What the first piece of work on a folder here will be: the computer this wsp runs on, and the word for the road
- * the create will take, read off the one home of that default (FIRST_WORKSPACE_ROAD, which the runtime reads where
- * it records that first workspace) through the protocol's own word table. This screen writes no road: the day the
- * default becomes a copy, one line in the protocol moves and this line follows. */
-export function landsLine(places: readonly PlaceView[], road: CopyRoad): string {
+/** What the first piece of work on a folder here will be: the computer this wsp runs on, and what the workspace is,
+ * a copy, in the protocol's own word for it, which is the word the row it becomes carries. */
+export function landsLine(places: readonly PlaceView[]): string {
   const here = places[0];
-  return [here === undefined ? undefined : placeName(here, true), madeOfWord(road)].filter((part): part is string => part !== undefined).join(" · ");
+  return [here === undefined ? undefined : placeName(here, true), COPY_WORD].filter((part): part is string => part !== undefined).join(" · ");
 }

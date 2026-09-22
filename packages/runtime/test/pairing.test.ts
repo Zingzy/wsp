@@ -2,9 +2,9 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
-import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
-import { createRuntime } from "../src/runtime.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH, deviceHeldRefusal } from "@wsp/protocol";
+import { createRuntime, type Runtime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
 import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -115,7 +115,8 @@ describe("pairing codes", () => {
     const paired = await client.request("pair.redeem", { code, name: "laptop" });
     const answer = await client.request("pair.issue");
     expect(paired.ok).toBe(true);
-    expect(answer).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    // The device door reads the op before the switch does, so a paired computer meets the door's own sentence.
+    expect(answer).toMatchObject({ ok: false, error: deviceHeldRefusal("pair.issue") });
     client.close();
   });
 
@@ -167,6 +168,80 @@ describe("pairing codes", () => {
     const { deviceToken } = (await client.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
     client.close();
     expect(JSON.stringify(await store.list("devices"))).not.toContain(deviceToken);
+  });
+});
+
+describe("the code wsp init mints for the browser it opens", () => {
+  /** What the runtime is handed as the caller of a listing: the one reading of a socket's road. */
+  const roadsSeen = (runtime: Runtime): (unknown | undefined)[] => {
+    const seen: (unknown | undefined)[] = [];
+    const list = runtime.workspaces.list.bind(runtime.workspaces);
+    vi.spyOn(runtime.workspaces, "list").mockImplementation(async caller => {
+      seen.push(caller);
+      return list(caller);
+    });
+    return seen;
+  };
+
+  it("admits a device listed here, whose socket takes the person's own road where a device from a plain code is a paired computer", async () => {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const seen = roadsSeen(runtime);
+    const host = await WsClient.connect(srv.port, { token: "host-token" });
+    const here = (await host.request("pair.issue", { here: true }))["code"] as string;
+    const plain = (await host.request("pair.issue"))["code"] as string;
+
+    const browser = await WsClient.connect(srv.port);
+    const admitted = (await browser.request("pair.redeem", { code: here, name: "a Mac in a browser" })) as { ok: boolean; deviceId: string; deviceToken: string };
+    expect(admitted.ok).toBe(true);
+    expect((await browser.request("workspaces.list")).ok).toBe(true);
+    const laptop = await WsClient.connect(srv.port);
+    const paired = (await laptop.request("pair.redeem", { code: plain, name: "laptop" })) as { ok: boolean; deviceId: string };
+    expect(paired.ok).toBe(true);
+    expect((await laptop.request("workspaces.list")).ok).toBe(true);
+    // The road each socket is handed: nobody in particular for the owner's browser, a paired computer for the laptop.
+    expect(seen).toEqual([undefined, "paired"]);
+
+    // The listing says which is which, and the bit survives the redeem into the token's next auth frame.
+    const { devices } = (await host.request("devices.list")) as { devices: { id: string; here?: true }[] };
+    expect(devices.map(d => [d.id, d.here])).toEqual([
+      [admitted.deviceId, true],
+      [paired.deviceId, undefined],
+    ]);
+    const back = await WsClient.connect(srv.port, { token: admitted.deviceToken });
+    expect((await back.request("workspaces.list")).ok).toBe(true);
+    expect(seen.at(-1)).toBeUndefined();
+    for (const c of [host, browser, laptop, back]) c.close();
+  });
+
+  it("is minted only over a socket holding the host's own token: the owner's browser cannot mint one, nor can a laptop", async () => {
+    await serving();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const here = (await host.request("pair.issue", { here: true }))["code"] as string;
+    const browser = await WsClient.connect(srv!.port);
+    expect((await browser.request("pair.redeem", { code: here, name: "a Mac in a browser" })).ok).toBe(true);
+    expect(await browser.request("pair.issue", { here: true })).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    expect(await browser.request("pair.issue")).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    const laptop = await WsClient.connect(srv!.port);
+    expect((await laptop.request("pair.redeem", { code: await codeFrom(), name: "laptop" })).ok).toBe(true);
+    expect(await laptop.request("pair.issue", { here: true })).toMatchObject({ ok: false, error: deviceHeldRefusal("pair.issue") });
+    // A spent code is spent: the second browser to try it is refused.
+    const again = await WsClient.connect(srv!.port);
+    expect(await again.request("pair.redeem", { code: here, name: "another" })).toMatchObject({ ok: false, error: PAIR_CODE_REFUSAL });
+    for (const c of [host, browser, laptop]) c.close();
+  });
+
+  it("is revoked like every other device, and its socket is cut with it", async () => {
+    await serving();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const here = (await host.request("pair.issue", { here: true }))["code"] as string;
+    const browser = await WsClient.connect(srv!.port);
+    const { deviceId, deviceToken } = (await browser.request("pair.redeem", { code: here, name: "a Mac in a browser" })) as { deviceId: string; deviceToken: string };
+    const cut = browser.closed();
+    expect(await host.request("devices.revoke", { deviceId })).toMatchObject({ ok: true, revoked: true });
+    expect(await cut).toBe(4401);
+    expect(await srv!.authorize(deviceToken)).toBeUndefined();
+    host.close();
   });
 });
 
@@ -242,19 +317,30 @@ describe("the device listing", () => {
     host.close();
   });
 
-  it("lets a device revoke itself and refuses it another device", async () => {
+  it("lets a paired device revoke another device and cuts that device's socket, as it lets it revoke itself", async () => {
     await serving();
     const one = await WsClient.connect(srv!.port);
     const { deviceId: oneId } = (await one.request("pair.redeem", { code: await codeFrom(), name: "one" })) as { deviceId: string };
     const two = await WsClient.connect(srv!.port);
     const { deviceId: twoId } = (await two.request("pair.redeem", { code: await codeFrom(), name: "two" })) as { deviceId: string };
+    const three = await WsClient.connect(srv!.port);
+    const { deviceId: threeId } = (await three.request("pair.redeem", { code: await codeFrom(), name: "three" })) as { deviceId: string };
 
-    expect(await one.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: false, error: DEVICE_REVOKE_REFUSAL });
-    expect(await two.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: true, revoked: true });
+    // The laptop a person holds is where they cut a token they lost elsewhere: another device's revoke lands, and
+    // the socket that device held is cut with it.
+    const twoCut = two.closed();
+    expect(await one.request("devices.revoke", { deviceId: twoId })).toMatchObject({ ok: true, revoked: true });
+    expect(await twoCut).toBe(4401);
+    // A device still hands its own back.
+    expect(await three.request("devices.revoke", { deviceId: threeId })).toMatchObject({ ok: true, revoked: true });
+    // An id nothing is paired under reads as nothing to take, whoever asks.
+    expect(await one.request("devices.revoke", { deviceId: "d_nope" })).toMatchObject({ ok: true, revoked: false });
 
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
     const { devices } = (await host.request("devices.list")) as { devices: { id: string }[] };
     expect(devices.map(d => d.id)).toEqual([oneId]);
+    // A paired device reads the list too, and the browser wsp init let in reads and cuts like any other.
+    expect(((await one.request("devices.list")) as { devices: { id: string }[] }).devices.map(d => d.id)).toEqual([oneId]);
     host.close();
     one.close();
   });

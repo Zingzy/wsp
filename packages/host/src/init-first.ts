@@ -9,11 +9,11 @@
 // reads the same answers off --first-workspace, --import and --no-local.
 import type { Readable, Writable } from "node:stream";
 import { statSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
 import type { Platform } from "@wsp/collect";
-import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, thisComputer, thisComputerLine, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, openingHash, plural, THIS_COMPUTER, thisComputer, thisComputerLine, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { dialAddress } from "./host-lock.js";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
@@ -208,11 +208,12 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
   }
 }
 
-/** The tick taken: a folder of the person's own on this computer, recorded as a project and worked in place, which
- * is what a workspace here is. A run that named no folder makes none and says the road; a host that refuses it (a
- * folder that is no repo, a name taken) is one line and never unwinds the run, so the fork above it still stands
- * and the address still opens. */
-export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "createWorkspace">, output: Writable, folder?: string, name: string = hostname()): Promise<WorkspaceView | undefined> {
+/** The tick taken: a folder of the person's own on this computer, recorded as a project, and a copy of it as the
+ * first workspace, named as the golden road names its first, since it is the first piece of work and not this
+ * computer. A run that named no folder makes none and says the road; a host that refuses it (a folder that is no
+ * repo, a name taken) is one line and never unwinds the run, so the fork above it still stands and the address
+ * still opens. */
+export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "createWorkspace">, output: Writable, folder?: string, name: string = FIRST_WORKSPACE): Promise<WorkspaceView | undefined> {
   if (folder === undefined) {
     log.warn(`${THIS_COMPUTER} was not made a workspace: a workspace is one project's, and this run named no folder here. wsp add <folder> records one and wsp new "<what you are working on>" makes its workspace.`, { output });
     return undefined;
@@ -220,7 +221,7 @@ export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "creat
   try {
     const project = await roads.addProject(folder);
     const workspace = await roads.createWorkspace(name, undefined, project.id);
-    log.step(thisComputerLine(workspace.name, workspace.id), { output });
+    log.step(thisComputerLine(workspace.name, workspace.id, folder), { output });
     return workspace;
   } catch (e) {
     log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp add <folder> records a project here and wsp new "<what you are working on>" makes its workspace.`, { output });
@@ -228,9 +229,10 @@ export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "creat
   }
 }
 
-/** The app's address, on the workspace just forked when there is one. Through the same rule every local client
- * dials by, so an init told to bind one address opens the browser there rather than at a loopback nothing answers. */
-export const appUrl = (at: { port: number; address?: string }, workspaceId?: string): string =>
-  `http://${authority(dialAddress(at), at.port)}/${workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
+/** The app's address, on the workspace just forked when there is one, carrying the code that lets the browser it
+ * opens in when the run minted one. Through the same rule every local client dials by, so an init told to bind one
+ * address opens the browser there rather than at a loopback nothing answers. */
+export const appUrl = (at: { port: number; address?: string }, workspaceId?: string, code?: string): string =>
+  `http://${authority(dialAddress(at), at.port)}/${code !== undefined ? openingHash(code, workspaceId) : workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

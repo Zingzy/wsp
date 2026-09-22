@@ -72,8 +72,8 @@ export function projectNameOf(source: ProjectSource): string {
 }
 
 /** Where a project's checkout sits inside a workspace of it: the folder itself where the source is one the
- * computer holding it already has, worked in place, and `<home>/<name>` where the source is a repo that computer
- * cloned into a checkout of its own. Which home is the landing road's answer, since it is the road that knows
+ * computer holding it already has, which every workspace there is a copy of, and `<home>/<name>` where the source
+ * is a repo that computer cloned into a checkout of its own. Which home is the landing road's answer, since it is the road that knows
  * which folder a copy can be bound at inside a workspace there without leaving the mount point on the computer
  * itself. A road that clones nothing names none, and a repo is refused on such a computer before this is asked. */
 export function projectPathOn(source: ProjectSource, name: string, home?: string): string {
@@ -97,8 +97,8 @@ export function projectSourceOf(word: string, kind: Exclude<ReturnType<typeof so
 export const sameSourceRefusal = (name: string, computer: string): string =>
   `that source is already a project on ${computer}, ${name}; one source on one computer is one project`;
 
-/** Why a repo's url with no computer named records nothing: this computer works a folder of yours in place, so a
- * url needs the computer that clones it, with the ones that do. */
+/** Why a repo's url with no computer named records nothing: this computer copies a folder of yours and clones
+ * nothing, so a url needs the computer that clones it, with the ones that do. */
 export const noComputerForSourceLine = (word: string, computers: readonly string[]): string =>
   `${word} is a repo, and ${THIS_COMPUTER} takes a folder of yours; name the computer that clones it with --on ${computers.length === 0 ? "<computer>, once you have added one" : computers.join(" | ")}`;
 
@@ -112,8 +112,8 @@ export const seedChoiceNeeded = (folder: string): string =>
  * in it has none. */
 export const NOT_A_REPO_LINE = "is not a git repo; git init makes it one, or name a repo's url with --on <computer>";
 
-/** Why a repo's url on this computer records nothing: this computer works the folder you already have. */
-export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours and works it in place; a repo's url is for a computer that clones it, named with --on <computer>`;
+/** Why a repo's url on this computer records nothing: this computer copies the folder you already have. */
+export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours, which every workspace here is a copy of; a repo's url is for a computer that clones it, named with --on <computer>`;
 
 /** Why a folder on a computer that is not this one records nothing: nothing carries a folder there yet, so its
  * project is the repo that computer can clone. */
@@ -212,7 +212,7 @@ export function noWorkspaceForFolderLine(folder: string, named: string): string 
 }
 
 /** The workspace a folder on this computer belongs to, and the project it is there as, for a thread opened with no
- * workspace named. A project on this computer is worked in place, so the folder is the project's own path: the
+ * workspace named. A project on this computer is the person's own folder, and its path is the project's: the
  * match is the project whose path the folder is or sits under, the nearest when projects nest, and the workspace
  * is the one standing on that project. None when no project holds the folder, and none when one does and no
  * workspace of it stands. */
@@ -231,24 +231,24 @@ export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project
   return workspace === undefined ? null : { workspace, project: found };
 }
 
-/** Whether a workspace of this kind works its project where it already sits rather than holding a copy of it: the
- * one reading of the kind table both the create and the folder rule take. */
-export function worksInPlace(kind: WorkspaceKind): boolean {
-  return kindWords(kind).worksInPlace;
+/** Whether a workspace of this kind is a copy of a folder on this computer, made by directory, and forks no image:
+ * the one reading of the kind table both the create and the folder rule take. */
+export function copiesFolder(kind: WorkspaceKind): boolean {
+  return kindWords(kind).copiesFolder;
 }
 
-/** The kind of workspace a computer makes: the computer the app runs on works a folder of the person's own in
- * place, and every other computer takes a copy of its own image. The one place a computer's id is read for its
- * kind, so no road anywhere compares that id itself. */
+/** The kind of workspace a computer makes: the computer the app runs on copies a folder of the person's own, and
+ * every other computer takes a copy of its own image. The one place a computer's id is read for its kind, so no
+ * road anywhere compares that id itself. */
 export function kindForComputer(computer: string): WorkspaceKind {
   return computer === HERE_PLACE_ID ? "local" : "cloud";
 }
 
-/** Why a workspace worked in place takes none of the words a fork takes: it is the project's own folder where it
- * already sits, so there is no image to start from, no machine to size and no engine to hand it. The words are
- * named in the order the command line lists them, so the sentence says exactly which to drop. */
-export const worksInPlaceTakesNone = (project: string, words: readonly string[]): string =>
-  `${project} is worked in place on ${THIS_COMPUTER}, which forks nothing, so it takes no ${words.join(", ")}`;
+/** Why a workspace on this computer takes none of the words a fork takes: it is a copy of the project's folder
+ * here, so there is no image to start from, no machine to size and no engine to hand it. The words are named in
+ * the order the command line lists them, so the sentence says exactly which to drop. */
+export const copyTakesNone = (project: string, words: readonly string[]): string =>
+  `a workspace of ${project} on ${THIS_COMPUTER} is a copy of its folder and forks nothing, so it takes no ${words.join(", ")}`;
 
 /** What a computer is called in a row or a line: the name this wsp holds for it, and this computer's own word
  * where the record names this one. `named` is the places table by id, which every caller already reads for its

@@ -5,16 +5,13 @@
 // is somewhere else, and a dial naming the computer wsp runs on is this one.
 import { afterEach, describe, expect, it } from "vitest";
 import { sshMachineId } from "@wsp/engine";
-import { noSshDaemonLine, pairedRunRefusal } from "@wsp/protocol";
+import { noSshDaemonLine } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
 const MACHINE = sshMachineId({ user: "dev", host: "box", port: 22 });
-/** The same road pointed at the computer wsp runs on: this computer under another kind's name, which is the one
- * dial both rules about who may drive such a workspace read apart from the rest. */
-const HERE_MACHINE = sshMachineId({ user: "root", host: "127.0.0.1", port: 22 });
 
 let rt: Runtime | undefined;
 
@@ -80,18 +77,5 @@ describe("the road to a daemon on a machine reached over ssh", () => {
     // Unsupported is the word for a machine there is no way at all to ask.
     const [row] = await rt.status.list({ zombieProbe: false });
     expect(row?.reach.state).toBe("unsupported");
-  });
-
-  it("starts no process for a computer the person paired where the dial names the computer wsp runs on", async () => {
-    const rt = await hostWithOne({ id: "ws_9f8e7d6c", name: "here", machineId: HERE_MACHINE });
-    const said = (call: () => Promise<unknown>): Promise<string> => call().then(() => "answered it", (e: unknown) => (e instanceof Error ? e.message : String(e)));
-    // A process on that machine runs under the person's own login on this computer, whatever kind its record says.
-    await expect(rt.workspaces.execStream("ws_9f8e7d6c", ["true"], undefined, "paired")).rejects.toThrow(pairedRunRefusal("here"));
-    await expect(rt.sessions.start("ws_9f8e7d6c", { prompt: "hi" }, "paired")).rejects.toThrow(pairedRunRefusal("here"));
-    // A machine somebody owns is somewhere else: that computer gets past this rule and reads whatever the host
-    // answers the person's own road, which on a runtime wired with no agents is the adapter table's own sentence.
-    const elsewhere = await said(() => rt.workspaces.execStream("ws_1a2b3c4d", ["true"], undefined, "paired"));
-    expect(elsewhere).not.toBe(pairedRunRefusal("box"));
-    expect(elsewhere).toBe(await said(() => rt.workspaces.execStream("ws_1a2b3c4d", ["true"], undefined, "here")));
   });
 });

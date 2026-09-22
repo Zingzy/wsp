@@ -31,11 +31,15 @@ interface DeviceRecord {
   /** Set on a token the host minted into one turn's launch rather than one a person's computer redeemed a code
    * for: what that token may drive. */
   scope?: ThreadScope;
+  /** Set on the browser wsp init opened here, whose code init itself minted: read as the owner. */
+  here?: true;
 }
 
 interface PairingRecord {
   code: string;
   expiresAt: number;
+  /** Carried onto the device the code admits. */
+  here?: true;
 }
 
 const isDevice = (v: unknown): v is DeviceRecord =>
@@ -44,7 +48,9 @@ const isDevice = (v: unknown): v is DeviceRecord =>
 const isPairing = (v: unknown): v is PairingRecord =>
   typeof v === "object" && v !== null && typeof (v as PairingRecord).code === "string" && typeof (v as PairingRecord).expiresAt === "number";
 
-const hashOf = (token: string): string => createHash("sha256").update(token).digest("hex");
+/** The one digest of a token this repo keeps or compares: what the store holds for a device, and what the loopback
+ * page carries of the host's own token for the desktop shell to compare against the token file. */
+export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /** A code of the alphabet's symbols. 256 is a whole number of 32s, so a byte masked to five bits picks one symbol
  * with no bias and no rejection loop. */
@@ -61,6 +67,7 @@ const viewOf = (record: DeviceRecord): DeviceView => ({
   createdAt: record.createdAt,
   lastSeenAt: record.lastSeenAt,
   ...(record.scope !== undefined ? { scope: record.scope } : {}),
+  ...(record.here === true ? { here: true } : {}),
 });
 
 /** What a redeem hands back: the token, once, and the record every later listing shows. */
@@ -73,8 +80,9 @@ export interface PairedDevice {
 /** The pairing door the protocol server calls. Every method takes the clock's reading rather than reading one, so
  * the server's own injectable clock is the only one in the system. */
 export interface DeviceDoor {
-  /** A fresh code, and when it stops being one. */
-  issue(at: { now: number; ttlMs: number }): Promise<{ code: string; expiresAt: number }>;
+  /** A fresh code, and when it stops being one. `here` is wsp init minting for the browser it opens on this
+   * computer: the device that code admits is read as the owner. */
+  issue(at: { now: number; ttlMs: number; here?: true }): Promise<{ code: string; expiresAt: number }>;
   /** Spends the code for a device of that name, or nothing when the host holds no such unexpired code. A spent or
    * expired code is deleted either way, so one guess never gets two tries. */
   redeem(code: string, name: string, now: number): Promise<PairedDevice | undefined>;
@@ -119,7 +127,7 @@ export function makeDevices(store: Store): DeviceDoor {
 
   /** One device record and the one token it will ever hand over. Both roads that make a device come through here,
    * so a scoped token is stored, hashed and named by exactly the rule a paired computer's is. */
-  const admit = async (name: string, scope: ThreadScope | undefined, now: number): Promise<PairedDevice> => {
+  const admit = async (name: string, scope: ThreadScope | undefined, now: number, here?: true): Promise<PairedDevice> => {
     const deviceToken = randomBytes(24).toString("base64url");
     const at = new Date(now).toISOString();
     const record: DeviceRecord = {
@@ -127,41 +135,46 @@ export function makeDevices(store: Store): DeviceDoor {
       // and the older computer's access would vanish under the newer.
       id: `d_${randomBytes(8).toString("hex")}`,
       name: name.trim() === "" ? "a paired computer" : name.trim(),
-      tokenHash: hashOf(deviceToken),
+      tokenHash: tokenDigest(deviceToken),
       createdAt: at,
       lastSeenAt: at,
       ...(scope !== undefined ? { scope } : {}),
+      ...(here === true ? { here: true } : {}),
     };
     await store.put(DEVICES, record.id, record);
     return { deviceId: record.id, deviceToken, device: viewOf(record) };
   };
 
-  /** The code half of a redeem, on its own: whether this host was holding it and it had not run out. Spent either
-   * way, so one guess never gets two tries, and whatever the caller does with the answer. */
-  const spendCode = async (code: string, now: number): Promise<boolean> => {
+  /** The code half of a redeem, on its own: the record this host was holding when it had not run out, else
+   * nothing. Spent either way, so one guess never gets two tries, and whatever the caller does with the answer. */
+  const spendCode = async (code: string, now: number): Promise<PairingRecord | undefined> => {
     const held = await store.get(PAIRINGS, code);
-    if (!isPairing(held)) return false;
+    if (!isPairing(held)) return undefined;
     await store.delete(PAIRINGS, code);
-    return now <= held.expiresAt;
+    return now <= held.expiresAt ? held : undefined;
   };
 
   return {
-    issue: ({ now, ttlMs }) =>
+    issue: ({ now, ttlMs, here }) =>
       oneAtATime(async () => {
         // A code nobody redeemed is dead weight in the state file, and minting is the one moment the list is
         // already worth reading: every host restart and every fresh code clears what has run out.
         for (const held of await store.list(PAIRINGS)) if (isPairing(held) && now > held.expiresAt) await store.delete(PAIRINGS, held.code);
         const code = mintCode();
         const expiresAt = now + ttlMs;
-        await store.put(PAIRINGS, code, { code, expiresAt } satisfies PairingRecord);
+        await store.put(PAIRINGS, code, { code, expiresAt, ...(here === true ? { here: true } : {}) } satisfies PairingRecord);
         return { code, expiresAt };
       }),
-    redeem: (code, name, now) => oneAtATime(async () => ((await spendCode(code, now)) ? admit(name, undefined, now) : undefined)),
-    spend: (code, now) => oneAtATime(() => spendCode(code, now)),
+    redeem: (code, name, now) =>
+      oneAtATime(async () => {
+        const spent = await spendCode(code, now);
+        return spent === undefined ? undefined : admit(name, undefined, now, spent.here);
+      }),
+    spend: (code, now) => oneAtATime(async () => (await spendCode(code, now)) !== undefined),
     admit: (name, now) => oneAtATime(() => admit(name, undefined, now)),
     mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
     match: async token => {
-      const digest = hashOf(token);
+      const digest = tokenDigest(token);
       // Every record is compared, and the first match is kept rather than returned: a loop that leaves early would
       // say by its own duration how far down the list the token sat.
       let found: DeviceRecord | undefined;

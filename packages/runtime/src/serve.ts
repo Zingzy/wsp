@@ -19,7 +19,6 @@ import {
   DAEMON_PRE_AUTH_BYTES_EXCEEDED,
   PRE_AUTH_MAX_BYTES,
   DEVICES_TICKET_REFUSAL,
-  DEVICE_REVOKE_REFUSAL,
   DOCTOR_UNSERVED,
   doctorRowRefusal,
   doctorRunningLine,
@@ -41,6 +40,7 @@ import {
   SEAL_CLIENT,
   SEAL_UNSERVED,
   THREAD_OPS,
+  DEVICE_OPS,
   peerAddress,
   SCOPED_TOKEN_ROAD_REFUSAL,
   TICKET_ORIGIN,
@@ -49,6 +49,7 @@ import {
   WorkspaceListing,
   WorkspaceOut,
   threadOpRefusal,
+  deviceHeldRefusal,
   type AccountView,
   type DeviceView,
   type DoctorLineEvent,
@@ -406,7 +407,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
      * device: both roads a device comes in by, the auth frame and a redeem, pass here, so neither is a way around
      * the stamp. */
     const bind = (device: DeviceView): void => {
-      pairedRoad = device.scope === undefined;
+      // The browser wsp init let in is the owner's own window, so its socket takes the person's road.
+      pairedRoad = device.scope === undefined && device.here !== true;
       me = { kind: "device", device };
       bound = { deviceId: device.id, cut: () => ws.close(4401, UNAUTHORIZED) };
       held.add(bound);
@@ -436,8 +438,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // having been forgotten, which is how the golden, the keys and the person's own init were reachable from a
         // machine. Ahead of the schema so an op that is not a thread's is refused by name whatever it carries.
         const asked = (parsed as { op?: unknown }).op;
+        const askedId = (parsed as { id?: string | number }).id ?? null;
         if (by !== undefined && (typeof asked !== "string" || !THREAD_OPS.includes(asked))) {
-          send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          send({ id: askedId, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          return;
+        }
+        // The door for a computer the person paired, read the same way and in the same place: shut, with the ops
+        // such a device may send as the openings, until a role of the person's opens more, and ahead of the schema
+        // so a held op is refused by name whatever it carries. The JSON routes read the same list by the op each
+        // route stands for, so neither door is wider than the other.
+        const asPaired = pairedRoad && stamped !== "relayed";
+        if (asPaired && (typeof asked !== "string" || !DEVICE_OPS.includes(asked))) {
+          send({ id: askedId, ok: false, error: deviceHeldRefusal(typeof asked === "string" ? asked : "that frame") });
           return;
         }
         const req2 = RuntimeRequest.safeParse(parsed);
@@ -569,7 +581,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // client's. A socket nothing stamped and no device opened carries the word its client sent, as it always did.
         // The paired word stands above the `here` a connect ticket carries, since a ticket never widens the road of
         // the socket that minted it; a relay ticket's word is stricter still and stays, whoever minted it.
-        const road = pairedRoad && stamped !== "relayed" ? "paired" : (stamped ?? msg.origin);
+        const road = asPaired ? "paired" : (stamped ?? msg.origin);
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {
@@ -587,7 +599,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // holds this host to that key before it spends it. A runtime wired with no place door proves none
               // and answers the code alone, which the line that asked refuses to print in its own words.
               const hostKey = rt.places?.hostKey();
-              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs });
+              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs, ...(msg.here === true ? { here: true } : {}) });
               send({ id: msg.id, ok: true, code, expiresAt, ...(hostKey === undefined ? {} : { hostKey }) });
               return;
             }
@@ -734,12 +746,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, devices: await devices().list() });
               return;
             case "devices.revoke": {
+              // A paired computer takes any device's token away, its own included: the laptop is where a person
+              // looks to see who holds a token to their box. A ticket's socket still cannot, whoever minted it.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
-                return;
-              }
-              if (me?.kind === "device" && msg.deviceId !== me.device.id) {
-                send({ id: msg.id, ok: false, error: DEVICE_REVOKE_REFUSAL });
                 return;
               }
               const revoked = await devices().revoke(msg.deviceId);

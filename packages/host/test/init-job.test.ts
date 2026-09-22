@@ -31,7 +31,7 @@ import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { DEVICE_URL, GEMINI_URL, scriptedLink } from "./init-link.js";
 import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
-import { holdingAgent, scriptedAgent, createOn, projectOn } from "./verbs-fixture.js";
+import { holdingAgent, scriptedAgent, copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE, builderDiskGb: BUILDER_DISK_GB };
@@ -173,7 +173,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     });
   // The provider the runtime forks on: the stub, or one a case hands over to stand for a host set up for none.
   const places = over.places?.(backend);
-  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1", ...(places !== undefined ? { places } : {}) });
+  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir, undefined, fakeDaemonStart, undefined, copyingFake()), hostId: "box:h1", ...(places !== undefined ? { places } : {}) });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };

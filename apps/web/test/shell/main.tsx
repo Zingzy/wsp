@@ -503,7 +503,7 @@ function fakeWire(): TerminalWire {
 // says about it can be measured where it lands; the whole road runs, bridge and boot object both.
 if (params.get("version") === "behind") {
   window.wsp = { ...window.wsp, version: "0.1.3" };
-  (window as unknown as { __WSP__?: { wsPort: number; token: string; version: string } }).__WSP__ = { wsPort: 0, token: "", version: "0.1.5" };
+  (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.1.5" };
 }
 const toast = params.get("toast");
 const shown = params.get("ws");

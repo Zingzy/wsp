@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { defaultHomeIn, devCheckoutState, dialAddress, homeNamed, hostTokenFor, lockPathFor, ownPid, serve, servingHost, type CliIO, type HostLock, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
-import { safeEqual, type Runtime } from "@wsp/runtime";
+import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
 export type PortState = "free" | "wsp" | "other";
 
@@ -13,7 +13,7 @@ export interface HostSession {
   port: number;
   /** True when this process started the host and must stop it on quit. */
   owned: boolean;
-  /** True for a host on another computer, whose page carries no token and whose device token the shell holds. */
+  /** True for a host on another computer, whose page pairs and whose device token the shell holds. */
   remote: boolean;
   /** What the window and the menu call this host. */
   label: string;
@@ -84,16 +84,19 @@ function attached(port: number, url: string): HostSession {
   return { url, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
-/** Whether a token is the one the host serving this state file presents, compared the one way this repo compares
- * a secret. False where no host has written the file, so nothing matches nothing. It lives here rather than
- * beside the token file's own reader because the host package's MCP server may reach no runtime. */
-export function hostTokenMatches(statePath: string, token: string): boolean {
+/** Whether a digest is the one of the token the host serving this state file holds, compared the one way this repo
+ * compares a secret. The page carries the digest and this window holds the file, so the compare sends nothing and
+ * a page a squatter serves learns nothing by being read. False where no host has written the file, so nothing
+ * matches nothing. It lives here rather than beside the token file's own reader because the host package's MCP
+ * server may reach no runtime. */
+export function hostTokenMatches(statePath: string, digest: string): boolean {
   const held = hostTokenFor(statePath);
-  return held !== undefined && safeEqual(held, token);
+  return held !== undefined && safeEqual(tokenDigest(held), digest);
 }
 
 /** One sentence for every live lock this window will not attach to, whichever of the three reasons it is: the
- * owner's token is never sent to that page to settle the question, since a squatter would then have it. */
+ * owner's token is never sent to that page to settle the question, since a squatter would then have it, and the
+ * page's digest of it is what is read instead. */
 const wontAttach = (statePath: string, lock: HostLock, why: string): Error =>
   new Error(`a host (pid ${lock.pid}) holds ${lockPathFor(statePath)} on port ${lock.port} but ${why}: stop that process or run wsp down, then open wsp again`);
 
@@ -108,11 +111,11 @@ export function statePathIn(home: string, launch: Launch): string {
 /** The host whose lock sits beside this state file, once this window has proof it is the owner's own. The lock is
  * the whole road in: a page on a port carrying the boot line is anything any login on this computer cares to
  * serve. Its pid is this login's, and then one of two readings by the address it bound. A host on loopback serves
- * its page with its own token inlined, so the page is held to the token file beside the state. A host bound
- * beyond this computer serves a page with no token by design, and the lock alone is the reading for it. Either
- * road is dialled where the lock says that host answers, which for a host on ::1 or on 127.0.0.2 is there and
- * nowhere else. Anything else is a refusal: this window starts no second host on a state file another process
- * holds. */
+ * its page with the digest of its own token inlined, so the page is held to the digest of the token file beside
+ * the state. A host bound beyond this computer serves a page with no digest by design, and the lock alone is the
+ * reading for it. Either road is dialled where the lock says that host answers, which for a host on ::1 or on
+ * 127.0.0.2 is there and nowhere else. Anything else is a refusal: this window starts no second host on a state
+ * file another process holds. */
 async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   const held = servingHost(statePath);
   if (held === undefined) return undefined;
@@ -121,18 +124,28 @@ async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   if (!isLoopback(held.address ?? LOOPBACK)) return attached(held.port, `http://${at}`);
   const boot = await bootAt(at);
   if (boot === undefined) throw wontAttach(statePath, held, "no wsp host answers there");
-  if (boot.token === undefined || !hostTokenMatches(statePath, boot.token)) throw wontAttach(statePath, held, "the page it serves carries another token than the file beside this state");
+  if (boot.tokenHash === undefined || !hostTokenMatches(statePath, boot.tokenHash)) throw wontAttach(statePath, held, "the page it serves carries another token's digest than the file beside this state");
   return attached(held.port, `http://${at}`);
 }
 
-/** Runs before the setup gate: a serving host is the proof of setup. WSP_HOME
- * names the home when it is set, else this computer's own, and the lock beside
- * that home's state file is the one thing read. A window that should open on
- * another home is launched with WSP_HOME naming it, which is the one way any
- * road here says which home it means. */
+/** The wsp home a launch means: WSP_HOME when it is set, else this computer's own. A window that should open on
+ * another home is launched with WSP_HOME naming it, which is the one way any road here says which home it means. */
+export function homeOf(launch: Launch): string {
+  const env = homeNamed(launch.env);
+  return env !== undefined ? resolve(env) : defaultHomeIn(homedir());
+}
+
+/** Where this app keeps Chromium's own files, its profile, caches and worker registrations: one folder beside the
+ * state file the launch serves, so two apps on two homes never share one profile. A shared profile's databases
+ * are locked by the first app to open them, and the second launch's page load never came back. */
+export function userDataIn(launch: Launch): string {
+  return join(dirname(statePathIn(homeOf(launch), launch)), "desktop");
+}
+
+/** Runs before the setup gate: a serving host is the proof of setup. The lock beside the launch's home's state file
+ * is the one thing read. */
 export async function locateHost(opts: Launch): Promise<Located> {
-  const env = homeNamed(opts.env);
-  const home = env !== undefined ? resolve(env) : defaultHomeIn(homedir());
+  const home = homeOf(opts);
   const session = await lockedHost(statePathIn(home, opts));
   return { home, ...(session !== undefined ? { session } : {}) };
 }

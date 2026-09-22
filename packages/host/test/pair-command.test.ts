@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The two commands that hand out access and take it back, and the words they
-// print. Both dial the running host over loopback, so a fake client is the
-// whole of what they need, and both refuse a line aimed at a host on another
-// computer, which is why every call here names the home and the environment
-// the run reads rather than leaving them to this process's.
+// print. Both dial a host, so a fake client is the whole of what they need.
+// wsp host pair refuses a line aimed at a host on another computer and wsp
+// host devices dials it, which is why every call here names the home and the
+// environment the run reads rather than leaving them to this process's.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXIT_CODES, pairToken, SEAL_UNSERVED } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { advertisedUrl, deviceLines, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
-import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
-import { cli, HOST_FLAG, type CliIO } from "../src/cli.js";
+import { advertisedUrl, deviceLines, deviceRoleWord, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
+import { hostSideOnlyFix, hostSideOnlyLine, type HostAim } from "../src/hosts.js";
+import { cli, HOST_COMMANDS, HOST_FLAG, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { doorAddresses } from "../src/server.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
@@ -51,7 +51,18 @@ function fakeHost(answers: Record<string, Record<string, unknown>>): { client: H
   return { client, asked, closes: () => closed };
 }
 
-const deps = (client: HostClient, now = Date.parse("2026-09-11T10:00:00.000Z")) => ({ dial: () => Promise.resolve(client), now: () => now });
+/** The dial a command makes, with the aim it handed over: where a line went is the whole of what these cases read. */
+const deps = (client: HostClient, now = Date.parse("2026-09-11T10:00:00.000Z")): { dial: (statePath: string, opts: { aim?: HostAim }) => Promise<HostClient>; now: () => number; aimed: HostAim[] } => {
+  const aimed: HostAim[] = [];
+  return {
+    dial: (_statePath, opts) => {
+      if (opts.aim !== undefined) aimed.push(opts.aim);
+      return Promise.resolve(client);
+    },
+    now: () => now,
+    aimed,
+  };
+};
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -108,28 +119,37 @@ describe("wsp host pair", () => {
 });
 
 describe("wsp host devices", () => {
-  it("lists what took a code, with a row per device and never a token", async () => {
+  it("lists what took a code, with a row per device saying what its token is read as, and never a token", async () => {
     const host = fakeHost({
       "devices.list": {
         devices: [
           { id: "d_1a2b3c4d5e6f7a8b", name: "maya's laptop", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:05:00.000Z" },
-          { id: "d_5e6f7a8b1a2b3c4d", name: "a phone", createdAt: "2026-09-11T11:00:00.000Z", lastSeenAt: "2026-09-11T11:00:00.000Z" },
+          { id: "d_5e6f7a8b1a2b3c4d", name: "a Mac in a browser at 127.0.0.1:4400", createdAt: "2026-09-11T11:00:00.000Z", lastSeenAt: "2026-09-11T11:00:00.000Z", here: true },
+          { id: "d_9a8b7c6d5e4f3a2b", name: "thread abcd1234", createdAt: "2026-09-11T12:00:00.000Z", lastSeenAt: "2026-09-11T12:00:00.000Z", scope: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } },
         ],
       },
     });
     const log: string[] = [];
     expect(await devicesCommand(io(log, []), here(), [], deps(host.client))).toBe(0);
-    expect(log[0]).toContain("DEVICE");
-    expect(log[1]).toContain("maya's laptop");
-    expect(log[2]).toContain("a phone");
+    expect(log[0]).toMatch(/^DEVICE\s+ID\s+AS\s+PAIRED\s+LAST SEEN$/);
+    expect(log[1]).toMatch(/^maya's laptop\s+d_1a2b3c4d5e6f7a8b\s+device\s+2026/);
+    expect(log[2]).toMatch(/^a Mac in a browser at 127\.0\.0\.1:4400\s+d_5e6f7a8b1a2b3c4d\s+owner\s+2026/);
+    expect(log[3]).toMatch(/^thread abcd1234\s+d_9a8b7c6d5e4f3a2b\s+thread\s+2026/);
+    expect(deviceRoleWord({})).toBe("device");
+    expect(deviceRoleWord({ here: true })).toBe("owner");
     expect(host.closes()).toBe(1);
   });
 
-  it("says so plainly when nobody is paired", async () => {
+  it("says so plainly when nobody is paired, naming the host the line was aimed at", async () => {
     const host = fakeHost({ "devices.list": { devices: [] } });
     const log: string[] = [];
     await devicesCommand(io(log, []), here(), [], deps(host.client));
     expect(log).toEqual(["No computer is paired with this host. Run wsp host pair for a code."]);
+    // Aimed at a host on another computer, the line names it, and the code is minted at that host's own terminal.
+    const box = fakeHost({ "devices.list": { devices: [] } });
+    const aimed: string[] = [];
+    await devicesCommand(io(aimed, []), { ...here(homeWithBox(false)), host: "box" }, [], deps(box.client));
+    expect(aimed).toEqual(["No computer is paired with box. Run wsp host pair on box for a code."]);
   });
 
   it("revokes by id, and exits non-zero on an id nothing is paired under", async () => {
@@ -152,33 +172,62 @@ describe("wsp host devices", () => {
     }
   });
 
-  it("reads where the line is aimed out of the environment the run was given, not this process's", async () => {
-    // The home holding the host and the mark aiming at it are named by this environment alone, so a command that
-    // read process.env instead would find no host at all and hand the code out over the wire.
-    const host = fakeHost({ "devices.list": { devices: [] } });
+  it("dials the host --host names and lists that host's devices, with the AS column, from the computer paired with it", async () => {
+    const host = fakeHost({ "devices.list": { devices: [{ id: "d_box1", name: "maya's laptop", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:05:00.000Z" }] } });
+    const home = homeWithBox(false);
+    const d = deps(host.client);
+    const log: string[] = [];
+    expect(await devicesCommand(io(log, []), { ...here(home), host: "box" }, [], d)).toBe(0);
+    expect(d.aimed).toMatchObject([{ kind: "alias", alias: "box" }]);
+    expect(host.asked).toEqual([{ op: "devices.list" }]);
+    expect(log[0]).toContain("AS");
+    expect(log[1]).toMatch(/maya's laptop\s+d_box1\s+device/);
+    expect(host.closes()).toBe(1);
+  });
+
+  it("sends a revoke to the host --host names, and reads where the line is aimed out of the environment the run was given, not this process's", async () => {
+    const host = fakeHost({ "devices.revoke": { revoked: true } });
+    // The home holding the host and the mark aiming at it are named by this environment alone: a command that read
+    // process.env instead would dial whatever this process's own home marks.
     const home = homeWithBox(true);
-    await expect(devicesCommand(io([], []), { statePath: "/s/state.json", env: { WSP_HOME: home } }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
-    expect(host.asked).toEqual([]);
-    expect(host.closes()).toBe(0);
+    const d = deps(host.client);
+    const log: string[] = [];
+    expect(await devicesCommand(io(log, []), { statePath: "/s/state.json", env: { WSP_HOME: home } }, ["revoke", "d_box1"], d)).toBe(0);
+    expect(d.aimed).toMatchObject([{ kind: "alias", alias: "box" }]);
+    expect(host.asked).toEqual([{ op: "devices.revoke", params: { deviceId: "d_box1" } }]);
+    expect(log[0]).toContain("d_box1 revoked");
+    // A revoke of an id that host holds nothing under names the host the line was aimed at.
+    const none = fakeHost({ "devices.revoke": { revoked: false } });
+    const err: string[] = [];
+    expect(await devicesCommand(io([], err), { ...here(homeWithBox(false)), host: "box" }, ["revoke", "d_nope"], deps(none.client))).toBe(1);
+    expect(err[0]).toBe("wsp host devices revoke: no device d_nope is paired with box.");
+  });
+
+  it("is a verb aimed like every other, so the shared parse takes --host on it and the skill's list of host commands carries it", () => {
+    expect(HOST_FLAG["host devices"]).toBe("aimed");
+    expect(HOST_COMMANDS).toContain("host devices");
   });
 });
 
 describe("a host side command aimed at a host on another computer", () => {
-  it("refuses --host, and the default alias, with the one sentence that says where to run it", async () => {
+  it("refuses --host, and the default alias, with the one sentence that says where to run it, while devices dials", async () => {
     const host = fakeHost({ "devices.list": { devices: [] }, "pair.issue": { code: "7K3MQP2X", expiresAt: 0 } });
     const home = homeWithBox(false);
     // A flag naming a host this computer paired with, with nothing marked as the default.
-    await expect(devicesCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
     await expect(pairCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host pair", "box"));
     // The default alias, with no flag and nothing in the environment: the aim no host on this computer wins back,
     // which is the road that reached the remote host by accident.
     const marked = homeWithBox(true);
-    await expect(devicesCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
     await expect(pairCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host pair", "box"));
     // Nothing was dialled: a code handed out over a device token is a code the host would refuse anyway, and the
     // refusal has to read as a line the person can act on rather than as the host's own.
     expect(host.asked).toEqual([]);
     expect(host.closes()).toBe(0);
+    // The devices line takes the same aim and goes there.
+    const d = deps(host.client);
+    expect(await devicesCommand(io([], []), here(marked), [], d)).toBe(0);
+    expect(d.aimed).toMatchObject([{ kind: "alias", alias: "box" }]);
+    expect(host.asked).toEqual([{ op: "devices.list" }]);
   });
 
   // The flag is one key of the shared parse: a word that does not declare it is refused before its command runs,
@@ -196,20 +245,11 @@ describe("a host side command aimed at a host on another computer", () => {
     await typed(["host", "pair", "--host", "box"], "host pair");
   });
 
-  it("wsp host devices takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
-    await typed(["host", "devices", "--host", "box"], "host devices");
-  });
-
-  it("wsp host devices revoke takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
-    await typed(["host", "devices", "revoke", "d_1a2b3c4d", "--host", "box"], "host devices");
-  });
-
-  it("the plumbing answers under wsp host alone: the old top level word is no command, and the folded line still runs at the host's own terminal", async () => {
+  it("the plumbing answers under wsp host alone: the old top level word is no command, and pair still runs at the host's own terminal", async () => {
     const gone: string[] = [];
     expect(await cli(["pair"], io([], gone), undefined, { WSP_HOME: homeWithBox(false) })).toBe(EXIT_CODES.usage);
     expect(gone).toEqual(["unknown command: pair. Run wsp --help for the list."]);
     expect(HOST_FLAG["host pair"]).toBe("hostSide");
-    expect(HOST_FLAG["host devices"]).toBe("hostSide");
     // The words select the command; wsp host devices revoke reaches it as the two words plus what follows.
     const revoked: string[] = [];
     expect(await cli(["host", "devices", "revoke"], io([], revoked), undefined, { WSP_HOME: homeWithBox(false) })).toBe(EXIT_CODES.usage);
@@ -353,8 +393,8 @@ describe("the words", () => {
   });
 
   it("pads the device table's columns and never carries a token", () => {
-    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }]);
-    expect(lines[0]!.startsWith("DEVICE")).toBe(true);
+    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }], { kind: "here" });
+    expect(lines[0]).toMatch(/^DEVICE\s+ID\s+AS\s+PAIRED\s+LAST SEEN$/);
     expect(lines.join("\n")).not.toContain("token");
   });
 

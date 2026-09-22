@@ -215,9 +215,9 @@ describe("the view's own last line", () => {
     expect(within(view).getByText("a copy · shares this Mac's ports, PORT 3100")).toBeTruthy();
   });
 
-  it("says the folder worked in place as that, and names the computer only where the work did not land here", async () => {
-    const view = await mount(answered({ copy: { road: "in-place", path: "/Users/dev/spoo", source: "/Users/dev/spoo", base: "", branch: "", carried: "nothing" }, portBase: undefined }));
-    expect(within(view).getByText("in this folder · shares this Mac's ports")).toBeTruthy();
+  it("says a copy by either road as that, and names the computer only where the work did not land here", async () => {
+    const view = await mount(answered({ copy: { road: "worktree", path: "/Users/dev/spoo-qr-codes", source: "/Users/dev/spoo", base: "", branch: "main", carried: "config-only" }, portBase: undefined }));
+    expect(within(view).getByText("a copy · shares this Mac's ports")).toBeTruthy();
     expect(view.textContent).not.toContain("zingzy-mbp");
   });
 

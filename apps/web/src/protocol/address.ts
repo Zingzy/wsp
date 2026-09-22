@@ -4,7 +4,7 @@
 // record of that, so it is replaced rather than pushed: a pick inside the app
 // is not a page to go back from, and a back step would leave the app showing
 // one thread while the address named another. The shape lives in the protocol.
-import { addressFromHash, appHash, type AppAddress } from "@wsp/protocol";
+import { addressFromHash, appHash, pairingCodeOf, type AppAddress } from "@wsp/protocol";
 
 /** What this page's address names, or nothing on a page whose hash names no workspace. */
 export function readAddress(): AppAddress | undefined {
@@ -17,6 +17,16 @@ export function writeAddress(address: AppAddress | null): void {
   const hash = address === null ? "" : appHash(address);
   if (window.location.hash === hash) return;
   window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${hash}`);
+}
+
+/** The pairing code wsp init put in this page's address, taken out of it as it is read: a second look finds none,
+ * and what the person is reading is written back without it. */
+export function takePairingCode(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const found = pairingCodeOf(window.location.hash);
+  if (found === undefined) return undefined;
+  window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${found.rest}`);
+  return found.code;
 }
 
 /** The whole link to an address, which is what a person pastes elsewhere. */

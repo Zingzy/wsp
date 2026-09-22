@@ -3,11 +3,11 @@
 // carries none over into a host page: the two halves of the rule that keeps a
 // worker a previewed page registered off the next page on that port.
 import { describe, expect, it, vi } from "vitest";
-import { guardWorkers, loadHostPage, type PageSession } from "../src/page-session.js";
+import { guardWorkers, loadHostPage, sweepFailedLine, type PageSession } from "../src/page-session.js";
 
 type Listener = (details: { url: string; requestHeaders: Record<string, string> }, callback: (response: { cancel?: boolean }) => void) => void;
 
-function fakeSession(order: string[] = []): PageSession & { listener(): Listener; cleared: { storages: string[] }[] } {
+function fakeSession(order: string[] = [], sweep: () => Promise<void> = async () => {}): PageSession & { listener(): Listener; cleared: { storages: string[] }[] } {
   let held: Listener | undefined;
   const cleared: { storages: string[] }[] = [];
   return {
@@ -18,6 +18,7 @@ function fakeSession(order: string[] = []): PageSession & { listener(): Listener
     },
     clearStorageData: async options => {
       cleared.push(options);
+      await sweep();
       order.push("cleared");
     },
     listener: () => {
@@ -66,15 +67,45 @@ describe("guardWorkers", () => {
 });
 
 describe("loadHostPage", () => {
-  it("sweeps the session's worker registrations before the page is loaded, never after", async () => {
+  it("sweeps the session's worker registrations before the page is loaded, never after, and says nothing when the sweep is done", async () => {
     const order: string[] = [];
     const session = fakeSession(order);
     const loadURL = vi.fn(async () => {
       order.push("loaded");
     });
-    await loadHostPage({ webContents: { session }, loadURL }, "http://127.0.0.1:4400");
+    const lines: string[] = [];
+    await loadHostPage({ webContents: { session }, loadURL }, "http://127.0.0.1:4400", { log: line => lines.push(line) });
     expect(order).toEqual(["cleared", "loaded"]);
     expect(session.cleared).toEqual([{ storages: ["serviceworkers"] }]);
     expect(loadURL).toHaveBeenCalledWith("http://127.0.0.1:4400");
+    expect(lines).toEqual([]);
+  });
+
+  it("does not hold the load past the bound behind a sweep that never comes back, and logs that it was skipped", async () => {
+    // What a profile another app has open does: the database is locked, and the promise never settles.
+    const order: string[] = [];
+    const session = fakeSession(order, () => new Promise<void>(() => {}));
+    const loadURL = vi.fn(async () => {
+      order.push("loaded");
+    });
+    const lines: string[] = [];
+    const started = Date.now();
+    await loadHostPage({ webContents: { session }, loadURL }, "http://127.0.0.1:4400", { boundMs: 50, log: line => lines.push(line) });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(order).toEqual(["loaded"]);
+    expect(loadURL).toHaveBeenCalledWith("http://127.0.0.1:4400");
+    expect(lines).toEqual([sweepFailedLine("not done in 50 ms")]);
+  });
+
+  it("loads the page when the sweep fails, with the failure in the line", async () => {
+    const order: string[] = [];
+    const session = fakeSession(order, () => Promise.reject(new Error("Database IO error")));
+    const loadURL = vi.fn(async () => {
+      order.push("loaded");
+    });
+    const lines: string[] = [];
+    await loadHostPage({ webContents: { session }, loadURL }, "http://127.0.0.1:4400", { log: line => lines.push(line) });
+    expect(order).toEqual(["loaded"]);
+    expect(lines).toEqual([sweepFailedLine("Database IO error")]);
   });
 });

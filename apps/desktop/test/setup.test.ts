@@ -9,6 +9,7 @@ import { createRuntime, localExecStream, memoryStore, STATE_SHAPE_KEY, stateWrit
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
+import { copyingFake } from "../../../packages/host/test/verbs-fixture.js";
 import { checkSetup, openThisComputer } from "../src/setup.js";
 import type { Keys, ProviderEnv } from "@wsp/host";
 
@@ -27,8 +28,8 @@ const GOLDEN: GoldenManifest = {
   ],
 };
 
-/** A project on this computer and its workspace, which is what a workspace here is: a folder of the person's own
- * worked in place. */
+/** A project on this computer and its workspace, which is what a workspace here is: a copy of a folder of the
+ * person's own. */
 async function here(rt: Runtime, name: string): Promise<WorkspaceView> {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-desktop-")));
   execFileSync("git", ["init", "-q", folder]);
@@ -58,6 +59,7 @@ describe("checkSetup", () => {
     rootsPath: join(root, "roots"),
     env: () => ({}),
     platform: process.platform === "darwin" ? "darwin" : "linux",
+    copier: copyingFake(),
   });
 
   beforeEach(() => {

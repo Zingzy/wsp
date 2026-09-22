@@ -10,6 +10,7 @@ import { isCancel, log, outro } from "@clack/prompts";
 import { NO_PROVIDER_LINE, THIS_COMPUTER, isLocalWorkspace, type AppPorts, type PortsAsked, type WorkspaceView } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { appUrl, askAlsoLocal, runLocal } from "./init-first.js";
+import { hostRunDir } from "./host-lock.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
@@ -21,7 +22,7 @@ import type { InitIO, InitResult } from "./init.js";
 export function noKeyLines(upCommand: string): string[] {
   return [
     NO_PROVIDER_LINE,
-    `So this run seals nothing and boots nothing. It makes ${THIS_COMPUTER} a workspace: threads run here, under your own sign-ins, with the agents already on your PATH.`,
+    `So this run seals nothing and boots nothing. It makes your first workspace a copy of a folder on ${THIS_COMPUTER}: threads run in it, under your own sign-ins, with the agents already on your PATH.`,
     `Put a Solari API key in ${KEY_LAYER_WORDS} and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
     `${upCommand} starts the app again after this terminal is closed.`,
   ];
@@ -38,8 +39,8 @@ export interface LocalInitOptions {
   address?: string;
   /** The command that starts the app again, with the flags this run was given. */
   upCommand: string;
-  /** A folder on this computer to record as a project and work in place, which is what a workspace here is;
-   * absent, this run makes none. */
+  /** A folder on this computer to record as a project and copy for the first workspace, which is what a workspace
+   * here is; absent, this run makes none. */
   importFolder?: string;
   /** The runtime over this state file, its provider module the one that holds no machine. */
   runtime(): Runtime;
@@ -95,7 +96,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
     }
     if (tick) workspace = await runLocal(roads, io.output, opts.importFolder);
   } else {
-    log.step(`${workspace.name} (${workspace.id}) is already ${THIS_COMPUTER}; this run opens the app on it.`, out);
+    log.step(`${workspace.name} (${workspace.id}) is already the workspace here; this run opens the app on it.`, out);
   }
   if (handle === undefined) {
     io.json?.({ event: "done", nextCommand: opts.upCommand, ...(workspace !== undefined ? { workspace: { id: workspace.id, name: workspace.name } } : {}) });
@@ -104,7 +105,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
     return { code: 0 };
   }
   const at = { port: handle.port, address: opts.address };
-  await openApp(appUrl(at, workspace?.id), at, io, interactive);
+  await openApp(appUrl(at, workspace?.id, await handle.hereCode()), at, io, interactive, { runDir: hostRunDir(opts.statePath) });
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   return { code: 0, handle };
 }

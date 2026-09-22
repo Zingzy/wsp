@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
 import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, madeOfWord, pairToken } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
+import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -26,7 +26,8 @@ import { notForThisPage } from "../src/origin.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
-const TOKEN = /^[A-Za-z0-9_-]{32}$/;
+/** What the loopback page carries of the host's token: its sha256, hex. The token itself is in no page. */
+const DIGEST = /^[0-9a-f]{64}$/;
 
 function builtApp(): string {
   const fromEnv = process.env["WSP_DESKTOP_APP"];
@@ -78,7 +79,7 @@ function seedLocalWorkspace(home: string): void {
     defaultBranch: "main",
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
-  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
+  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: `${folder}-first`, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
   writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
@@ -283,9 +284,9 @@ function frameAt(win: Page, url: string): Promise<Frame> {
 /** What the page inside a frame made of the worker it asked for. */
 const registerWorker = (frame: Frame): Promise<string> => frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 
-async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
+async function bootOf(page: Page): Promise<{ wsPort: number; tokenHash: string; token?: string }> {
   await page.waitForLoadState("domcontentloaded");
-  return page.evaluate(() => (window as unknown as { __WSP__: { wsPort: number; token: string } }).__WSP__);
+  return page.evaluate(() => (window as unknown as { __WSP__: { wsPort: number; tokenHash: string; token?: string } }).__WSP__);
 }
 
 interface DesktopWindow {
@@ -432,14 +433,15 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(existsSync(builtApp())).toBe(true);
   });
 
-  it("opens one window on the host it started, titled wsp, with a boot token, and stops the host on quit", async () => {
+  it("opens one window on the host it started, titled wsp, with the token's digest in the boot object and never the token, and stops the host on quit", async () => {
     launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
     const url = win.url();
     expect(url).toMatch(APP_URL);
     expect(await win.title()).toBe("wsp");
-    expect(boot.token).toMatch(TOKEN);
+    expect(boot.tokenHash).toMatch(DIGEST);
+    expect(boot.token).toBeUndefined();
     expect(boot.wsPort).toBeGreaterThan(0);
     expect(appWindows(launched.app)).toHaveLength(1);
     await launched.app.close();
@@ -562,7 +564,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.keyboard.press("Enter");
     const win = await windowAt(app, APP_URL);
     const boot = await bootOf(win);
-    expect(boot.token).toMatch(TOKEN);
+    expect(boot.tokenHash).toMatch(DIGEST);
     await closed;
     await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
     // A workspace is one project's copy, so this press records neither: the app opens on the screen that asks for a
@@ -652,12 +654,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = await launch({}, seedLocalWorkspace);
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
-    expect(boot.token).toMatch(TOKEN);
+    expect(boot.tokenHash).toMatch(DIGEST);
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is what the workspace is made of, in the protocol's own word for the folder worked where it sits.
-    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("in-place"));
+    // Line two is what the workspace is made of, in the protocol's own word for a copy of the folder.
+    expect(await row.locator("[data-workspace-made-of]").textContent()).toContain(madeOfWord("clonefile"));
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
@@ -764,7 +766,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
     expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
-    expect(boot.token).toBe(existing.authToken);
+    expect(boot.tokenHash).toBe(tokenDigest(existing.authToken));
     await launched.app.close();
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
     rmSync(user, { recursive: true, force: true });

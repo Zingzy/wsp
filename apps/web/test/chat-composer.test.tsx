@@ -588,7 +588,7 @@ describe("composer while the workspace is not live", () => {
   });
 
   it("on a window the host did not serve on this computer, a socket that drops reads as that computer asleep, not as wsp gone", async () => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: false, version: "0.0.0" };
     try {
       const { api } = fixtureApi([workspace]);
       await setup(api);
@@ -599,7 +599,7 @@ describe("composer while the workspace is not live", () => {
       expect(send.disabled).toBe(true);
       expect(isEditable(composerEditor())).toBe(false);
       // A page the host served on this computer says what it has always said: wsp itself is not running here.
-      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", token: "t_local" };
+      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", tokenHash: "a".repeat(64) };
       act(() => useStore.getState().setConn("closed"));
       await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("closed")));
     } finally {
@@ -608,7 +608,7 @@ describe("composer while the workspace is not live", () => {
   });
 
   it("a window on a sleeping Mac says which computer is asleep, ahead of anything that computer's daemon would say", async () => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: false, version: "0.0.0" };
     try {
       const here: WorkspaceView = { ...workspace, kind: "local", machineId: "local" };
       const { api } = fixtureApi([here]);

@@ -41,7 +41,7 @@ import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
 import { guestAnswer, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 import { loginOf } from "./signin-questions.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
+import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 
 /** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
 const HOME_HERE = "/home/nobody";
@@ -49,6 +49,16 @@ const HOME_HERE = "/home/nobody";
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
+/** The code the fake host mints for the browser init opens; every address the run opens or prints carries it. */
+const HERE_CODE = "7K3MQP2X";
+/** What the browser is handed on a terminal the person is at: a page in the host's run folder, never the address. */
+const OPENING_PAGE = /\/runs\/open-[0-9a-f]+\.html$/;
+/** The address that page sends the browser to, read off the page the trail's last open named. */
+const openedAddress = (trail: readonly string[]): string | undefined => {
+  const last = trail.at(-1);
+  if (last === undefined || !last.startsWith("open ") || !OPENING_PAGE.test(last)) return undefined;
+  return /content="0; url=([^"]*)"/.exec(readFileSync(last.slice("open ".length), "utf8"))?.[1];
+};
 const SEAL_Q = (v: number) => `Seal this machine as image v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE, builderDiskGb: BUILDER_DISK_GB };
@@ -227,7 +237,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       served.push(ports);
       // The host starts only once the golden is on the account and in the store: a host that fails cannot lose it.
       expect(goldenHead(await rt.golden.get())).toBeDefined();
-      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
+      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", hereCode: async () => HERE_CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
       return handle;
     },
     daemon: async () => ({ link: link.dial(), close: () => {} }),
@@ -324,6 +334,7 @@ function localWiring(root: string): LocalWiring {
     rootsPath: join(root, "roots"),
     env: () => ({}),
     platform: hostPlatform(),
+    copier: copyingFake(),
   };
 }
 
@@ -382,7 +393,7 @@ async function bootedOnly(f: Fake): Promise<void> {
 /** Workspace roads whose fork is refused, for runs that test what comes before the first workspace. */
 const quietRoads: WorkspaceRoads = { createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, addProject: async () => { throw new Error("no project in this fixture"); }, ...fakeProjects([], []) };
 /** A host whose first-workspace fork is refused, for the same runs on a terminal. */
-const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...quietRoads, close: async () => {} });
+const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", hereCode: async () => HERE_CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...quietRoads, close: async () => {} });
 
 const dirs: string[] = [];
 const servers: Server[] = [];
@@ -1468,7 +1479,7 @@ describe("wsp init, the sign-in stage", () => {
     expect(result.logins?.map(l => l.state)).toEqual(["skipped"]);
     expect(out).not.toMatch(/—/);
     // o opened the page twice; the device URL, the second o, then the app after the seal.
-    expect(f.opened).toEqual([DEVICE_URL, DEVICE_URL, expect.stringMatching(URL_RE)]);
+    expect(f.opened).toEqual([DEVICE_URL, DEVICE_URL, expect.stringMatching(OPENING_PAGE)]);
     // The seal stamps their states on the version.
     expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([{ name: "Supabase login", state: "skipped" }]);
   });
@@ -2083,7 +2094,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(0);
     expect(f.opened).toEqual([]);
     const out = f.text();
-    expect(out).toMatch(/^◇\s+Open http:\/\/100\.64\.0\.3:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).toMatch(/^◇\s+Open http:\/\/100\.64\.0\.3:4400\/#w\/ws_[0-9a-f]+\/c\/7K3MQP2X$/m);
     expect(out).not.toContain("ssh -L");
   });
 
@@ -2095,7 +2106,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.hosts).toBe(1);
     expect(f.opened).toEqual([]);
     const out = f.text();
-    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+\/c\/7K3MQP2X$/m);
     expect(out).toContain("wsp keeps serving the app from this terminal; Ctrl-C stops it.");
     expect(out).not.toContain("Done. Image v1 is sealed");
     expect(out.indexOf("Image v1 sealed.")).toBeLessThan(out.indexOf("Open http://"));
@@ -3917,7 +3928,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("Your 1 workspace stays on the image version it was forked from; upgrade it from the app. New workspaces fork v2.");
     expect(out).not.toContain("Workspace first");
     expect(out).not.toContain("Forking your first workspace");
-    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/$/m);
+    expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#c\/7K3MQP2X$/m);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => [w.id, w.golden])).toEqual([[alpha.id, "snap_wsp-h1-default-v1"]]);
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false], [undefined, false], ["snap_wsp-h1-default-v2", true]]);
   });
@@ -4276,7 +4287,8 @@ describe("wsp init, the first workspace and its project", () => {
     await sealIt(f);
     await firstWorkspace(f, false, false);
     expect((await run).code).toBe(0);
-    expect(f.trail).toEqual(["open http://127.0.0.1:4400/"]);
+    expect(f.trail).toEqual([expect.stringMatching(OPENING_PAGE)]);
+    expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#c/${HERE_CODE}`);
     expect(f.imports).toEqual([]);
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     const out = f.text();
@@ -4295,7 +4307,8 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await run).code).toBe(0);
     // A workspace is one project's copy, so a run that named no folder here makes none and says what records one.
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
-    expect(f.trail).toEqual(["open http://127.0.0.1:4400/"]);
+    expect(f.trail).toEqual([expect.stringMatching(OPENING_PAGE)]);
+    expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#c/${HERE_CODE}`);
     expect(f.text()).toContain("a workspace is one project's, and this run named no folder here");
   });
 
@@ -4314,7 +4327,8 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
     expect(workspaces.map(w => w.name)).toEqual(["first", LOCAL_NAME]);
-    expect(f.trail).toEqual(["fork first", `import ${folder} -> ${folder}`, "local", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.trail).toEqual(["fork first", `import ${folder} -> ${folder}`, "local", expect.stringMatching(OPENING_PAGE)]);
+    expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${HERE_CODE}`);
   });
 
   it("Yes with nothing typed forks the workspace and imports no project", async () => {
@@ -4327,7 +4341,8 @@ describe("wsp init, the first workspace and its project", () => {
     await firstWorkspace(f, "");
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
-    expect(f.trail).toEqual(["fork first", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.trail).toEqual(["fork first", expect.stringMatching(OPENING_PAGE)]);
+    expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${HERE_CODE}`);
     expect(f.imports).toEqual([]);
   });
 
@@ -4388,7 +4403,8 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
     expect(workspaces.map(w => w.name)).toEqual(["first"]);
-    expect(f.trail).toEqual(["fork first", `open http://127.0.0.1:4400/#w/${workspaces[0]!.id}`]);
+    expect(f.trail).toEqual(["fork first", expect.stringMatching(OPENING_PAGE)]);
+    expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${HERE_CODE}`);
     expect(f.imports).toEqual([]);
     expect(f.text()).not.toContain("Done. wsp up starts the app");
   });

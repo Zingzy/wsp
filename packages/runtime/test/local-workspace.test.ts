@@ -9,14 +9,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, pairedRunRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, alreadyRecorded, copyPathFor, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -202,6 +202,7 @@ describe("local workspace", () => {
       rootsPath: join(root, "host", "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {
@@ -239,16 +240,21 @@ describe("local workspace", () => {
     expect(over.pid).toBeUndefined();
   });
 
-  it("a project worked in place has one workspace where this host has no copy road, and says why a second cannot be made", async () => {
-    const rt = runtime();
+  it("a host with no copy road refuses the first workspace of a project here, since every workspace here is a copy", async () => {
+    const { copier: _none, ...bare } = localWiring;
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: bare });
     const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
-    await rt.workspaces.create({ project: project.id, name: "mac" });
-    // This wiring hands in no copier, so the second piece of work has no road to a copy and the sentence says so.
+    // This wiring hands in no copier, so the first piece of work has no road to a copy and the sentence says so.
     // With one wired it is a copy of the folder; that is local-copy.test.ts.
-    await expect(rt.workspaces.create({ project: project.id, name: "mac2" })).rejects.toThrow(NO_COPIER_HERE);
-    // A second project here is a second workspace: this computer runs as many as there are folders to work in.
-    const second = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"));
-    expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
+    await expect(rt.workspaces.create({ project: project.id, name: "mac" })).rejects.toThrow(NO_COPIER_HERE);
+    expect(await rt.workspaces.list()).toEqual([]);
+    // A second project on a host that copies is a second workspace: this computer runs as many as there are
+    // folders to copy.
+    const copying = runtime();
+    const first = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "one"));
+    const second = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "other"));
+    expect((await copying.workspaces.create({ project: first.id, name: "mac" })).kind).toBe("local");
+    expect((await copying.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
   });
 
   it("a create on this computer that its own refusal stops asks nothing of the workspace it names as a parent", async () => {
@@ -375,13 +381,14 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
-  it("the view names the project's own folder, which is what a workspace worked in place is, so the app's line under the box says what the runtime will do", async () => {
+  it("the view names the copy beside the project's folder, never the folder itself, so the app's line under the box says what the runtime did", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    // The workspace here is the folder the project was recorded on, and a thread on it starts there.
-    expect(ws.folder).toBe(ws.project.path);
-    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.project.path);
-    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.project.path);
+    // The workspace here is a copy of the folder the project was recorded on, and a thread on it starts there.
+    expect(ws.folder).toBe(copyPathFor(ws.project.path, "mac"));
+    expect(ws.folder).not.toBe(ws.project.path);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.folder);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.folder);
     await rt.close();
   });
 
@@ -390,9 +397,9 @@ describe("local workspace", () => {
     const folder = repoIn(root);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const result = await (await rt.sessions.start(ws.id, { prompt: "where are you" })).finished;
-    expect(realpathSync(result.text!.trim())).toBe(realpathSync(folder));
+    expect(realpathSync(result.text!.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
     const [session] = await rt.sessions.list(ws.id);
-    expect(session!.cwd).toBe(folder);
+    expect(session!.cwd).toBe(copyPathFor(folder, "mac"));
     await rt.close();
   });
 
@@ -402,11 +409,11 @@ describe("local workspace", () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
     // The stream says which folder it resolved, so the client that prints it never restates the rule.
-    expect(stream.ranIn).toBe(folder);
+    expect(stream.ranIn).toBe(copyPathFor(folder, "mac"));
     let out = "";
     for await (const line of stream.lines) out += line;
     expect(await stream.exited).toBe(0);
-    expect(realpathSync(out.trim())).toBe(realpathSync(folder));
+    expect(realpathSync(out.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
     await rt.close();
   });
 
@@ -602,14 +609,14 @@ describe("local workspace", () => {
       // not only at an auth frame: a redeem is the other way in.
       const spending = await WsClient.connect(srv.port);
       const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
-      expect((await spending.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await spending.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(deviceHeldRefusal("workspaces.exec"));
       spending.close();
 
       const paired = await WsClient.connect(srv.port, { token: deviceToken });
       // The client fills the field in with this computer's own word; the road it arrived on answers for it instead.
-      expect((await paired.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"], origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
-      expect((await paired.request("sessions.start", { workspaceId: ws.id, prompt: "hi", origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
-      expect((await paired.request("daemon.open", { workspaceId: ws.id, origin: "here" }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await paired.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"], origin: "here" }))["error"]).toBe(deviceHeldRefusal("workspaces.exec"));
+      expect((await paired.request("sessions.start", { workspaceId: ws.id, prompt: "hi", origin: "here" }))["error"]).toBe(deviceHeldRefusal("sessions.start"));
+      expect((await paired.request("daemon.open", { workspaceId: ws.id, origin: "here" }))["error"]).toBe(deviceHeldRefusal("daemon.open"));
       // Nothing ran: no thread stands on that workspace and the command left no run behind.
       expect(await rt.sessions.list()).toEqual([]);
       // What that computer does with this workspace otherwise is what it always did.
@@ -637,45 +644,84 @@ describe("local workspace", () => {
     }
   });
 
-  it("a computer the person paired starts no process on this computer's own workspace, and every other kind takes one", async () => {
+  it("a computer the person paired is refused every op outside the device list at the door, on every kind of workspace, and nothing runs", async () => {
     const rt = runtime();
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
-    const said = (call: () => Promise<unknown>): Promise<string> => call().then(() => "answered it", (e: unknown) => (e instanceof Error ? e.message : String(e)));
-    const starts = (id: string, caller: "here" | "paired"): [string, () => Promise<unknown>][] => [
-      ["workspaces.execStream", () => rt.workspaces.execStream(id, ["true"], undefined, caller)],
-      ["sessions.start", () => rt.sessions.start(id, { prompt: "hi" }, caller).then(h => h.finished)],
-      ["workspaces.daemonChannel", () => rt.workspaces.daemonChannel(id, () => {}, caller)],
-    ];
-    // Every verb is asked, so one that stops refusing is named rather than hidden behind the first failure.
-    const answered: string[] = [];
-    for (const [name, call] of starts(mac.id, "paired")) {
-      const line = await said(call);
-      if (line !== pairedRunRefusal("mac")) answered.push(`${name}: ${line}`);
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const code = (await here.request("pair.issue"))["code"] as string;
+      const spending = await WsClient.connect(srv.port);
+      const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
+      spending.close();
+      const paired = await WsClient.connect(srv.port, { token: deviceToken });
+      // Every op that starts or puts a hand on a process, on this computer's workspace and on a fork alike: the list
+      // is the rule, not the kind, so a device that may not start a thread here may not start one on a box either.
+      const held: [string, Record<string, unknown>][] = [];
+      for (const ws of [mac, cloud]) {
+        held.push(
+          ["sessions.start", { workspaceId: ws.id, prompt: "hi" }],
+          ["sessions.steer", { sessionId: "s_none", prompt: "and this" }],
+          ["workspaces.exec", { workspaceId: ws.id, argv: ["true"] }],
+          ["workspaces.bringBack", { workspaceId: ws.id }],
+          ["daemon.open", { workspaceId: ws.id }],
+        );
+      }
+      held.push(["daemon.open", { placeId: "pl_box" }], ["sessions.answer", { sessionId: "s_none", askId: "a1", optionId: "yes" }], ["sessions.access", { sessionId: "s_none", permissionMode: "bypassPermissions" }]);
+      // The door is read before the frame's shape is, so a held op with a frame the schema would refuse reads the
+      // held sentence and not the names of the fields it lacks.
+      held.push(["sessions.start", { prompt: "hi" }]);
+      const answered: string[] = [];
+      for (const [op, frame] of held) {
+        const reply = await paired.request(op, frame);
+        if (reply["error"] !== deviceHeldRefusal(op)) answered.push(`${op}: ${String(reply["error"] ?? "answered it")}`);
+      }
+      expect(answered).toEqual([]);
+      // Nothing ran: no thread stands anywhere and no command left a run behind.
+      expect(await rt.sessions.list()).toEqual([]);
+      // What that computer lists, reads, watches and manages is what it always was.
+      expect(((await paired.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+      expect(((await paired.request("status.list"))["statuses"] as { name: string }[]).map(w => w.name).sort()).toEqual(["b1", "mac"]);
+      expect((await paired.request("sessions.list")).ok).toBe(true);
+      expect((await paired.request("devices.list")).ok).toBe(true);
+      const made = await paired.request("workspaces.create", { project: cloud.project.id, name: "b2", golden: "snap_g" });
+      expect(made.ok, String(made["error"])).toBe(true);
+      paired.close();
+      // The rule left the runtime for the door: a start asked of the runtime itself under the paired word runs, which
+      // is the road a line registered by an older host takes and the one the delivery below reads for itself.
+      expect((await rt.sessions.start(mac.id, { prompt: "hi" }, "paired").then(h => h.finished)).status).toBe("completed");
+      here.close();
+    } finally {
+      await srv.close();
+      await rt.close();
     }
-    expect(answered).toEqual([]);
-    // Nothing ran on it, and the same three from this computer still run.
-    expect(await rt.sessions.list()).toEqual([]);
-    expect((await rt.sessions.start(mac.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
-    // A workspace whose machine is somewhere else answers a paired computer exactly as it answers this one: the
-    // rule is the kind's, and the sentence never reaches a fork. The stub machine never says it launched, so the
-    // command is read where it fails here rather than left rejecting after the case.
-    const onTheFork = async (caller: "here" | "paired"): Promise<string[]> => {
-      const running = await rt.workspaces.execStream(cloud.id, ["true"], undefined, caller);
-      const read = await said(async () => {
-        for await (const line of running.lines) void line;
-      });
-      running.teardown();
-      return [read, await said(() => rt.sessions.start(cloud.id, { prompt: "hi" }, caller).then(h => h.finished)), await said(() => rt.workspaces.daemonChannel(cloud.id, () => {}, caller))];
-    };
-    const fork = await onTheFork("paired");
-    expect(fork).not.toContain(pairedRunRefusal("b1"));
-    expect(fork).toEqual(await onTheFork("here"));
-    // Reading is untouched: the workspace is listed and read by that computer as it always was.
-    expect((await rt.workspaces.list("paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
-    expect((await rt.status.list(undefined, "paired")).map(w => w.name).sort()).toEqual(["b1", "mac"]);
-    expect((await rt.workspaces.get(mac.id, "paired")).name).toBe("mac");
-    await rt.close();
+  });
+
+  it("a computer the person paired is refused a thread's rename on a workspace here, since a rename runs a shell on the machine and writes the person's agent session file", async () => {
+    const rt = runtime();
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const thread = await rt.sessions.start(mac.id, { prompt: "hi" });
+      await thread.finished;
+      const here = await WsClient.connect(srv.port, { token: "secret" });
+      const code = (await here.request("pair.issue"))["code"] as string;
+      const spending = await WsClient.connect(srv.port);
+      const { deviceToken } = (await spending.request("pair.redeem", { code, name: "laptop" })) as { deviceToken: string };
+      spending.close();
+      const paired = await WsClient.connect(srv.port, { token: deviceToken });
+      expect((await paired.request("sessions.rename", { sessionId: thread.id, title: "renamed" }))["error"]).toBe(deviceHeldRefusal("sessions.rename"));
+      expect((await rt.sessions.list(mac.id)).every(row => row.titleSource !== "person")).toBe(true);
+      // The workspace's own rename writes a record of wsp's and nothing else, so it stays that computer's to ask.
+      const renamed = await paired.request("workspaces.rename", { workspaceId: mac.id, name: "renamed" });
+      expect(renamed.ok, String(renamed["error"])).toBe(true);
+      paired.close();
+      here.close();
+    } finally {
+      await srv.close();
+      await rt.close();
+    }
   });
 
   it("a ticket a paired computer minted opens a paired socket, so a second frame is no way around the rule", async () => {
@@ -694,8 +740,8 @@ describe("local workspace", () => {
       paired.close();
       // A ticket carries the road of the socket that minted it, so the socket it lets in is that computer too.
       const second = await WsClient.connect(srv.port, { ticket });
-      expect((await second.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(pairedRunRefusal("mac"));
-      expect((await second.request("sessions.start", { workspaceId: ws.id, prompt: "hi" }))["error"]).toBe(pairedRunRefusal("mac"));
+      expect((await second.request("workspaces.exec", { workspaceId: ws.id, argv: ["true"] }))["error"]).toBe(deviceHeldRefusal("workspaces.exec"));
+      expect((await second.request("sessions.start", { workspaceId: ws.id, prompt: "hi" }))["error"]).toBe(deviceHeldRefusal("sessions.start"));
       // What that socket reads is unchanged, as it is on the device's own.
       expect(((await second.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["mac"]);
       second.close();
@@ -722,7 +768,7 @@ describe("local workspace", () => {
     }
   });
 
-  it("a paired computer names no thread on this computer as a target, and the road it named one from rides to the delivery", async () => {
+  it("a line registered from a paired computer falls away to the person at its delivery, and the road it was named from rides beside the target", async () => {
     const noting = notingAdapter();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: noting.factory }, local: localWiring });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
@@ -731,27 +777,19 @@ describe("local workspace", () => {
     const own = await rt.sessions.start(mac.id, { prompt: "coordinate" });
     await own.finished;
     const onThisComputer = own.view().threadId!;
-    // A fork takes a paired computer's turn; naming the owner's thread here as its target is the road it cannot
-    // take, since the line's own start would run a process on this computer.
-    await expect(rt.sessions.start(cloud.id, { prompt: "reply", notify: [onThisComputer] }, "paired")).rejects.toThrow(pairedRunRefusal("mac"));
-    // Refused before anything ran: no turn on the fork, so no line is waiting behind one.
-    const startsHere = async (): Promise<number> => (await rt.sessions.history(mac.id)).filter(e => e.type === "session.start").length;
-    expect(noting.starts).toEqual([{ prompt: "coordinate" }]);
-    expect(await startsHere()).toBe(1);
-
-    // A target on the fork itself is that computer's to name, and the road it named it from is kept beside the
-    // thread, so the line's own start is read against the same rule a turn later.
-    const mate = await rt.sessions.start(cloud.id, { prompt: "mate" }, "paired");
-    await mate.finished;
-    const onTheFork = mate.view().threadId!;
-    const lead = await rt.sessions.start(cloud.id, { prompt: "lead", notify: [onTheFork] }, "paired");
+    // The door is what refuses a paired socket a start, so a start asked of the runtime under that word, which is
+    // what a row an older host wrote carries, registers the target and keeps the road beside it.
+    const lead = await rt.sessions.start(cloud.id, { prompt: "lead", notify: [onThisComputer] }, "paired");
     await lead.finished;
-    await until(() => noting.starts.length === 4);
-    expect(noting.starts[3]!.prompt).toContain("finished");
+    const leadThread = lead.view().threadId!;
+    // At the delivery the road is read against the device list: the line goes to the person, once, and the
+    // owner's thread on this computer never runs again.
+    await until(async () => (await rt.sessions.history(cloud.id)).some(e => e.type === "session.notify" && e.threadId === leadThread && (e as { notify: string }).notify === NOTIFY_ME));
+    expect(noting.starts).toEqual([{ prompt: "coordinate" }, { prompt: "lead" }]);
+    const startsHere = (await rt.sessions.history(mac.id)).filter(e => e.type === "session.start").length;
+    expect(startsHere).toBe(1);
     const kept = (await store.get("sessions", cloud.id)) as { sessions: { notifyRoad?: string }[] };
     expect(kept.sessions.filter(row => row.notifyRoad !== undefined).map(row => row.notifyRoad)).toEqual(["paired"]);
-    // And the owner's thread on this computer never ran again.
-    expect(await startsHere()).toBe(1);
     await rt.close();
   });
 
@@ -977,6 +1015,7 @@ describe("a local turn and a host restart", () => {
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
   });
   afterEach(() => {

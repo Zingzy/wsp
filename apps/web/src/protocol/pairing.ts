@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Where this page dials the runtime and with what. A host on this computer
-// inlines its own token and the page dials the loopback pair; a host reached
-// over a forwarded port, a private network address or a tunnel hostname
-// inlines none, and the page redeems a one time code for a token of its own
-// and keeps it in this browser under that host's origin.
+// Where this page dials the runtime and with what. No page carries the host's
+// own token: in the desktop shell the page asks the shell, which holds it; a
+// browser redeems a one time code for a token of its own, the one wsp init put
+// in the address of the page it opened or one read off wsp host pair, and
+// keeps it in this browser under that host's origin.
 import type { BootPayload } from "@wsp/protocol";
 
 /** Where the device token this browser was handed lives. Local storage is already scoped to the host's origin, so
@@ -48,12 +48,6 @@ export function forgetDeviceToken(storage: Pick<Storage, "removeItem">): void {
   } catch {
     return;
   }
-}
-
-/** The token this page opens its socket with: the host's own when the page came from this computer, else the one
- * this browser was paired with. Nothing means the page has to redeem a code first. */
-export function pageToken(boot: BootPayload, storage: Pick<Storage, "getItem">): string | undefined {
-  return boot.token ?? storedDeviceToken(storage);
 }
 
 /** Spends a pairing code over a socket of its own: the redeem is the first frame an unauthed socket may send, and

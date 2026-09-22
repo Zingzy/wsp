@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { isCancel } from "@clack/prompts";
-import type { ProjectImportResult, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import { FIRST_WORKSPACE, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion, appUrl, askFirst, folderOf, importedLine, planLine, runLocal, type FirstAsk } from "../src/init-first.js";
 
 /** The two keys the step is answered with. */
@@ -167,10 +167,19 @@ describe("the tick taken", () => {
     const output = new PassThrough();
     const said: string[] = [];
     output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
-    const workspace = { id: "ws_local", name: "mac", kind: "local" } as WorkspaceView;
-    const roads = { addProject: async () => project, createWorkspace: async () => workspace };
+    const workspace = { id: "ws_local", name: "first", kind: "local" } as WorkspaceView;
+    const named: string[] = [];
+    const roads = {
+      addProject: async () => project,
+      createWorkspace: async (name: string) => {
+        named.push(name);
+        return workspace;
+      },
+    };
     expect(await runLocal(roads, output, "/Users/dev/mac")).toBe(workspace);
-    expect(said.join("")).toContain("Workspace mac (ws_local) is this computer");
+    // The first piece of work, named as the golden road names its first, since it is a copy and not this computer.
+    expect(named).toEqual([FIRST_WORKSPACE]);
+    expect(said.join("")).toContain("Workspace first (ws_local) is a copy of /Users/dev/mac on this computer; its threads run here, under your own sign-ins.");
   });
 
   it("a run that named no folder makes nothing and says the road: a workspace is one project's", async () => {

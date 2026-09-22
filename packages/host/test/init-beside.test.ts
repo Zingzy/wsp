@@ -6,6 +6,7 @@
 // job's test; what this proves is the road between the two.
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import WebSocket from "ws";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -99,6 +100,24 @@ interface Beside {
   signals: EventEmitter;
   text(): string;
   statePath: string;
+  handle: HostHandle;
+  /** Where the app that host serves answers, as the run is told it. */
+  app: { at: { port: number; address: string }; runDir: string; interactive: boolean };
+}
+
+/** Spends a code the way the page wsp init opens does: the first frame of a socket nothing authed. */
+async function redeem(port: number, code: string): Promise<{ deviceId?: string; deviceToken?: string; error?: string }> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  await new Promise<void>((done, fail) => {
+    ws.once("open", () => done());
+    ws.once("error", fail);
+  });
+  const reply = await new Promise<Record<string, unknown>>(done => {
+    ws.once("message", raw => done(JSON.parse(String(raw)) as Record<string, unknown>));
+    ws.send(JSON.stringify({ id: 1, op: "pair.redeem", code, name: "a Mac in a browser" }));
+  });
+  ws.close();
+  return reply as { deviceId?: string; deviceToken?: string; error?: string };
 }
 
 /** A real host over the scripted door, its lock and token written where a host writes them, so the run dials it the
@@ -139,14 +158,14 @@ async function serving(): Promise<Beside> {
     signals,
     exit: () => {},
   };
-  return { door, io, signals, text: () => stripVTControlCharacters(chunks.join("")), statePath };
+  return { door, io, signals, text: () => stripVTControlCharacters(chunks.join("")), statePath, handle, app: { at: { port: handle.port, address: "127.0.0.1" }, runDir: join(dir, "state", "runs"), interactive: false } };
 }
 
 describe("the build wsp init hands to the host serving the state", () => {
   it("starts the terminal road, asks for the build, prints every row as it lands and ends on the golden that host recorded", async () => {
     const f = await serving();
     const client = await dialHost(f.statePath);
-    const run = buildBesideHost({ client, io: f.io, fork: { name: "beside", folder: "/Users/maya/spoo" }, yes: true, on: "spoo", appUrl: "http://127.0.0.1:4400" });
+    const run = buildBesideHost({ client, io: f.io, fork: { name: "beside", folder: "/Users/maya/spoo" }, yes: true, on: "spoo", app: f.app });
     await until(() => f.door.calls.some(c => c.op === "start"));
     expect(f.door.calls[0]).toEqual({ op: "start", args: { road: "terminal" } });
     f.door.push({ phase: "answering" });
@@ -178,7 +197,15 @@ describe("the build wsp init hands to the host serving the state", () => {
     expect(out).toContain(`Tools installed  ${INIT_ROW_STATES.skipped}`);
     expect(out).toContain("Image v1 sealed on the host serving this state.");
     expect(out).toContain("Workspace beside (ws_1) forked from it.");
-    expect(out).toContain("The app is already running at http://127.0.0.1:4400.");
+    // The app opens on the workspace the build forked, at an address carrying a code that host minted over this
+    // run's own socket: the browser it lets in is the owner's, listed as such and revocable like any other.
+    const opened = /Open (http:\/\/127\.0\.0\.1:\d+\/#w\/ws_1\/c\/([0-9A-Z]{8}))/.exec(out);
+    expect(opened, out).not.toBeNull();
+    expect(opened![1]).toBe(`http://127.0.0.1:${f.handle.port}/#w/ws_1/c/${opened![2]!}`);
+    const admitted = await redeem(f.handle.wsPort, opened![2]!);
+    expect(typeof admitted.deviceToken).toBe("string");
+    const { devices } = await client.request<{ devices: { id: string; here?: true }[] }>("devices.list");
+    expect(devices).toEqual([{ id: admitted.deviceId, here: true, name: "a Mac in a browser", createdAt: expect.any(String), lastSeenAt: expect.any(String) }]);
     client.close();
   });
 
@@ -223,7 +250,7 @@ describe("the build wsp init hands to the host serving the state", () => {
     const f = await serving();
     const client = await dialHost(f.statePath);
     const input = f.io.input as PassThrough;
-    const run = buildBesideHost({ client, io: f.io, appUrl: "http://127.0.0.1:4400" });
+    const run = buildBesideHost({ client, io: f.io, app: f.app });
     await until(() => f.door.calls.some(c => c.op === "start"));
     f.door.push({ phase: "answering" });
     await until(() => f.door.calls.some(c => c.op === "build"));

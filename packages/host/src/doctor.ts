@@ -1638,8 +1638,8 @@ export async function doctorOverHost(client: DoctorClient, io: CliIO, places: re
  * somebody joined takes neither: its link is held by the host it dials, so that host runs its road and the line
  * prints what it says. */
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
-  // This computer's own row takes the local road, and so does a line that named nothing: this computer is already
-  // the one workspace it can be, and the projects on it are folders worked in place with no checkout to copy.
+  // This computer's own row takes the local road, and so does a line that named nothing: a workspace here is a
+  // copy of a folder on this computer, so the proof forks no machine and bills nothing.
   return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);
 }
 

@@ -8,12 +8,14 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { copyPathFor } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { cli, localWiring, serve, type CliIO } from "../src/cli.js";
 import { placeWiring } from "../src/places.js";
 import { createFor, workspaceLine } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
 import type { HostHandle } from "../src/server.js";
 
 const PAGE = `<!doctype html><html><body><div id="root"></div><script>window.__WSP__ = { wsPort: 4410, token: "" };</script></body></html>`;
@@ -52,7 +54,7 @@ beforeEach(async () => {
   vi.stubEnv("WSP_HOME", join(dir, "home"));
   const store = memoryStore();
   await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
+  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath, {}) });
   handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
 });
 
@@ -76,7 +78,7 @@ describe("wsp add and the computer a project lives on", () => {
     expect(io.errors.join("\n")).toContain("no place named nowhere");
   });
 
-  it("records a folder here as a project worked in place, and wsp new makes its workspace", async () => {
+  it("records a folder here as a project, and wsp new makes its workspace as a copy beside it", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-place-here-")));
     execFileSync("git", ["init", "-q", folder]);
     const added = await run("add", folder);
@@ -86,6 +88,7 @@ describe("wsp add and the computer a project lives on", () => {
     const held = (await rt!.workspaces.list()).find(w => w.name === "work here")!;
     expect(held.kind).toBe("local");
     expect(held.project.path).toBe(folder);
+    expect(held.folder).toBe(copyPathFor(folder, "work-here"));
     rmSync(folder, { recursive: true, force: true });
   });
 

@@ -207,8 +207,8 @@ import {
   ProjectView,
   addedProjectLine,
   computerNamed,
-  worksInPlaceTakesNone,
-  worksInPlace,
+  copyTakesNone,
+  copiesFolder,
   madeOfWord,
   portsWord,
   kindForComputer,
@@ -1350,10 +1350,10 @@ export async function createFor(
   name: string,
   asked: { from?: string; size?: string; agents?: Partial<WorkspaceAgents>; engine?: boolean; parent?: string } = {},
 ): Promise<WorkspaceCreateResult> {
-  // A project worked in place is its own folder, so the words a fork takes have nothing to act on: they are
-  // refused here in the runtime's own sentence, before the landing is even read.
+  // A workspace here is a copy of the project's folder and forks nothing, so the words a fork takes have nothing to
+  // act on: they are refused here in the runtime's own sentence, before the landing is even read.
   const forkWords = [asked.from !== undefined ? "--from" : "", asked.size !== undefined ? "--size" : "", asked.engine === true ? "--engine" : ""].filter(w => w !== "");
-  if (worksInPlace(kindForComputer(project.computer)) && forkWords.length > 0) throw usageRefusal(worksInPlaceTakesNone(project.name, forkWords), "Drop them.");
+  if (copiesFolder(kindForComputer(project.computer)) && forkWords.length > 0) throw usageRefusal(copyTakesNone(project.name, forkWords), "Drop them.");
   const capabilities = (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project: project.id })).capabilities;
   const chosen = asked.size === undefined ? undefined : sizeChosen(capabilities, asked.size);
   const golden = asked.from === undefined ? undefined : await projectGoldenFor(client, asked.from, project);
@@ -1377,10 +1377,10 @@ export async function createFor(
       ...(asked.parent !== undefined ? { parent: asked.parent } : {}),
     });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
-    // The folder this workspace actually holds the project in: the project's own where it is worked in place, and
-    // the copy's where one was made, since a person who just had a copy made needs the path it landed at.
+    // The folder this workspace holds the project in: the copy's on this computer, since a person who just had a
+    // copy made needs the path it landed at, and the checkout's inside a fork.
     const at = workspace.folder ?? workspace.project.path;
-    out.emit(created, `created ${workspace.name} ${workspace.id} with ${workspace.project.name} at ${at}${notice !== undefined ? `\n${notice}` : ""}`);
+    out.emit(created, `created ${workspace.name} ${workspace.id}, a copy of ${workspace.project.name} at ${at}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
   } finally {
     pushed.stop();
@@ -2591,7 +2591,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every workspace this host runs, as the app lists them: id, name, the project it holds, the computer it runs on and its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one. A workspace is a copy of its project's computer with the project inside, made for one piece of work and named by it; on the computer the app runs on it is the project's own folder, worked in place. The name is what run and every other verb take.",
+        "Every workspace this host runs, as the app lists them: id, name, the project it holds, the computer it runs on and its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one. A workspace is a copy of its project's computer with the project inside, made for one piece of work and named by it; on the computer the app runs on it is a copy of the project's folder beside it. The name is what run and every other verb take.",
       input: {},
       output: { workspaces: z.array(WorkspaceListing) },
       call: async (_args, deps) => asJson({ workspaces: await workspaceStatuses(await deps.client()) }),
@@ -2628,7 +2628,7 @@ export const VERBS: readonly Verb[] = [
       "the command line records a project with wsp add, the same word that joins a computer and takes a provider's key; those two belong at the terminal the host runs at, so the tool door carries the project half alone",
     tool: tool({
       description:
-        "Records a project: one source on one computer, which every workspace of it is a copy for. A folder is worked in place on the computer the app runs on, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+        "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
       input: {
         source: z.string().describe("a folder on the computer the app runs on, or a repo's url"),
         on: z.string().optional().describe("the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"),
@@ -2858,7 +2858,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is the project's own folder worked in place, and a project there has one workspace at a time. With from, it forks a project image instead of the computer's own image head.",
+        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own. With from, it forks a project image instead of the computer's own image head.",
       input: {
         project: z.string().optional().describe("the project this work is on, by the name or the id projects lists; needed once you have more than one project"),
         name: z.string().describe("what you are working on, which is the workspace's name and what run and every other verb take"),

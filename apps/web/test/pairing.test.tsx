@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What a page does with what the host inlined: dial this origin's WS_PATH, use
-// the host's token when the page came from the host's own computer, and pair
-// for one of its own when it did not.
+// What a page does with what the host inlined: dial this origin's WS_PATH, and
+// find a token of its own, since no page carries the host's: the shell's over
+// the bridge, the code wsp init put in the address, this browser's store, or
+// the code a person types off wsp host pair.
 import { createServer, type Server } from "node:http";
 import { createRuntime, memoryStore, serveRuntime, type RuntimeServer } from "@wsp/runtime";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { WS_PATH, type BootPayload } from "@wsp/protocol";
+import { openingHash, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { BootGate } from "../src/BootGate.js";
 import { PAIR_HEADING } from "../src/PairScreen.js";
-import { DEVICE_TOKEN_KEY, deviceName, pageToken, redeemPairingCode, runtimeUrl, storedDeviceToken } from "../src/protocol/pairing.js";
+import { DEVICE_TOKEN_KEY, deviceName, redeemPairingCode, runtimeUrl, storedDeviceToken } from "../src/protocol/pairing.js";
 import { stubBackend } from "../../../packages/runtime/test/stub-backend.js";
 
-const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPort: 4410, wsPath: WS_PATH, paired: true, version: "0.0.0", token: "host-token", ...over });
+/** The page as the host serves it on its own computer: the digest of its token, never the token. */
+const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPort: 4410, wsPath: WS_PATH, paired: true, version: "0.0.0", tokenHash: "a".repeat(64), ...over });
 
 let srv: RuntimeServer | undefined;
 let http: Server | undefined;
 afterEach(async () => {
   window.localStorage.clear();
+  window.location.hash = "";
+  delete window.wsp;
   await srv?.close();
   srv = undefined;
   if (http !== undefined) await new Promise<void>(done => http!.close(() => done()));
@@ -25,13 +29,31 @@ afterEach(async () => {
 });
 
 /** A real host-shaped pair: an HTTP server with the runtime answering upgrades of WS_PATH on its own port. */
-async function serving(): Promise<{ port: number; hostToken: string }> {
+async function serving(): Promise<{ port: number; hostToken: string; runtime: ReturnType<typeof createRuntime> }> {
   const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
   http = createServer((_req, res) => res.end("page"));
   await new Promise<void>(done => http!.listen(0, "127.0.0.1", done));
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", attach: http, devices: runtime.devices });
-  return { port: (http.address() as { port: number }).port, hostToken: "host-token" };
+  return { port: (http.address() as { port: number }).port, hostToken: "host-token", runtime };
 }
+
+/** A code minted the way wsp host pair and wsp init mint one: over a socket holding the host's own token. */
+async function codeFrom(port: number, here = false): Promise<string> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`);
+  await new Promise<void>(done => ws.addEventListener("open", () => done()));
+  const ask = (frame: Record<string, unknown>): Promise<Record<string, unknown>> =>
+    new Promise(done => {
+      ws.addEventListener("message", e => done(JSON.parse(String(e.data)) as Record<string, unknown>), { once: true });
+      ws.send(JSON.stringify(frame));
+    });
+  await ask({ id: 1, op: "auth", token: "host-token" });
+  const issued = await ask({ id: 2, op: "pair.issue", ...(here ? { here: true } : {}) });
+  ws.close();
+  return issued["code"] as string;
+}
+
+const AT = (port: number) => ({ protocol: "http:", host: `127.0.0.1:${port}` });
+const mount = (b: BootPayload, port: number) => render(<BootGate boot={b} at={AT(port)} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
 
 describe("where the page dials", () => {
   it("dials this page's own origin and path, over ws or wss as the page was served", () => {
@@ -39,13 +61,10 @@ describe("where the page dials", () => {
     expect(runtimeUrl(boot(), { protocol: "https:", host: "box.example.com" })).toBe("wss://box.example.com/ws");
   });
 
-  it("takes the host's own token when the page carries one, and this browser's when it does not", () => {
-    expect(pageToken(boot(), window.localStorage)).toBe("host-token");
-    expect(pageToken(boot({ token: undefined, paired: false }), window.localStorage)).toBeUndefined();
+  it("holds only the token this browser was handed, under this host's origin", () => {
+    expect(storedDeviceToken(window.localStorage)).toBeUndefined();
     window.localStorage.setItem(DEVICE_TOKEN_KEY, "device-token");
-    expect(pageToken(boot({ token: undefined, paired: false }), window.localStorage)).toBe("device-token");
-    // The host's own wins: a page from this computer never dials with a token another host handed this browser.
-    expect(pageToken(boot(), window.localStorage)).toBe("host-token");
+    expect(storedDeviceToken(window.localStorage)).toBe("device-token");
   });
 
   it("names this browser by its platform and the host it reached, so wsp host devices has a row worth reading", () => {
@@ -95,7 +114,7 @@ describe("the screen a page with no token shows", () => {
     const code = (await issued)["code"] as string;
     host.close();
 
-    render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: code } });
@@ -107,7 +126,7 @@ describe("the screen a page with no token shows", () => {
 
   it("shows the host's refusal on a code it will not take, and stays on the screen", async () => {
     const { port } = await serving();
-    render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "AAAAAAAA" } });
       fireEvent.click(screen.getByRole("button", { name: "Pair" }));
@@ -121,7 +140,7 @@ describe("the screen a page with no token shows", () => {
     const { port } = await serving();
     window.localStorage.setItem(DEVICE_TOKEN_KEY, "a-token-this-host-never-minted");
     const page = render(
-      <BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />,
+      <BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />,
     );
     // The client's own close on unmount is not the host refusing anything: a token dropped here would send every
     // remount back to the code screen.
@@ -131,7 +150,7 @@ describe("the screen a page with no token shows", () => {
     expect(storedDeviceToken(window.localStorage)).toBe("a-token-this-host-never-minted");
 
     // The host refusing it is the one thing that drops it, and the page goes back to asking for a code.
-    render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeUndefined());
     expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
   });
@@ -149,7 +168,7 @@ describe("the screen a page with no token shows", () => {
       },
     };
     try {
-      render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
       // Two asks: the first token the host refuses, and the one it is serving now.
       await waitFor(() => expect(asked).toHaveLength(2), { timeout: 5_000 });
       await waitFor(() => expect(screen.queryByTestId?.("booting") ?? null).toBeNull());
@@ -169,7 +188,7 @@ describe("the screen a page with no token shows", () => {
       },
     };
     try {
-      render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
       expect(await screen.findByText(PAIR_HEADING, undefined, { timeout: 5_000 })).toBeTruthy();
       // The one token the shell holds was asked about once and refused once: nothing loops on it.
       expect(asked.length).toBeLessThanOrEqual(2);
@@ -178,10 +197,66 @@ describe("the screen a page with no token shows", () => {
     }
   });
 
-  it("goes straight to the app when the page carries the host's own token", async () => {
-    await act(async () => {
-      render(<BootGate boot={boot()} at={{ protocol: "http:", host: "127.0.0.1:4400" }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
-    });
+});
+
+describe("this computer's own page", () => {
+  it("in the shell asks the bridge for the token and never shows the pair screen, whatever the page carries", async () => {
+    const { port } = await serving();
+    const asked: number[] = [];
+    window.wsp = {
+      hostToken: async () => {
+        asked.push(asked.length);
+        return "host-token";
+      },
+    };
+    mount(boot(), port);
+    await waitFor(() => expect(asked).toHaveLength(1));
+    await waitFor(() => expect(document.querySelector("[data-k=booting]")).toBeNull());
     expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+  });
+
+  it("in a browser spends the code wsp init put in its address, keeps the token it bought, and writes the address back without the code", async () => {
+    const { port, runtime } = await serving();
+    const code = await codeFrom(port, true);
+    window.location.hash = openingHash(code, "ws_first");
+    mount(boot(), port);
+    await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeDefined());
+    await waitFor(() => expect(document.querySelector("[data-k=booting]")).toBeNull());
+    expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+    // The workspace stays in the address; the code does not, so a reload spends nothing and the app never reads it.
+    expect(window.location.hash).toBe("#w/ws_first");
+    // The device is the owner's browser, listed as such.
+    expect((await runtime.devices.list()).map(d => [d.name, d.here])).toEqual([["a Mac in a browser at 127.0.0.1:" + String(port), true]]);
+  });
+
+  it("in a browser with a spent or made up code in its address ends on the pair screen, with the code gone from the address", async () => {
+    const { port } = await serving();
+    window.location.hash = openingHash("AAAAAAAA");
+    mount(boot(), port);
+    expect(await screen.findByText(PAIR_HEADING)).toBeTruthy();
+    expect(window.location.hash).toBe("");
+    expect(storedDeviceToken(window.localStorage)).toBeUndefined();
+  });
+
+  it("in a browser holding no token and given no code shows the pair screen, and a code from wsp host pair lets it in as a device", async () => {
+    const { port, runtime } = await serving();
+    mount(boot(), port);
+    expect(await screen.findByText(PAIR_HEADING)).toBeTruthy();
+    const code = await codeFrom(port);
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: code } });
+      fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+    });
+    await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeDefined());
+    expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+    expect((await runtime.devices.list()).map(d => d.here)).toEqual([undefined]);
+  });
+
+  it("in a browser whose token the host refuses forgets it and asks for a code, on this computer's page as on any other", async () => {
+    const { port } = await serving();
+    window.localStorage.setItem(DEVICE_TOKEN_KEY, "a-token-this-host-never-minted");
+    mount(boot(), port);
+    await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeUndefined());
+    expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
   });
 });

@@ -19,7 +19,7 @@ import { HERE_PLACE_ID, resumeNotOfThreadLine, threadRunsOnLine, type TurnResult
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, testPlatform } from "./stub-backend.js";
 
 const CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111";
 const CODEX_SESSION = "22222222-2222-4222-8222-222222222222";
@@ -63,6 +63,7 @@ describe("the agent and the access a send into an existing thread runs on", () =
       rootsPath: join(root, "roots"),
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
       platform: testPlatform(),
+      copier: copyingFake(),
     };
     return createRuntime({ backend: stubBackend(), store, adapters: { claude: claude.adapter, codex: codex.adapter }, local });
   };

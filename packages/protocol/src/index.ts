@@ -557,9 +557,16 @@ export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDe
 export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
 
 /** Which road made a workspace's copy on a computer that copies by directory: a directory clone of the project
- * folder, a git worktree of it, or the folder itself worked where it sits. */
-export const CopyRoad = z.enum(["clonefile", "worktree", "in-place"]);
+ * folder or a git worktree of it. Every workspace on such a computer is a copy, from the first piece of work on. */
+export const CopyRoad = z.enum(["clonefile", "worktree"]);
 export type CopyRoad = z.infer<typeof CopyRoad>;
+
+/** The one home of the word for a folder worked where it sits, which no workspace is any more: the copy verb still
+ * answers it when asked for it, and nothing asks; a record carrying it is refused at boot in one sentence. */
+export const IN_PLACE_ROAD = "in-place";
+/** What the copy verb may answer as its road: the two a record keeps, and the word above, kept on the wire so the
+ * daemon's contract stands while every host asks for a copy. */
+export const CopyVerbRoad = z.enum([...CopyRoad.options, IN_PLACE_ROAD]);
 
 /** What rode along in the copy: everything the folder held that git ignores, so the dependencies are there and a
  * build runs at once; the config files alone, so the dependencies install first; or nothing. */
@@ -586,7 +593,7 @@ export type CopyAsk = z.infer<typeof CopyAsk>;
 /** What the daemon binary's copy verb printed, read back by the host and kept on the workspace's record as
  * `copy`. */
 export const CopyReport = z.object({
-  road: CopyRoad,
+  road: CopyVerbRoad,
   path: z.string(),
   base: z.string(),
   branch: z.string(),
@@ -605,7 +612,8 @@ export type CopyReport = z.infer<typeof CopyReport>;
 /** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
  * landed, what it stands on and what rode along. Absent on a fork and on a box snapshot, whose project arrives by
  * the runtime's own road. */
-export const ProjectCopy = CopyReport.pick({ road: true, path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+export const ProjectCopy = CopyReport.pick({ path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+  road: CopyRoad,
   /** The project folder the copy was taken from: what a worktree's remove needs and what the row names. */
   source: z.string(),
 });
@@ -688,8 +696,7 @@ export const WorkspaceView = z.object({
    * arrives by the runtime's own road. */
   copy: ProjectCopy.optional(),
   /** The port an app that reads PORT binds in this workspace, on a computer whose copies share its network.
-   * Absent where a copy has a network of its own, and absent on the folder worked in place, whose ports are the
-   * person's own. */
+   * Absent where a copy has a network of its own. */
   portBase: z.number().int().positive().optional(),
   /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
    * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's
@@ -1924,16 +1931,19 @@ export function bootLineOf(html: string): BootPayload | undefined {
 
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
-  /** The runtime's own port, inlined only on the loopback page beside the token; a page served beyond loopback
-   * carries none and dials the origin it came from at wsPath. */
+  /** The runtime's own port, inlined only on the loopback page beside the token's digest; a page served beyond
+   * loopback carries none and dials the origin it came from at wsPath. */
   wsPort?: number;
-  /** The host's own token, inlined only when the page was served on loopback, where reaching it already means being
-   * on the computer. A page served beyond loopback carries none and pairs for a device token of its own. */
-  token?: string;
+  /** The sha256 of the host's own token, hex, inlined only on the loopback page: the desktop shell compares it to the
+   * digest of the token file beside the state and sends nothing, so a page a squatter serves on the lock's port
+   * cannot learn the token by being read. The token itself is never in any page: a browser here dials with a
+   * device token wsp init or wsp host pair let it in with, and the shell hands its page the file's over the bridge. */
+  tokenHash?: string;
   /** The path on this page's own origin the runtime WebSocket answers on, which is the one road a client reaching
    * the host through an ssh forward or a tunnel hostname has. */
   wsPath: string;
-  /** False when this page carries no token and has to redeem a pairing code before it can dial anything. */
+  /** True when this page was served on the computer the host runs on, which is the page's one reading of being at
+   * home: false is a host on another computer, whose page pairs for a device token of its own. */
   paired: boolean;
   /** The release this host is, which is the release this page is: a desktop shell attached to a host it did not
    * start reads it to tell whether the two halves were built apart. */
@@ -4241,6 +4251,10 @@ export const DeviceView = z.object({
    * environment, which drives only the tree that turn's thread is in. Absent is a paired computer, which drives
    * everything this host holds. */
   scope: ThreadScope.optional(),
+  /** Set on the browser wsp init opened on the computer the host runs on: its code was minted by init itself, so
+   * the device is read as the owner on the socket and the JSON routes alike, and is still listed and revoked like
+   * every other. Absent is a computer or a browser that took a code from wsp host pair. */
+  here: z.literal(true).optional(),
 });
 export type DeviceView = z.infer<typeof DeviceView>;
 
@@ -4296,17 +4310,13 @@ export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token m
 export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
- * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
- * taken away at the terminal of the computer it runs on, and nowhere else. */
+ * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out at the
+ * terminal of the computer it runs on, and read and taken away there or from a computer paired with it. */
 export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
-/** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
- * the host takes anyone else's away. */
-export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
-
-/** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
- * device token. */
-export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
+/** The refusal the JSON routes answer with when a request carries no token this host takes: reaching the port,
+ * the loopback one included, names nobody, since another login on the same computer reaches it too. */
+export const API_UNAUTHORIZED = "this route needs a token in an Authorization header, the host's own from the token file beside its state or a paired device's; run wsp host pair on the computer the host runs on for one";
 
 /** The refusal a write route and a browser's upgrade answer with when the page that sent them was loaded at
  * another name than the one this host was reached at. A page may only drive the host it was served by, and the
@@ -4726,8 +4736,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
   /** Mints a one time code another computer redeems for a device token of its own. Answers `{ code, expiresAt }`.
-   * Only on a socket holding the host's own token, and never on one let in by a ticket. */
-  z.object({ id: reqId, op: z.literal("pair.issue") }),
+   * Only on a socket holding the host's own token, and never on one let in by a ticket. `here` marks the code wsp
+   * init mints for the browser it opens on this computer, whose device is then read as the owner. */
+  z.object({ id: reqId, op: z.literal("pair.issue"), here: z.literal(true).optional() }),
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
   z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
@@ -4740,8 +4751,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("account.get") }),
   /** Every paired device, for the host token and for a device's own socket alike. */
   z.object({ id: reqId, op: z.literal("devices.list") }),
-  /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token
-   * names any. */
+  /** Takes a device's token away and cuts the sockets holding it, for the host token and for a paired device's
+   * own socket alike, whichever device is named. */
   z.object({ id: reqId, op: z.literal("devices.revoke"), deviceId: z.string() }),
   /** The first frame of a computer joining as a place: spends a join code for a record holding its key. Answered
    * with a PlaceJoinReply, and the socket then sends place.prove as an authed one would. */
@@ -5219,6 +5230,75 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.rename",
 ];
 
+/** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
+ * THREAD_OPS is a list: a deny list would let every op added later through by having been forgotten. Read at both
+ * doors, the socket and the JSON routes, so a route added later is held by the op it stands for, and a route that
+ * names none is held outright. What is here is listing, reading, watching and the management of wsp's own machines
+ * and records, which touch no process and no computer of the person's and write this disk only where wsp's own
+ * copies land: workspaces.create on a project here runs the copy verb and puts the copy beside the person's
+ * folder, open by the owner's ruling. What is not: every op that starts or puts a hand on a process (a start, a
+ * steer, a stop, an answer, an access change, a command, a bring back, a pane, and a thread's rename, which runs a
+ * shell on the workspace's machine and writes the person's agent session file), every op that adds, changes,
+ * dials, sweeps or lands a binary on a computer of the person's or clones onto one, every op that writes keys,
+ * builds or seals an image, runs the sign-ins or costs money, and every op that reads or writes this computer's
+ * disk outside wsp's own folders. The daemon channel's send and close ride a channel a refused open never gave
+ * this socket. A role of the person's is where this list widens, per device. */
+export const DEVICE_OPS: readonly string[] = [
+  "auth",
+  "events.subscribe",
+  "status.subscribe",
+  "status.list",
+  "capabilities.get",
+  "ticket.issue",
+  "places.list",
+  "account.get",
+  "devices.list",
+  "devices.revoke",
+  "workspaces.landing",
+  "workspaces.create",
+  "workspaces.list",
+  "workspaces.resolve",
+  "workspaces.get",
+  "workspaces.nap",
+  "workspaces.wake",
+  "workspaces.stopWake",
+  "workspaces.restartDaemon",
+  "workspaces.upgrade",
+  "workspaces.updateImage",
+  "workspaces.rename",
+  "workspaces.look",
+  "workspaces.agents",
+  "workspaces.delete",
+  "workspaces.forget",
+  "workspaces.snapshot",
+  "workspaces.touch",
+  "workspaces.portReach",
+  "workspaces.portProbe",
+  "workspaces.rebuild",
+  "projects.list",
+  "projects.resolve",
+  "projects.remove",
+  "projectGoldens.list",
+  "sys.subscribe",
+  "harnesses.list",
+  "sessions.list",
+  "sessions.history",
+  "sessions.forget",
+  "golden.get",
+  "image.get",
+  "snapshots.list",
+  "snapshots.storage",
+  "snapshots.rollback",
+  "cost.history",
+  "cost.spend",
+  "forwards.list",
+  "forwards.stop",
+  "preferences.get",
+  "preferences.set",
+  "host.terminalConfig",
+  "init.get",
+];
+
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
  * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. */
 export function threadOpRefusal(op: string, threadId: string): string {
@@ -5476,7 +5556,7 @@ export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
+export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
