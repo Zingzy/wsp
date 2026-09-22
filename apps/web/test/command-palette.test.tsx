@@ -307,7 +307,7 @@ describe("command palette", () => {
   });
 
 
-  it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
+  it("the Settings row and its chord open the settings page, whose row names the chord; the settings sidebar's Back closes it again", async () => {
     // No flag over the page: the row stands for everybody.
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     await mountShell();
@@ -318,7 +318,9 @@ describe("command palette", () => {
     fireEvent.click(row);
     await waitFor(() => expect(palette()).toBeNull());
     expect(useStore.getState().settingsOpen).toBe(true);
-    fireEvent.click(document.querySelector("[data-row-id='ws:ws_b']")!);
+    // The settings sidebar stands in the app sidebar's place while the page is open, so Back is the row that closes it.
+    expect(document.querySelector("[data-row-id='ws:ws_b']")).toBeNull();
+    fireEvent.click(document.querySelector("[data-k=settings-back]")!);
     expect(useStore.getState().settingsOpen).toBe(false);
     mod(",");
     expect(useStore.getState().settingsOpen).toBe(true);

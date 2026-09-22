@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The theme rule: which side each value draws, the html element following the
-// computer's own scheme without a reload, and the desktop shell told that value
-// so its frame follows. No screen picks a side, so a side left in the record
-// from before is not read: the rule under test is the computer's scheme alone.
+// record's pick and, under system, the computer's own scheme without a reload,
+// and the desktop shell told the picked value so its frame follows.
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
@@ -36,7 +35,7 @@ describe("the theme", () => {
     expect(isDark()).toBe(true);
   });
 
-  it("the html element follows the computer's own scheme as it changes, with no reload, and no record can pin a side", () => {
+  it("the html element follows the computer's own scheme as it changes under system, and the record's pick pins a side", () => {
     let systemDark = false;
     const listeners = new Set<() => void>();
     vi.spyOn(window, "matchMedia").mockImplementation(query => {
@@ -50,15 +49,17 @@ describe("the theme", () => {
       for (const fn of listeners) fn();
     });
     expect(isDark()).toBe(true);
-    // A side left in the record from before is not drawn: nothing in the app can undo one, so nothing reads it.
+    // The pick is a row in Settings: a side picked draws that side whatever the computer is set to.
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
-    expect(isDark()).toBe(true);
+    expect(isDark()).toBe(false);
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
     expect(isDark()).toBe(true);
     act(() => {
       systemDark = false;
       for (const fn of listeners) fn();
     });
+    expect(isDark()).toBe(true);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "system" } }));
     expect(isDark()).toBe(false);
   });
 
@@ -76,13 +77,12 @@ describe("the theme", () => {
     expect(cleanStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
   });
 
-  it("the desktop shell hears the one value, so the window's frame draws the same side as the page", () => {
+  it("the desktop shell hears the picked value, so the window's frame draws the same side as the page", () => {
     const setTheme = vi.fn();
     window.wsp = { setTheme };
     renderHook(() => useThemeEffect());
     expect(setTheme).toHaveBeenLastCalledWith("system");
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
-    // One value, whatever the record says: the shell and the page cannot draw two sides.
-    expect(setTheme).toHaveBeenLastCalledWith("system");
+    expect(setTheme).toHaveBeenLastCalledWith("light");
   });
 });

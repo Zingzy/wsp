@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
-import { SETTINGS_WORDS, versionFact } from "../../web/src/settings/format.js";
+import { SETTINGS_WORDS } from "../../web/src/settings/format.js";
 import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { FIRST_RUN_WORDS } from "../../web/src/sidebar/words.js";
 import { VERSION } from "../../../packages/host/src/version.js";
@@ -719,14 +719,15 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await line.waitFor();
     expect(await line.textContent()).toContain(`this app is ${VERSION}, the host is 9.9.9: get the new app`);
     expect(await win.locator("[data-toast-action]").textContent()).toBe(GET_THE_APP_WORD);
-    // The settings page names both halves as well, so the line is never the only place the numbers are. It is a labs
-    // surface, and the record that says labs is on is its own reply over the socket, which can land after the
-    // workspace list: the palette's Settings row is that record on screen, so the road through it waits on the fact
-    // rather than on a chord that is silently dropped when it arrives first.
+    // The settings page names both halves as well, on About, so the line is never the only place the numbers are.
+    // The palette's Settings row is the road through it.
     await win.keyboard.press("Meta+k");
     await win.locator("[data-command-palette]").getByText(SETTINGS_WORDS.title, { exact: true }).click();
     await win.waitForSelector("[data-settings-page]");
-    expect(await win.locator("[data-k=version]").textContent()).toBe(versionFact(VERSION, "9.9.9", true));
+    await win.locator("[data-k=settings-about]").click();
+    await win.waitForSelector("[data-settings-at=about]");
+    expect(await win.locator("[data-k=app-version] [data-settings-word]").textContent()).toBe(VERSION);
+    expect(await win.locator("[data-k=host-version] [data-settings-word]").textContent()).toBe("9.9.9");
   });
 
   it("attached to a host of an earlier release, asks for the app's own host and offers nothing to download", async () => {

@@ -20,6 +20,8 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "..
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { SettingsHeaderActions } from "../settings/SettingsHeaderActions.js";
+import { SettingsSidebar } from "../settings/SettingsSidebar.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { hostAsleep } from "../boot.js";
@@ -51,8 +53,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toggleVisibility = useRightPanelStore(s => s.toggleVisibility);
   const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
-  // Settings is a page, not a panel of a workspace: it takes the whole region right of the sidebar while it is
-  // open. The panel's own record is untouched, so every surface is back as it was the moment Settings closes.
+  // Settings takes the window: its own sidebar in the app sidebar's place and the page in the whole region right of
+  // it, with Restore defaults where the layout controls were. The panel's own record is untouched, so every
+  // surface is back as it was the moment Settings closes.
   const settingsOpen = useSettingsOpen();
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const viewportWidth = useViewportWidth();
@@ -66,10 +69,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       terminalAvailable={workspaceId !== null}
       terminalOpen={terminalOpen}
       terminalShortcutLabel={TERMINAL_SHORTCUT_LABEL}
-      rightPanelAvailable={workspaceId !== null && !settingsOpen}
+      rightPanelAvailable={workspaceId !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}
-      rightPanelUnavailableLabel={settingsOpen ? "Close Settings to open the right panel" : "Select a workspace to open the right panel"}
+      rightPanelUnavailableLabel="Select a workspace to open the right panel"
       liveAgentCount={0}
       onToggleTerminal={() => {
         if (workspaceId) toggleTerminal(workspaceId);
@@ -93,7 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: sidebarMaxWidthBeside(viewportWidth, panelInline), width: sidebarWidthStore }}
       >
-        <WorkspaceSidebar />
+        {settingsOpen ? <SettingsSidebar /> : <WorkspaceSidebar />}
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">
@@ -105,7 +108,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>
             <WorkspacePageHeader className="border-b border-border">
               <ThreadBreadcrumb />
-              {panelInline ? null : <div className="ml-auto mr-px">{layoutControls}</div>}
+              {settingsOpen ? (
+                <div className="ml-auto mr-px">
+                  <SettingsHeaderActions />
+                </div>
+              ) : panelInline ? null : (
+                <div className="ml-auto mr-px">{layoutControls}</div>
+              )}
             </WorkspacePageHeader>
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
           </div>

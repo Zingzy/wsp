@@ -19,7 +19,7 @@ import { useStore } from "../protocol/store.js";
 import type { InstallStage } from "../protocol/client.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
-import { PlaceRow, PlaceTable } from "./PlaceTable.js";
+import { ComputerRow } from "./computers.js";
 import { RefusalSlot, RoadLines, type RoadLine } from "./sheetParts.js";
 
 const WORDS = PLACES_WORDS.sheet;
@@ -90,9 +90,9 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
         </SheetHeader>
         <SheetPanel className="flex flex-col gap-4">
           {installed !== null ? (
-            <PlaceTable menu={false} k="joined-table">
-              <PlaceRow place={installed} now={now()} />
-            </PlaceTable>
+            <div data-k="joined-row">
+              <ComputerRow place={installed} now={now()} />
+            </div>
           ) : (
             // The field stays where it is once Add is pressed, holding the login it was given and dimmed: a field
             // that left the tree took the focus with it and drew the ring round the whole sheet, and the row that

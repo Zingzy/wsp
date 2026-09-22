@@ -14,17 +14,14 @@ export const IMAGE_WORDS = {
   title: "Image",
   image: "Image",
   built: "Built",
-  edit: "Edit",
+  edit: "Edit image",
   /** The sheet the six init screens are drawn in, opened from Edit. */
   sheet: "Your image",
   /** The fact beside the row before anything has been sealed. */
   notBuilt: "not built yet",
   /** The one sentence under that row: what will build it and when. */
   firstBuild: "Built from this Mac the first time a workspace is created on another computer or in the cloud.",
-  copyAt: "Copy at",
-  version: "Version",
-  size: "Size",
-  copyBuilt: "Built",
+  copies: "Copies",
 } as const;
 
 /** The clock and the date this section spells a stamp with, both in the app's own locale, as every other stamp in

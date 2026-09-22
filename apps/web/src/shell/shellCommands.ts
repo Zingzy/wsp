@@ -241,14 +241,16 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     case "settings.toggle":
       useStore.getState().toggleSettings();
       return;
+    // Settings takes the whole region right of the sidebar and mounts neither the panel nor the drawer, so a chord
+    // that flips one would move a record behind a page that never shows it.
     case "rightPanel.toggle":
-      if (workspaceId) useRightPanelStore.getState().toggleVisibility(workspaceId);
+      if (workspaceId && !useStore.getState().settingsOpen) useRightPanelStore.getState().toggleVisibility(workspaceId);
       return;
     case "preview.toggle":
-      if (workspaceId) useRightPanelStore.getState().toggle(workspaceId, "preview");
+      if (workspaceId && !useStore.getState().settingsOpen) useRightPanelStore.getState().toggle(workspaceId, "preview");
       return;
     case "terminal.toggle":
-      if (workspaceId) useTerminalDrawerStore.getState().toggle(workspaceId);
+      if (workspaceId && !useStore.getState().settingsOpen) useTerminalDrawerStore.getState().toggle(workspaceId);
       return;
     case "terminal.new":
       if (!workspaceId) return;

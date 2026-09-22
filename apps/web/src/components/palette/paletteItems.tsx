@@ -12,6 +12,7 @@ import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
+import { groupNames } from "../../settings/groups.js";
 import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
@@ -179,10 +180,10 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     {
       kind: "action",
       value: "action:settings",
-      searchTerms: ["settings", "preferences", "computers", "agents", "appearance", "sidebar width", "terminal size"],
+      searchTerms: ["settings", "preferences", "computers", "projects", "devices", "account", "keybindings", "appearance", "theme", "sidebar width", "terminal size"],
       icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
       title: SETTINGS_WORDS.title,
-      description: SETTINGS_WORDS.hint,
+      description: groupNames(),
       shortcutCommand: "settings.toggle",
       run: sync(handlers.openSettings),
     },
