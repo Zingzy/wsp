@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The hooks under .githooks, driven through real commits in a throwaway repository: what they refuse, the
-// sentence each refusal says, and the shapes that look like a refusal and are not.
+// sentence each refusal says, and the shapes that look like a refusal and are not. The text read here is this
+// branch's, which is what testing a hook change needs; where git reads the text it runs from is hooks-path.test.ts.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -257,37 +258,5 @@ describe("what the pre-commit hook refuses", () => {
       ].join("\n"),
     );
     expect(commit(dir, "host: the deploy writes the token")).toBe("");
-  });
-});
-
-describe("what the prepare script wires", () => {
-  it("points git at the versioned hooks", () => {
-    const dir = repo();
-    git(dir, "config", "--unset", "core.hooksPath");
-    const said = execFileSync("node", [join(ROOT, "scripts", "hooks-path.mjs")], { cwd: dir, encoding: "utf8" });
-    expect(said.trim()).toBe("hooks: git reads this repository's .githooks");
-    expect(git(dir, "config", "--get", "core.hooksPath").trim()).toBe(".githooks");
-  });
-
-  it("is not a failed install where there is no git repository", () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-githooks-bare-"));
-    dirs.push(dir);
-    const said = execFileSync("node", [join(ROOT, "scripts", "hooks-path.mjs")], { cwd: dir, encoding: "utf8" });
-    expect(said.trim()).toBe("hooks: no git repository here, nothing to wire");
-  });
-
-  it("says the hooks are unwired when git will not take the setting, which is not the same as having no git", () => {
-    const dir = repo();
-    // A git that answers where it is and refuses to write, so the case holds whatever the runner's privileges are.
-    const bin = join(dir, "bin");
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "git"), '#!/bin/sh\ncase "$1" in rev-parse) exit 0 ;; esac\nexit 1\n');
-    chmodSync(join(bin, "git"), 0o755);
-    const said = execFileSync("node", [join(ROOT, "scripts", "hooks-path.mjs")], {
-      cwd: dir,
-      encoding: "utf8",
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
-    });
-    expect(said.trim()).toBe("hooks: git would not take core.hooksPath, so the hooks under .githooks are not wired");
   });
 });
