@@ -234,10 +234,10 @@ describe("openHost", () => {
     const closed = vi.spyOn(runtime, "close");
     session = await openWith(dial, [], runtime);
     expect(dialled).toEqual(["box"]);
-    // A person is watching an empty window while this dial waits, so it takes a few seconds rather than the
-    // fifteen a line at a terminal gives a relayed road, and a box that is asleep costs that much and no more.
+    // A person is watching an empty window while this dial waits, so it is well under the fifteen seconds a line
+    // at a terminal gives a relayed road, and over the hold that road was measured at, which the constant names.
     expect(windows[0]).toBeGreaterThan(0);
-    expect(windows[0]).toBeLessThan(5_000);
+    expect(windows[0]).toBeLessThan(10_000);
     // The runtime the setup gate built serves nothing here, so it goes rather than lingering behind the window.
     expect(closed).toHaveBeenCalledOnce();
     expect(session).toMatchObject({ url: "https://hbox1.boxes.example", owned: false, remote: true, alias: "box", label: "box", deviceToken: "tok-fresh" });

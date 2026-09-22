@@ -163,10 +163,12 @@ export async function locateHost(opts: Launch): Promise<Located> {
   return { home, ...(session !== undefined ? { session } : {}) };
 }
 
-/** How long this window's one dial waits. A line at a terminal gives a relayed road fifteen seconds, which is a
- * window with nothing in it for that long; a person who opened the app is watching it, so a host that has not
- * answered in a few seconds is one the window opens without, with the host's own sentence in the log. */
-const ACCOUNT_DIAL_MS = 4_000;
+/** How long this window's one dial at the marked host waits. A line at a terminal gives a relayed road fifteen
+ * seconds, which is a window with nothing in it for that long; a person who opened the app is watching it, so a
+ * host that has not answered is one the window opens without, with the host's own sentence in the log. The floor
+ * under it is what that road was measured to hold: an edge whose tunnel has just come up answers a first frame at
+ * 5.8 s, so anything shorter calls a box that is alive dead and opens here instead of where the mark says. */
+const MARKED_DIAL_MS = 8_000;
 
 /** The host somewhere else this window opens on when nothing serves here: the alias the rule every line with no
  * name on it takes, which is the marked default whichever road it came by, else the one host on the account this
@@ -185,7 +187,7 @@ async function accountSession(opts: OpenHostOptions): Promise<HostSession | unde
   }
   try {
     const aim = aimedHost(opts.statePath, { host: alias, home });
-    (await (opts.dial ?? dialHost)(opts.statePath, { aim, home, deadlineMs: ACCOUNT_DIAL_MS })).close();
+    (await (opts.dial ?? dialHost)(opts.statePath, { aim, home, deadlineMs: MARKED_DIAL_MS })).close();
   } catch (e) {
     opts.io.error(`${e instanceof Error ? e.message : String(e)}; this window is opening on the host here instead`);
     return undefined;
