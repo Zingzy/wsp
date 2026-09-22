@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
-import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
+import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type DiskUse, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS, markersOf, pagedReads } from "./exec-detached.js";
 import { TOOLS_PATH, brewHousekeeping as brewHousekeepingCmds, pathLine, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -43,11 +43,14 @@ export interface ToolsOutcome {
 
 type Stage = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
 
-/** df on the root disk in kilobytes, one column at a time: used is what a snapshot comes to, free is what an install
- * has left; the one place the df line is spelled. */
-export const dfRootKbCmd = (column: "used" | "free"): string => `df -Pk /root | awk 'NR==2{print $${column === "used" ? 3 : 4}}'`;
-export const FREE_KB_CMD = dfRootKbCmd("free");
-export const USED_KB_CMD = dfRootKbCmd("used");
+/** Where each figure sits on df's line. */
+const DF_COLUMN = { size: 2, used: 3, free: 4 } as const;
+/** df on a disk in kilobytes, the columns asked for on one line in that order, /root's unless a path is named: used is
+ * what a snapshot comes to, free is what an install has left, size is the disk those two are read against; the one
+ * place the df line is spelled. */
+export const dfKbCmd = (columns: readonly (keyof typeof DF_COLUMN)[], path = "/root"): string => `df -Pk ${path} | awk 'NR==2{print ${columns.map(c => `$${DF_COLUMN[c]}`).join(", ")}}'`;
+export const FREE_KB_CMD = dfKbCmd(["free"]);
+export const USED_KB_CMD = dfKbCmd(["used"]);
 export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
 export const TOOLS_DISK_FLOOR = 2048 * MIB;
@@ -161,7 +164,7 @@ export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reas
 
 /** One df column read off the machine, in bytes; a df that fails or prints no number is reported, never assumed. */
 async function dfRootBytes(machine: Machine, column: "used" | "free"): Promise<{ bytes: number } | { reason: string }> {
-  const res = await machine.exec(dfRootKbCmd(column), { timeoutMs: INLINE_EXEC_MS });
+  const res = await machine.exec(dfKbCmd([column]), { timeoutMs: INLINE_EXEC_MS });
   const kb = Number(res.stdout.trim());
   return res.exitCode === 0 && Number.isFinite(kb) && kb > 0 ? { bytes: kb * 1024 } : { reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
 }
@@ -170,6 +173,16 @@ async function dfRootBytes(machine: Machine, column: "used" | "free"): Promise<{
 export async function freeBytes(machine: Machine): Promise<FreeDisk> {
   const read = await dfRootBytes(machine, "free");
   return "bytes" in read ? { kind: "free", bytes: read.bytes } : { kind: "unknown", reason: read.reason };
+}
+
+/** What df says is used under /root and the size of the disk it sits on, off one exec; a df that fails or prints
+ * no pair of numbers is reported, never assumed. */
+export async function diskUse(machine: Machine): Promise<DiskUse> {
+  const res = await machine.exec(dfKbCmd(["used", "size"]), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+  const [used, size] = res.stdout.trim().split(/\s+/).map(Number);
+  return res.exitCode === 0 && Number.isFinite(used) && Number.isFinite(size) && size! > 0
+    ? { kind: "use", usedBytes: used! * 1024, sizeBytes: size! * 1024 }
+    : { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
 }
 
 /** What a snapshot of the disk comes to: what the backend says the machine has written since it booted, where it

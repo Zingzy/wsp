@@ -3240,6 +3240,19 @@ export function providerAnswerLine(a: ProviderAnswer): string {
   return `${a.status} ${a.message} (${a.requestId !== undefined ? `request ${a.requestId}` : `no request id from the provider, at ${a.at}`})`;
 }
 
+/** What df read of a machine's root disk before a snapshot was asked for, or why it read nothing. */
+export type DiskUse = { kind: "use"; usedBytes: number; sizeBytes: number } | { kind: "unknown"; reason: string };
+
+/** A workspace snapshot the provider refused: its answer, and the disk read before the ask, named the reason only at
+ * the danger tier the disk meter uses. */
+export function snapshotRefusedLine(name: string, answer: ProviderAnswer, disk: DiskUse): string {
+  const answered = `the provider answered ${providerAnswerLine(answer)}`;
+  if (disk.kind === "unknown") return `${name} was not snapshotted: ${answered}; the disk could not be read (${disk.reason})`;
+  const full = `its disk is ${Math.floor((disk.usedBytes / disk.sizeBytes) * 100)} percent full (${fmtBytesOf(disk.usedBytes, disk.sizeBytes)})`;
+  if (diskTone(disk.usedBytes, disk.sizeBytes) === "danger") return `${name} was not snapshotted: ${full} and ${answered}; free space on it or delete the workspace, then snapshot again`;
+  return `${name} was not snapshotted: ${answered}; ${full}, so the disk is not the reason`;
+}
+
 /** The snapshotting stage's line after one refused attempt with another to come: which attempt, what the provider
  * said, what the builder reads at the provider, and when the next attempt is. */
 export function snapshotAttemptLine(attempt: number, attempts: number, answer: ProviderAnswer, builderState: BuilderReading, retryMs: number): string {
