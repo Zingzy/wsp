@@ -103,7 +103,7 @@ describe("where a job's managers install", () => {
     // The one knob an image's job exports, the one it has always exported: pnpm has no folder of its own by default.
     expect(installEnv(own)).toEqual({ PNPM_HOME });
     // Nothing is linked and nothing is added to the PATH of a line: an image's scripts read as they did.
-    expect(line({ road: "cargo", package: "ripgrep" }, "rg", own)).toBe("cargo install ripgrep");
+    expect(line({ road: "cargo", package: "ripgrep" }, "rg", own)).toBe("cargo install ripgrep --locked");
     expect(line({ road: "pnpm", package: "wrangler" }, "wrangler", own)).toBe("pnpm add -g wrangler");
     expect(line(rustRoad, "cargo", own)).toBe(line(rustRoad, "cargo", homes).split("\nfind ")[0]);
   });
@@ -128,7 +128,7 @@ describe("where a job's managers install", () => {
   it("links what a manager with no folder knob left in its own folder, and takes the link off again", () => {
     const link = `find ${TOOL_PREFIX}/cargo/bin -maxdepth 1 -type f -perm -u+x -exec ln -sfn {} ${LOCAL_BIN}/ ';'`;
     const cargo = line({ road: "cargo", package: "ripgrep" }, "rg", homes);
-    expect(cargo).toContain("cargo install ripgrep");
+    expect(cargo).toContain("cargo install ripgrep --locked");
     expect(cargo.endsWith(link)).toBe(true);
     expect(roadModule({ road: "cargo", package: "ripgrep" } as InstallRoad).uninstall({ road: "cargo", package: "ripgrep" }, "rg", homes)).toEqual({ cmd: `export PATH=${TOOL_PREFIX}/cargo/bin:$PATH; cargo uninstall ripgrep\nrm -f ${LOCAL_BIN}/'rg'` });
     // pnpm refuses to install a global while the folder it links into is off PATH, so its own lines carry it.

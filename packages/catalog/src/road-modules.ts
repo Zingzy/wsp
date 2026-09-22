@@ -372,10 +372,11 @@ const cargo: RoadModule<Road<"cargo">> = {
   env: homes => homes.cargo.env,
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   // cargo install writes its command into the cargo home's own bin folder and takes no knob for another, so a job
-  // that moved that home links what it left there onto the PATH the daemon resolves through.
+  // that moved that home links what it left there onto the PATH the daemon resolves through. --locked builds the
+  // crate against the lockfile it shipped; a crate that ships none warns and resolves as before.
   install: (r, _bin, homes = OWN_HOMES) => {
     const version = versionOf(r);
-    return [inHome(homes.cargo, `cargo install ${r.package}${version === undefined ? "" : ` --version ${version}`}`), ...linkCommands(linkedOf(homes.cargo))].join("\n");
+    return [inHome(homes.cargo, `cargo install ${r.package}${version === undefined ? "" : ` --version ${version}`} --locked`), ...linkCommands(linkedOf(homes.cargo))].join("\n");
   },
   uninstall: (r, bin, homes = OWN_HOMES) => ({ cmd: [inHome(homes.cargo, `cargo uninstall ${r.package}`), ...unlinkCommand(homes.cargo, bin)].join("\n") }),
   names: r => [r.package],

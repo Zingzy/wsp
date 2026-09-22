@@ -835,7 +835,7 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/pipx/black")).toMatch(/pipx install black==24\.1\.0$/);
     expect(cmd("tools/manager/cargo")).toContain('curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.1/$arch-unknown-linux-gnu/rustup-init"');
     expect(cmd("tools/manager/cargo")).toMatch(/\n\/tmp\/rustup-init -y --no-modify-path --profile default --default-toolchain stable\nrm -f \/tmp\/rustup-init$/);
-    expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0$/);
+    expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0 --locked$/);
     expect(cmd("tools/manager/go")).toMatch(/brew install go'$/);
     expect(cmd("tools/go/sqlc")).toMatch(/go install github\.com\/sqlc-dev\/sqlc\/cmd\/sqlc@v1\.31\.1$/);
     for (const i of t.installs) expect(i.cmd).toMatch(/^export PATH=.*PNPM_HOME=/);

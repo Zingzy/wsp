@@ -176,7 +176,7 @@ describe("catalog", () => {
     expect(ROAD_MODULES.npm.install({ road: "npm", package: "wrangler", pin }, "wrangler")).toBe("npm install -g wrangler@4.1.0");
     expect(ROAD_MODULES.pnpm.install({ road: "pnpm", package: "wrangler", pin }, "wrangler")).toBe("pnpm add -g wrangler@4.1.0");
     expect(ROAD_MODULES.uv.install({ road: "uv", package: "ruff", pin: { tag: "0.4.4" } }, "ruff")).toBe("uv tool install ruff==0.4.4");
-    expect(ROAD_MODULES.cargo.install({ road: "cargo", package: "bat", pin: { tag: "0.24.0" } }, "bat")).toBe("cargo install bat --version 0.24.0");
+    expect(ROAD_MODULES.cargo.install({ road: "cargo", package: "bat", pin: { tag: "0.24.0" } }, "bat")).toBe("cargo install bat --version 0.24.0 --locked");
     expect(ROAD_MODULES.go.install({ road: "go", module: "golang.org/x/tools/gopls", pin: { tag: "v0.16.2" } }, "gopls")).toBe("go install golang.org/x/tools/gopls@v0.16.2");
     // A pin the row's version moved past does not stand: the row installs at its version, a first install again.
     expect(ROAD_MODULES.npm.install({ road: "npm", package: "wrangler", version: "4.2.0", pin }, "wrangler")).toBe("npm install -g wrangler@4.2.0");
@@ -373,8 +373,9 @@ describe("catalog", () => {
     expect([line(uv), off(uv)]).toEqual(["uv tool install ty==0.0.56", { cmd: "uv tool uninstall ty" }]);
     const pipx = ROAD_MODULES.pipx.fromRow!(row("black", "24.1.0"));
     expect([line(pipx), off(pipx)]).toEqual(["pipx install black==24.1.0", { cmd: "pipx uninstall black" }]);
-    expect(line(ROAD_MODULES.cargo.fromRow!(row("bat", "0.24.0")))).toBe("cargo install bat --version 0.24.0");
-    expect([line(ROAD_MODULES.cargo.fromRow!(row("bat"))), off(ROAD_MODULES.cargo.fromRow!(row("bat")))]).toEqual(["cargo install bat", { cmd: "cargo uninstall bat" }]);
+    // --locked takes the dependency set the crate's own lockfile names, so two builders a month apart build the same tool.
+    expect(line(ROAD_MODULES.cargo.fromRow!(row("bat", "0.24.0")))).toBe("cargo install bat --version 0.24.0 --locked");
+    expect([line(ROAD_MODULES.cargo.fromRow!(row("bat"))), off(ROAD_MODULES.cargo.fromRow!(row("bat")))]).toEqual(["cargo install bat --locked", { cmd: "cargo uninstall bat" }]);
     // A Go row carries its module in its first path (or an older label); the row's version wins over the module's; no module, nothing to run.
     const gopls = ROAD_MODULES.go.fromRow!({ name: "gopls", paths: ["golang.org/x/tools/gopls@v0.16.2"], label: "gopls" });
     expect([line(gopls), ROAD_MODULES.go.bin!(gopls), off(gopls)]).toEqual(["go install golang.org/x/tools/gopls@v0.16.2", "gopls", { note: "go has no uninstall; the binary stays in /root/go/bin" }]);
@@ -713,7 +714,9 @@ describe("catalog", () => {
       expect(e.floor, id).toBe(false);
     }
     expect(installLine(catalogEntry("bun")!)).toBe("npm install -g bun");
-    expect(installLine(catalogEntry("yarn")!)).toBe("corepack enable yarn\nCOREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@stable");
+    // An exact version, not corepack's moving stable alias: an image built a month later takes the same yarn.
+    expect(installLine(catalogEntry("yarn")!)).toBe(`corepack enable yarn\nCOREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@${catalog.YARN_VERSION}`);
+    expect(catalog.YARN_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     expect(installAfter(catalogEntry("yarn") as ToolEntry)).toBe("node");
     expect(installLine(catalogEntry("ruff")!)).toBe("uv tool install ruff");
     expect(installLine(catalogEntry("typescript")!)).toBe("npm install -g typescript");
