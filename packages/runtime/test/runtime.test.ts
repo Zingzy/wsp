@@ -191,6 +191,58 @@ describe("runtime", () => {
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
   });
+
+  it("a delete the provider answers and never acts on keeps the record, fails naming the machine, and says so in the row's reason and the host's log", async () => {
+    const backend = stubBackend();
+    const made = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      m.kill = async () => {};
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    const said = "x's machine m1 is still running after two asks; run wsp delete again or delete it at the provider";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ kind: "machineAlive", message: said });
+      expect(warn.mock.calls.map(c => c[0])).toContain(said);
+    } finally {
+      warn.mockRestore();
+    }
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.reason).toBe(said);
+    expect((await backend.list()).map(m => m.id)).toEqual(["m1"]);
+  });
+
+  it("a delete the provider takes on the second ask drops the record, and a machine already missing at the first read drops it after one ask", async () => {
+    const backend = stubBackend();
+    const made = backend.create.bind(backend);
+    const asks = new Map<string, number>();
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      const kill = m.kill.bind(m);
+      m.kill = async () => {
+        asks.set(m.id, (asks.get(m.id) ?? 0) + 1);
+        if (m.id === "m2") {
+          m.killed = true;
+          throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
+        }
+        if (asks.get(m.id)! > 1) await kill();
+      };
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const late = await createOn(rt, { golden: "snap_g", name: "late" });
+    const missing = await createOn(rt, { golden: "snap_g", name: "missing" });
+    await rt.workspaces.delete(late.id);
+    expect(asks.get("m1")).toBe(2);
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([missing.id]);
+    await rt.workspaces.delete(missing.id);
+    expect(asks.get("m2")).toBe(1);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(await backend.list()).toEqual([]);
+  });
 });
 
 describe("runtime session history", () => {
