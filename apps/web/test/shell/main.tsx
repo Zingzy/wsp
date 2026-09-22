@@ -35,9 +35,7 @@
 // ?archived=1 gives the first workspace two threads quiet for days, so the
 // Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
-// text can be measured; ?settings=1 puts the settings page in the centre,
-// with the theme rule mounted so a pick on it moves the page's theme as the
-// app's would; ?size=file is the record saying the terminal's text size comes
+// text can be measured; ?size=file is the record saying the terminal's text size comes
 // from the Ghostty file; ?local=1 puts this computer in the list beside the
 // cloud machines, so a mixed list of both kinds can be measured; ?projects=1
 // gives the first workspace two projects, its threads folders inside them and
@@ -52,7 +50,7 @@
 // folder home on ws_a; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
-// ?places=1 fills the Computers table with four computers, one of them
+// ?places=1 fills the places list with four computers, one of them
 // away with the longest name the spec draws; ?init=building puts the init job
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
@@ -66,8 +64,6 @@ import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { useBrowserTabs } from "../../src/browser/tabs";
 import { parseAddress } from "../../src/browser/url";
-import { SettingsPage } from "../../src/settings/SettingsPage";
-import { useThemeEffect } from "../../src/settings/theme";
 import { AppShell } from "../../src/shell/AppShell";
 import { useShellVersionEffect } from "../../src/shell/shellVersion";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
@@ -518,10 +514,8 @@ useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(show
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
-const settings = params.get("settings") === "1";
-if (settings) useStore.setState({ settingsOpen: true });
-// ?places=1 fills the Computers table with the worst row the spec draws, a computer away with a long name
-// beside this Mac and a provider, so the table's four columns and its menu cell can be measured at every window.
+// ?places=1 fills the places list with the worst row the spec draws, a computer away with a long name beside
+// this Mac and a provider, so the pane's rows can be measured against a full list at every window.
 if (params.get("places") === "1") {
   useStore.setState({
     places: [
@@ -545,10 +539,6 @@ if (params.get("places") === "1") {
       { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, takesForks: true, rateUsdPerHour: 0.018 },
     ],
   });
-}
-function ThemeRule() {
-  useThemeEffect();
-  return null;
 }
 /** The app's own reading of the two halves, so ?version=behind runs the road the app runs and not a set toast. */
 function VersionRule() {
@@ -653,9 +643,8 @@ if (params.get("oom") === "1") {
 }
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    {settings ? <ThemeRule /> : null}
     {params.get("version") === "behind" ? <VersionRule /> : null}
-    <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
+    <AppShell>{shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );
 // ?export=1: the dialog that brings a folder home, asked for once the sidebar is listening.

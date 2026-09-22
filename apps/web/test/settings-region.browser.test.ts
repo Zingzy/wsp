@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three rules of round three, measured in a real Chromium at both allowed
-// windows and in both themes, since jsdom lays nothing out: Settings takes the
-// whole region right of the sidebar and hands the right panel back as it was;
-// the Computers table gives its name column away rather than scrolling
-// sideways; every value in the workspace pane ends 20 px from the panel's edge,
-// clear of the scroll bar; and the one-field side sheet is as tall as what it
-// holds, top edge 16 px in, never past the window less 32 px. Runs only when asked for
-// (WSP_RENDER=1) and skips without Playwright's Chromium.
+// The workspace pane's one rule, measured in a real Chromium at both allowed
+// windows and in both themes, since jsdom lays nothing out: every value in the
+// pane ends 20 px from the panel's edge, clear of the scroll bar. The settings
+// region and the one-field sheet are measured in the wireframe render test.
+// Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
+// Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PlaceAddStep } from "@wsp/protocol";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -27,9 +24,9 @@ const WINDOWS = [
 /** The inset every pane row leaves at the right, which the 6 px scroll bar rides inside. */
 const PANE_RIGHT_INSET = 20;
 
-if (renderSkipped !== undefined) console.info(`settings region render test skipped: ${renderSkipped}`);
+if (renderSkipped !== undefined) console.info(`pane render test skipped: ${renderSkipped}`);
 
-describe.skipIf(renderSkipped !== undefined)("the settings region, the table and the pane", () => {
+describe.skipIf(renderSkipped !== undefined)("the workspace pane", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -53,153 +50,6 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
     const b = el.getBoundingClientRect();
     return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), right: Math.round(b.right), bottom: Math.round(b.bottom) };
   });
-  /** Waits until a thing has stopped moving: a sheet slides in over 200 ms, and a rect read mid-slide is a race. */
-  const settled = async (selector: string): Promise<void> => {
-    // The last read is dropped first, so a fresh popup is never taken as settled on one poll.
-    await page!.evaluate(() => delete (window as unknown as { __rect?: string }).__rect);
-    await page!.waitForFunction(
-      sel => {
-        const el = document.querySelector(sel);
-        if (el === null) return false;
-        const held = window as unknown as { __rect?: string };
-        const now = JSON.stringify(el.getBoundingClientRect());
-        const same = held.__rect === now;
-        held.__rect = now;
-        return same;
-      },
-      selector,
-      { polling: 100 },
-    );
-  };
-
-  it.each(WINDOWS)("at $name Settings is the whole region right of the sidebar, and the panel comes back as it was", async window => {
-    // The panel is open on the Machine tab before Settings is, which is the state the testers met.
-    await open(window, "theme=dark&ws=ws_a&panel=machine&places=1&settings=1");
-    await page!.waitForSelector("[data-k=places-table]");
-    expect(await page!.locator("[data-preview-panel-mode]").count()).toBe(0);
-    expect(await page!.locator("[data-right-panel-tabbar]").count()).toBe(0);
-    const region = await page!.evaluate(() => {
-      const centre = document.querySelector("[data-shell-center]")!.getBoundingClientRect();
-      const sidebar = document.querySelector("[data-slot=sidebar-inner]")!.getBoundingClientRect();
-      return { gap: Math.round(centre.x - sidebar.right), right: Math.round(centre.right), width: Math.round(centre.width), sidebar: Math.round(sidebar.width) };
-    });
-    // The centre starts where the sidebar ends, the sidebar's own hairline between them, and runs to the window's
-    // edge: there is nothing else in the row.
-    expect(region.gap).toBeLessThanOrEqual(1);
-    expect(region.right).toBe(window.width);
-    console.info(`settings region at ${window.name}: sidebar ${region.sidebar}, region ${region.width}`);
-    // The chord closes Settings, and the panel is back on the tab it was on.
-    await page!.keyboard.press("Meta+Comma");
-    await page!.waitForSelector("[data-right-panel-tabbar]");
-    expect(await page!.locator("[data-k=state]").count()).toBe(1);
-  }, 60_000);
-
-  it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
-    "at $name in the $theme theme the table gives its name column away rather than scrolling sideways",
-    async window => {
-      await open(window, `theme=${window.theme}&ws=ws_a&panel=machine&places=1&settings=1`);
-      await page!.waitForSelector("[data-k=places-table]");
-      const scroll = await page!.locator("[data-k=places-table]").evaluate(el => {
-        const container = el.closest("[data-slot=table-container]")!;
-        return { scrollWidth: container.scrollWidth, clientWidth: container.clientWidth, table: Math.round(el.getBoundingClientRect().width) };
-      });
-      console.info(`table at ${window.name} ${window.theme}: ${scroll.table} px wide, scroll ${scroll.scrollWidth} in ${scroll.clientWidth}`);
-      expect(scroll.scrollWidth).toBe(scroll.clientWidth);
-      // The three fact columns and the menu stand at their content's width; the name column takes what is left.
-      const columns = await page!.locator("[data-k=places-table] th").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().width)));
-      const facts = columns.slice(1);
-      // Squeezed to 480 px, the width the centre column used to be beside the panel, the fact columns do not move.
-      await page!.locator("[data-settings-page]").evaluate(el => ((el as HTMLElement).style.maxWidth = "528px"));
-      const narrowed = await page!.locator("[data-k=places-table] th").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().width)));
-      const narrowScroll = await page!.locator("[data-k=places-table]").evaluate(el => {
-        const container = el.closest("[data-slot=table-container]")!;
-        const name = el.querySelector("tbody tr td span span")!;
-        return { scrollWidth: container.scrollWidth, clientWidth: container.clientWidth, card: Math.round(container.parentElement!.getBoundingClientRect().width), table: Math.round(el.getBoundingClientRect().width), cut: name.scrollWidth > name.clientWidth };
-      });
-      console.info(`table squeezed: card ${narrowScroll.card} px, table ${narrowScroll.table} px, columns ${narrowed.join(", ")}`);
-      // The card is the 480 px the centre column used to be beside the panel; the table is that less its hairlines.
-      expect(narrowScroll.card).toBe(480);
-      expect(narrowScroll.scrollWidth).toBe(narrowScroll.clientWidth);
-      expect(narrowScroll.cut).toBe(true);
-      expect(narrowed.slice(1)).toEqual(facts);
-      expect(narrowed[0]!).toBeLessThan(columns[0]!);
-      await page!.screenshot({ path: join(SHOTS, `settings-table-${window.width}-${window.theme}.png`) });
-    },
-    60_000,
-  );
-
-  it.each(["dark", "light"] as const)(
-    "in the %s theme every row of the table is one height and the note behind a count is the muted ink",
-    async theme => {
-      // A row with a menu button used to stand 6 px taller than the row without one, which is the first thing a
-      // person reads as wrong in a table of four rows.
-      await open(WINDOWS[0], `theme=${theme}&ws=ws_a&panel=machine&places=1&settings=1`);
-      await page!.waitForSelector("[data-k=places-table]");
-      const rows = await page!.locator("[data-k=places-table] tbody tr").evaluateAll(els => els.map(el => ({ id: el.getAttribute("data-place-row"), height: el.getBoundingClientRect().height, cells: el.children.length })));
-      console.info(`places rows in the ${theme} theme: ${rows.map(r => `${r.id} ${r.height} px in ${r.cells} cells`).join(", ")}`);
-      expect(rows.length).toBeGreaterThan(2);
-      expect(new Set(rows.map(r => Math.round(r.height))).size).toBe(1);
-      // The head's own height, and every row carries the menu column whether or not it has a menu in it.
-      expect(Math.round(rows[0]!.height)).toBe(Math.round(await page!.locator("[data-k=places-table] thead tr").evaluate(el => el.getBoundingClientRect().height)));
-      expect(new Set(rows.map(r => r.cells)).size).toBe(1);
-      // The count stands in the row's own ink and the clause behind it is muted, as the mock draws it.
-      const inks = await page!.locator("[data-k=places-table] tbody [data-k=workspaces-note]").evaluateAll(els =>
-        els.map(el => ({ note: getComputedStyle(el).color, count: getComputedStyle(el.parentElement!).color })),
-      );
-      console.info(`the note behind a count in the ${theme} theme: ${inks.map(i => `${i.note} on ${i.count}`).join(", ")}`);
-      expect(inks.length).toBeGreaterThan(0);
-      for (const ink of inks) expect(ink.note).not.toBe(ink.count);
-      await page!.screenshot({ path: join(SHOTS, `settings-table-rows-${theme}.png`) });
-    },
-    60_000,
-  );
-
-  it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
-    "at $name in the $theme theme an open row's refusal wraps inside the card rather than widening the table",
-    async window => {
-      await open(window, `theme=${window.theme}&ws=ws_a&panel=machine&places=1&settings=1`);
-      await page!.waitForSelector("[data-k=places-table]");
-      const closed = await page!.locator("[data-k=places-table]").evaluate(el => {
-        const container = el.closest("[data-slot=table-container]")!;
-        return { scrollWidth: container.scrollWidth, clientWidth: container.clientWidth };
-      });
-      await page!.locator("[data-place-row=p_laptop]").click();
-      await page!.waitForSelector("[data-k=place-detail] [data-k=dialled]");
-      const open_ = await page!.locator("[data-k=places-table]").evaluate(el => {
-        const container = el.closest("[data-slot=table-container]")!;
-        const said = el.querySelector("[data-k=dialled]")!;
-        const cell = said.closest("td")!;
-        return {
-          scrollWidth: container.scrollWidth,
-          clientWidth: container.clientWidth,
-          wrap: getComputedStyle(said).whiteSpace,
-          said: Math.round(said.getBoundingClientRect().width),
-          cell: Math.round(cell.getBoundingClientRect().width),
-          cut: said.scrollWidth > said.clientWidth,
-          // The longest sentence ssh hands back, laid out in the same box: a refusal is one line or several, and
-          // either way it may not push the table out from under the card.
-          overflowsLong: ((): boolean => {
-            const held = said.textContent;
-            said.textContent = `${held ?? ""} ${(held ?? "").repeat(2)}`;
-            const over = said.scrollWidth > said.clientWidth;
-            said.textContent = held;
-            return over;
-          })(),
-        };
-      });
-      console.info(`table at ${window.name} ${window.theme}: closed ${closed.scrollWidth} in ${closed.clientWidth}, open ${open_.scrollWidth} in ${open_.clientWidth}, refusal ${open_.said} px (${open_.wrap}) in a ${open_.cell} px cell`);
-      // The amendment's rule: the table never scrolls sideways. A refusal that inherits the cell's nowrap widens
-      // it and is clipped at the card's edge, which is the half of the sentence that says what happened.
-      expect(closed.scrollWidth).toBe(closed.clientWidth);
-      expect(open_.scrollWidth).toBe(open_.clientWidth);
-      expect(open_.cut).toBe(false);
-      expect(open_.overflowsLong).toBe(false);
-      expect(open_.wrap).not.toBe("nowrap");
-      await page!.screenshot({ path: join(SHOTS, `settings-detail-refusal-${window.width}-${window.theme}.png`) });
-    },
-    60_000,
-  );
-
   it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
     "at $name in the $theme theme every pane value ends 20 px from the panel's edge",
     async window => {
@@ -224,57 +74,4 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
     60_000,
   );
 
-  it("at a window too short for it the sheet stops at the cap and its body scrolls under a standing footer", async () => {
-    // Shorter than the app allows, on purpose: it is the one window where the cap is reached at all, and the rule
-    // is what happens there.
-    const short = { name: "1024 by 420", width: 1024, height: 420 } as const;
-    await open(short, "theme=dark&ws=ws_a&places=1&settings=1");
-    await page!.waitForSelector("[data-k=add-computer-button]");
-    await page!.click("[data-k=add-computer-button]");
-    // The one field and the plan under it are there at once: the sheet has one road and asks one thing.
-    await page!.waitForSelector("[data-k=add-computer] [data-k=login-field]");
-    await settled("[data-slot=sheet-popup]");
-    const popup = await box("[data-slot=sheet-popup]");
-    const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-    console.info(`the sheet at ${short.name}: ${popup.w} by ${popup.h}, cap ${short.height - 32}, footer ends ${footer.bottom}`);
-    expect(popup.h).toBe(short.height - 32);
-    // The footer is in view, not past the window's floor.
-    expect(footer.bottom).toBeLessThanOrEqual(short.height);
-    const body = await page!.locator("[data-slot=sheet-popup] [data-slot=scroll-area-viewport]").evaluate(el => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
-    console.info(`its body: ${body.scrollHeight} of content in ${body.clientHeight}`);
-    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
-    // The last line of the plan is reachable: scrolled to the end, it stands inside the body's own box.
-    const reached = await page!.locator("[data-slot=sheet-popup] [data-slot=scroll-area-viewport]").evaluate(el => {
-      el.scrollTop = el.scrollHeight;
-      const lines = el.querySelectorAll("[data-k=plan] [data-k=line]");
-      const last = lines[lines.length - 1]!.getBoundingClientRect();
-      const view = el.getBoundingClientRect();
-      return { lines: lines.length, inside: last.top >= view.top - 1 && last.bottom <= view.bottom + 1, word: lines[lines.length - 1]!.textContent };
-    });
-    console.info(`scrolled to the end: ${reached.lines} lines, the last one ${reached.word}`);
-    expect(reached.lines).toBe(PlaceAddStep.options.length);
-    expect(reached.inside).toBe(true);
-    await page!.screenshot({ path: join(SHOTS, "sheet-capped-1024x420.png") });
-  }, 60_000);
-
-  it.each(WINDOWS)("at $name the side sheet is as tall as what it holds, inset 16 px, and never past the window less 32", async window => {
-    await open(window, "theme=dark&ws=ws_a&places=1&settings=1");
-    await page!.waitForSelector("[data-k=add-computer-button]");
-    await page!.click("[data-k=add-computer-button]");
-    await page!.waitForSelector("[data-k=add-computer] [data-k=login-field]");
-    await settled("[data-slot=sheet-popup]");
-    const popup = await box("[data-slot=sheet-popup]");
-    const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-    console.info(`add a computer at ${window.name}: ${popup.w} by ${popup.h}, top ${popup.y}, right inset ${window.width - popup.right}`);
-    expect(popup.w).toBe(448);
-    expect(popup.y).toBe(16);
-    expect(window.width - popup.right).toBe(16);
-    // The footer's own bottom is the sheet's, less the popup's hairline: no stretch under it.
-    expect(popup.bottom - footer.bottom).toBeLessThanOrEqual(1);
-    expect(popup.h).toBeLessThanOrEqual(window.height - 32);
-    // The plan stands before Add is pressed, one line per step of the installer, so the space holds the answer to
-    // what this does to that box.
-    expect(await page!.locator("[data-k=plan] [data-k=line]").count()).toBe(PlaceAddStep.options.length);
-    await page!.screenshot({ path: join(SHOTS, `sheet-add-computer-${window.width}.png`) });
-  }, 90_000);
 });

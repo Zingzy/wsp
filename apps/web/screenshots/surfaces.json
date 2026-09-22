@@ -181,14 +181,15 @@
       "settleMs": 700
     },
     {
-      "name": "settings-where",
+      "name": "settings-computers",
       "at": "/",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "k=settings-row"
+        "k=settings-row",
+        "k=settings-computers"
       ],
-      "wait": "k=places-table"
+      "wait": "settings-at=computers"
     },
     {
       "name": "settings-account",
@@ -196,7 +197,8 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "k=settings-row"
+        "k=settings-row",
+        "k=settings-account"
       ],
       "wait": "k=account-state"
     },
@@ -207,6 +209,7 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
+        "k=settings-computers",
         "k=add-computer-button"
       ],
       "wait": "k=add-computer",
@@ -218,7 +221,10 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "k=settings-row"
+        "k=settings-row",
+        "k=settings-computers",
+        "390:key:Escape",
+        "place-row=solari"
       ],
       "wait": "k=image-facts",
       "settleMs": 700
@@ -226,25 +232,31 @@
     {
       "name": "settings-image-built",
       "at": "/",
-      "fixture": "image-built",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "k=settings-row"
+        "k=settings-row",
+        "k=settings-computers",
+        "390:key:Escape",
+        "place-row=solari"
       ],
-      "wait": "k=image-copies",
+      "fixture": "image-built",
+      "wait": "k=image-copy",
       "settleMs": 700
     },
     {
       "name": "settings-image-sheet",
       "at": "/",
-      "fixture": "image-built",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
+        "k=settings-computers",
+        "390:key:Escape",
+        "place-row=solari",
         "k=edit-image"
       ],
+      "fixture": "image-built",
       "wait": "k=choice",
       "settleMs": 700
     },
@@ -255,10 +267,11 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
+        "k=settings-computers",
         "390:key:Escape",
         "place-row=p_hetzner"
       ],
-      "wait": "k=place-detail",
+      "wait": "settings-at=computer:p_hetzner",
       "settleMs": 700
     },
     {
@@ -268,12 +281,68 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
+        "k=settings-computers",
         "390:key:Escape",
         "place-row=p_hetzner",
         "k=remove"
       ],
       "wait": "k=remove-sentence",
       "settleMs": 700
+    },
+    {
+      "name": "settings-appearance",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-appearance"
+      ],
+      "wait": "settings-at=appearance"
+    },
+    {
+      "name": "settings-projects",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-projects"
+      ],
+      "wait": "settings-at=projects"
+    },
+    {
+      "name": "settings-devices",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-devices"
+      ],
+      "wait": "settings-at=devices"
+    },
+    {
+      "name": "settings-keybindings",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-keybindings"
+      ],
+      "wait": "settings-at=keybindings"
+    },
+    {
+      "name": "settings-about",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-about"
+      ],
+      "wait": "settings-at=about"
     },
     {
       "name": "new-workspace",

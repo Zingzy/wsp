@@ -476,9 +476,10 @@ export interface Api {
    * The host answers the record it kept, so the sidebar draws the project before anything is cloned. Optional so a
    * fixture that records none need not fake it; without it the first run and the sheet are held. */
   projectsAdd?(source: string, on?: string): Promise<ProjectView>;
-  /** Forgets a project. The host refuses one a workspace still stands on, naming them. Optional so a fixture that
-   * removes none need not fake it; without it the row's Remove project is held. */
-  projectsRemove?(projectId: string): Promise<void>;
+  /** Forgets a project and answers the runtime's own sentence for what left. The host refuses one a workspace
+   * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
+   * Remove project is held. */
+  projectsRemove?(projectId: string): Promise<{ said: string | undefined }>;
   /** Where a workspace of this project would land and what that computer offers: the computer's name, and the
    * flags the row's own words about the copy's ports and the state word's pause mode are read off. Refused in the
    * runtime's own sentence where that computer forks nothing. Optional so a fixture with no landing need not fake
@@ -492,8 +493,10 @@ export interface Api {
   /** Who this wsp is signed in to, as the host reads it off this computer. Optional so a fixture with no Settings
    * page need not fake it; without it the Account row says nothing rather than guessing. */
   account?(): Promise<AccountView>;
-  /** Every device paired with this wsp, which is what the Account section lists once there is a sign-in. */
+  /** Every device paired with this wsp, which is what Settings > Devices lists. */
   devicesList?(): Promise<DeviceView[]>;
+  /** Takes a device's token away; any paired computer may, its own included. */
+  devicesRevoke?(deviceId: string): Promise<void>;
   /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
    * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
   preferences?(): Promise<Preferences>;
@@ -700,7 +703,8 @@ export function makeApi(c: ProtocolClient): Api {
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }) })).project),
     projectsRemove: async projectId => {
-      await c.request("projects.remove", { projectId });
+      const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
+      return { said: typeof reply.said === "string" ? reply.said : undefined };
     },
     // Parsed, not trusted: a row's words about a copy's ports and its state word are read off these flags.
     workspacesLanding: async project => WorkspaceLanding.parse(await c.request<unknown>("workspaces.landing", { project })),
@@ -708,6 +712,9 @@ export function makeApi(c: ProtocolClient): Api {
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     account: async () => AccountView.parse((await c.request<{ account?: unknown }>("account.get")).account),
     devicesList: async () => DeviceView.array().parse((await c.request<{ devices?: unknown }>("devices.list")).devices),
+    devicesRevoke: async deviceId => {
+      await c.request("devices.revoke", { deviceId });
+    },
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the Computers section computes beyond the cells the protocol
-// already words: the name a person reads a row as, and the sentence the Remove
-// dialog computes from what the computer holds. The four cells of a row, the
+// What the Computers pages compute beyond the words the protocol already
+// carries: the name a person reads a row as, and the sentence the Remove
+// dialog computes from what the computer holds. The facts of a row, the
 // state word after a name, how long a computer has been away and an hourly
-// rate are all the protocol's (absentComputer, placeWorkspacesCell, fmtSize,
-// fmtBytes, offlineFor, fmtRate) and are not copied here.
+// rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
+// fmtRate) and are not copied here.
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
@@ -209,14 +209,14 @@ export function copiesWord(place: PlaceView, here: boolean): string {
   return !here && place.takesForks === false ? WHERE_WORDS.copiesNothing : "";
 }
 
-/** One line of a computer's agents block: the agent by its catalog name, the word for what it is there, and the
- * line a held Sign in says on hover. */
+/** One agent on a computer's page: the agent by its catalog name, the word for what it is there, and why a Sign
+ * in beside it is held. */
 export interface AgentLine {
   id: string;
   name: string;
   state: string;
-  /** Why the sign-in is held here: the command line that runs it, built from this row's own two names. Absent on
-   * this computer, whose agents are signed in where they are installed. */
+  /** Why the sign-in is held here, as the last clause of the row's description. Absent on this computer, whose
+   * agents are signed in where they are installed. */
   held?: string;
   /** Whether a sign-in already stands for this agent there: its own login on that computer, or the variable this
    * wsp's vault holds for it. The Sign in button is not drawn where one does. */
@@ -241,7 +241,7 @@ export function hereAgentLines(setup: Pick<InitSetup, "agents"> | null): AgentLi
  * for its sign-in, which are the two facts a person asks first, and the recipe's outcome only where that row
  * failed, since a row that installed or was already there says nothing this line does not. A computer whose daemon
  * reports neither reads as it did before: the recipe's word, or the bare word found. The sign-in beside each is
- * held: nothing on the wire runs one on a computer from here, so the line names the command that does. */
+ * held: nothing on the wire runs one on a computer from here, and the row says so. */
 export function placeAgentLines(place: PlaceView): AgentLine[] {
   return (place.agents ?? []).map(id => {
     const signIn = place.signIns?.[id];
@@ -254,7 +254,7 @@ export function placeAgentLines(place: PlaceView): AgentLine[] {
       id,
       name: agentName(id),
       state: said.length === 0 ? (outcomeWord(row) ?? AGENTS_WORDS.found) : said.join(" · "),
-      held: AGENTS_WORDS.signInHeld(place.name, id),
+      held: AGENTS_WORDS.signInHeld,
       ...(signIn === undefined || signIn === "none" ? {} : { signedIn: true }),
     };
   });

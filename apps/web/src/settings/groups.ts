@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The one table of settings groups: each id's words, glyph, whether it has
+// defaults to restore, and the function that states its page's cards as data.
+// The sidebar, the search, the breadcrumb and Restore defaults all read this
+// table; adding a group is one id in groupIds.ts, one entry here and its page
+// module. A group marked empty is not drawn, which is General today: no pick
+// the record holds is a behaviour yet.
+import { FolderIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { PLACES_WORDS } from "@wsp/protocol";
+import type { Preferences, PreferencesPatch } from "@wsp/protocol";
+import { aboutCards } from "./about.js";
+import { accountCards } from "./account.js";
+import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
+import { computersCards } from "./computers.js";
+import { devicesCards } from "./devices.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, SETTINGS_WORDS } from "./format.js";
+import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
+import { keybindingsCards } from "./keybindings.js";
+import { projectsCards } from "./projects.js";
+import { normalizeSearchText } from "../lib/utils.js";
+import { itemWords, type SettingsCardData, type SettingsItem } from "./rows.js";
+import type { SettingsContext } from "./settingsContext.js";
+
+export interface SettingsGroup {
+  readonly id: SettingsGroupId;
+  readonly name: string;
+  readonly glyph: LucideIcon;
+  /** The defaults a person can restore, where the group's rows have any: whether a row is off them, and the one
+   * patch that puts them back. */
+  readonly restore?: { readonly off: (preferences: Preferences) => boolean; readonly patch: PreferencesPatch };
+  /** A group whose page has no row yet, which is not drawn: a group with nothing in it is decoration. */
+  readonly empty?: true;
+  readonly cards: (ctx: SettingsContext) => SettingsCardData[];
+}
+
+const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
+  general: { name: "General", glyph: SlidersHorizontalIcon, empty: true, cards: () => [] },
+  appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
+  computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards },
+  projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards },
+  devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
+  account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },
+  keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, cards: keybindingsCards },
+  about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards },
+};
+
+export const SETTINGS_GROUPS: ReadonlyArray<SettingsGroup> = SETTINGS_GROUP_IDS.map(id => ({ id, ...TABLE[id] }));
+
+export const groupById = (id: SettingsGroupId): SettingsGroup => ({ id, ...TABLE[id] });
+
+/** The groups the sidebar draws: those whose page has something on it. */
+export const drawnGroups = (): SettingsGroup[] => SETTINGS_GROUPS.filter(group => group.empty !== true);
+
+/** Every item of a group's page whose words hold the query, case aside: what the search page and the sidebar's
+ * dimming read. A list row matches by its name, since its title is the name. */
+export function searchGroup(group: SettingsGroup, ctx: SettingsContext, query: string): SettingsItem[] {
+  const q = normalizeSearchText(query);
+  if (q === "") return [];
+  return group.cards(ctx).flatMap(card => card.items.filter(item => itemWords(item).some(word => normalizeSearchText(word).includes(q))));
+}
+
+/** The palette row's description: the groups a person will find, named. */
+export const groupNames = (): string => drawnGroups().map(group => group.name).join(", ");

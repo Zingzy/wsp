@@ -1,144 +1,104 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The settings page in the centre: one column of sections in the grammar
-// rows.tsx holds, a caps mono zone label over each, then one hairline-separated
-// row per pick with its label at the left and its control at the right edge.
-// The control's own label is the explanation: no sentence under any pick,
-// though a section may put one sentence of its own in a row of the same shape.
-// Every pick goes to the host's preferences record and paints at once, so a
-// browser tab on the same host follows.
-//
-// Two picks are left, the sidebar's width and the terminal's text size; the
-// page follows the computer's own colour scheme and offers no side to pick.
-// Computers, Account and About take no pick: they say which computers this wsp
-// runs on and which agents are on each, whether this wsp is on an account, and
-// the release each half of the app is on. The section about one cloud stands
-// only while this host holds that cloud's key, the same rule its row in the
-// table stands under.
-import { PLACES_WORDS, TerminalSizeSource, fmtPx, type InitSetup, type TerminalConfig } from "@wsp/protocol";
-import { useEffect, useState } from "react";
-import { Button } from "../components/ui/button.js";
-import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncrement, NumberFieldInput } from "../components/ui/number-field.js";
+// The settings page in the centre: the open group's cards, or a computer's or
+// a project's own page, in the grammar rows.tsx holds, one card per section.
+// While the settings sidebar's field holds text at a width with room for
+// both, the centre is a results page: under each group with a match, its name
+// as a link and a card of the matching rows, live, so a pick made there is
+// made. The sheets that mount at page level stand over whichever page is
+// open: Add a computer over Computers, the image screens over the cloud's page.
+import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
-import { SegmentedControl } from "../components/ui/segmented-control.js";
-import { cn } from "../lib/utils.js";
-import { useAddComputerOpen, usePreferences, useStore } from "../protocol/store.js";
-import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../shell/sidebarWidth.js";
-import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
-import { appScheme } from "../terminal/ghosttyConfig.js";
-import { shellVersions } from "../shell/shellVersion.js";
-import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, versionFact } from "./format.js";
-import { AccountSection } from "./AccountSection.js";
+import { useIsMobile } from "../hooks/useMediaQuery.js";
+import { useAddComputerOpen, useStore } from "../protocol/store.js";
+import { AddProjectSheet } from "../sidebar/AddProjectSheet.js";
+import { CloudSetupDialog } from "../sidebar/CloudSetupDialog.js";
 import { AddComputerSheet } from "./AddComputerSheet.js";
-import { Computers } from "./Computers.js";
-import { ImageSection } from "./ImageSection.js";
-import { CLOUD_NAMES, keyHeld } from "./providers.js";
-import { Row, Section } from "./rows.js";
+import { ComputerPage } from "./computers.js";
+import { SETTINGS_WORDS } from "./format.js";
+import { drawnGroups, groupById, searchGroup } from "./groups.js";
+import { ProjectPage } from "./projects.js";
+import { Card, Cards, Line, Row, ROW_CLASS } from "./rows.js";
+import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
+import { useSettingsReads } from "./settingsReads.js";
+import { atId, useSettingsStore, type SettingsAt } from "./settingsStore.js";
 
-const SIZES = TerminalSizeSource.options.map(source => ({ value: source, label: TERMINAL_SIZE_WORDS[source] }));
+/** The results page: one card per group with a match, its name over it as the road to the whole group. */
+function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
+  const found = drawnGroups()
+    .map(group => ({ group, items: searchGroup(group, ctx, query) }))
+    .filter(hit => hit.items.length > 0);
+  if (found.length === 0) {
+    return (
+      <p data-k="nothing-matches" className={`${ROW_CLASS} flex items-center justify-center text-[13px] text-muted-foreground`}>
+        {SETTINGS_WORDS.nothingMatches}
+      </p>
+    );
+  }
+  return (
+    <>
+      {found.map(({ group, items }) => {
+        const tall = items.some(item => item.kind === "row" && item.drops === true);
+        return (
+          <Card
+            key={group.id}
+            id={`search-${group.id}`}
+            head={
+              <button type="button" data-k={`search-group-${group.id}`} className="text-left transition-colors duration-150 hover:text-foreground" onClick={() => ctx.go({ kind: "group", group: group.id })}>
+                {group.name}
+              </button>
+            }
+          >
+            {items.map(item => {
+              if (item.kind === "line") {
+                const { kind: _line, ...line } = item;
+                return <Line key={item.id} {...line} />;
+              }
+              const { kind: _row, ...row } = item;
+              return <Row key={item.id} {...row} tall={tall} />;
+            })}
+          </Card>
+        );
+      })}
+    </>
+  );
+}
 
-/** The cloud whose own section stands on this page while it is still the road a workspace at a cloud is made on.
- * One entry, read off the name table, so the day it leaves the section leaves with its row. */
-const CLOUD_SECTION = CLOUD_NAMES.find(row => row.id === "solari")!;
+function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
+  if (at.kind === "group") return <Cards cards={groupById(at.group).cards(ctx)} />;
+  if (at.kind === "computer") {
+    const place = ctx.places.find(p => p.id === at.id);
+    return place === undefined ? null : <ComputerPage place={place} ctx={ctx} />;
+  }
+  const project = ctx.projects.find(p => p.id === at.id);
+  return project === undefined ? null : <ProjectPage project={project} ctx={ctx} />;
+}
 
 export function SettingsPage() {
-  const preferences = usePreferences();
-  const setPreferences = useStore(s => s.setPreferences);
-  const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
-  const initGet = useStore(s => s.api?.initGet);
-  const [file, setFile] = useState<TerminalConfig | null>(null);
-  const [setup, setSetup] = useState<InitSetup | null>(null);
-  const versions = shellVersions();
+  useSettingsReads();
+  const ctx = useSettingsContext();
+  const at = useSettingsAt();
+  const search = useSettingsStore(s => s.search);
+  const addProjectAt = useSettingsStore(s => s.addProjectAt);
+  const closeAddProject = useSettingsStore(s => s.closeAddProject);
+  const isMobile = useIsMobile();
   const addComputer = useAddComputerOpen();
   const closeAddComputer = useStore(s => s.closeAddComputer);
-  // The file's size is a fact the host already reads for the pane; the page shows it beside the pick that would use it.
-  useEffect(() => {
-    if (readHostConfig === undefined) return;
-    let live = true;
-    void readHostConfig(appScheme())
-      .then(config => {
-        if (live) setFile(config);
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [readHostConfig]);
-  // Which keys this host holds, which is the one rule the cloud's own section stands under.
-  useEffect(() => {
-    if (initGet === undefined) return;
-    let live = true;
-    void initGet().then(
-      read => {
-        if (live) setSetup(read);
-      },
-      () => {
-        if (live) setSetup(null);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [initGet]);
-  const width = preferences.sidebarWidth ?? SIDEBAR_DEFAULT_WIDTH;
+  const editing = useStore(s => s.setupOpen);
+  const closeSetup = useStore(s => s.closeSetup);
+  // At a phone's width the results are in the sheet the field is in, so the centre keeps its page.
+  const searching = search !== "" && !isMobile;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page className="mx-auto flex w-full max-w-[672px] flex-col gap-8 px-6 py-6">
-        <Section id="settings-appearance" title={SETTINGS_WORDS.appearance}>
-          <Row id="settings-sidebar-width" label={SETTINGS_WORDS.sidebarWidth}>
-            {preferences.sidebarWidth === undefined ? null : (
-              <Button size="xs" variant="ghost-muted" onClick={() => void setPreferences({ sidebarWidth: null })}>
-                {SETTINGS_WORDS.reset}
-              </Button>
-            )}
-            <NumberField
-              aria-labelledby="settings-sidebar-width"
-              className="w-auto"
-              size="sm"
-              min={SIDEBAR_MIN_WIDTH}
-              max={SIDEBAR_MAX_WIDTH}
-              step={8}
-              value={width}
-              onValueChange={value => {
-                // Held to the drag's bounds before the host hears it, since every keystroke lands here; the field's own
-                // clamp on blur then repeats the value, which is not sent twice.
-                if (value === null || !Number.isFinite(value)) return;
-                const sidebarWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
-                if (sidebarWidth !== width) void setPreferences({ sidebarWidth });
-              }}
-            >
-              <NumberFieldGroup className="w-auto">
-                <NumberFieldDecrement aria-label="Narrower" />
-                <NumberFieldInput data-k="sidebar-width" aria-label={SETTINGS_WORDS.sidebarWidth} className="w-14 font-mono text-[11px]" />
-                <NumberFieldIncrement aria-label="Wider" />
-              </NumberFieldGroup>
-            </NumberField>
-          </Row>
-        </Section>
-        <Section id="settings-terminal" title={SETTINGS_WORDS.terminal}>
-          <Row id="settings-text-size" label={SETTINGS_WORDS.textSize}>
-            <span className={FACT} data-k="terminal-size">
-              {TERMINAL_SIZE_FACT[preferences.terminalSize](appTerminalFontSize(), file?.fontSize)}
-            </span>
-            <SegmentedControl aria-labelledby="settings-text-size" value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => void setPreferences({ terminalSize })} />
-          </Row>
-        </Section>
-        <Section id="settings-where" title={PLACES_WORDS.section}>
-          {/* One read of the host's setup on this page, handed to the section that draws its keys and its agents:
-              two components asking for one record at one mount asked the host twice for it. */}
-          <Computers setup={setup} />
-        </Section>
-        {keyHeld(CLOUD_SECTION.id, setup) ? <ImageSection title={CLOUD_SECTION.name} /> : null}
-        <AccountSection />
-        <Section id="settings-about" title={SETTINGS_WORDS.about}>
-          <Row id="settings-version" label={SETTINGS_WORDS.version}>
-            {/* A row with no control still stands as tall as one, so the rhythm down the column never breaks. */}
-            <span className={cn(FACT, "flex h-7 items-center")} data-k="version">
-              {versionFact(versions.app, versions.host, versions.inShell)}
-            </span>
-          </Row>
-        </Section>
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-6 py-6">
+        {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addComputer ? <AddComputerSheet onClose={closeAddComputer} /> : null}
+      {editing ? <CloudSetupDialog onClose={closeSetup} /> : null}
+      {addProjectAt === null ? null : (
+        <Fragment key={addProjectAt}>
+          <AddProjectSheet onClose={closeAddProject} />
+        </Fragment>
+      )}
     </ScrollArea>
   );
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Where the person is: the settings page by its name while it is open; else
+// Where the person is: the settings crumbs while Settings is open; else
 // the thread that opened this one where an agent did, the workspace's name, a
 // slash and the open thread's title, with no glyph before the name, since the
 // sidebar draws a workspace with none and its folder means project; a creation
@@ -14,7 +14,7 @@ import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
 import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
-import { SETTINGS_WORDS } from "../settings/format.js";
+import { SettingsCrumbs } from "../settings/SettingsCrumbs.js";
 import { openedBy } from "../sidebar/threadTree.js";
 
 export function ThreadBreadcrumb() {
@@ -31,7 +31,7 @@ export function ThreadBreadcrumb() {
   return (
     <span className="flex min-w-0 items-center gap-2 text-sm" data-thread-breadcrumb>
       {settingsOpen ? (
-        <span className="truncate font-medium text-foreground">{SETTINGS_WORDS.title}</span>
+        <SettingsCrumbs />
       ) : name === undefined ? (
         firstRun ? null : <span className="truncate text-muted-foreground">No workspace selected</span>
       ) : (

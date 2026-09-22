@@ -15,7 +15,13 @@
 // sentence in the sans; the held compose glyph still answers a hover with its
 // tooltip; the switcher's menu is the head's width, its rows 28 px, at rest
 // with no transform once open; the desktop foot names this computer; and the
-// whole is photographed on every screen in both themes for a judge. Vite serves test/wireframe to Playwright's
+// whole is photographed on every screen in both themes for a judge. The
+// settings page follows, on the same page: every row 52 px and every line 32,
+// the settings sidebar's rows 28 with one lifted, the dropped rows 84 at 390,
+// no caps, no cut segment, no sideways scroll, the muted words at AA, the Light
+// pick drawing the page light, Restore defaults only off the defaults, the
+// region right of the sidebar whole with the panel back on the chord, and the
+// one-field sheet's geometry over Computers. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -23,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
+import { PlaceAddStep } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -471,13 +478,38 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
 
 /** The settings screens the wireframe page holds, each with the element its shot waits on. */
 const SETTINGS_SCREENS = [
-  ["computers", "[data-k=places-table]"],
-  ["computers-many", "[data-place-row=solari]"],
-  ["computers-open", "[data-k=place-detail]"],
-  ["computers-failed", "[data-k=place-detail] [data-k=recipe-row]"],
-  ["add-computer", "[data-k=add-computer] [data-k=login-field]"],
-  ["remove-computer", "[data-k=remove-sentence]"],
+  ["settings-appearance", "[data-settings-at=appearance]"],
+  ["settings-restore", "[data-k=restore-defaults]"],
+  ["settings-light-picked", "[data-settings-at=appearance]"],
+  ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
+  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-k=agent]"],
+  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=recipe-row]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-k=agent]"],
+  ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=image-copy]"],
+  ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
+  ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=seeded]"],
+  ["settings-devices", "[data-settings-at=devices] [data-device-row=d_3]"],
+  ["settings-account", "[data-settings-at=account] [data-k=account-action]"],
+  ["settings-keybindings", "[data-settings-at=keybindings] [data-slot=kbd]"],
+  ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
+  ["settings-search", "[data-settings-at=search] [data-settings-row=sidebar-width]"],
+  ["settings-over-panel", "[data-settings-at=appearance]"],
+  ["settings-add-computer", "[data-k=add-computer] [data-k=login-field]"],
+  ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
+const ROW = 52;
+const DROPPED_ROW = 84;
+const LINE = 32;
+
+/** Every row, line and sidebar row of a settings screen, with its height and what it holds. */
+interface SettingsRead {
+  rows: { id: string; height: number; card: string; drops: boolean; fill: string }[];
+  lines: { id: string; height: number }[];
+  sidebarRows: { id: string; height: number; active: boolean }[];
+  cutSegments: string[];
+  dressed: string[];
+  scroll: { page: number; client: number };
+}
 
 describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chromium", () => {
   let vite: ViteChild | undefined;
@@ -496,22 +528,220 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
 
   afterAll(() => stopRender(browser, vite?.child));
 
-  const shot = async (name: string): Promise<string> => {
-    const path = join(SHOTS_DIR, `settings-${name}.png`);
-    await page!.screenshot({ path });
+  const url = (screen: string, theme: (typeof THEMES)[number], extra = ""): string => `${base}?screen=${screen}&theme=${theme}${extra}`;
+  /** Opens a screen with the computer's own scheme set to the shot's side, so the theme rule's system pick draws it. */
+  const open = async (screen: string, theme: (typeof THEMES)[number], waitFor: string, size: { width: number; height: number } = { width: 1280, height: 800 }, extra = ""): Promise<void> => {
+    await page!.setViewportSize(size);
+    await page!.emulateMedia({ colorScheme: theme });
+    await page!.goto(url(screen, theme, extra));
+    await page!.waitForSelector(waitFor);
+  };
+  /** A shot named by its page, width and theme, the screen's own settings- prefix said once. */
+  const shot = async (name: string, selector?: string): Promise<string> => {
+    const path = join(SHOTS_DIR, `settings-${name.replace(/^settings-/, "")}.png`);
+    if (selector === undefined) await page!.screenshot({ path });
+    else await page!.locator(selector).first().screenshot({ path });
     console.info(`settings screenshot: ${path}`);
     return path;
   };
 
-  it("every settings screen stands in the shell's centre under the Settings crumb and is photographed in both themes", async () => {
+  const read = (): Promise<SettingsRead> =>
+    page!.evaluate(() => {
+      const box = (el: Element) => el.getBoundingClientRect();
+      const rows = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")].map(el => ({
+        id: el.dataset["settingsRow"] ?? "?",
+        height: box(el).height,
+        card: el.closest<HTMLElement>("[data-settings-card]")?.dataset["settingsCard"] ?? "?",
+        drops: el.className.includes("max-sm:flex-col"),
+        fill: getComputedStyle(el).backgroundColor,
+      }));
+      const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({ id: el.dataset["settingsLine"] ?? "?", height: box(el).height }));
+      const sidebarRows = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => ({ id: el.dataset["rowId"] ?? "?", height: box(el).height, active: el.dataset["active"] === "true" }));
+      const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
+      const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
+        .filter(el => getComputedStyle(el).textTransform !== "none" || getComputedStyle(el).letterSpacing !== "normal")
+        .map(el => (el.textContent ?? "").trim().slice(0, 20));
+      const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
+      const viewport = pageEl.closest<HTMLElement>("[data-slot=scroll-area-viewport]")!;
+      return { rows, lines, sidebarRows, cutSegments, dressed, scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth } };
+    });
+
+  const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
+    // Every row of a card stands at one height: 52 px, or 84 where a control in that card drops under its description.
+    const cards = new Map<string, { drops: boolean; heights: number[] }>();
+    for (const row of got.rows) {
+      const card = cards.get(row.card) ?? { drops: false, heights: [] };
+      card.drops = card.drops || row.drops;
+      card.heights.push(row.height);
+      cards.set(row.card, card);
+      expect(row.fill, `${row.id} at ${where} carries no fill of its own`).toBe("rgba(0, 0, 0, 0)");
+    }
+    for (const [card, { drops, heights }] of cards) {
+      const want = narrow && drops ? DROPPED_ROW : ROW;
+      for (const height of heights) expect(height, `a row of ${card} at ${where}`).toBe(want);
+    }
+    for (const line of got.lines) expect(line.height, `${line.id} at ${where}`).toBe(LINE);
+    for (const row of got.sidebarRows) expect(row.height, `${row.id} at ${where}`).toBe(ONE_LINE);
+    expect(got.cutSegments, `segments cut at ${where}`).toEqual([]);
+    expect(got.dressed, `caps or tracking at ${where}`).toEqual([]);
+    expect(got.scroll.page, `sideways scroll at ${where}`).toBeLessThanOrEqual(got.scroll.client);
+  };
+
+  it("every row is 52 px and every line 32, the sidebar rows 28 with exactly one lifted, no caps, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
-        await page!.goto(`${base}?screen=${screen}&theme=${theme}`);
-        await page!.waitForSelector(waitFor);
-        await page!.waitForSelector("[data-settings-page]");
-        expect(await page!.locator("[data-thread-breadcrumb]").textContent()).toBe("Settings");
+        await open(screen, theme, waitFor, { width: 1280, height: 800 }, screen === "settings-restore" ? "&sidebar=312" : "");
+        const got = await read();
+        console.info(`${screen} ${theme}: rows ${JSON.stringify(got.rows.map(r => [r.id, r.height]))}, lines ${JSON.stringify(got.lines.map(l => [l.id, l.height]))}`);
+        expectGrammar(got, `${screen} ${theme} 1280`, false);
+        expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(screen === "settings-search" ? 1 : 1);
+        // The muted words read at AA on both sides: descriptions, state words and the sub-heads.
+        const ratios = await textContrast(page!, "[data-settings-page] [data-settings-description], [data-settings-page] [data-settings-word], [data-settings-page] [data-settings-head], [data-settings-page] [data-settings-mark]");
+        for (const ratio of ratios) expect(ratio, `muted text on ${screen} ${theme} reads at ${ratio}`).toBeGreaterThanOrEqual(4.5);
         await shot(`${screen}-1280-${theme}`);
       }
     }
-  }, 180_000);
+  }, 300_000);
+
+  it("at 390 the rows whose control drops stand at 84 with every row of their card, the rest keep 52, lines 32, and the settings sidebar is the sheet with the groups", async () => {
+    for (const theme of THEMES) {
+      for (const [screen, waitFor] of SETTINGS_SCREENS) {
+        if (screen === "settings-search") continue;
+        await open(screen, theme, waitFor, { width: 390, height: 844 }, screen === "settings-restore" ? "&sidebar=312" : "");
+        const got = await read();
+        expectGrammar(got, `${screen} ${theme} 390`, true);
+        if (screen === "settings-appearance") {
+          expect(got.rows.map(row => row.height)).toEqual([DROPPED_ROW, DROPPED_ROW, DROPPED_ROW]);
+          // The segment's whole words at this width, which is why the size segments read App and Ghostty file.
+          expect(await page!.locator("[data-settings-row=terminal-size] [role=radio]").allTextContents()).toEqual(["App", "Ghostty file"]);
+        }
+        await shot(`${screen}-390-${theme}`);
+      }
+      // The sheet: the groups at 28 px, one lifted; then the field's results in the sheet, a tap landing on the row.
+      await open("settings-appearance", theme, "[data-settings-at=appearance]", { width: 390, height: 844 });
+      await page!.locator("[data-slot=sidebar-trigger]").first().click();
+      await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-settings-groups]");
+      await page!.waitForTimeout(400);
+      const sheet = await read();
+      for (const row of sheet.sidebarRows) expect(row.height).toBe(ONE_LINE);
+      expect(sheet.sidebarRows.filter(row => row.active).map(row => row.id)).toEqual(["group:appearance"]);
+      await shot(`settings-appearance-390-sheet-${theme}`);
+      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-k=settings-search] input, [data-slot=sidebar][data-mobile=true] input[data-k=settings-search]").first().fill("width");
+      await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-row-id='result:appearance:sidebar-width']");
+      // The centre keeps its page while the results stand in the sheet.
+      expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
+      await shot(`settings-search-390-sheet-${theme}`);
+      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-row-id='result:appearance:sidebar-width']").click();
+      await page!.waitForSelector("[data-slot=sidebar][data-mobile=true]", { state: "detached" });
+      expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
+    }
+  }, 300_000);
+
+  it("the Light segment picked on the dark side draws the page light, and Restore defaults stands only off the defaults", async () => {
+    await open("settings-light-picked", "dark", "[data-settings-at=appearance]");
+    await page!.waitForFunction(() => !document.documentElement.classList.contains("dark"));
+    expect(await page!.locator("[data-settings-row=theme] [role=radio][aria-checked=true]").textContent()).toBe("Light");
+    expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(1);
+    await shot("light-picked-1280-dark");
+    await open("settings-appearance", "dark", "[data-settings-at=appearance]");
+    expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(0);
+    await open("settings-restore", "dark", "[data-k=restore-defaults]", { width: 1280, height: 800 }, "&sidebar=312");
+    // The stepper moves the settings sidebar itself by eight: the body swapped, the width and the rail stayed.
+    expect(Math.round((await page!.locator("[data-slot=sidebar]").first().boundingBox())!.width)).toBe(312);
+    expect(await page!.locator("[data-slot=sidebar-rail]").count()).toBe(1);
+    await page!.getByRole("button", { name: "Wider" }).click();
+    await page!.waitForFunction(() => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - 320) < 1);
+    await page!.locator("[data-k=restore-defaults]").click();
+    await page!.waitForFunction(() => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - 256) < 1);
+    expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(0);
+  }, 60_000);
+
+  it("Settings takes the whole region right of the sidebar and the panel comes back on the chord, in both windows", async () => {
+    for (const size of [
+      { width: 1280, height: 800 },
+      { width: 1024, height: 700 },
+    ]) {
+      await open("settings-over-panel", "dark", "[data-settings-at=appearance]", size);
+      expect(await page!.locator("[data-preview-panel-mode]").count()).toBe(0);
+      expect(await page!.locator("[data-right-panel-tabbar]").count()).toBe(0);
+      expect(await page!.locator("[data-panel-layout-controls]").count()).toBe(0);
+      const region = await page!.evaluate(() => {
+        const centre = document.querySelector("[data-shell-center]")!.getBoundingClientRect();
+        const sidebar = document.querySelector("[data-slot=sidebar-inner]")!.getBoundingClientRect();
+        return { gap: Math.round(centre.x - sidebar.right), right: Math.round(centre.right), width: Math.round(centre.width), sidebar: Math.round(sidebar.width) };
+      });
+      expect(region.gap).toBeLessThanOrEqual(1);
+      expect(region.right).toBe(size.width);
+      console.info(`settings region at ${size.width}: sidebar ${region.sidebar}, region ${region.width}`);
+      await page!.keyboard.press("Meta+Comma");
+      await page!.waitForSelector("[data-right-panel-tabbar]");
+      expect(await page!.locator("[data-settings-groups]").count()).toBe(0);
+    }
+  }, 60_000);
+
+  it("at 390 the sheet opened on the workspace body stays open with the settings body when Settings opens from its foot row", async () => {
+    await page!.setViewportSize({ width: 390, height: 844 });
+    await page!.emulateMedia({ colorScheme: "dark" });
+    await page!.goto(url("sidebar", "dark"));
+    await page!.waitForSelector("[data-slot=sidebar-trigger]");
+    await page!.keyboard.press("Escape");
+    await page!.waitForSelector("[data-slot=sheet-viewport]", { state: "detached" });
+    await page!.locator("[data-slot=sidebar-trigger]").first().click();
+    await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-k=settings-row]");
+    await page!.locator("[data-slot=sidebar][data-mobile=true] [data-k=settings-row]").click();
+    await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-settings-groups]");
+    expect(await page!.locator("[data-slot=sidebar][data-mobile=true] [data-sidebar-tree]").count()).toBe(0);
+    await shot("from-foot-390-dark");
+  }, 60_000);
+
+  it("the Add a computer sheet stands over Computers 448 wide, inset 16 px, as tall as it holds and never past the window less 32, and stops at the cap in a short window", async () => {
+    const settled = async (selector: string): Promise<void> => {
+      await page!.evaluate(() => delete (window as unknown as { __rect?: string }).__rect);
+      await page!.waitForFunction(
+        sel => {
+          const el = document.querySelector(sel);
+          if (el === null) return false;
+          const held = window as unknown as { __rect?: string };
+          const now = JSON.stringify(el.getBoundingClientRect());
+          const same = held.__rect === now;
+          held.__rect = now;
+          return same;
+        },
+        selector,
+        { polling: 100 },
+      );
+    };
+    const box = async (selector: string) =>
+      page!.locator(selector).first().evaluate(el => {
+        const b = el.getBoundingClientRect();
+        return { y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), right: Math.round(b.right), bottom: Math.round(b.bottom) };
+      });
+    for (const size of [
+      { width: 1280, height: 800 },
+      { width: 1024, height: 700 },
+    ]) {
+      await open("settings-add-computer", "dark", "[data-k=add-computer] [data-k=login-field]", size);
+      await settled("[data-slot=sheet-popup]");
+      const popup = await box("[data-slot=sheet-popup]");
+      const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
+      console.info(`add a computer at ${size.width}: ${popup.w} by ${popup.h}, top ${popup.y}, right inset ${size.width - popup.right}`);
+      expect(popup.w).toBe(448);
+      expect(popup.y).toBe(16);
+      expect(size.width - popup.right).toBe(16);
+      expect(popup.bottom - footer.bottom).toBeLessThanOrEqual(1);
+      expect(popup.h).toBeLessThanOrEqual(size.height - 32);
+      expect(await page!.locator("[data-k=plan] [data-k=line]").count()).toBe(PlaceAddStep.options.length);
+    }
+    // Shorter than the app allows, on purpose: the one window where the cap is reached, and the body scrolls under
+    // a standing footer.
+    await open("settings-add-computer", "dark", "[data-k=add-computer] [data-k=login-field]", { width: 1024, height: 420 });
+    await settled("[data-slot=sheet-popup]");
+    const popup = await box("[data-slot=sheet-popup]");
+    const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
+    expect(popup.h).toBe(420 - 32);
+    expect(footer.bottom).toBeLessThanOrEqual(420);
+    const body = await page!.locator("[data-slot=sheet-popup] [data-slot=scroll-area-viewport]").evaluate(el => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+    await shot("add-computer-capped-1024x420");
+  }, 90_000);
 });

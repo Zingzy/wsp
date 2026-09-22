@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
 import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, outcomeWord, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
 
@@ -210,10 +211,10 @@ describe("which rows the Computers table draws", () => {
     };
     const place: PlaceView = { ...hetzner, name: "spoo", agents: ["claude", "codex", "cursor"], provision };
     expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "installed", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude" },
-      { id: "codex", name: "Codex", state: "already there", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+      { id: "claude", name: "Claude Code", state: "installed", held: WHERE_WORDS.notFromApp },
+      { id: "codex", name: "Codex", state: "already there", held: WHERE_WORDS.notFromApp },
       // An agent the job carried no row for is what the computer said it found, and no more.
-      { id: "cursor", name: "cursor", state: "found", held: "Sign in from a terminal for now: wsp add spoo --sign-in cursor" },
+      { id: "cursor", name: "cursor", state: "found", held: WHERE_WORDS.notFromApp },
     ]);
     // The tool rows are counted in the row's own state slot, not listed here; the person's own files and the
     // servers written into their agents' configs are.
@@ -233,8 +234,8 @@ describe("which rows the Computers table draws", () => {
       signIns: { claude: "vault-key", codex: "none" },
     };
     expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude", signedIn: true },
-      { id: "codex", name: "Codex", state: "0.153.0 · not signed in", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", held: WHERE_WORDS.notFromApp, signedIn: true },
+      { id: "codex", name: "Codex", state: "0.153.0 · not signed in", held: WHERE_WORDS.notFromApp },
     ]);
     // A sign-in on the computer itself reads as one, and a recipe row that installed the agent adds nothing the
     // line does not already say.
