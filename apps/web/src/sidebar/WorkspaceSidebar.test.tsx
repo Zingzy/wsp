@@ -140,9 +140,13 @@ describe("the sidebar under the four nouns", () => {
     const leaf = screen.getByText(PROJECT_WORDS.noWorkspaces);
     expect(leaf.closest("li")!.parentElement!.previousElementSibling!.querySelector("[data-row-id='project:pr_2']")).not.toBeNull();
     expect(leaf.className).toContain("h-7");
+    // A sentence with a period is read, not glanced at: the sans at the rows' size in the prose ink, never the mono.
+    expect(leaf.className).toContain("text-[13px]");
+    expect(leaf.className).toContain("text-[var(--sidebar-prose)]");
+    expect(leaf.className).not.toContain("font-mono");
     const plus = [...document.querySelectorAll<HTMLElement>(`[data-k=new-workspace]`)].find(el => el.dataset["project"] === "pr_2")!;
-    // The plus sits in the row's frame and reads at rest as nothing: the hover and the keyboard focus lift it.
-    expect(plus.className).toContain("md:opacity-0");
+    // The plus sits in the row's frame and reads at rest as nothing at every width: the hover and the keyboard focus lift it.
+    expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
     expect(plus.className).toContain("group-hover/menu-item:opacity-100");
     expect(plus.getAttribute("aria-label")).toBe(NEW_WORKSPACE);
     fireEvent.click(plus);
@@ -216,8 +220,8 @@ describe("the sidebar under the four nouns", () => {
     // The opener is in the shut archive, so no thread row carries it; the fork stands in the project's own list
     // with its own thread under it, where the plain rule puts it.
     await waitFor(() => expect(rowIds()).toContain("ws:ws_fork"));
-    // The shelf's own fold and the archive's under it, both shut over the opener, then the fork's row.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
+    // The archive's fold alone, shut over the opener, since the shelf has no row of its own; then the fork's row.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
     expect(screen.queryByText("move the pricing table")).toBeNull();
     expect(screen.getByText("pricing table")).toBeDefined();
     expect(depthOf("pricing table")).toBe(1);

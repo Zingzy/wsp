@@ -47,7 +47,7 @@ import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectSheet } from "./AddProjectSheet.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
-import { CHILD_LIST_CLASS, GLYPH_ROW_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TOP_ROW_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { CHILD_LIST_CLASS, GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, ROW_SENTENCE_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads, threadForest, type ThreadNode } from "./Sidebar.logic.js";
 import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree, workspaceOf, type ProjectGroup, type ProjectRef } from "./threadTree.js";
@@ -104,6 +104,14 @@ interface VisibleProject {
   readonly archived: ReadonlyArray<ThreadNode<SidebarThreadSnapshot>>;
   /** Every thread the three trees hold, top to bottom, for the rule that says which forks nest. */
   readonly rows: { readonly active: ReadonlyArray<string>; readonly settled: ReadonlyArray<string>; readonly archived: ReadonlyArray<string> };
+}
+
+/** Which folds one workspace's shelf draws: the Idle row only while it has rows of its own, since an open shelf
+ * over nothing is a label for nothing; the archive's row under it while the shelf is open, or on its own where
+ * there is no shelf to hang from. */
+function shelfFolds(settled: number, archived: number, settledOpen: boolean): { idle: boolean; archive: boolean } {
+  const idle = settled > 0;
+  return { idle, archive: archived > 0 && (!idle || settledOpen) };
 }
 
 /** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
@@ -221,9 +229,10 @@ export function WorkspaceSidebar() {
         const settledOpen = !settledCollapsed.includes(project.id);
         const archivedOpen = archivedOpenIds.includes(project.id);
         const hidden = shutProjects.has(project.workspace.project.id) || collapsed.has(project.id);
+        const folds = shelfFolds(rows.settled.length, rows.archived.length, settledOpen);
         return {
           workspace: project.id,
-          threads: hidden ? [] : [...rows.active, ...(settledOpen ? rows.settled : []), ...(settledOpen && archivedOpen ? rows.archived : [])],
+          threads: hidden ? [] : [...rows.active, ...(settledOpen ? rows.settled : []), ...(folds.archive && archivedOpen ? rows.archived : [])],
         };
       }),
     [visible, settledCollapsed, archivedOpenIds, shutProjects, collapsed],
@@ -243,9 +252,11 @@ export function WorkspaceSidebar() {
   const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting.workspaceId);
 
   const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
-  const openDialogRef = useRef(openDialog);
-  openDialogRef.current = openDialog;
-  useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current(null)), []);
+  // The palette's New workspace lands on the project the head names while one is picked, as the head's plus does.
+  const openDialogForPick = (): void => openDialog(picked?.project.id ?? null);
+  const openDialogRef = useRef(openDialogForPick);
+  openDialogRef.current = openDialogForPick;
+  useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
   useEffect(() => onAddProjectRequest(() => setAddProject(Date.now())), []);
   useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceId, act })), []);
   useEffect(
@@ -385,6 +396,7 @@ export function WorkspaceSidebar() {
      * thread's: a workspace running a person's first message may not read that it has no threads. */
     const launch = launches[project.id];
     if (shut || (launch === undefined && active.length + shelved === 0)) return null;
+    const folds = shelfFolds(settled.length, archived.length, settledOpen);
     const started = (thread: SidebarThreadSnapshot): string => compactTimeLabel(thread.startedAt);
     const ended = (thread: SidebarThreadSnapshot): string => compactTimeLabel(resolveSettledTimestamp(thread));
     return (
@@ -395,14 +407,14 @@ export function WorkspaceSidebar() {
           </li>
         )}
         {active.map(node => threadItem(node, started, project, depth))}
-        {shelved > 0 ? (
+        {folds.idle ? (
           <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} depth={depth} onToggle={() => toggleSettled(project.id)} />
         ) : null}
         {settledOpen ? settled.map(node => threadItem(node, ended, project, depth)) : null}
-        {settledOpen && archived.length > 0 ? (
+        {folds.archive ? (
           <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} depth={depth} onToggle={() => toggleArchived(project.id)} />
         ) : null}
-        {settledOpen && archivedOpen ? archived.map(node => threadItem(node, ended, project, depth)) : null}
+        {folds.archive && archivedOpen ? archived.map(node => threadItem(node, ended, project, depth)) : null}
       </ul>
     );
   };
@@ -463,7 +475,7 @@ export function WorkspaceSidebar() {
         {made.map(creation => creationItem(creation, depth, rail))}
         {group.workspaces.length === 0 && made.length === 0 ? (
           <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
-            <p data-k="no-workspaces" data-depth={depth} className={cn(ROW_PROSE_CLASS, "flex h-7 items-center px-2")}>
+            <p data-k="no-workspaces" data-depth={depth} className={cn(ROW_SENTENCE_CLASS, "flex h-7 items-center px-2")}>
               {PROJECT_WORDS.noWorkspaces}
             </p>
           </li>
@@ -480,6 +492,7 @@ export function WorkspaceSidebar() {
     const actions = projectActionsOf(group);
     const computer = projectComputerWord(group.project, named);
     const count = group.workspaces.length + creations.filter(creation => creation.project === id).length;
+    const slotWords = [...(computer === null ? [] : [computer]), ...(shut ? [String(count)] : [])];
     return (
       <li key={id} data-project={id}>
         <RowFrame onContextMenu={event => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
@@ -489,22 +502,19 @@ export function WorkspaceSidebar() {
             data-row-id={projectRowK(id)}
             data-depth={0}
             aria-expanded={!shut}
-            aria-label={name}
-            className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS, GLYPH_ROW_CLASS)}
+            aria-label={[name, ...slotWords].join(", ")}
+            className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS)}
             onClick={() => toggleProject(id)}
           >
             <FolderIcon className="size-3.5" />
             <span data-project-name className="min-w-0 flex-1 truncate">
               {name}
             </span>
-            {computer === null ? null : (
-              <span data-project-computer className={cn(ROW_META_CLASS, "shrink-0")}>
-                {computer}
-              </span>
-            )}
-            {/* The slot the plus takes on hover, holding the count while the row is shut and nothing otherwise. */}
-            <span data-project-count className={cn(ROW_META_CLASS, "w-5 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0")}>
-              {shut ? count : ""}
+            {/* The one right slot, ending where every other row's does: the computer's name where it is not this one
+                and the count while the row is shut, both yielding to the plus on hover and focus. */}
+            <span data-project-slot className={cn(ROW_META_CLASS, "flex min-w-5 shrink-0 items-center justify-end gap-2 transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0")}>
+              {computer === null ? null : <span data-project-computer>{computer}</span>}
+              {shut ? <span data-project-count>{count}</span> : null}
             </span>
           </SidebarMenuButton>
           <Tooltip>
@@ -512,7 +522,7 @@ export function WorkspaceSidebar() {
               render={
                 <SidebarMenuAction
                   showOnHover
-                  className="right-2 disabled:pointer-events-none disabled:opacity-50"
+                  className={cn(HOVER_GLYPH_CLASS, "right-2 disabled:pointer-events-none disabled:opacity-50")}
                   data-k="new-workspace"
                   data-project={id}
                   aria-label={NEW_WORKSPACE}
@@ -563,15 +573,17 @@ export function WorkspaceSidebar() {
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
-  /** The one add control at rest: a new thread in the selected workspace, held while none is selected. */
+  /** The one add control at rest: a new thread in the selected workspace, held while none is selected. Held by
+   * aria-disabled rather than the disabled attribute, so the pointer still reaches it and the tooltip can say what
+   * it is in the one state a person might ask why it is held. */
   const compose = (
     <Tooltip>
       <TooltipTrigger
         render={
           <SidebarGroupAction
-            className="top-1 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
+            className="top-1 text-sidebar-muted-foreground transition-colors duration-150 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-sidebar-muted-foreground"
             aria-label="New thread"
-            disabled={selectedWorkspace === null}
+            aria-disabled={selectedWorkspace === null || undefined}
             onClick={() => {
               if (selectedWorkspace !== null) verbs.newThread(selectedWorkspace.id);
             }}
@@ -627,7 +639,7 @@ export function WorkspaceSidebar() {
             {homeless.map(creation => creationItem(creation, 0, false))}
             {empty ? (
               <li>
-                <SidebarMenuButton size="sm" data-k="new-project" className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS)} onClick={requestFirstRunFocus}>
+                <SidebarMenuButton size="sm" data-k="new-project" className={ONE_LINE_ROW_CLASS} onClick={requestFirstRunFocus}>
                   <PlusIcon className="size-3.5" />
                   <span>{PROJECT_WORDS.new}</span>
                 </SidebarMenuButton>
@@ -709,21 +721,19 @@ export function WorkspaceSidebar() {
 
 /** The fold over one group of thread rows, which shuts and opens it: the word alone while the group is open, the
  * word with its count while it is shut, so a shut group still says how much it holds. The idle shelf and the archive
- * under it are one row, so neither can drift from the other. */
+ * under it are one row, so neither can drift from the other. The label says the two words with the space the face
+ * draws as a gap. */
 function ThreadGroupRow({ rowId, label, count, open, depth, onToggle }: { rowId: string; label: string; count: number; open: boolean; depth: number; onToggle: () => void }) {
   return (
     <li data-thread-selection-safe className={RAIL_ITEM_CLASS}>
-      <SidebarMenuButton size="sm" data-sidebar-row data-row-id={rowId} data-depth={depth} aria-expanded={open} onClick={onToggle} className={cn(ONE_LINE_ROW_CLASS, "w-full")}>
+      <SidebarMenuButton size="sm" data-sidebar-row data-row-id={rowId} data-depth={depth} aria-expanded={open} aria-label={open ? label : `${label} ${count}`} onClick={onToggle} className={cn(ONE_LINE_ROW_CLASS, "w-full")}>
         <span data-group-word className={cn(ROW_PROSE_CLASS, "shrink-0")}>
           {label}
         </span>
         {open ? null : (
-          <>
-            {" "}
-            <span data-group-count className={cn(ROW_META_CLASS, "shrink-0")}>
-              {count}
-            </span>
-          </>
+          <span data-group-count className={cn(ROW_META_CLASS, "shrink-0")}>
+            {count}
+          </span>
         )}
         <span aria-hidden className="min-w-0 flex-1" />
         <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
@@ -739,7 +749,7 @@ function CreationRow({ creation, depth, active, onSelect }: { creation: Creation
   const failed = creation.failed !== null;
   const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
   return (
-    <SidebarMenuButton size="lg" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={creation.key} data-depth={depth} className={TWO_LINE_ROW_CLASS} onClick={onSelect}>
+    <SidebarMenuButton size="lg" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={creation.key} data-depth={depth} data-lines={2} className={TWO_LINE_ROW_CLASS} onClick={onSelect}>
       {/* The lead centres on the first line, as a one-line row's lead does. */}
       <span aria-hidden className={cn(ROW_LEAD_CLASS, "mt-[7px]")}>
         {failed ? null : <Spinner className="size-3.5" />}

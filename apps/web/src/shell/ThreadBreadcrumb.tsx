@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the person is: the settings page by its name while it is open; else
-// the thread that opened this one where an agent did, a folder glyph, the
-// workspace's name, a slash and the open thread's title; a creation in
-// progress by its name; the words for no selection otherwise, and nothing at
+// the thread that opened this one where an agent did, the workspace's name, a
+// slash and the open thread's title, with no glyph before the name, since the
+// sidebar draws a workspace with none and its folder means project; a creation
+// in progress by its name; the words for no selection otherwise, and nothing at
 // all while the first run is the centre, since that screen's own title says
 // the same emptiness and two sentences about it read as a fault. The thread is
 // the one the centre shows. The header carries no state word for a thread that
 // is simply working or settled, since the pane under it already shows that; it
 // carries the one state a person has to act on, so a prompt is never hidden by
 // the header the pane is scrolled under.
-import { FolderIcon } from "lucide-react";
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
 import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
@@ -47,7 +47,6 @@ export function ThreadBreadcrumb() {
               <span aria-hidden className="text-muted-foreground/50">/</span>
             </>
           ) : null}
-          <FolderIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={thread === null ? "truncate font-medium text-foreground" : "shrink-0 text-muted-foreground"}>{name}</span>
           {thread !== null ? (
             <>

@@ -1014,8 +1014,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-25);
   --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
+  /* The phone's sheet is a portal that reads these root copies, so the lifted row and the rails are declared on
+     both, as the sidebar's own block declares them. */
+  --sidebar-row-selected: var(--color-zinc-100);
+  --sidebar-row-edge: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   --sidebar-border: var(--border);
+  --sidebar-rail: var(--sidebar-border);
   --sidebar-stage-fade: var(--sidebar);
   /* Each agent's brand hue, the one colour a row carries besides its state dot, as simple-icons publishes it
      (Claude #d97757, Gemini #8e75b2). The terracotta measures 2.99:1 on zinc-50, so the light theme takes it one
@@ -1090,6 +1094,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --sidebar-row-hover: var(--accent);
     --sidebar-row-active: var(--accent);
     --sidebar-row-selected: var(--muted);
+    --sidebar-row-edge: transparent;
+    --sidebar-rail: rgb(255 255 255 / 8%);
     --sidebar-stage-fade: var(--card);
     --agent-claude: #d97757;
     --agent-gemini: #8e75b2;
@@ -1140,8 +1146,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-25);
   --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
+  /* One step darker than the zinc-50 ground, with the component tier hairline round it: white on this ground
+     stood at 1.05 to 1 and read as no lift at all. */
+  --sidebar-row-selected: var(--color-zinc-100);
+  --sidebar-row-edge: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   --sidebar-border: var(--color-zinc-200);
+  /* The tree's rails, the structural hairline on this side. */
+  --sidebar-rail: var(--sidebar-border);
   --sidebar-stage-fade: var(--sidebar);
 
   /* The dark set applies on the app's dark side, and wherever a workspace theme pins its own side it wins over
@@ -1168,7 +1179,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 4%, transparent);
     --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
     --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
+    /* The 7 percent fill reads on black by itself; no edge on this side. */
+    --sidebar-row-edge: transparent;
     --sidebar-border: var(--border);
+    /* One step over the structural hairline, so the tree reads on a bright display. */
+    --sidebar-rail: rgb(255 255 255 / 8%);
     --sidebar-stage-fade: var(--card);
   }
 }

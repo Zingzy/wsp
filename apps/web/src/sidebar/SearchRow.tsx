@@ -15,7 +15,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { cn } from "../lib/utils.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
-import { ONE_LINE_ROW_CLASS, TOP_ROW_CLASS } from "./rowGrammar.js";
+import { ONE_LINE_ROW_CLASS } from "./rowGrammar.js";
 
 const PALETTE_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle");
 const SEARCH_TITLE = PALETTE_SHORTCUT ? `Search (${PALETTE_SHORTCUT})` : "Search";
@@ -26,7 +26,7 @@ export function SearchRow({ action }: { action?: ReactNode }) {
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton size="sm" aria-label="Search" data-search-row="" className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS, action !== undefined && "pe-8")} onClick={() => openCommandPalette()}>
+            <SidebarMenuButton size="sm" aria-label="Search" data-search-row="" className={cn(ONE_LINE_ROW_CLASS, action !== undefined && "pe-8")} onClick={() => openCommandPalette()}>
               <SearchIcon className="size-3.5" />
               <span>Search</span>
             </SidebarMenuButton>

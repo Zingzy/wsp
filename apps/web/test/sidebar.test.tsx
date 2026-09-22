@@ -16,7 +16,7 @@ import { CLOSE_TOAST_LABEL, TOAST_MS } from "../src/sidebar/toastLife.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
-import { onFirstRunFocusRequest, onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { onFirstRunFocusRequest, onNewThreadRequest, requestNewWorkspace, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
 import { caps } from "./caps.js";
@@ -173,6 +173,8 @@ const workspaceRowIds = (): string[] => Array.from(document.querySelectorAll<HTM
 
 const API = view("ws_a", "api");
 const WEB = view("ws_b", "web", "napping");
+/** The same workspace as a copy on a branch, which is what gives its row a second line. */
+const COPIED = { ...API, copy: { road: "clonefile" as const, path: "/Users/dev/spoo-api", source: "/Users/dev/spoo", base: "abc", branch: "agent/api-port-list", carried: "deps-and-config" as const } };
 
 describe("header", () => {
   it("carries the brand lockup named wsp", async () => {
@@ -223,7 +225,7 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
     // The one idle two days is past the archive threshold, so it sits in the Archived group nested in its
     // workspace's shelf, shut, rather than as a row on the shelf itself.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "settled:ws_b", "archived:ws_b"]);
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "archived:ws_b"]);
     // The one slot at the right edge: the state word while a thread is one a person acts on, the time once it rests.
     expect(threadTime(rowOf("fix the port list"))).toBeNull();
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
@@ -234,9 +236,9 @@ describe("rows from the fixture wire", () => {
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
-    // the nested archive, and a shelf that holds only that is still a shelf.
-    expect(screen.getAllByRole("button", { name: "Idle" })).toHaveLength(2);
+    // ws_a heads its shelf whether or not one of its threads is working; ws_b's shelf would hold nothing but the
+    // nested archive, so no Idle row stands over it and the archive's fold is its own.
+    expect(screen.getAllByRole("button", { name: "Idle" })).toHaveLength(1);
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -392,7 +394,7 @@ describe("rows from the fixture wire", () => {
     expect(toggle("ws_a").getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(toggle("ws_a"));
     expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(toggle("ws_a").textContent).toBe("Idle 1");
+    expect(toggle("ws_a").getAttribute("aria-label")).toBe("Idle 1");
     expect(toggle("ws_b").getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
     expect(window.localStorage.getItem("wsp:sidebar-settled-collapsed")).toBe('["ws_a"]');
@@ -458,12 +460,12 @@ describe("rows from the fixture wire", () => {
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a"]);
     const archived = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='archived:ws_a']")!;
     expect(archived().getAttribute("aria-expanded")).toBe("false");
-    expect(archived().textContent).toBe("Archived 2");
+    expect(archived().getAttribute("aria-label")).toBe("Archived 2");
     expect(screen.queryByText("bump the lockfile")).toBeNull();
     // One click opens it, and the rows arrive newest end first, as the shelf orders its own.
     fireEvent.click(archived());
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2", "thread:s3"]);
-    expect(archived().textContent).toBe("Archived");
+    expect(archived().getAttribute("aria-label")).toBe("Archived");
     expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe('["ws_a"]');
     fireEvent.click(archived());
     expect(screen.queryByText("bump the lockfile")).toBeNull();
@@ -489,7 +491,7 @@ describe("rows from the fixture wire", () => {
     expect(useStore.getState().selectedThreadId).toBe("thr_old");
   });
 
-  it("a workspace whose threads are every one archived still draws the group rather than an empty workspace", async () => {
+  it("a workspace whose threads are every one archived draws the archive alone: no Idle shelf stands over nothing", async () => {
     await mount(
       fakeApi(
         [API],
@@ -499,12 +501,12 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Archived 1" })).toBeDefined());
-    // The shelf still heads them even with nothing of its own to draw, since the archive nests inside it and has
-    // to hang from something; shutting it counts the archived thread it takes away.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "archived:ws_a"]);
-    fireEvent.click(screen.getByRole("button", { name: "Idle" }));
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a"]);
-    expect(screen.getByRole("button", { name: "Idle 1" })).toBeDefined();
+    // An open shelf with nothing of its own under it is a label for nothing, so the archive stands on its own.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a"]);
+    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Archived 1" }));
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a", "thread:s1"]);
+    expect(screen.getByRole("button", { name: "Archived" })).toBeDefined();
   });
 
   it("the archive nests inside the idle shelf: shutting the shelf hides the archived header and its rows too", async () => {
@@ -563,8 +565,13 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("agent/api-port-list"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(stateSlot(rowOf("web")).textContent).toBe("Stopped");
-    // A fork carries no copy of a folder, so its second line is empty rather than a figure.
-    expect(metaOf(rowOf("web")).textContent).toBe("");
+    // A fork carries no copy of a folder and so no branch: its row is one line at a thread row's height, with no
+    // blank second line, while the copy on a branch keeps its two.
+    expect(rowOf("web").querySelector("[data-workspace-meta]")).toBeNull();
+    expect(rowOf("web").dataset["lines"]).toBe("1");
+    expect(rowOf("api").dataset["lines"]).toBe("2");
+    expect([...rowOf("web").classList].filter(c => /^h-/.test(c))).toEqual(["h-7"]);
+    expect([...rowOf("api").classList].filter(c => /^h-/.test(c))).toEqual(["h-11"]);
     const meta = metaOf(rowOf("api"));
     expect(meta.className).toContain("font-mono");
     expect(meta.className).toContain("truncate");
@@ -599,11 +606,11 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(stateSlot(row()).textContent).toBe(""));
   });
 
-  it("every workspace row is one two-line height, every thread row and fold row one line, the mark before a thread's title and one slot after it", async () => {
+  it("every workspace row on a branch is one two-line height, every thread row and fold row one line, the mark before a thread's title and one slot after it, and every row fades its colours alike", async () => {
     await mount(
       fakeApi(
-        [API],
-        [status(API)],
+        [COPIED],
+        [status(COPIED)],
         [
           session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
           session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
@@ -623,6 +630,12 @@ describe("rows from the fixture wire", () => {
     expect(heightOf(idle)).toEqual(["h-7", "py-0"]);
     // No rule across the fold row: the rails carry the structure it used to draw.
     expect(idle.querySelector(".h-px")).toBeNull();
+    // One hover on every row kind: the fill and the ink step in 150 ms on the workspace, the thread and the fold as
+    // on the search row, the head and the project row, so no row snaps while the one above it fades.
+    for (const row of [rowOf("spoo-landing"), rowOf("api"), rowOf("fix the port list"), rowOf("upgrade node"), idle, screen.getByRole("button", { name: "Search" }), head()]) {
+      expect(row.className, row.textContent ?? "").toContain("transition-[background-color,color]");
+      expect(row.className, row.textContent ?? "").toContain("duration-150");
+    }
     // The thread title takes the line from the mark up to the one slot at the right, nothing else beside it.
     const title = rowOf("fix the port list").querySelector<HTMLElement>("[data-thread-title]")!;
     expect(title.className).toContain("flex-1");
@@ -755,10 +768,15 @@ describe("new thread", () => {
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });
     act(() => useStore.getState().select(null));
-    expect(compose.hasAttribute("disabled")).toBe(true);
+    // Held by aria-disabled rather than the disabled attribute, so the pointer still reaches it and its tooltip
+    // can say what it is in the one state a person might ask.
+    expect(compose.getAttribute("aria-disabled")).toBe("true");
+    expect(compose.hasAttribute("disabled")).toBe(false);
+    expect(compose.className).not.toContain("pointer-events-none");
+    fireEvent.click(compose);
     fireEvent.click(rowOf("web"));
     expect(useStore.getState().selectedId).toBe("ws_b");
-    expect(compose.hasAttribute("disabled")).toBe(false);
+    expect(compose.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(compose);
     expect(seen).toEqual(["ws_b"]);
     expect(screen.queryByRole("button", { name: "New thread in web" })).toBeNull();
@@ -892,7 +910,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     expect(rowIds()).toEqual([]);
     // The compose glyph stands, held: there is no workspace to open a thread in.
-    expect(screen.getByRole("button", { name: "New thread" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
     // Pressing the row asks the first run for its folder field and opens nothing here.
     const asked: number[] = [];
     const off = onFirstRunFocusRequest(() => asked.push(1));
@@ -1272,9 +1290,23 @@ describe("the project switcher", () => {
     expect(rowIds().filter(id => id?.startsWith("project:"))).toEqual(["project:pr_1", "project:pr_2"]);
     // The project on the box names it in muted mono; the one on this computer names nothing.
     expect(rowOf("spoo-landing").querySelector("[data-project-computer]")!.textContent).toBe(BOX_NAME);
-    expect(rowOf("spoo-landing").querySelector("[data-project-computer]")!.className).toContain("font-mono");
+    expect(rowOf("spoo-landing").querySelector("[data-project-slot]")!.className).toContain("font-mono");
     expect(rowOf("wsp").querySelector("[data-project-computer]")).toBeNull();
     expect(document.querySelector("[data-sidebar-search] svg.lucide-settings, [data-sidebar-tree] svg.lucide-settings")).toBeNull();
+    // The computer word and the count share the row's one right slot, which is the row's last child and yields to
+    // the plus on hover, so the word ends where every other row's slot ends.
+    const slot = rowOf("spoo-landing").querySelector<HTMLElement>("[data-project-slot]")!;
+    expect(slot).toBe(rowOf("spoo-landing").lastElementChild);
+    expect(slot.contains(rowOf("spoo-landing").querySelector("[data-project-computer]"))).toBe(true);
+    expect(slot.className).toContain("group-hover/menu-item:opacity-0");
+    // What a screen reader is given is what the face shows: the name, the computer where it is not this one, and
+    // the count while the row is shut.
+    expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}`);
+    expect(rowOf("wsp").getAttribute("aria-label")).toBe("wsp");
+    fireEvent.click(rowOf("spoo-landing"));
+    expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}, 1`);
+    expect(slot.contains(rowOf("spoo-landing").querySelector("[data-project-count]"))).toBe(true);
+    expect(slot.textContent).toBe(`${BOX_NAME}1`);
   });
 
   it("opens on a click to a search field, All projects checked, one row per project and Add a project at the foot; typing filters the projects while the two ends stand", async () => {
@@ -1315,7 +1347,8 @@ describe("the project switcher", () => {
     const plus = head().parentElement!.querySelector<HTMLElement>("[data-k=new-workspace]")!;
     expect(plus.dataset["project"]).toBe("pr_2");
     expect(plus.getAttribute("aria-label")).toBe(NEW_WORKSPACE);
-    expect(plus.className).toContain("md:opacity-0");
+    // Nothing at rest at every width, the phone's sheet included, where the kit alone would stand it up.
+    expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
     fireEvent.click(plus);
     const dialog = await screen.findByRole("dialog");
     expect(dialog.querySelector<HTMLElement>("[data-segment=pr_2]")!.getAttribute("aria-checked")).toBe("true");
@@ -1329,24 +1362,45 @@ describe("the project switcher", () => {
     expect(head().parentElement!.querySelector("[data-k=new-workspace]")).toBeNull();
   });
 
-  it("the keys walk the menu: ArrowDown moves the active row, Enter picks and shuts, and a stored pick for a project this host no longer holds reads as All projects", async () => {
+  it("the keys walk the menu and stop there: ArrowDown moves the active row and names it to the field while focus stays on the field, Enter picks and shuts, and a stored pick for a project this host no longer holds reads as All projects", async () => {
     window.localStorage.setItem("wsp:sidebar-project", '"pr_gone"');
     await two();
     expect(head().textContent).toBe(SWITCHER_WORDS.all);
     expect(rowIds()).toContain("project:pr_1");
     fireEvent.click(head());
-    const active = () => menu()!.querySelector("[data-active]")?.textContent;
-    expect(active()).toBe(SWITCHER_WORDS.all);
-    fireEvent.keyDown(menu()!, { key: "ArrowDown" });
-    expect(active()).toBe(`spoo-landing${BOX_NAME}`);
-    fireEvent.keyDown(menu()!, { key: "ArrowDown" });
-    fireEvent.keyDown(menu()!, { key: "ArrowDown" });
-    expect(active()).toBe(PROJECT_WORDS.add);
-    fireEvent.keyDown(menu()!, { key: "ArrowUp" });
-    fireEvent.keyDown(menu()!, { key: "Enter" });
+    const field = within(menu()!).getByLabelText(SWITCHER_WORDS.search) as HTMLInputElement;
+    act(() => field.focus());
+    const active = () => menu()!.querySelector<HTMLElement>("[data-active]")!;
+    expect(active().textContent).toBe(SWITCHER_WORDS.all);
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(active().textContent).toBe(`spoo-landing${BOX_NAME}`);
+    // The key stops at the menu: the sidebar's own walk under it never takes focus off the field, and the field
+    // names the row the keys are on.
+    expect(document.activeElement).toBe(field);
+    expect(active().id).not.toBe("");
+    expect(field.getAttribute("aria-activedescendant")).toBe(active().id);
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(active().textContent).toBe(PROJECT_WORDS.add);
+    expect(document.activeElement).toBe(field);
+    expect(field.getAttribute("aria-activedescendant")).toBe(active().id);
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: "Enter" });
     expect(menu()).toBeNull();
     expect(head().textContent).toBe("wsp");
     expect(rowIds()).toEqual(["ws:ws_b", "thread:thr_2"]);
+    expect(document.activeElement).toBe(head());
+  });
+
+  it("while a project is picked the palette's New workspace opens the dialog on that project, as the head's plus does", async () => {
+    await two();
+    fireEvent.click(head());
+    fireEvent.click(within(menu()!).getByRole("option", { name: /^wsp/ }));
+    act(() => requestNewWorkspace());
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_2]")!.getAttribute("aria-checked")).toBe("true");
+    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_1]")!.getAttribute("aria-checked")).toBe("false");
   });
 
   it("picking a project changes what the sidebar lists and nothing else: the selected thread stays open and the sidebar then draws no lifted row", async () => {
@@ -1425,12 +1479,14 @@ describe("the tree", () => {
     const fold = document.querySelector<HTMLElement>("[data-row-id='settled:ws_a']")!;
     expect([depthOf(rowOf("working")), depthOf(fold), depthOf(rowOf("idle"))]).toEqual([2, 2, 2]);
     // The fold: the word in the prose ink, the count beside it only while shut, the chevron at the edge, no rule.
-    expect(fold.textContent).toBe("Idle");
+    expect(fold.getAttribute("aria-label")).toBe("Idle");
+    expect(fold.querySelector("[data-group-count]")).toBeNull();
     expect(fold.querySelector("[data-group-word]")!.className).toContain("text-[var(--sidebar-prose)]");
     expect(fold.querySelector(".h-px, .bg-sidebar-border\\/60")).toBeNull();
     expect(fold.className).toContain("h-7");
     fireEvent.click(fold);
-    expect(fold.textContent).toBe("Idle 1");
+    expect(fold.getAttribute("aria-label")).toBe("Idle 1");
+    expect(fold.textContent).toBe("Idle1");
     expect(fold.querySelector("[data-group-count]")!.className).toContain("text-[var(--top-row-meta)]");
   });
 });
@@ -1464,14 +1520,20 @@ describe("one lifted row", () => {
 
 describe("the add roads", () => {
   it("at rest the sidebar holds one button named New thread and, per project row, one New workspace on hover; nothing at rest says Add a project", async () => {
-    const api = fakeApi([API], [status(API)]);
+    const api = fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "hello" })]);
     api.projectsList = vi.fn(async () => [...PROJECTS, HERE_PROJECT]);
     await mount(api, "api");
     await waitFor(() => expect(rowIds()).toContain("project:pr_2"));
     expect(screen.getAllByRole("button", { name: "New thread" })).toHaveLength(1);
     const pluses = screen.getAllByRole("button", { name: NEW_WORKSPACE });
     expect(pluses.map(plus => [plus.dataset["k"], plus.dataset["project"]])).toEqual([["new-workspace", "pr_1"], ["new-workspace", "pr_2"]]);
-    for (const plus of pluses) expect(plus.className).toContain("md:opacity-0");
+    for (const plus of pluses) expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    // The one glyph a row keeps at rest on a width with no pointer is the selected workspace row's chevron; the
+    // rest of the hover glyphs, the chevron on every other row among them, read as nothing there too.
+    const chevron = screen.getByRole("button", { name: "Collapse api" });
+    expect(chevron.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    expect(chevron.className).toContain("max-md:peer-data-[active=true]/menu-button:opacity-100");
+    for (const plus of pluses) expect(plus.className).not.toContain("peer-data-[active=true]/menu-button:opacity-100");
     expect(document.querySelectorAll("svg.lucide-plus")).toHaveLength(2);
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     expect(screen.queryByText(/ADD A PROJECT/)).toBeNull();
@@ -1480,7 +1542,7 @@ describe("the add roads", () => {
 
 describe("the creation row", () => {
   it("is two lines at the workspace row's height: the spinner in the lead, the name, the stage line cut with the whole on hover; a failed create is the word Failed in the slot and no dot", async () => {
-    await mount(fakeApi([API], [status(API)]), "api");
+    await mount(fakeApi([COPIED], [status(COPIED)]), "api");
     const long = "Forking the image, which takes a moment on a computer that has never made a copy of this project before.";
     act(() =>
       useStore.setState({

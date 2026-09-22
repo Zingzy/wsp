@@ -13,7 +13,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover.
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, normalizeSearchText } from "../lib/utils.js";
-import { GLYPH_ROW_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS, TOP_ROW_CLASS } from "./rowGrammar.js";
+import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
 import type { ProjectRef } from "./threadTree.js";
 import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "./words.js";
 import { projectComputerWord } from "./workspaceRows.js";
@@ -26,6 +26,9 @@ interface Option {
 }
 
 const MENU_ROW_CLASS = "flex h-7 w-full cursor-pointer items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-[13px] text-foreground outline-none";
+/** The id of one menu row, which the field names as its active descendant while the keys are on it. */
+const optionId = (id: string | null): string => `project-switcher-option-${id ?? "all"}`;
+const ADD_ROW_ID = "project-switcher-option-add";
 
 /** The rows the menu lists for a query: "All projects" always, then every project whose name holds the typed
  * text, case aside. */
@@ -85,14 +88,18 @@ export function ProjectSwitcher({
     onAddProject();
   };
 
+  // Every key the menu takes stops here: the popup is a portal under the sidebar's own key handler, which would
+  // otherwise walk the tree rows on the same ArrowDown.
   const onMenuKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      event.stopPropagation();
       setActive(at => (at + (event.key === "ArrowDown" ? 1 : last)) % (last + 1));
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      event.stopPropagation();
       const option = options[active];
       if (option !== undefined) choose(option);
       else add();
@@ -123,7 +130,7 @@ export function ProjectSwitcher({
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={held}
-          className={cn(ONE_LINE_ROW_CLASS, TOP_ROW_CLASS, GLYPH_ROW_CLASS)}
+          className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS)}
           onKeyDown={onHeadKeyDown}
         >
           <FolderIcon className="size-3.5" />
@@ -136,7 +143,7 @@ export function ProjectSwitcher({
             </span>
           )}
           {/* The room the plus takes on hover, kept at rest so nothing moves. */}
-          {pick === null ? null : <span aria-hidden className="w-5 shrink-0" />}
+          {pick === null ? null : <span aria-hidden data-switcher-plus-room className="w-5 shrink-0" />}
           <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", open && "rotate-180")} />
         </PopoverTrigger>
         {pick === null ? null : (
@@ -145,7 +152,8 @@ export function ProjectSwitcher({
               render={
                 <SidebarMenuAction
                   showOnHover
-                  className="right-7"
+                  // The room's own place: the row's 8 px inset, the 14 px chevron and the 8 px gap before it.
+                  className={cn(HOVER_GLYPH_CLASS, "right-[30px]")}
                   data-k="new-workspace"
                   data-project={pick.id}
                   aria-label={NEW_WORKSPACE}
@@ -177,6 +185,7 @@ export function ProjectSwitcher({
               }}
               placeholder={SWITCHER_WORDS.search}
               aria-label={SWITCHER_WORDS.search}
+              aria-activedescendant={active === last ? ADD_ROW_ID : optionId(options[active]?.id ?? null)}
               className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-placeholder"
               data-switcher-search
             />
@@ -185,6 +194,7 @@ export function ProjectSwitcher({
             {options.map((option, index) => (
               <div
                 key={option.id ?? "all"}
+                id={optionId(option.id)}
                 role="option"
                 aria-selected={(pick?.id ?? null) === option.id}
                 data-switcher-option={option.id ?? "all"}
@@ -203,6 +213,7 @@ export function ProjectSwitcher({
           <div className="border-t border-border p-1">
             <button
               type="button"
+              id={ADD_ROW_ID}
               data-k="add-project-row"
               data-active={active === last || undefined}
               onMouseEnter={() => setActive(last)}

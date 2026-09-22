@@ -387,14 +387,15 @@ describe("the header row", () => {
     expect(banner().textContent).not.toContain("/");
   });
 
-  it("collapsed: the page's row takes the toggle in front of the breadcrumb, folder glyph, workspace, slash, the open thread's title", async () => {
+  it("collapsed: the page's row takes the toggle in front of the breadcrumb, which is the workspace, a slash and the open thread's title with no glyph before them", async () => {
     await mountShell();
     act(() => useStore.setState({ sessions: { ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "make me a simple server", threadId: "thr_1" }, { id: "s2", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "add a health route", threadId: "thr_2" }] } }));
     await collapse();
     expect(toggleIn(banner())).not.toBeNull();
     expect(banner().querySelector("[data-header-row]")!.getAttribute("data-header-row")).toBe("frame");
     const crumb = banner().querySelector("[data-thread-breadcrumb]")!;
-    expect(crumb.querySelector("svg")).not.toBeNull();
+    // No folder before the name: the sidebar's folder means project, and a workspace there wears no glyph.
+    expect(crumb.querySelector("svg")).toBeNull();
     // The crumb names the thread the centre is on, which is the one the address names, and the workspace alone until one is.
     expect(crumb.textContent).toBe("api");
     act(() => useStore.getState().select("ws_a", "thr_2"));
@@ -431,12 +432,12 @@ describe("the header row", () => {
     const compose = screen.getByRole("button", { name: "New thread" });
     expect(compose.closest("[data-sidebar-search]")).not.toBeNull();
     expect(banner().contains(compose)).toBe(false);
-    expect(compose.hasAttribute("disabled")).toBe(false);
+    expect(compose.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(compose);
     expect(seen).toEqual(["ws_a"]);
     off();
     act(() => useStore.getState().select(null));
-    await waitFor(() => expect(screen.getByRole("button", { name: "New thread" }).hasAttribute("disabled")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true"));
   });
 });
 

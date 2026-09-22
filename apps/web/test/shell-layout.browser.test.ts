@@ -351,7 +351,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           const style = getComputedStyle(word);
           const rowStyle = getComputedStyle(row);
           return {
-            text: (row.textContent ?? "").trim(),
+            text: row.getAttribute("aria-label"),
             expanded: row.getAttribute("aria-expanded"),
             y: box.y,
             height: box.height,
@@ -411,6 +411,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.waitForFunction(
         () => document.querySelector("[data-row-id='ws:ws_a']")!.closest("[data-sidebar='menu-item']")!.querySelectorAll("[data-row-id^='thread:']").length === 4,
       );
+      // The chevron turns to point down in 150 ms; the shot waits for it to land, so it is a chevron and not a corner,
+      // and the pointer leaves the row, so the fold carries no hover fill in the shot.
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-row-id='archived:ws_a'] svg")!).transform === "none");
+      await page!.mouse.move(640, 760);
+      await page!.waitForTimeout(200);
       const open = await readGroups();
       console.info(`archived group ${theme} open: ${JSON.stringify(open)}`);
       expect(open.archived.expanded).toBe("true");
@@ -505,18 +510,20 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const plain = await metaOf();
-      // A cloud fork with no copy of a folder has no branch to name: its second line is empty, and never a figure.
+      // A cloud fork with no copy of a folder has no branch to name: its row is one line at a thread row's height,
+      // with no blank second line and never a figure.
       expect(plain[0]!.text).toBe("");
+      expect(plain[0]!.height).toBe(28);
 
       await page!.goto(`${base}?theme=${theme}&helper=1`);
       await page!.waitForSelector("[data-sidebar-row]");
       const updating = await metaOf();
       console.info(`helper line at ${theme}: ${JSON.stringify(updating[0])}`);
-      // The whole line, nothing beside it, drawn whole rather than cut, and the row is the height it always was.
+      // The whole line, nothing beside it, drawn whole rather than cut, on the second line a row on a branch has.
       // The slot is about 159px at the default width, so a line that outgrows it goes red here.
       expect(updating[0]!.text).toBe("updating the helper");
       expect(updating[0]!.clipped).toBe(false);
-      expect(updating[0]!.height).toBe(plain[0]!.height);
+      expect(updating[0]!.height).toBe(44);
       expect(updating.slice(1).map(m => m.text)).toEqual(plain.slice(1).map(m => m.text));
       const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -528,7 +535,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const oom = await metaOf();
       expect(oom[0]!.text).toBe("out of memory, 3.6 of 3.9 GB");
       expect(oom[0]!.clipped).toBe(false);
-      expect(oom[0]!.height).toBe(plain[0]!.height);
+      expect(oom[0]!.height).toBe(44);
       const oomPath = join(SHOTS_DIR, `sidebar-oom-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: oomPath });
       console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);

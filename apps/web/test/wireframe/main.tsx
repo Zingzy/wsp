@@ -23,6 +23,8 @@
 //   sidebar-one-project  spoo alone with its two workspaces
 //   sidebar-picked   the sidebar screen filtered to spoo, with the thread three
 //                    deep selected, so the lifted row is the deepest one
+//   sidebar-hosts    the sidebar screen in a desktop window that knows a second
+//                    host, so the foot names the computer this window is on
 //   switcher-open    the sidebar screen with the switcher's menu open
 //   dialog           New workspace over that sidebar with three projects, so
 //                    the pick is the segmented control
@@ -55,7 +57,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { SettingsPage } from "../../src/settings/SettingsPage";
@@ -334,6 +336,12 @@ const api = {
   },
 } as unknown as Api;
 
+// The desktop shell's bridge, on the one screen about the foot: the hosts this window can move between, which is
+// what draws the row naming the computer it is on. Every other screen is a browser tab and draws no foot row.
+if (screen === "sidebar-hosts") {
+  window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
+}
+
 // The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
 const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
@@ -355,8 +363,10 @@ useStore.setState({
 } as never);
 useStore.getState().bind(api);
 // A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
-// creation view is what this shot is of, so the panel on that workspace is shut before the first paint.
-if (screen === "creating") useRightPanelStore.setState({ byWorkspaceId: { [CREATED_ID]: { isOpen: false, activeSurfaceId: null, surfaces: [] } } });
+// sidebar and the creation view are what these shots are of, so the panel on every workspace a screen can select
+// is shut before the first paint.
+const shutPanel = { isOpen: false, activeSurfaceId: null, surfaces: [] };
+useRightPanelStore.setState({ byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, shutPanel])) });
 
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";

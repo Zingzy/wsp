@@ -146,7 +146,8 @@ async function mountSidebar(api: FakeApi, firstName: string) {
 }
 
 /** The name the project's header row carries, which is the record every workspace in this file is made of. */
-const PROJECT_NAME = "the-project";
+/** The project row's name leads its label, which goes on to name the computer the project is on and the count while shut. */
+const PROJECT_NAME = /^the-project/;
 
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 /** A row by the id it carries, for a row whose own text is being edited. */
