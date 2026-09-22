@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import { keyFingerprint } from "@wsp/engine";
-import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DOCTOR_UNSERVED, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
+import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DOCTOR_UNSERVED, REQUEST_NOT_AN_OBJECT, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, verifyPlaceBytes, type PlaceKeyPair, type PlaceRecord } from "../src/places.js";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
@@ -64,6 +64,35 @@ describe("serveRuntime auth", () => {
     const ok = await c.request("workspaces.list");
     expect(ok.ok).toBe(true);
     c.close();
+  });
+});
+
+describe("a frame that parsed as JSON but not as an object", () => {
+  /** Every JSON value that is not an object, as the four raw bytes `null` and their kin arrive on the wire. */
+  const BARE = ["null", "7", '"a string"', "true", "[]"];
+
+  it("before auth is refused in one sentence under a null id and the socket closes, and the host answers the next socket", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const stranger = await WsClient.connect(srv.port);
+    const frames: unknown[] = [];
+    stranger.onFrame(m => frames.push(m));
+    stranger.ws.send("null");
+    expect(await stranger.closed()).toBe(4401);
+    expect(frames).toEqual([{ id: null, ok: false, error: REQUEST_NOT_AN_OBJECT }]);
+    const owner = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await owner.request("workspaces.list")).ok).toBe(true);
+    owner.close();
+  });
+
+  it("on the owner's socket is refused the same way and the socket stays, answering the request after it", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const owner = await WsClient.connect(srv.port, { token: "secret" });
+    const frames: unknown[] = [];
+    owner.onFrame(m => frames.push(m));
+    for (const raw of BARE) owner.ws.send(raw);
+    expect((await owner.request("workspaces.list")).ok).toBe(true);
+    expect(frames.slice(0, BARE.length)).toEqual(BARE.map(() => ({ id: null, ok: false, error: REQUEST_NOT_AN_OBJECT })));
+    owner.close();
   });
 });
 

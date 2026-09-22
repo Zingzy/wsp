@@ -36,6 +36,7 @@ import {
   PLACE_UNKNOWN_REFUSAL,
   noSuchPlaceRefusal,
   RELAY_TICKET_REFUSAL,
+  REQUEST_NOT_AN_OBJECT,
   RuntimeRequest,
   SEAL_CLIENT,
   SEAL_UNSERVED,
@@ -50,6 +51,7 @@ import {
   WorkspaceOut,
   threadOpRefusal,
   deviceHeldRefusal,
+  isObjectFrame,
   type AccountView,
   type DeviceView,
   type DoctorLineEvent,
@@ -430,6 +432,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           parsed = JSON.parse(openFrame(seal, raw));
         } catch {
           send({ id: null, ok: false, error: "invalid json" });
+          if (!authed) ws.close(4401, UNAUTHORIZED);
+          return;
+        }
+        // Ahead of every read of the frame's fields: a null frame has none, and reading one off it throws past every
+        // door below and out of this handler, where nothing catches it.
+        if (!isObjectFrame(parsed)) {
+          send({ id: null, ok: false, error: REQUEST_NOT_AN_OBJECT });
           if (!authed) ws.close(4401, UNAUTHORIZED);
           return;
         }

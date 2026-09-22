@@ -29,7 +29,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -915,6 +915,21 @@ export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess =
   for (const sig of STOP_SIGNALS) self.on(sig, () => stop(sig));
 }
 
+/** Where an error nothing caught arrives. The default is this process; a test hands in its own, since either event
+ * on the real one would take the test runner with it. */
+export interface UncaughtProcess {
+  on(event: "unhandledRejection" | "uncaughtException", listener: (e: unknown) => void): unknown;
+}
+
+/** A serving host says an error nothing caught in one line and stays. Node's default ends the process on either,
+ * and this process is every socket the host holds and every link it keeps to a machine, so a frame in a shape no
+ * door read, or a promise a handler let go, would otherwise end all of it with nothing said. Installed only once a
+ * host serves: a verb that runs and returns keeps the default, since its exit code has to say it failed. */
+export function stayOnUncaught(io: CliIO, self: UncaughtProcess = process): void {
+  self.on("unhandledRejection", e => io.error(`unhandled rejection, kept serving: ${verbFailure(e).error}`));
+  self.on("uncaughtException", e => io.error(`uncaught exception, kept serving: ${verbFailure(e).error}`));
+}
+
 /** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both
  * the flag and the wizard's own question resolve a folder. */
 export function projectFolder(folder: string): { path: string; exists: boolean } {
@@ -1108,7 +1123,10 @@ async function init(
       },
       screen,
     );
-    if (local.handle !== undefined) stopOnSignals(local.handle, say);
+    if (local.handle !== undefined) {
+      stopOnSignals(local.handle, say);
+      stayOnUncaught(say);
+    }
     return local.code;
   }
   // The socket the hand-off drives is closed on every road out of the run: node ends this process when the loop
@@ -1168,7 +1186,10 @@ async function init(
   } finally {
     beside?.client.close();
   }
-  if (result.handle !== undefined) stopOnSignals(result.handle, say);
+  if (result.handle !== undefined) {
+    stopOnSignals(result.handle, say);
+    stayOnUncaught(say);
+  }
   return result.code;
 }
 
@@ -1818,6 +1839,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // keys, the second lock read and the bind itself all refuse after the ports are picked.
       if (picked.moved !== undefined) io.log(portsPickedLine({ port: handle.port, wsPort: handle.wsPort }, picked.moved.port, picked.moved.holder));
       stopOnSignals(handle, io);
+      stayOnUncaught(io);
       return 0;
     },
   },
