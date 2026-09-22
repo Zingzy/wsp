@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, GOLDEN_SETUP, HOME_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -22,6 +22,7 @@ import {
   CURRENT_LTS,
   NODE_RELEASES,
   agentInstallsFor,
+  agentUninstall,
   agentOwning,
   brewfileFor,
   copiedLoginDests,
@@ -651,20 +652,22 @@ describe("recipeDigest and recipeHash", () => {
   });
 
   it("a tools tick carries its road's identity: the road by name, the sha256 of the lines a first run of it installs with, and the pin those lines are fixed to while it stands", () => {
-    const pin = { tag: "v2.86.0", sha256: "d".repeat(64) };
     const gh = catalogEntryOf("gh")!;
     const road = gh.kind === "tool" ? gh.installRoad : undefined;
     if (road?.road !== "release") throw new Error("gh installs from its release");
+    const tag = road.version!;
+    const pin = { tag, sha256: "d".repeat(64) };
     const firstRun = ROAD_MODULES.release.install(road, "gh") as string;
     // The lines are hashed without the pin: the run that recorded it and the run that carries it install the same golden.
     const bare = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh" })], [], [], new Map()).ticks[0]!;
     const pinned = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", pin })], [], [], new Map()).ticks[0]!;
-    expect(bare).toEqual({ id: "tools/catalog/gh", road: "release", installer: sha256(firstRun) });
-    expect(pinned).toEqual({ id: "tools/catalog/gh", road: "release", installer: sha256(firstRun), pin });
-    expect(firstRun).toContain("releases/latest");
-    // A version past the pin leaves it behind: the tick fixes to nothing, and the lines are the tagged install's.
-    const moved = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", version: "v2.87.0", pin })], [], [], new Map()).ticks[0]!;
-    expect(moved).toEqual({ id: "tools/catalog/gh", version: "v2.87.0", road: "release", installer: sha256(ROAD_MODULES.release.install({ ...road, version: "v2.87.0" }, "gh") as string) });
+    expect(bare).toEqual({ id: "tools/catalog/gh", version: tag, road: "release", installer: sha256(firstRun) });
+    expect(pinned).toEqual({ id: "tools/catalog/gh", version: tag, road: "release", installer: sha256(firstRun), pin });
+    expect(firstRun).toContain(`releases/download/${tag}/`);
+    // The catalog's tag is what the row installs at, so a recipe asking another version moves no line, and a pin
+    // recorded at another tag does not stand against it.
+    const moved = recipeDigest([row({ rung: "tools", id: "tools/catalog/gh", version: "v2.87.0", pin: { tag: "v2.87.0", sha256: "d".repeat(64) } })], [], [], new Map()).ticks[0]!;
+    expect(moved).toEqual({ id: "tools/catalog/gh", version: tag, road: "release", installer: sha256(firstRun) });
     // A tools row no road installs, and every other rung, carries none.
     expect(recipeDigest([row({ rung: "tools", id: "tools/brew-tap/zingzy/tap" })], [], [], new Map()).ticks[0]).toEqual({ id: "tools/brew-tap/zingzy/tap" });
     expect(recipeDigest([row({ rung: "agents", id: "agents/claude" })], [], [], new Map()).ticks[0]).toEqual({ id: "agents/claude" });
@@ -832,7 +835,7 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/pipx/black")).toMatch(/pipx install black==24\.1\.0$/);
     expect(cmd("tools/manager/cargo")).toContain('curl -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.1/$arch-unknown-linux-gnu/rustup-init"');
     expect(cmd("tools/manager/cargo")).toMatch(/\n\/tmp\/rustup-init -y --no-modify-path --profile default --default-toolchain stable\nrm -f \/tmp\/rustup-init$/);
-    expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0$/);
+    expect(cmd("tools/cargo/bat")).toMatch(/cargo install bat --version 0\.24\.0 --locked$/);
     expect(cmd("tools/manager/go")).toMatch(/brew install go'$/);
     expect(cmd("tools/go/sqlc")).toMatch(/go install github\.com\/sqlc-dev\/sqlc\/cmd\/sqlc@v1\.31\.1$/);
     for (const i of t.installs) expect(i.cmd).toMatch(/^export PATH=.*PNPM_HOME=/);
@@ -1079,7 +1082,7 @@ describe("what a step shows while it runs", () => {
       "tools/pipx/black": "pipx install black==24.1.0",
       "tools/apt-index": "apt-get update",
       "tools/catalog/tmux": "apt-get install tmux",
-      "tools/catalog/gh": "the latest release of github.com/cli/cli",
+      "tools/catalog/gh": "the v2.101.0 release of github.com/cli/cli",
       "tools/custom/just": "brew install just; just --version",
     });
   });
@@ -1118,11 +1121,11 @@ describe("catalog rows", () => {
     const cmd = (id: string) => t.installs.find(i => i.id === id)!.cmd;
     for (const i of t.installs) expect(i.cmd).toMatch(/^export PATH=.*PNPM_HOME=/);
     expect(cmd("tools/catalog/wrangler")).toMatch(/\nnpm install -g wrangler$/);
-    expect(cmd("tools/catalog/gh")).toContain("'https://api.github.com/repos/cli/cli/releases/latest'");
+    expect(cmd("tools/catalog/gh")).toContain("releases/download/v2.101.0/");
     expect(cmd("tools/catalog/gh")).toContain("name='gh'");
     expect(cmd("tools/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("tools/catalog/ffmpeg")).toMatch(/\napt-get install -y -qq ffmpeg$/);
-    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL })}`);
+    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install}`);
     expect(t.installs.some(i => i.id === "tools/homebrew")).toBe(false);
     expect(t.skipped).toEqual([]);
     expect(t.base).toEqual([]);
@@ -1204,19 +1207,22 @@ describe("catalog rows", () => {
     const get = (id: string) => t.installs.find(i => i.id === id)!;
     expect(get("tools/catalog/wrangler").cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);
     expect(get("tools/catalog/wrangler").note).toBe(UNMEASURED_ROAD);
-    expect(get("tools/catalog/gh").cmd).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
-    expect(get("tools/catalog/gh").cmd).not.toContain('[ "$sum" =');
+    // A release row installs the catalog's pinned tag whatever the Mac runs, and the note says which one it got.
+    expect(get("tools/catalog/gh").note).toBe(`${UNMEASURED_ROAD}; asked v2.86.0, installed at the catalog's pinned v2.101.0`);
+    expect(get("tools/catalog/gh").cmd).toContain("releases/download/v2.101.0/");
     expect(get("tools/catalog/tmux").cmd).toMatch(/\napt-get install -y -qq tmux$/);
     expect(get("tools/catalog/tmux").note).toBe(`${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`);
   });
 
-  it("a bare row keeps the tag and checksum its first install recorded: the release fetches that tag and checks the sum, and so does the vendor's download", () => {
+  it("a catalog row installs the artifact the catalog pinned and checks the sum beside it, whatever a recipe recorded", () => {
     const t = toolInstallsFor([catalog("gh", { pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }), catalog("kubectl", { pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })]);
     const gh = t.installs.find(i => i.id === "tools/catalog/gh")!.cmd;
-    expect(gh).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
-    expect(gh).not.toContain("releases/latest");
-    expect(gh).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
-    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })}`);
+    expect(gh).toContain("releases/download/v2.101.0/");
+    expect(gh).not.toContain("api.github.com");
+    // The recorded sum of an older tag decides nothing: the catalog's own sum is checked before the unpack.
+    expect(gh).not.toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
+    expect(gh).toContain('echo "$sha  $tmp/$asset" | sha256sum -c - >/dev/null');
+    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install}`);
   });
 });
 
@@ -1366,18 +1372,27 @@ describe("agentInstallsFor", () => {
       expect(a.smoke, name).toMatch(/--version/);
       expect(a.install, name).not.toMatch(/\|\s*(ba)?sh\b/);
       expect(a.install, name).not.toMatch(/@latest\b/);
-      // The harness vendor's own installer is unpinned by design; every other agent's line names a version.
-      if (a.install !== GOLDEN_SETUP) expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
+      // Every agent's line names the version it installs, the harness vendor's binary included.
+      expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d|\/\d+\.\d+\.\d+\//);
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
-    // The vendor's installer takes the current release, so its pin reads the command's own version and marks it latest.
-    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: false, words: "by its own installer" } });
+    // The harness installs at the version its own text fixes, so a copy built from the pin gets that version.
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: true, words: "by its own installer" } });
     // The road each line walks, which is what bounds a step that runs it on a computer somebody owns.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script" });
     expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
     expect(AGENT_INSTALLERS["hermes"]!.pin).toEqual({ read: expect.stringContaining("'hermes' --version"), fixed: true, words: "by its own installer" });
     // Engines floors as the registry states them at the pinned versions.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined });
+  });
+
+  it("takes each agent off the way its line put it on: the global uninstalled, the checkout removed, the pinned binary's one file deleted", () => {
+    // The harness is one file the install line names, so the inverse is that file and no vendor uninstaller.
+    expect(agentUninstall(AGENT_INSTALLERS["claude"]!)).toEqual({ cmd: `rm -f ${HOME_BIN}/claude` });
+    expect(agentUninstall(AGENT_INSTALLERS["codex"]!)).toEqual({ cmd: `${NODE_PATH_LINE}\nnpm uninstall -g @openai/codex` });
+    expect(agentUninstall(AGENT_INSTALLERS["aider"]!)).toEqual({ cmd: "uv tool uninstall aider-chat" });
+    expect(agentUninstall(AGENT_INSTALLERS["hermes"]!)).toEqual({ cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" });
+    expect(agentUninstall({ name: "Nothing", install: "echo hi", smoke: "nothing --version", road: "script" })).toEqual({ note: "Nothing has no uninstaller; left on the machine" });
   });
 
   it("installs only the ticked agents, in recipe order, each from the catalog's table", () => {

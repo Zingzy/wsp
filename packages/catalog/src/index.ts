@@ -2,6 +2,7 @@
 export * from "./mac-paths.js";
 export * from "./roads.js";
 export * from "./road-modules.js";
+export * from "./release-pins.js";
 export * from "./linux-casks.js";
 export * from "./signin.js";
 export * from "./jsonc.js";
