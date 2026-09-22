@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
+import { connect, type Socket } from "node:net";
 import WebSocket from "ws";
 import { keyFingerprint } from "@wsp/engine";
 import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DOCTOR_UNSERVED, REQUEST_NOT_AN_OBJECT, doctorRowRefusal, doctorRunningLine, HERE_PLACE_ID, HOST_STOPPING_CLOSE, noSuchPlaceRefusal, PLACE_LINK_NONCE_BYTES, placeLinkTranscript, SEAL_CLIENT, SEAL_UNSERVED, SealOpenReply, WS_PATH, type AdapterEvent, type DoctorLineEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
@@ -93,6 +95,47 @@ describe("a frame that parsed as JSON but not as an object", () => {
     expect((await owner.request("workspaces.list")).ok).toBe(true);
     expect(frames.slice(0, BARE.length)).toEqual(BARE.map(() => ({ id: null, ok: false, error: REQUEST_NOT_AN_OBJECT })));
     owner.close();
+  });
+});
+
+describe("a frame wrong at the wire rather than at the JSON", () => {
+  /** A socket upgraded by hand, so the bytes after the handshake can be anything: the client library masks every
+   * frame it sends, and this case needs one it never would. */
+  const upgradedByHand = async (port: number): Promise<Socket> => {
+    const sock = connect(port, "127.0.0.1");
+    sock.on("error", () => {});
+    await once(sock, "connect");
+    const answered = new Promise<string>(resolve => {
+      let head = "";
+      const read = (chunk: Buffer): void => {
+        head += chunk.toString("latin1");
+        if (!head.includes("\r\n\r\n")) return;
+        sock.off("data", read);
+        resolve(head);
+      };
+      sock.on("data", read);
+    });
+    sock.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    expect((await answered).startsWith("HTTP/1.1 101 ")).toBe(true);
+    return sock;
+  };
+
+  it("is said in one line naming the peer, the socket is dropped, and the host answers the next socket", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sock = await upgradedByHand(srv.port);
+      const closed = new Promise<void>(resolve => sock.once("close", () => resolve()));
+      // The four bytes of null as a text frame with its mask bit clear: refused at the wire, before any JSON is read.
+      sock.write(Buffer.from([0x81, 0x04, 0x6e, 0x75, 0x6c, 0x6c]));
+      await closed;
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual(["socket from 127.0.0.1 dropped on a wire fault: Invalid WebSocket frame: MASK must be set"]);
+      const owner = await WsClient.connect(srv.port, { token: "secret" });
+      expect((await owner.request("workspaces.list")).ok).toBe(true);
+      owner.close();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

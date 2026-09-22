@@ -309,6 +309,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const url = new URL(req.url ?? "/", "ws://localhost");
     // Where this socket came from, as the app shows it beside a computer that just joined.
     const from = peerAddress(req.socket.remoteAddress);
+    // A frame wrong at the wire is an error event on this socket, and one nobody listens for is thrown out of the
+    // library's read, ending a process with no handler. The library has begun closing the socket when it emits;
+    // terminating spares the wait on a peer that sent such bytes to answer the close.
+    ws.on("error", (e: Error) => {
+      console.warn(`socket from ${from} dropped on a wire fault: ${e.message}`);
+      ws.terminate();
+    });
     const ticketParam = url.searchParams.get("ticket");
     let authed = false;
     // What this socket is, decided when it is let in and never again: the ticket it redeemed says whether its

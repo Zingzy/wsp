@@ -926,8 +926,15 @@ export interface UncaughtProcess {
  * door read, or a promise a handler let go, would otherwise end all of it with nothing said. Installed only once a
  * host serves: a verb that runs and returns keeps the default, since its exit code has to say it failed. */
 export function stayOnUncaught(io: CliIO, self: UncaughtProcess = process): void {
-  self.on("unhandledRejection", e => io.error(`unhandled rejection, kept serving: ${verbFailure(e).error}`));
-  self.on("uncaughtException", e => io.error(`uncaught exception, kept serving: ${verbFailure(e).error}`));
+  self.on("unhandledRejection", e => io.error(`unhandled rejection, kept serving: ${verbFailure(e).error}${faultSite(e)}`));
+  self.on("uncaughtException", e => io.error(`uncaught exception, kept serving: ${verbFailure(e).error}${faultSite(e)}`));
+}
+
+/** Where an error the host kept serving through came from, as the first frame of its stack, so the fault can be
+ * found in the log; a thrown value with no stack names nothing. */
+function faultSite(e: unknown): string {
+  const frame = e instanceof Error ? e.stack?.split("\n").map(line => line.trim()).find(line => line.startsWith("at ")) : undefined;
+  return frame === undefined ? "" : `, ${frame}`;
 }
 
 /** A folder a `~/`-relative answer or a flag named: where it is, and whether there is one there. The one place both

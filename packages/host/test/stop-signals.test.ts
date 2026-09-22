@@ -117,14 +117,15 @@ describe("a serving host meeting an error nothing caught", () => {
     };
   }
 
-  it("says each in one line naming the error and registers nothing on the real process", () => {
+  it("says each in one line naming the error and where it came from, and registers nothing on the real process", () => {
     const errors: string[] = [];
     const before = (["unhandledRejection", "uncaughtException"] as const).map(event => process.listenerCount(event));
     const host = standInProcess();
     stayOnUncaught(quietIO(errors), host.self);
     host.raise("unhandledRejection", new TypeError("Cannot read properties of null (reading 'op')"));
     host.raise("uncaughtException", "a string thrown");
-    expect(errors).toEqual(["unhandled rejection, kept serving: Cannot read properties of null (reading 'op')", "uncaught exception, kept serving: a string thrown"]);
+    expect(errors[0]).toMatch(/^unhandled rejection, kept serving: Cannot read properties of null \(reading 'op'\), at .*stop-signals\.test\.ts:\d+:\d+/);
+    expect(errors.slice(1)).toEqual(["uncaught exception, kept serving: a string thrown"]);
     expect((["unhandledRejection", "uncaughtException"] as const).map(event => process.listenerCount(event))).toEqual(before);
   });
 });
