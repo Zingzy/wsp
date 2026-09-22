@@ -209,7 +209,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -2061,6 +2061,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A copy forked from the project's own image already holds the checkout and its dependencies, and so does one
     // the computer copied the checkout into; there is nothing to clone and nothing to install in either.
     if (project.image !== undefined || project.checkout !== undefined) return;
+    // And neither has a fork of a project image that carried this checkout: the snapshot is the whole disk, so the
+    // project stands at its path with its dependencies installed, and a clone over it is what git refuses. The
+    // image the machine was forked from is what says so, read off this workspace's own record.
+    if (imageCarriesCheckout((await imageOf(entry.record.golden)).projects, project.path)) return;
     report("project-cloned", `Cloning ${project.remote} into ${project.path}.`);
     const cloned = await entry.machine.exec(cloneOnMachine(project, placeName(entry.record.place ?? places.wired)), { timeoutMs: CLONE_MS });
     if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
@@ -3995,6 +3999,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       backendFor(record),
     );
 
+  /** The machine a fork made, taken away and proven gone at the provider rather than at the delete's answer: a
+   * DELETE Solari takes and does not act on would otherwise read as a machine that went. Rejects while the
+   * provider still holds it, which is what keeps a record naming it. */
+  const unfork = (entry: LiveWorkspace): Promise<void> => killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+
   /** The engine knows three phases. A pause in flight is a nap to it (the wake resumes either way); a gone record's
    * machine is a stand-in it only ever meets through rebuild, which replaces the machine whatever the phase says. */
   const enginePhaseOf = (phase: WorkspacePhase): EnginePhase => {
@@ -5076,11 +5085,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return await createStaged(o, await startedFrom(project, parent), id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
-        // will not part with keeps its record instead, since a machine nobody records bills unseen.
+        // will not part with keeps its record instead, since a machine nobody records bills unseen. Which of the
+        // two it is, is read off the provider and never off the delete answering: a DELETE Solari takes and does
+        // not act on left the machine running with no record naming it, and the record is dropped only once the
+        // provider says the machine is gone.
         const entry = live.get(id);
         let kept: LiveWorkspace | undefined;
         if (entry !== undefined) {
-          const gone = await entry.machine.kill().then(() => true, (k: unknown) => isMissing(k));
+          const gone = await unfork(entry).then(() => true, (k: unknown) => isMissing(k));
           if (gone) live.delete(id);
           else {
             kept = entry;
