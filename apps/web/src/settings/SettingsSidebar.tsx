@@ -146,7 +146,8 @@ export function SettingsSidebar() {
           <ul className="ml-[14px] flex min-w-0 flex-col">
             {under.map(sub => (
               <li key={atId(sub.at)}>
-                <SidebarMenuButton size="sm" isActive={sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} onClick={() => go(sub.at)} className={ONE_LINE_ROW_CLASS}>
+                {/* A sub-row dims with its group: lit under a dimmed head it reads as the one thing that matched. */}
+                <SidebarMenuButton size="sm" isActive={sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && "text-sidebar-muted-foreground")}>
                   <span className="min-w-0 flex-1 truncate">{sub.name}</span>
                 </SidebarMenuButton>
               </li>

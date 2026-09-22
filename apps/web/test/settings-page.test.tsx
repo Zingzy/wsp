@@ -145,8 +145,11 @@ describe("search", () => {
     // The pick made on the results page is made: the stepper writes the record from here.
     fireEvent.click(screen.getByRole("button", { name: "Wider" }));
     await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH + 8));
+    // A computer or a project under a dimmed group dims with it: left lit under a dimmed head it would read as
+    // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:computers", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(dimmed).toEqual(["group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("text-sidebar-muted-foreground");
     fireEvent.change(field(), { target: { value: "zzz" } });
     expect(document.querySelector("[data-k=nothing-matches]")?.textContent).toBe(SETTINGS_WORDS.nothingMatches);
     // A project matches by its name, the one word on its row a person searches for.
