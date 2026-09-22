@@ -50,7 +50,8 @@ const ASK: PermissionAsk = {
 function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
   return () => ({
     steers: false,
-    start: ({ onEvent }) => {
+    start: ({ onEvent, resume }) => {
+      const session = resume ?? randomUUID();
       const open = new Map<string, PermissionAsk>();
       const answers: Turn["answers"] = [];
       let interrupted = false;
@@ -59,27 +60,27 @@ function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
         settle = () => {
           for (const askId of [...open.keys()]) {
             open.delete(askId);
-            onEvent({ type: "permission.close", sessionId: SESSION, askId, outcome: "cancelled" });
+            onEvent({ type: "permission.close", sessionId: session, askId, outcome: "cancelled" });
           }
           const result = interrupted ? ({ status: "interrupted" } as const) : ({ status: "completed", text: "done" } as const);
-          onEvent({ type: "turn.done", sessionId: SESSION, result });
-          onEvent({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
+          onEvent({ type: "turn.done", sessionId: session, result });
+          onEvent({ type: "session.end", sessionId: session, exitCode: 0, sawResult: true });
           resolve(result);
         };
       });
-      onEvent({ type: "session.start", sessionId: SESSION, cwd: "/root" });
+      onEvent({ type: "session.start", sessionId: session, cwd: "/root" });
       turns.push({
         raise: overrides => {
           const ask = { ...ASK, ...overrides };
           open.set(ask.askId, ask);
-          onEvent({ type: "permission.ask", sessionId: SESSION, ask });
+          onEvent({ type: "permission.ask", sessionId: session, ask });
         },
         answers,
         reply: () => settle?.(),
         interrupted: () => interrupted,
       });
       return {
-        localId: SESSION,
+        localId: session,
         finished,
         interrupt: async () => {
           interrupted = true;
@@ -90,7 +91,7 @@ function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
           if (ask === undefined) return "gone";
           open.delete(askId);
           answers.push({ askId, ...o });
-          onEvent({ type: "permission.close", sessionId: SESSION, askId, outcome: o.outcome, optionId: o.optionId });
+          onEvent({ type: "permission.close", sessionId: session, askId, outcome: o.outcome, optionId: o.optionId });
           return "answered";
         },
       };
@@ -307,6 +308,33 @@ describe("a permission prompt relayed into the chat", () => {
     expect(await rt.sessions.answer(handle.id, { askId: "ask_9", optionId: PERMISSION_ALLOW })).toEqual({ outcome: "gone" });
     expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: "mode:bypassPermissions" })).toEqual({ outcome: "no-option" });
     expect(turn.answers).toHaveLength(0);
+    turn.reply();
+    await handle.finished;
+  });
+
+  it("a thread of another tree on the workspace is told not-found, as the interrupt tells it, and answers nothing; the asking thread answers", async () => {
+    const { handle, turn, workspaceId } = await started();
+    turn.raise();
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    // A second thread the person opened on the same workspace is its own root: the first thread is outside its tree.
+    const beside = await rt.sessions.start(workspaceId, { prompt: "beside it" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    const besideThread = beside.view().threadId!;
+    const outside = { origin: "here", by: { kind: "thread", threadId: besideThread, workspaceId, rootThreadId: besideThread } } as const;
+    // The same absence the sibling verbs answer, before the workspace is read: the prompt stays open and the
+    // harness hears nothing, so a thread of one tree cannot grant what another tree's agent asked to do.
+    expect(await rt.sessions.interrupt(handle.id, outside)).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW }, outside)).toEqual({ outcome: "not-found" });
+    expect(turn.answers).toHaveLength(0);
+    expect(closes(await history(workspaceId))).toHaveLength(0);
+    // A caller inside the tree answers as the person does.
+    const askingThread = handle.view().threadId!;
+    const inside = { origin: "here", by: { kind: "thread", threadId: askingThread, workspaceId, rootThreadId: askingThread } } as const;
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW }, inside)).toEqual({ outcome: "answered" });
+    expect(turn.answers).toMatchObject([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed" }]);
+    expect(closes(await history(workspaceId))).toHaveLength(1);
+    turns[1]!.reply();
+    await beside.finished;
     turn.reply();
     await handle.finished;
   });
