@@ -6960,7 +6960,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      const entry = await entryOf(s.view.workspaceId, origin);
+      const entry = await entryOfRow(s.view, origin);
+      if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
