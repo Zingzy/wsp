@@ -40,6 +40,19 @@ export function pinCheckLine(what: string, tag: string, sha256: string): string 
   return `[ "$sum" = ${shellQuote(sha256)} ] || { echo "Error: ${pinMismatchLine(what, tag, shortSum(sha256), `\${sum:0:${SUM_SHOWN}}`)}" >&2; exit 1; }`;
 }
 
+/** One release asset wsp recorded: the file's name under its tag's download address and its sha256, which the
+ * machine checks before anything the file carries runs. */
+export interface ReleaseAsset {
+  name: string;
+  sha256: string;
+}
+
+/** A release's recorded assets by the arch a machine reports; an arch with none has no Linux build in that release. */
+export interface ReleaseAssets {
+  x86_64?: ReleaseAsset;
+  aarch64?: ReleaseAsset;
+}
+
 /** A package manager's global: at `version` when the row names one (the laptop's), else at the recorded `pin` while
  * it stands, else the current one. */
 export interface PackageRoad<K extends string> {
@@ -59,10 +72,12 @@ export type InstallRoad =
   | PackageRoad<"cargo">
   /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
   | { road: "go"; module?: string; version?: string; pin?: ToolPin }
-  /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
-   * install of that tag recorded and `go` the main package `go install` falls back to, at its own version or the tag's;
-   * with none there is no fall-through. A row that came back from a golden's digest names no repository: it only ever comes off. */
-  | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
+  /** A GitHub repository's Linux asset for the arch at `version`, the tag the catalog pinned or the one a person's own
+   * row names; `assets` is the file and the sha256 wsp recorded per arch, which every catalog row carries, and a row
+   * without them takes the release's own listing with the sum its first install recorded (`pin`). `go` is the main
+   * package `go install` falls back to for an arch the release has no asset for; with none there is no fall-through.
+   * A row that came back from a golden's digest names no repository: it only ever comes off. */
+  | { road: "release"; repo?: string; version?: string; assets?: ReleaseAssets; pin?: ToolPin; go?: string }
   /** A vendor's own Linux download, as its cask row scripts and hashes it. */
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
   | { road: "apt"; packages: readonly string[]; pin?: ToolPin }

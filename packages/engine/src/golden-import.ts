@@ -998,9 +998,13 @@ export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined
   if (known !== undefined) {
     const mod = roadModule(known.installRoad);
     const road = e.version !== undefined && mod.at !== undefined ? mod.at(known.installRoad, e.version) : known.installRoad;
+    // A road the catalog pinned installs that pin on every machine, so a row asking another version is told which
+    // one it gets; a road that takes no version at all is told it installs the source's current one.
+    const pinned = "version" in known.installRoad ? known.installRoad.version : undefined;
+    const asked = e.version !== undefined && mod.at === undefined && e.version !== pinned;
     const notes = [
       ...(known.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
-      ...(e.version !== undefined && mod.at === undefined ? [`${e.version} asked, installed ${mod.words} at its current version`] : []),
+      ...(asked ? [pinned !== undefined ? `asked ${e.version}, installed at the catalog's pinned ${pinned}` : `${e.version} asked, installed ${mod.words} at its current version`] : []),
     ];
     const after = installAfter(known);
     return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };

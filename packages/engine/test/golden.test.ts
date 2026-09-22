@@ -1296,7 +1296,7 @@ describe("golden import stages", () => {
 
   it("a catalog tool this computer has no row for installs by its catalog road on the guest: the current release is fetched, the road recorded, and the tally says the road is unmeasured", async () => {
     const { backend, cmds, fetch, inline } = backendFor([
-      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }],
+      ["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.101.0\n`, stderr: "" }],
     ]);
     const plan = toolInstallsFor([
       { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
@@ -1305,21 +1305,23 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const results: ImportResult[] = [];
     await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, onResult: r => void results.push(r) }) });
-    const road = cmds.find(c => c.includes("repos/cli/cli/releases/latest"))!;
+    const road = cmds.find(c => c.includes("cli/cli/releases/download/v2.101.0"))!;
     expect(road).toContain(`install -m 0755 "$bin" "/usr/local/bin/$name"`);
-    expect(road).toContain("go install '\\''github.com/cli/cli/v2/cmd/gh@latest'\\''");
+    // The sum the catalog pinned is checked on the guest before anything the download carries is unpacked.
+    expect(road).toContain("sha256sum -c -");
+    expect(road).not.toContain("api.github.com");
     expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'node' 'gh'; do`);
     expect(results[0]!.tools).toEqual([
       { id: "tools/manager/npm", label: "Node 22 with npm", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
-      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
+      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.101.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.101.0" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v2.101.0", sha256: "b".repeat(64) } },
     ]);
     expect(stages).toContain(`installing-tools:3 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
   });
 
   it("after the checks the stage reads every installed row's version back in one run: a package road's pin is what its line printed, a release keeps the tag and sum its own line said, a road that installs latest is marked so, and one line names them all", async () => {
     const { backend, cmds, fetch } = backendFor([
-      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }],
+      ["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.101.0\n`, stderr: "" }],
       ["wsp-version", { exitCode: 0, stdout: "wsp-version 0 4.1.0\nwsp-version 1 3.3a-3\n", stderr: "" }],
     ]);
     const plan = toolInstallsFor([
@@ -1341,11 +1343,11 @@ describe("golden import stages", () => {
       "tools/npm/wrangler": { tag: "4.1.0" },
       "tools/apt-index": undefined,
       "tools/catalog/tmux": { tag: "3.3a-3", latest: true },
-      "tools/catalog/gh": { tag: "v2.86.0", sha256: "b".repeat(64) },
+      "tools/catalog/gh": { tag: "v2.101.0", sha256: "b".repeat(64) },
     });
-    expect(stages).toContain("installing-tools:pinned: wrangler 4.1.0, GitHub CLI v2.86.0; installs latest on every place: tmux 3.3a-3 by apt");
+    expect(stages).toContain("installing-tools:pinned: wrangler 4.1.0, GitHub CLI v2.101.0; installs latest on every place: tmux 3.3a-3 by apt");
     expect(builder.import?.recipe?.ticks).toEqual([
-      { id: "tools/catalog/gh", road: "release", installer: "k".repeat(64), pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
+      { id: "tools/catalog/gh", road: "release", installer: "k".repeat(64), pin: { tag: "v2.101.0", sha256: "b".repeat(64) } },
       { id: "tools/catalog/tmux", road: "apt", installer: "j".repeat(64), pin: { tag: "3.3a-3", latest: true } },
       { id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i".repeat(64), pin: { tag: "4.1.0" } },
     ]);
@@ -1377,15 +1379,15 @@ describe("golden import stages", () => {
   });
 
   it("the tools stage stamps the pin a release install recorded on the ledger's digest, so the sealed version says which release the row is fixed to", async () => {
-    const { backend, fetch } = backendFor([["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }]]);
+    const { backend, fetch } = backendFor([["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.101.0\n`, stderr: "" }]]);
     const plan = toolInstallsFor([{ rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" }]);
     const recipe: RecipeDigest = { ticks: [{ id: "agents/claude" }, { id: "tools/catalog/gh", road: "release", installer: "i".repeat(64) }], files: [] };
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ tools: plan.installs, recipe }) });
-    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude" }, { id: "tools/catalog/gh", road: "release", installer: "i".repeat(64), pin: { tag: "v2.86.0", sha256: "b".repeat(64) } }]);
+    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude" }, { id: "tools/catalog/gh", road: "release", installer: "i".repeat(64), pin: { tag: "v2.101.0", sha256: "b".repeat(64) } }]);
     // The digest handed in is left as the caller planned it.
     expect(recipe.ticks[1]).not.toHaveProperty("pin");
     // A road that printed no sum, or a tool that did not install, stamps nothing.
-    const { backend: b2, fetch: f2 } = backendFor([["repos/cli/cli/releases/latest", { exitCode: 0, stdout: "WSP_ROAD go github.com/cli/cli/v2/cmd/gh@latest\n", stderr: "" }]]);
+    const { backend: b2, fetch: f2 } = backendFor([["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: "WSP_ROAD go github.com/cli/cli/v2/cmd/gh@v2.101.0\n", stderr: "" }]]);
     const viaGo = await prepareBuilder({ backend: b2, setup: "true", fetch: f2, import: importOf({ tools: plan.installs, recipe }) });
     expect(viaGo.import?.recipe).toEqual(recipe);
   });
@@ -1429,7 +1431,7 @@ describe("golden import stages", () => {
 
   it("the tally names every install once: a tool carrying both a road and a note keeps its notes inside its own brackets, so no note reads as a nameless tool", async () => {
     const { backend, fetch } = backendFor([
-      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"c".repeat(64)} v2.86.0\n`, stderr: "" }],
+      ["cli/cli/releases/download/v2.101.0", { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${"c".repeat(64)} v2.101.0\n`, stderr: "" }],
     ]);
     const plan = toolInstallsFor([
       { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },

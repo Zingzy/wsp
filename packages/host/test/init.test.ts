@@ -3323,7 +3323,7 @@ describe("disk estimate before the boot", () => {
     const sha = "b".repeat(64);
     f.opts.runtime = recipe => {
       const backend = stubBackend();
-      backend.execImpl = (_m, cmd) => (cmd.includes("repos/cli/cli/releases/latest") ? { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${sha} v2.86.0\n`, stderr: "" } : guestAnswer(cmd));
+      backend.execImpl = (_m, cmd) => (cmd.includes("cli/cli/releases/download/") ? { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${sha} v2.101.0\n`, stderr: "" } : guestAnswer(cmd));
       f.backends.push(backend);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" }, hostId: "box:h1" });
       f.runtimes.push(rt);
@@ -3331,21 +3331,21 @@ describe("disk estimate before the boot", () => {
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
-    // The road command ran without a check: nothing was recorded before.
-    const road = f.backends[0]!.machines[0]!.execLog.find(c => c.includes("repos/cli/cli/releases/latest"))!;
-    expect(road).not.toContain('[ "$sum" =');
+    // The road checked the catalog's own sum, and recorded nothing of its own before it ran.
+    const road = f.backends[0]!.machines[0]!.execLog.find(c => c.includes("cli/cli/releases/download/"))!;
+    expect(road).toContain("sha256sum -c -");
     const saved = loadManifest(recipePath(f.opts.statePath));
     expect(saved.entries.filter(e => e.pin !== undefined)).toHaveLength(0);
     // The small recipe carries the record's pin under the catalog id, for wsp recipe to show; the fake guest reads no other version back.
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "recipe.json"), "utf8")));
-    expect(small.rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.86.0", sha256: sha });
+    expect(small.rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.101.0", sha256: sha });
     expect(small.rows.filter(r => r.pin !== undefined)).toHaveLength(1);
     // The record beside it says the same, by the row's id there.
     const record = (await f.runtimes[0]!.image.get()).image!;
-    expect(record.pins).toEqual([{ id: "gh", tag: "v2.86.0", sha256: sha, road: "release" }]);
+    expect(record.pins).toEqual([{ id: "gh", tag: "v2.101.0", sha256: sha, road: "release" }]);
     // The results file carries the same checksum and tag beside the road.
     const results = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { tools: { id: string; road?: { kind: string; sha256?: string } }[] };
-    expect(results.tools.find(t => t.id === "tools/catalog/gh")?.road).toEqual({ kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: sha, tag: "v2.86.0" });
+    expect(results.tools.find(t => t.id === "tools/catalog/gh")?.road).toEqual({ kind: "release", from: "gh_2.101.0_linux_amd64.tar.gz", sha256: sha, tag: "v2.101.0" });
   });
 
   it("the tally after the build names every skipped tool with its reason, under the counts, and the results file carries the same rows", async () => {
@@ -3412,21 +3412,21 @@ describe("wsp init with a golden already built from a recipe", () => {
     const sha = "b".repeat(64);
     // The fake guest serves whatever tag the road asks for, and hashes every asset the same.
     const answer = (cmd: string): ExecResult => {
-      const tag = /repos\/cli\/cli\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
-      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release gh_linux_amd64.tar.gz ${sha} ${tag[1] ?? "v2.86.0"}\n`, stderr: "" };
+      const tag = /cli\/cli\/releases\/download\/(\S+?)\//.exec(cmd);
+      return tag === null ? guestAnswer(cmd) : { exitCode: 0, stdout: `WSP_ROAD release gh_linux_amd64.tar.gz ${sha} ${tag[1]}\n`, stderr: "" };
     };
     // gh with no formula row here, so the recipe's bare row installs it from its GitHub release.
     const collect = async () => ({ entries: FIXTURE.entries.filter(e => e.id !== "tools/brew/gh") });
     const { store, shared, first, next } = await sealed({ collect }, answer);
     const recipeFile = join(dirname(first.opts.statePath), "recipe.json");
     const small = () => Recipe.parse(JSON.parse(readFileSync(recipeFile, "utf8")));
-    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("repos/cli/cli/releases/")));
+    const roadRuns = () => shared.machines.flatMap(m => m.execLog.filter(c => c.includes("cli/cli/releases/download/")));
     const record = () => store.get("images", "default") as Promise<{ pins?: unknown }>;
-    const pin = { tag: "v2.86.0", sha256: sha };
-    // v1 fetched the current release with nothing to check; the record keeps what it read, and the small recipe shows it.
+    const pin = { tag: "v2.101.0", sha256: sha };
+    // v1 installed the catalog's pinned release and checked its sum; the record keeps what it read, and the small recipe shows it.
     expect(roadRuns()).toHaveLength(1);
-    expect(roadRuns()[0]).toContain("releases/latest");
-    expect(roadRuns()[0]).not.toContain('[ "$sum" =');
+    expect(roadRuns()[0]).toContain("releases/download/v2.101.0/");
+    expect(roadRuns()[0]).toContain("sha256sum -c -");
     expect((await record()).pins).toEqual([{ id: "gh", ...pin, road: "release" }]);
     expect(small().rows.find(r => r.id === "gh")?.pin).toEqual(pin);
     expect(small().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual(["gh"]);

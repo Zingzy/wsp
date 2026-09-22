@@ -10,7 +10,7 @@
 // /opt for a computer somebody owns, whose daemon resolves no command through
 // a folder the workspaces there can write.
 import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
-import { APT_ENV, GUEST_HOME, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
+import { APT_ENV, GUEST_HOME, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -71,10 +71,11 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   installed?(road: R, bin: string, homes?: InstallHomes): string;
 }
 
-/** Whether a copy built from this road's pin gets the version the seal read: the road installs at one (`at`), or
- * its script fixes one in its own text. Absent both, the road installs what its source serves on the day. */
+/** Whether a copy built from this road's pin gets the version the seal read: the road installs at one (`at`), or it
+ * carries a version of its own (the catalog's pinned release, a script whose own text fixes one). Absent both, the
+ * road installs what its source serves on the day. */
 export function fixesVersion(road: InstallRoad): boolean {
-  return roadModule(road).at !== undefined || (road.road === "script" && road.version !== undefined);
+  return roadModule(road).at !== undefined || ("version" in road && road.version !== undefined);
 }
 
 // --- the network clock every road runs under -------------------------------------
@@ -420,24 +421,90 @@ const go: RoadModule<Road<"go">> = {
 
 // --- releases ------------------------------------------------------------------
 
-/** A tool from its repository: the release asset built for this arch, unpacked and its binary put in
- * /usr/local/bin; with no Linux asset, a main package named and go on the machine, `go install` of that package
- * at the tag (or at the version it carries), moved to the row's command when its name differs. The asset's sha256
- * is checked against `pin`, the recorded sum for this tag when the recipe has one, and printed with the tag on the
- * WSP_ROAD line the stage reads either way, so the first install of a tag records it. Without a tag the current
- * release is fetched and its tag read. */
-function releaseInstall(name: string, repo: string, tag: string | undefined, pin: string | undefined, go: string | undefined): string {
-  const api = tag === undefined ? `https://api.github.com/repos/${repo}/releases/latest` : `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
-  const goAt = go === undefined || go.includes("@") ? go : `${go}@${tag ?? "latest"}`;
+/** What a downloaded asset becomes on the machine: unpacked where it is an archive, the command the row names found
+ * in what came out, installed, and the artifact with its sum and tag printed on the WSP_ROAD line the stage reads.
+ * `sum` is the shell word holding the sha256, which the two release roads fill from different places. */
+function unpackLines(sum: string): string[] {
+  return [
+    'case "$asset" in',
+    '  *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
+    '  *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
+    '  *.zip) if command -v unzip >/dev/null 2>&1; then unzip -qo "$tmp/$asset" -d "$tmp"; else python3 -m zipfile -e "$tmp/$asset" "$tmp"; fi ;;',
+    '  *) mv "$tmp/$asset" "$tmp/$name"; chmod +x "$tmp/$name" ;;',
+    "esac",
+    'bin="$(find "$tmp" -type f -name "$name" | head -1)"',
+    `[ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "$asset" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
+    '[ -n "$bin" ] || { echo "Error: no binary in $asset" >&2; exit 1; }',
+    'install -m 0755 "$bin" "/usr/local/bin/$name"',
+    `echo "WSP_ROAD release $asset ${sum} $tag"`,
+  ];
+}
+
+/** The fall-through for an arch the release has no Linux asset for: the main package the row names, built by the go
+ * on the machine and moved to the row's command where the module's own name differs. */
+function goLines(goAt: string, name: string): string[] {
+  return [
+    "elif command -v go >/dev/null 2>&1; then",
+    `  GOBIN=/usr/local/bin go install ${shellQuote(goAt)}`,
+    ...(goBinary(goAt) === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBinary(goAt)}`)} "/usr/local/bin/$name"`]),
+    `  echo "WSP_ROAD go "${shellQuote(goAt)}`,
+  ];
+}
+
+/** The module at a version, for the fall-through: its own where it names one, else the tag the road installs at. */
+const goAtTag = (go: string | undefined, tag: string): string | undefined => (go === undefined || go.includes("@") ? go : `${go}@${tag}`);
+
+/** A tool from its repository: the asset the catalog recorded for this arch, downloaded from the tag's own download
+ * address, its sha256 checked before anything it carries is unpacked, and its binary put in /usr/local/bin. Nothing
+ * is read off the API and no listing is grepped: the file's name and its sum stand in the catalog. An arch the
+ * release has no asset for takes the go fall-through, and is refused where the row names no module. */
+function assetInstall(name: string, repo: string, tag: string, assets: ReleaseAssets, go: string | undefined): string {
+  const goAt = goAtTag(go, tag);
+  const pick = (a: ReleaseAsset | undefined): string => (a === undefined ? "asset= sha=" : `asset=${shellQuote(a.name)} sha=${a.sha256}`);
+  const body = [
+    `url=${shellQuote(`https://github.com/${repo}/releases/download/${tag}/`)}"$asset"`,
+    'curl -o "$tmp/$asset" "$url"',
+    'echo "$sha  $tmp/$asset" | sha256sum -c - >/dev/null',
+    ...unpackLines("$sha"),
+  ];
+  // A row the catalog recorded both arches for can only take the asset road, so nothing renders the other two.
+  const complete = assets.x86_64 !== undefined && assets.aarch64 !== undefined;
   return [
     "set -euo pipefail",
     `name=${shellQuote(name)}`,
+    `tag=${shellQuote(tag)}`,
+    'arch="$(uname -m)"',
+    `case "$arch" in x86_64) ${pick(assets.x86_64)} ;; aarch64) ${pick(assets.aarch64)} ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac`,
+    'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
+    "trap 'rm -rf \"$tmp\"' EXIT",
+    ...(complete
+      ? body
+      : [
+          'if [ -n "$asset" ]; then',
+          ...body.map(l => `  ${l}`),
+          ...(goAt === undefined ? [] : goLines(goAt, name)),
+          "else",
+          `  echo "Error: release "${shellQuote(tag)}" of "${shellQuote(repo)}" has no Linux build for $arch${goAt === undefined ? "" : ", and go is not on the machine"}" >&2`,
+          "  exit 1",
+          "fi",
+        ]),
+  ].join("\n");
+}
+
+/** A person's own row's release, which names no asset: the release's listing read off the API at the tag the row
+ * carries, the Linux asset for this arch picked out of it, and the sum its first install recorded checked where one
+ * stands. Only a row the catalog does not carry takes this road; every catalog row names its asset above. */
+function releaseInstall(name: string, repo: string, tag: string, pin: string | undefined, go: string | undefined): string {
+  const goAt = goAtTag(go, tag);
+  return [
+    "set -euo pipefail",
+    `name=${shellQuote(name)}`,
+    `tag=${shellQuote(tag)}`,
     'arch="$(uname -m)"',
     'case "$arch" in x86_64) pat="amd64|x86_64|x64" ;; aarch64) pat="arm64|aarch64" ;; *) echo "Error: unsupported arch: $arch" >&2; exit 1 ;; esac',
     'tmp="$(mktemp -d /tmp/wsp-road-XXXXXX)"',
     "trap 'rm -rf \"$tmp\"' EXIT",
-    `release="$(curl ${shellQuote(api)} || true)"`,
-    tag === undefined ? `tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"` : `tag=${shellQuote(tag)}`,
+    `release="$(curl ${shellQuote(`https://api.github.com/repos/${repo}/releases/tags/${tag}`)} || true)"`,
     `urls="$(printf '%s\\n' "$release" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 || true)"`,
     `url="$(printf '%s\\n' "$urls" | grep -i linux | grep -iE "$pat" | grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$' | head -1 || true)"`,
     'if [ -n "$url" ]; then',
@@ -445,47 +512,32 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
     '  curl -o "$tmp/$asset" "$url"',
     `  sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`,
     ...(pin !== undefined ? [`  ${pinCheckLine("$asset", "$tag", pin)}`] : []),
-    '  case "$asset" in',
-    '    *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" ;;',
-    '    *.tar.xz) tar -xJf "$tmp/$asset" -C "$tmp" ;;',
-    '    *.zip) if command -v unzip >/dev/null 2>&1; then unzip -qo "$tmp/$asset" -d "$tmp"; else python3 -m zipfile -e "$tmp/$asset" "$tmp"; fi ;;',
-    '    *) mv "$tmp/$asset" "$tmp/$name"; chmod +x "$tmp/$name"; asset="" ;;',
-    "  esac",
-    '  bin="$(find "$tmp" -type f -name "$name" | head -1)"',
-    `  [ -n "$bin" ] || bin="$(find "$tmp" -type f -perm -u+x ! -name "\${asset:-.}" ! -name '*.md' ! -name '*.txt' -printf '%s %p\\n' | sort -rn | head -1 | cut -d' ' -f2-)"`,
-    '  [ -n "$bin" ] || { echo "Error: no binary in ${asset:-the release}" >&2; exit 1; }',
-    '  install -m 0755 "$bin" "/usr/local/bin/$name"',
-    '  echo "WSP_ROAD release ${asset:-$url} $sum $tag"',
-    ...(goAt === undefined
-      ? []
-      : [
-          "elif command -v go >/dev/null 2>&1; then",
-          `  GOBIN=/usr/local/bin go install ${shellQuote(goAt)}`,
-          ...(goBinary(goAt) === name ? [] : [`  mv ${shellQuote(`/usr/local/bin/${goBinary(goAt)}`)} "/usr/local/bin/$name"`]),
-          `  echo "WSP_ROAD go "${shellQuote(goAt)}`,
-        ]),
+    ...unpackLines("$sum").map(l => `  ${l}`),
+    ...(goAt === undefined ? [] : goLines(goAt, name)),
     "else",
-    `  echo "Error: ${tag === undefined ? "the current release" : `release "${shellQuote(tag)}"`} of "${shellQuote(repo)}" has no Linux build${goAt === undefined ? "" : ", and go is not on the machine"}" >&2`,
+    `  echo "Error: release "${shellQuote(tag)}" of "${shellQuote(repo)}" has no Linux build${goAt === undefined ? "" : ", and go is not on the machine"}" >&2`,
     "  exit 1",
     "fi",
   ].join("\n");
 }
 
 const NO_RELEASE = "no GitHub release to install from";
+/** A release road with no tag installs nothing: the current release is a moving artifact and no road fetches one. */
+const NO_TAG = "names no release tag; name the version";
 
 const release: RoadModule<Road<"release">> = {
   words: "from its release",
   roots: ["/usr/local/bin"],
   bins: () => [LOCAL_BIN],
-  shown: r => (r.repo === undefined ? NO_RELEASE : `the ${versionOf(r) ?? "latest"} release of github.com/${r.repo}`),
+  shown: r => (r.repo === undefined ? NO_RELEASE : versionOf(r) === undefined ? NO_TAG : `the ${versionOf(r)} release of github.com/${r.repo}`),
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
-    // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
-    return releaseInstall(bin, r.repo, versionOf(r), standingPin(r)?.sha256, r.go);
+    const tag = versionOf(r);
+    if (tag === undefined) return { note: NO_TAG };
+    return r.assets === undefined ? releaseInstall(bin, r.repo, tag, standingPin(r)?.sha256, r.go) : assetInstall(bin, r.repo, tag, r.assets, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
-  at: atVersion,
 };
 
 const vendor: RoadModule<Road<"vendor">> = {
@@ -498,7 +550,6 @@ const vendor: RoadModule<Road<"vendor">> = {
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
   bin: r => r.cask.bin,
-  at: atVersion,
 };
 
 // --- the distro and plain scripts ----------------------------------------------

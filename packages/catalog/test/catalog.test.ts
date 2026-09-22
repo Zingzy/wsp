@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
-import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -101,6 +101,35 @@ describe("catalog", () => {
     }
   });
 
+  it("names the artifact and the sum before anything runs: every release row a pinned tag and an asset per arch, every cask a version and two sums, and no row asking a vendor what its current version is", () => {
+    const releases = CATALOG.filter(e => e.installRoad.road === "release");
+    expect(releases.map(e => e.id)).toEqual(["gh", "cloudflared", "fly", "supabase", "doppler", "yq", "golangci-lint", "mise", "git-delta", "bazel"]);
+    for (const e of releases) {
+      const road = e.installRoad as Extract<InstallRoad, { road: "release" }>;
+      const pin = RELEASE_PINS[road.repo!];
+      // Every release row goes through the one helper that reads the table, so no row carries a tag of its own.
+      expect(pin, e.id).toBeDefined();
+      expect(road.version, e.id).toBe(pin!.tag);
+      expect(road.assets, e.id).toBe(pin!.assets);
+      for (const arch of ["x86_64", "aarch64"] as const) {
+        expect(road.assets?.[arch]?.name, `${e.id} ${arch}`).toMatch(/^[\w.+-]+$/);
+        expect(road.assets?.[arch]?.sha256, `${e.id} ${arch}`).toMatch(/^[0-9a-f]{64}$/);
+      }
+    }
+    expect(Object.keys(RELEASE_PINS).sort()).toEqual(releases.map(e => (e.installRoad as Extract<InstallRoad, { road: "release" }>).repo!).sort());
+    for (const cask of LINUX_CASKS) {
+      expect(cask.version, cask.bin).toMatch(/^v?\d/);
+      expect(cask.sha256.x86_64, cask.bin).toMatch(/^[0-9a-f]{64}$/);
+      expect(cask.sha256.aarch64, cask.bin).toMatch(/^[0-9a-f]{64}$/);
+    }
+    for (const e of CATALOG.filter(e => e.installRoad.road === "vendor")) expect((e.installRoad as Extract<InstallRoad, { road: "vendor" }>).version, e.id).toBe((e.installRoad as Extract<InstallRoad, { road: "vendor" }>).cask.version);
+    // Nothing any row runs asks a source what it is serving today.
+    for (const e of CATALOG) {
+      const line = installLine(e);
+      for (const moving of ["releases/latest", "stable.txt", "components-2.json", "@latest"]) expect(line, `${e.id} reads ${moving}`).not.toContain(moving);
+    }
+  });
+
   it("one rule says which pin stands and one line checks it: the sum, the tag and both sums in the failure, on the release road and the vendor's", () => {
     const pin = { tag: "v2.86.0", sha256: "d".repeat(64) };
     // A pin stands while the road names its tag or none; a version past it, or no pin, leaves nothing to check.
@@ -119,13 +148,18 @@ describe("catalog", () => {
     const release = roadModule({ road: "release", repo: "cli/cli", pin }).install({ road: "release", repo: "cli/cli", pin }, "gh") as string;
     expect(release).toContain("tag='v2.86.0'");
     expect(release).toContain(pinCheckLine("$asset", "$tag", pin.sha256));
-    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin })).toContain(pinCheckLine("kubectl", "$ver", pin.sha256));
-    expect(GCLOUD.install({ road: "vendor", cask: GCLOUD, pin })).toContain(pinCheckLine("$pkg", "$ver", pin.sha256));
-    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL })).not.toContain('[ "$sum" =');
-    // The cask reads the one version rule: a row's version past the pin installs at the version, with no check.
-    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0", pin })).toContain("ver='v1.38.0'");
-    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0", pin })).not.toContain('[ "$sum" =');
-    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin })).toContain("ver='v2.86.0'");
+    // A cask checks the sum it pins for the arch, whatever a recipe recorded, so its first install is checked too.
+    for (const cask of LINUX_CASKS) {
+      const line = cask.install({ road: "vendor", cask, version: cask.version });
+      expect(line, cask.bin).toContain(`x86_64) a=`);
+      expect(line, cask.bin).toContain(cask.sha256.x86_64);
+      expect(line, cask.bin).toContain(cask.sha256.aarch64);
+      expect(line, cask.bin).toContain('| sha256sum -c - >/dev/null');
+      expect(line, cask.bin).not.toContain('[ "$sum" =');
+      expect(line, cask.bin).toContain(`ver='${cask.version}'`);
+    }
+    // The vendor's current version is asked of nobody: no cask reads a version off the network.
+    for (const cask of LINUX_CASKS) expect(cask.install({ road: "vendor", cask }), cask.bin).not.toContain('ver="$(');
     // The words are the protocol's, so the reason line a person reads is the one the format test pins.
     expect(pinCheckLine("x", "y", "z")).toContain(pinMismatchLine("x", "y", "z", "${sum:0:12}"));
   });
@@ -146,17 +180,26 @@ describe("catalog", () => {
     expect(ROAD_MODULES.go.install({ road: "go", module: "golang.org/x/tools/gopls", pin: { tag: "v0.16.2" } }, "gopls")).toBe("go install golang.org/x/tools/gopls@v0.16.2");
     // A pin the row's version moved past does not stand: the row installs at its version, a first install again.
     expect(ROAD_MODULES.npm.install({ road: "npm", package: "wrangler", version: "4.2.0", pin }, "wrangler")).toBe("npm install -g wrangler@4.2.0");
-    // Which roads fix a version on a copy: the ones that install at one, and a script whose own text fixes one.
+    // Which roads fix a version on a copy: the ones that install at one, and any road carrying a version of its own,
+    // which after the pins table is every release and vendor row the catalog carries.
     expect(fixesVersion({ road: "npm", package: "wrangler" })).toBe(true);
-    expect(fixesVersion({ road: "release", repo: "cli/cli" })).toBe(true);
-    expect(fixesVersion({ road: "vendor", cask: KUBECTL })).toBe(true);
+    expect(fixesVersion({ road: "release", repo: "cli/cli" })).toBe(false);
+    expect(fixesVersion({ road: "release", repo: "cli/cli", version: "v2.86.0" })).toBe(true);
+    expect(fixesVersion({ road: "vendor", cask: KUBECTL })).toBe(false);
+    expect(fixesVersion({ road: "vendor", cask: KUBECTL, version: KUBECTL.version })).toBe(true);
     expect(fixesVersion({ road: "go", module: "x" })).toBe(true);
     expect(fixesVersion({ road: "brew", formula: "go" })).toBe(false);
     expect(fixesVersion({ road: "apt", packages: ["tmux"] })).toBe(false);
     expect(fixesVersion({ road: "script", script: "x" })).toBe(false);
     expect(fixesVersion({ road: "script", script: "x", version: "6.3.3" })).toBe(true);
-    for (const id of ["swift", "playwright", "hermes"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(true);
-    for (const id of ["claude", "rust", "yarn", "op"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(false);
+    for (const id of ["swift", "playwright", "hermes", "gh", "bazel", "gcloud", "kubectl"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(true);
+    for (const id of ["rust", "yarn", "op"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(false);
+    // A catalog row installs at the catalog's tag whatever version a recipe row asks for: the engine's plan test
+    // pins the note the row gets, and the road itself never moves.
+    expect(versionOf(catalogEntry("gh")!.installRoad)).toBe("v2.101.0");
+    expect(versionOf(catalogEntry("kubectl")!.installRoad)).toBe(KUBECTL.version);
+    expect(ROAD_MODULES.release.at).toBeUndefined();
+    expect(ROAD_MODULES.vendor.at).toBeUndefined();
     // How each road reads the installed version back, each in the form its install takes: no v where the install takes none, the v where go wants it.
     expect(ROAD_MODULES.npm.installed!({ road: "npm", package: "@openai/codex" }, "codex")).toBe(`node -p 'require(process.argv[1] + "/package.json").version' "$(npm root -g)/"'@openai/codex'`);
     expect(ROAD_MODULES.pnpm.installed!({ road: "pnpm", package: "wrangler" }, "wrangler")).toContain("$(pnpm root -g)");
@@ -272,23 +315,30 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
     expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install go'$/);
+    // A catalog row on the release road downloads the asset the pins table names, at the tag it names, and checks
+    // the sum beside it before anything is unpacked: no API read, no listing grepped, no release fetched by date.
     const gh = installLine(catalogEntry("gh")!);
+    const pin = RELEASE_PINS["cli/cli"]!;
     expect(gh).toContain("name='gh'");
-    // A failed API call (the rate limit, a network blip) leaves the release empty and falls through to go install.
-    expect(gh).toContain(`release="$(curl 'https://api.github.com/repos/cli/cli/releases/latest' || true)"`);
-    expect(gh).toContain(`tag="$(printf '%s\\n' "$release" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"`);
-    expect(gh).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
-    // The pick skips sums, signatures, packages for other package managers and archives the road cannot unpack, whatever order the API lists them in.
-    expect(gh).toContain(`grep -viE '\\.(sha256|sha256sum|sha512|sig|asc|txt|md5|pem|deb|rpm|apk|zst|tar\\.zst|json)$' | head -1`);
-    // The fall-through installs the entry's main package, not the repository root, which for gh is no package.
-    expect(gh).toContain("go install 'github.com/cli/cli/v2/cmd/gh@latest'");
-    expect(installLine(catalogEntry("cloudflared")!)).toContain("go install 'github.com/cloudflare/cloudflared/cmd/cloudflared@latest'");
-    expect(installLine(catalogEntry("yq")!)).toContain("go install 'github.com/mikefarah/yq/v4@latest'");
-    // An entry that names no Go module has no fall-through and says only what is true.
-    const supabase = installLine(catalogEntry("supabase")!) as string;
-    expect(supabase).not.toContain("go install");
-    expect(supabase).not.toContain("command -v go");
-    expect(supabase).toContain(`echo "Error: the current release of "'supabase/cli'" has no Linux build" >&2`);
+    expect(gh).toContain(`tag='${pin.tag}'`);
+    expect(gh).toContain(`case "$arch" in x86_64) asset='${pin.assets.x86_64!.name}' sha=${pin.assets.x86_64!.sha256} ;; aarch64) asset='${pin.assets.aarch64!.name}' sha=${pin.assets.aarch64!.sha256} ;;`);
+    expect(gh).toContain(`url='https://github.com/cli/cli/releases/download/${pin.tag}/'"$asset"`);
+    expect(gh.indexOf('echo "$sha  $tmp/$asset" | sha256sum -c - >/dev/null')).toBeLessThan(gh.indexOf('tar -xzf "$tmp/$asset"'));
+    expect(gh).toContain('echo "WSP_ROAD release $asset $sha $tag"');
+    expect(gh).not.toContain("api.github.com");
+    expect(gh).not.toContain("browser_download_url");
+    // Every arch the table names an asset for leaves no fall-through to render: go is the road for an arch with none.
+    expect(gh).not.toContain("go install");
+    expect(gh).not.toContain("command -v go");
+    // An arch the release has no asset for takes the row's main package at the tag, and is refused where it names none.
+    const armless = ROAD_MODULES.release.install({ road: "release", repo: "cli/cli", version: "v2.86.0", assets: { x86_64: { name: "gh_linux_amd64.tar.gz", sha256: "e".repeat(64) } }, go: "github.com/cli/cli/v2/cmd/gh" }, "gh") as string;
+    expect(armless).toContain("aarch64) asset= sha= ;;");
+    expect(armless).toContain("go install 'github.com/cli/cli/v2/cmd/gh@v2.86.0'");
+    const noGo = ROAD_MODULES.release.install({ road: "release", repo: "cli/cli", version: "v2.86.0", assets: { x86_64: { name: "gh_linux_amd64.tar.gz", sha256: "e".repeat(64) } } }, "gh") as string;
+    expect(noGo).not.toContain("go install");
+    expect(noGo).toContain(`echo "Error: release "'v2.86.0'" of "'cli/cli'" has no Linux build for $arch" >&2`);
+    // A release road with no tag installs nothing: nothing in the catalog fetches the current release any more.
+    expect(ROAD_MODULES.release.install({ road: "release", repo: "cli/cli" }, "gh")).toEqual({ note: "names no release tag; name the version" });
     expect(gh).not.toContain('[ "$sum" =');
     expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install({ road: "vendor", cask: GCLOUD }));
     expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL }));
@@ -344,7 +394,7 @@ describe("catalog", () => {
     expect(tagged).toContain(`release="$(curl 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
     expect(tagged).toContain("tag='v0.4.1'");
-    expect(tagged).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    expect(tagged).toContain('echo "WSP_ROAD release $asset $sum $tag"');
     // A bare module goes in at the tag; one that carries its own version keeps it; a road with none has no go branch.
     expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
     expect(tagged).toContain(`echo "Error: release "'v0.4.1'" of "'spoo-me/spoo-cli'" has no Linux build, and go is not on the machine" >&2`);
@@ -353,12 +403,10 @@ describe("catalog", () => {
     // A road that pins a version takes a row's through at(); Homebrew, apt and a script install what their source serves and have none.
     expect(ROAD_MODULES.npm.at!({ road: "npm", package: "wrangler" }, "4.1.0")).toEqual({ road: "npm", package: "wrangler", version: "4.1.0" });
     expect(ROAD_MODULES.cargo.at!({ road: "cargo", package: "bat", version: "0.23.0" }, "0.24.0")).toEqual({ road: "cargo", package: "bat", version: "0.24.0" });
-    expect(ROAD_MODULES.release.at!({ road: "release", repo: "cli/cli" }, "v2.86.0")).toEqual({ road: "release", repo: "cli/cli", version: "v2.86.0" });
-    // A bare row's version is the tool's own, not a Mac cask's, so the vendor road takes it whether or not the cask's Mac version names the Linux build.
-    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: GCLOUD }, "575.0.0")).toEqual({ road: "vendor", cask: GCLOUD, version: "575.0.0" });
-    expect(ROAD_MODULES.vendor.at!({ road: "vendor", cask: KUBECTL }, "v1.37.0")).toEqual({ road: "vendor", cask: KUBECTL, version: "v1.37.0" });
-    for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor"] as const) expect(ROAD_MODULES[road].at, road).toBeDefined();
-    for (const road of ["brew", "apt", "script"] as const) expect(ROAD_MODULES[road].at, road).toBeUndefined();
+    // The release and vendor roads take no version from a row: each installs the artifact the catalog pinned, so a
+    // recipe's own version moves nothing and the row is noted instead.
+    for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"] as const) expect(ROAD_MODULES[road].at, road).toBeDefined();
+    for (const road of ["brew", "apt", "script", "release", "vendor"] as const) expect(ROAD_MODULES[road].at, road).toBeUndefined();
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "c".repeat(64) } }, "spoo")).toContain(`[ "$sum" = '${"c".repeat(64)}' ]`);
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }, "spoo")).not.toContain('[ "$sum" =');
     // No version: a pin fixes the tag and is checked, as a vendor install does; none at all takes the current release.
@@ -371,9 +419,8 @@ describe("catalog", () => {
     expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install(gcloud), { cmd: GCLOUD.uninstall }, "gcloud"]);
     const kubectl: InstallRoad = { road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } };
     expect(line(kubectl)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } }));
-    // A vendor pin whose version moved on is not the cask's to check: the cask gets none, so a first install records anew.
-    expect(line({ ...kubectl, version: "v1.38.0" })).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0" }));
-    expect(line({ ...kubectl, version: "v1.38.0" })).not.toContain('[ "$sum" =');
+    // A cask's own sum rides every install of it, so the bytes are checked whether or not a recipe recorded a pin.
+    expect(line(kubectl)).toContain(KUBECTL.sha256.x86_64);
     // apt rows wait on the one index read; purge takes what the package alone pulled in.
     const apt: InstallRoad = { road: "apt", packages: ["neovim"] };
     expect([line(apt), off(apt), ROAD_MODULES.apt.after]).toEqual(["export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq neovim", { cmd: "export DEBIAN_FRONTEND=noninteractive\napt-get purge -y -qq neovim && apt-get autoremove -y -qq --purge" }, APT_INDEX]);
@@ -386,7 +433,7 @@ describe("catalog", () => {
     const shown = (road: InstallRoad, bin = "x") => roadModule(road).shown?.(road, bin);
     expect(shown({ road: "brew", formula: "gh" })).toBe("brew install gh");
     expect(shown({ road: "apt", packages: ["neovim", "fd-find"] })).toBe("apt-get install neovim fd-find");
-    expect(shown({ road: "release", repo: "cli/cli" }, "gh")).toBe("the latest release of github.com/cli/cli");
+    expect(shown({ road: "release", repo: "cli/cli" }, "gh")).toBe("names no release tag; name the version");
     expect(shown({ road: "release", repo: "cli/cli", version: "v2.86.0" }, "gh")).toBe("the v2.86.0 release of github.com/cli/cli");
     expect(shown({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toBe("the v2.86.0 release of github.com/cli/cli");
     expect(shown({ road: "vendor", cask: GCLOUD })).toBe(GCLOUD.from);
@@ -712,16 +759,14 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("llvm")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq clang clang-format clang-tidy");
     expect(catalogToolFor("clang-tidy")?.id).toBe("llvm");
     for (const id of ["ruby", "php", "postgresql-client", "redis-tools", "shellcheck", "elixir", "llvm"]) expect(installAfter(catalogEntry(id) as ToolEntry), id).toBe(APT_INDEX);
-    // The release rows: each repository's Linux asset, golangci-lint and bazelisk with a go install to fall back on.
-    expect(installLine(catalogEntry("golangci-lint")!)).toContain(`release="$(curl 'https://api.github.com/repos/golangci/golangci-lint/releases/latest' || true)"`);
-    expect(installLine(catalogEntry("golangci-lint")!)).toContain("go install 'github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest'");
-    expect(installLine(catalogEntry("mise")!)).toContain("'https://api.github.com/repos/jdx/mise/releases/latest'");
-    expect(installLine(catalogEntry("mise")!)).not.toContain("go install");
+    // The release rows: each repository's pinned Linux asset, downloaded from the tag's own address and checked.
+    expect(installLine(catalogEntry("golangci-lint")!)).toContain("url='https://github.com/golangci/golangci-lint/releases/download/v2.13.2/'\"$asset\"");
+    expect(installLine(catalogEntry("mise")!)).toContain("asset='mise-v2026.9.12-linux-x64'");
     expect(installLine(catalogEntry("git-delta")!)).toContain("name='delta'");
-    expect(installLine(catalogEntry("git-delta")!)).toContain("'https://api.github.com/repos/dandavison/delta/releases/latest'");
+    expect(installLine(catalogEntry("git-delta")!)).toContain("url='https://github.com/dandavison/delta/releases/download/0.19.2/'\"$asset\"");
     // bazelisk goes on PATH under the name agents type, and covers the name it is published under.
     expect(installLine(catalogEntry("bazel")!)).toContain("name='bazel'");
-    expect(installLine(catalogEntry("bazel")!)).toContain("'https://api.github.com/repos/bazelbuild/bazelisk/releases/latest'");
+    expect(installLine(catalogEntry("bazel")!)).toContain("asset='bazelisk-linux-amd64'");
     expect(catalogToolFor("bazelisk")?.id).toBe("bazel");
     // Swift from swift.org's Debian 12 tarball, checksummed, under its own prefix, after the apt index its dependencies need.
     const swift = installLine(catalogEntry("swift")!);

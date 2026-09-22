@@ -10,6 +10,7 @@ import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
+import { RELEASE_PINS } from "./release-pins.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, HOME_BIN, LOCAL_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
@@ -152,8 +153,14 @@ const brew = (formula: string, bytes: number): { installRoad: InstallRoad; size:
 const apt = (bytes: number, ...packages: string[]): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "apt", packages }, size: measured("apt", bytes) });
 const npm = (bytes: number, pkg: string, version?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) }, size: measured("du", bytes) });
 const uvTool = (bytes: number, pkg: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "uv", package: pkg }, size: measured("du", bytes) });
-/** A release road; `go` is the repository's main package for the fall-through, left off when it has none; the bytes are the binary's. */
-const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "release", repo, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) });
+/** A release road at the tag and the per-arch assets the pins table recorded for the repository, so no row of the
+ * catalog installs a release nobody read; `go` is the repository's main package for an arch the release has no asset
+ * for, left off when it has none; the bytes are the binary's. */
+const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => {
+  const pin = RELEASE_PINS[repo];
+  if (pin === undefined) throw new Error(`the release pins table names no ${repo}`);
+  return { installRoad: { road: "release", repo, version: pin.tag, assets: pin.assets, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) };
+};
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
 /** The file a project keeps its standing instructions for agents in; an agent that reads another one names that too. */
 const AGENTS_MD = "AGENTS.md";
@@ -347,8 +354,8 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "typescript", name: "TypeScript", bin: "tsc", ...npm(32022528, "typescript"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 8, images: 0, road: "unmeasured" } },
   { ...tool, id: "wrangler", name: "Cloudflare Wrangler", bin: "wrangler", ...npm(251080704, "wrangler"), covers: ["cloudflare-wrangler"], signIn: SIGN_IN_ROWS.wrangler, defaultOn: false, source: { sessions: 3, images: 0, road: "unmeasured" } },
   { ...tool, id: "cloudflared", name: "cloudflared", bin: "cloudflared", ...github(42455400, "cloudflare/cloudflared", "github.com/cloudflare/cloudflared/cmd/cloudflared"), signIn: SIGN_IN_ROWS.cloudflared, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
-  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" }, size: measured("unpacked", 475987968) },
-  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" }, size: measured("unpacked", 61886626) },
+  { ...tool, id: "gcloud", name: "Google Cloud CLI", bin: "gcloud", installRoad: { road: "vendor", cask: GCLOUD, version: GCLOUD.version }, signIn: SIGN_IN_ROWS.gcloud, defaultOn: false, source: { sessions: 4, images: 0, road: "measured" }, size: measured("unpacked", 475987968) },
+  { ...tool, id: "kubectl", name: "kubectl", bin: "kubectl", installRoad: { road: "vendor", cask: KUBECTL, version: KUBECTL.version }, covers: ["kubernetes-cli"], signIn: SIGN_IN_ROWS.kubectl, defaultOn: false, source: { sessions: 1, images: 1, road: "unmeasured" }, size: measured("unpacked", 61886626) },
   { ...tool, id: "aws", name: "AWS CLI", bin: "aws", ...brew("awscli", 319703017), signIn: SIGN_IN_ROWS.aws, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "vercel", name: "Vercel CLI", bin: "vercel", ...npm(338280448, "vercel"), signIn: SIGN_IN_ROWS.vercel, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
   { ...tool, id: "netlify", name: "Netlify CLI", bin: "netlify", ...npm(377982976, "netlify-cli"), signIn: SIGN_IN_ROWS.netlify, defaultOn: false, source: { sessions: 1, images: 0, road: "unmeasured" } },
@@ -373,7 +380,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "swift", name: "Swift 6.3", bin: "swift", installRoad: { road: "script", script: SWIFT_INSTALL, version: SWIFT.version }, after: APT_INDEX, brings: [{ bin: "swiftc", version: "swiftc --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 3562135552) },
   { ...tool, id: "elixir", name: "Elixir 1.14 with Erlang", bin: "elixir", ...apt(33395712, "elixir"), covers: ["erlang"], brings: [{ bin: "mix", version: "mix --version" }, { bin: "erl", version: "erl +V" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
   // The first bazel --version fetches Bazel itself into ~/.cache/bazelisk; the du counts bazelisk and that Bazel.
-  { ...tool, id: "bazel", name: "Bazel via bazelisk", bin: "bazel", installRoad: { road: "release", repo: "bazelbuild/bazelisk", go: "github.com/bazelbuild/bazelisk" }, covers: ["bazelisk"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 72921088) },
+  { ...tool, id: "bazel", name: "Bazel via bazelisk", bin: "bazel", ...github(72921088, "bazelbuild/bazelisk", "github.com/bazelbuild/bazelisk"), covers: ["bazelisk"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 72921088) },
   { ...tool, id: "llvm", name: "clang, clang-format, clang-tidy", bin: "clang", ...apt(750848000, "clang", "clang-format", "clang-tidy"), covers: ["llvm"], brings: [{ bin: "clang-format", version: "clang-format --version" }, { bin: "clang-tidy", version: "clang-tidy --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
   // The du counts the global, Chromium with its headless shell and ffmpeg under ~/.cache/ms-playwright, and the browser's Debian packages.
   { ...tool, id: "playwright", name: "Chromium for Playwright", bin: "playwright", installRoad: { road: "script", script: PLAYWRIGHT_INSTALL, version: PLAYWRIGHT.version }, after: "node", covers: ["chromium"], depends: { npm: ["playwright", "@playwright/test", "playwright-core"] }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("du", 1015808000) },
