@@ -7,7 +7,7 @@
 // on a computer already in, whose approval carries the admission it signed. The
 // code is spent by the approval and the token by the first poll that takes it.
 import { admissionOf, bodyText, fingerprintField, jsonBody, nameOf, type Admission } from "./body.js";
-import { accountByProvider, accountOf, approveLink, clientKeyed, deleteLink, deleteRunOutClient, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
+import { accountByProvider, accountOf, approveLink, clientKeyed, clientsOf, deleteLink, deleteRunOutClient, hostNamed, insertAccount, insertAdmission, insertClient, insertHost, insertLink, linkByCode, linkByPoll, linksFrom, renameAccount, spendLink, sweepLinks, type LinkRow } from "./db.js";
 import { GITHUB_PROVIDER, authorizeUrl, githubUser } from "./github.js";
 import { boxNamedRefusal, clientFor, signedByBearer, signedInSince } from "./hosts.js";
 import { newCode, newId, newSecret, sha256Hex } from "./ids.js";
@@ -31,6 +31,11 @@ type LinkKind = (typeof LINK_KINDS)[number];
 
 /** What the sign-in stamp carries: the page the person came from and goes back to, whose address holds no code. */
 const VERIFY_PAGE = "verify";
+
+/** Each stamp has its own purpose word, so no approve stamp signs a computer out and no sign-out stamp approves a code. */
+const SIGN_IN_STAMP = "sign-in";
+const APPROVE_STAMP = "approve";
+export const SIGN_OUT_STAMP = "sign-out";
 
 const isExpired = (row: LinkRow, now: number): boolean => Date.parse(row.expires_at) <= now;
 
@@ -91,7 +96,7 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
 }
 
 /** Whoever this browser is signed in as here, or nobody. */
-async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undefined> {
+export async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undefined> {
   const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
   return account === undefined ? undefined : await accountOf(ctx.env, account);
 }
@@ -99,9 +104,9 @@ async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } | undef
 /** To GitHub, and back to this page afterwards. The state is bound to this browser: a callback URL handed to
  * somebody else carries a nonce their browser never got, so it cannot sign them in as whoever started the
  * sign-in. It carries no code, because the page it returns to asks the person for one. */
-async function toSignIn(ctx: Ctx): Promise<Response> {
+export async function toSignIn(ctx: Ctx): Promise<Response> {
   const nonce = newSecret(ctx.deps.random);
-  const state = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", VERIFY_PAGE, ctx.deps.now(), await sha256Hex(nonce));
+  const state = await mintStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_IN_STAMP, VERIFY_PAGE, ctx.deps.now(), await sha256Hex(nonce));
   const sent = Response.redirect(authorizeUrl(ctx.env, `${ctx.url.origin}/link/callback`, state), 302);
   return new Response(sent.body, { status: 302, headers: { location: sent.headers.get("location") ?? "/", "set-cookie": nonceCookie(nonce) } });
 }
@@ -111,7 +116,15 @@ async function toSignIn(ctx: Ctx): Promise<Response> {
  * opens this same page and approves nothing until that person types a code they were given. */
 export async function linkVerify(ctx: Ctx): Promise<Response> {
   const who = await signedIn(ctx);
-  return who === undefined ? toSignIn(ctx) : codePage(who.login);
+  return who === undefined ? toSignIn(ctx) : accountPage(ctx, who);
+}
+
+/** Each sign-out is stamped for its own id and this account, so a form handed on or pointed elsewhere signs nothing out. */
+async function accountPage(ctx: Ctx, who: { id: string; login: string }): Promise<Response> {
+  const now = ctx.deps.now();
+  const rows = await clientsOf(ctx.env, who.id);
+  const computers = await Promise.all(rows.map(async row => ({ ...row, stamp: await mintStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_OUT_STAMP, row.id, now, who.id) })));
+  return codePage(who.login, computers);
 }
 
 /** The code the person typed on that page. The approve form it renders is stamped for this account, so the
@@ -122,7 +135,7 @@ export async function linkTyped(ctx: Ctx): Promise<Response> {
   const code = (new URLSearchParams(await bodyText(ctx)).get("code") ?? "").trim().toUpperCase();
   const row = await linkByCode(ctx.env, code);
   if (row === undefined || isExpired(row, ctx.deps.now()) || row.state !== "pending") return gonePage();
-  const stamp = await mintStamp(ctx.env.RELAY_SIGNING_KEY, "approve", code, ctx.deps.now(), who.id);
+  const stamp = await mintStamp(ctx.env.RELAY_SIGNING_KEY, APPROVE_STAMP, code, ctx.deps.now(), who.id);
   return approvePage(row.name, who.login, code, stamp, row.kind, row.fingerprint);
 }
 
@@ -131,7 +144,7 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   const oauthCode = ctx.url.searchParams.get("code") ?? "";
   const state = ctx.url.searchParams.get("state") ?? undefined;
   const nonce = cookieOf(ctx.req.headers.get("cookie"), NONCE_COOKIE);
-  const started = nonce === undefined ? undefined : await readStamp(ctx.env.RELAY_SIGNING_KEY, "sign-in", state, ctx.deps.now(), await sha256Hex(nonce));
+  const started = nonce === undefined ? undefined : await readStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_IN_STAMP, state, ctx.deps.now(), await sha256Hex(nonce));
   if (started === undefined || oauthCode === "") throw refuse(400, "that sign-in did not start in this browser; open the page the command line printed again");
   const user = await githubUser(ctx.env, ctx.deps, oauthCode, `${ctx.url.origin}/link/callback`);
   const now = ctx.deps.now();
@@ -162,19 +175,23 @@ const standingSince = (ctx: Ctx): string => new Date(signedInSince(ctx.deps.now(
  * read it, and the poll reads it where two codes approved under one key met the index. */
 async function keyHeldRefusal(ctx: Ctx, accountId: string, fingerprint: string | null): Promise<Refusal | undefined> {
   const held = await clientKeyed(ctx.env, accountId, fingerprint, standingSince(ctx));
-  return held === undefined ? undefined : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, then run wsp login again`);
+  return held === undefined
+    ? undefined
+    : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, or from ${ctx.url.origin}/link/verify in your browser, then run wsp login again`);
 }
 
+/** No form on the page carries a bearer, so a request with one is a program's and reads JSON on a page's road too. */
+export const carriesBearer = (req: Request): boolean => req.headers.has("authorization");
+
 /** The person says yes, on the page or from a wsp already in. The code is spent here, once, whichever gets there
- * first. A request carrying a bearer is a wsp's, since the page's form carries none. */
+ * first. */
 export async function linkApprove(ctx: Ctx): Promise<Response> {
-  if (ctx.req.headers.has("authorization")) return approveFromWsp(ctx);
+  if (carriesBearer(ctx.req)) return approveFromWsp(ctx);
   const form = new URLSearchParams(await bodyText(ctx));
-  const account = await readSession(ctx.env.RELAY_SIGNING_KEY, cookieOf(ctx.req.headers.get("cookie"), SESSION_COOKIE), ctx.deps.now());
-  const who = account === undefined ? undefined : await accountOf(ctx.env, account);
+  const who = await signedIn(ctx);
   if (who === undefined) throw refuse(401, "sign in first: open the page the command line printed");
   const code = form.get("code") ?? "";
-  const stamped = await readStamp(ctx.env.RELAY_SIGNING_KEY, "approve", form.get("stamp") ?? undefined, ctx.deps.now(), who.id);
+  const stamped = await readStamp(ctx.env.RELAY_SIGNING_KEY, APPROVE_STAMP, form.get("stamp") ?? undefined, ctx.deps.now(), who.id);
   // The stamp names the code the page was rendered for, so a form posted from anywhere else approves nothing.
   if (stamped === undefined || stamped !== code) throw refuse(403, "that form did not come from this relay's page; open the page the command line printed again");
   const row = await linkByCode(ctx.env, code);
