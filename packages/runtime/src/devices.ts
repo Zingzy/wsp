@@ -5,13 +5,17 @@
 // once and never stored: only its sha256 is kept, and every reading of it is a
 // timing safe compare of that hash.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, type ThreadScope } from "@wsp/protocol";
+import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, type DeviceVia, type ThreadScope } from "@wsp/protocol";
 import type { Store } from "./store.js";
 
 /** One document per paired computer, keyed by its id. */
 const DEVICES = "devices";
 /** One document per unspent pairing code, keyed by the code itself, so a redeem is one read. */
 const PAIRINGS = "pairings";
+/** One document per key this host took away, keyed by the fingerprint: a device admitted through the account
+ * carries the same key when it signs in again while the relay mints it a fresh id, so the key is what a refusal
+ * has to remember. Kept until the account stops holding a device under it. */
+const REVOKED = "revoked-keys";
 
 /** Two strings of the same bytes, in a time that does not say where they first differ. The one compare every road
  * into this host makes, whether it holds the host's own token or a device's hash. */
@@ -33,6 +37,10 @@ interface DeviceRecord {
   scope?: ThreadScope;
   /** Set on the browser wsp init opened here, whose code init itself minted: read as the owner. */
   here?: true;
+  /** Set on a device admitted through the account rather than by a code: which computer it is there, the key it
+   * proved and the key that signed for it. The key is kept because a device admitted here may sign the next one's
+   * admission, and the host trusts no key it has not seen at an admission. */
+  via?: DeviceVia;
 }
 
 interface PairingRecord {
@@ -41,6 +49,14 @@ interface PairingRecord {
   /** Carried onto the device the code admits. */
   here?: true;
 }
+
+/** What the store keeps for a key this host took away: the fingerprint, which is the whole of it. No clock is
+ * read here, since every method of the door below is handed the one the server injects. */
+interface RevokedRecord {
+  fingerprint: string;
+}
+
+const isRevoked = (v: unknown): v is RevokedRecord => typeof v === "object" && v !== null && typeof (v as RevokedRecord).fingerprint === "string";
 
 const isDevice = (v: unknown): v is DeviceRecord =>
   typeof v === "object" && v !== null && typeof (v as DeviceRecord).id === "string" && typeof (v as DeviceRecord).tokenHash === "string";
@@ -68,6 +84,7 @@ const viewOf = (record: DeviceRecord): DeviceView => ({
   lastSeenAt: record.lastSeenAt,
   ...(record.scope !== undefined ? { scope: record.scope } : {}),
   ...(record.here === true ? { here: true } : {}),
+  ...(record.via !== undefined ? { via: record.via } : {}),
 });
 
 /** What a redeem hands back: the token, once, and the record every later listing shows. */
@@ -94,6 +111,18 @@ export interface DeviceDoor {
    * join spent the code the person carried across the room) asks for the token its own window will hold. Stored,
    * hashed, listed and revoked exactly as every other device is. */
   admit(name: string, now: number): Promise<PairedDevice>;
+  /** A device the account admitted: no code was spent, and an admission signed by a key this host already trusts
+   * is what let it in. Stored, hashed, listed and revoked exactly as a device that redeemed a code is; `via` is
+   * what tells them apart in a listing and what a revoke here remembers. */
+  admitAccount(name: string, via: DeviceVia, now: number): Promise<PairedDevice>;
+  /** Whether this host took a device holding that key away and still remembers it, which is what keeps an
+   * admission it still holds from letting it back in through the account. */
+  refuses(fingerprint: string): Promise<boolean>;
+  /** Every key this host took away and still remembers. */
+  refused(): Promise<string[]>;
+  /** Forgets one, which the reconcile does for a key the account no longer holds a device under: a computer signed
+   * out of the account and signed in again is a fresh admission and not the one that was taken away. */
+  forget(fingerprint: string): Promise<void>;
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
@@ -127,7 +156,7 @@ export function makeDevices(store: Store): DeviceDoor {
 
   /** One device record and the one token it will ever hand over. Both roads that make a device come through here,
    * so a scoped token is stored, hashed and named by exactly the rule a paired computer's is. */
-  const admit = async (name: string, scope: ThreadScope | undefined, now: number, here?: true): Promise<PairedDevice> => {
+  const admit = async (name: string, scope: ThreadScope | undefined, now: number, more: { here?: true; via?: DeviceVia } = {}): Promise<PairedDevice> => {
     const deviceToken = randomBytes(24).toString("base64url");
     const at = new Date(now).toISOString();
     const record: DeviceRecord = {
@@ -139,7 +168,8 @@ export function makeDevices(store: Store): DeviceDoor {
       createdAt: at,
       lastSeenAt: at,
       ...(scope !== undefined ? { scope } : {}),
-      ...(here === true ? { here: true } : {}),
+      ...(more.here === true ? { here: true } : {}),
+      ...(more.via !== undefined ? { via: more.via } : {}),
     };
     await store.put(DEVICES, record.id, record);
     return { deviceId: record.id, deviceToken, device: viewOf(record) };
@@ -168,11 +198,15 @@ export function makeDevices(store: Store): DeviceDoor {
     redeem: (code, name, now) =>
       oneAtATime(async () => {
         const spent = await spendCode(code, now);
-        return spent === undefined ? undefined : admit(name, undefined, now, spent.here);
+        return spent === undefined ? undefined : admit(name, undefined, now, spent.here === true ? { here: true } : {});
       }),
     spend: (code, now) => oneAtATime(async () => (await spendCode(code, now)) !== undefined),
     admit: (name, now) => oneAtATime(() => admit(name, undefined, now)),
+    admitAccount: (name, via, now) => oneAtATime(() => admit(name, undefined, now, { via })),
     mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
+    refuses: async fingerprint => isRevoked(await store.get(REVOKED, fingerprint)),
+    refused: async () => (await store.list(REVOKED)).filter(isRevoked).map(held => held.fingerprint),
+    forget: fingerprint => oneAtATime(() => store.delete(REVOKED, fingerprint)),
     match: async token => {
       const digest = tokenDigest(token);
       // Every record is compared, and the first match is kept rather than returned: a loop that leaves early would
@@ -196,6 +230,9 @@ export function makeDevices(store: Store): DeviceDoor {
       oneAtATime(async () => {
         const held = await store.get(DEVICES, id);
         if (!isDevice(held)) return false;
+        // The key first: a revoke that took the record away and then failed would leave the device free to dial
+        // back in on the admission it still holds.
+        if (held.via !== undefined) await store.put(REVOKED, held.via.fingerprint, { fingerprint: held.via.fingerprint } satisfies RevokedRecord);
         await store.delete(DEVICES, id);
         return true;
       }),

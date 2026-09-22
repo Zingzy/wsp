@@ -80,9 +80,10 @@ The front page of `wsp --help` is sixteen words on five nouns: image, place, wor
 | `wsp init --provider <id>` | `wsp add <id>` |
 | `wsp pair`, `wsp devices` | `wsp host pair`, `wsp host devices` |
 | `wsp connect <url>` | `wsp host connect <url>` |
-| `wsp hosts`, `wsp hosts default`, `wsp disconnect` | `wsp host list`, `wsp host default`, `wsp host forget` |
+| `wsp hosts default`, `wsp disconnect` | `wsp host default`, `wsp host forget` |
 | `wsp relay link`, `wsp relay unlink` | `wsp host link`, `wsp host unlink` |
-| `wsp relay hosts`, `wsp relay clients` | `wsp host linked`, `wsp host clients` |
+| `wsp relay hosts`, `wsp host linked`, `wsp host list` | `wsp hosts`, one listing of both roads |
+| `wsp relay clients`, `wsp host clients` | `wsp login`, and `wsp logout <id>` to sign one out |
 | `wsp up` to get going | nothing: the first command that needs a host starts one, and `wsp down` stops it |
 | plain `wsp` serving | plain `wsp` prints the help |
 

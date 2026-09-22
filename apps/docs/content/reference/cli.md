@@ -40,9 +40,12 @@ Sleeping is automatic. A line that needs a host starts one when none serves.
 
 wsp up                 serve a host in this terminal, to watch it
 wsp down               stop it
+wsp login              sign this computer in to your account
+wsp logout             sign it out; wsp logout <id> signs another out
+wsp hosts              the hosts you can reach, the one lines take marked
 wsp <verb> --help      the verb's own flags
 wsp --help agent       the verbs your agents use
-wsp host --help        a host on another computer: pair, connect, link
+wsp host --help        a host outside your account: pair, connect, link
 wsp --version
 ```
 
@@ -198,38 +201,33 @@ exit codes; every failure is one line on stderr, the failure object with --json:
       the computers paired with a host and what each token is read as; revoke
       takes one back out. --host reads a host on another computer this one is
       paired with
-  wsp host connect <url> --code <code> [--name <alias>] [--relay <host>]
-      redeem a code from a host on another computer for a token of this one's
-      own; --name is what every later line calls that host, and --relay reaches
-      it through your relay by the name it has there
-  wsp host list
-      the hosts on other computers this computer holds, the default marked
+  wsp host connect <url> --code <code> [--name <alias>]
+      redeem a code from a host outside your account for a token of this
+      computer's own; --name is what every later line calls that host, and a
+      host on your account needs no code at all
   wsp host default <alias>
       move which host every line on this computer runs against
   wsp host forget <alias>
       hand that host its token back and forget it here
-  wsp host link <url> [--name <name>]
-      put this computer on your relay account, so it is reachable from anywhere
-      with no port open to the world; it prints a code and a page to approve it
-      on
+  wsp host link [<url>] [--name <name>]
+      put the host on this computer onto your account, so it is reachable from
+      anywhere with no port open to the world; on a computer that is signed in
+      it takes no address and asks nothing, and on one that is not it prints a
+      code and a page to approve it on
   wsp host unlink
       take this computer off the relay account and stop its tunnel
-  wsp host linked [<url>]
-      the boxes on your relay account, from whichever computer you are at
-  wsp host clients [revoke <id>]
-      which computers hold a token for your relay account; revoke signs one out
   wsp host devices revoke <id>
       take one computer's token away
-  wsp host clients revoke <id>
-      sign one computer out of your relay account
 
-You need these only for a host serving on a computer that is not the one you are
-sitting at, or for one outside your own account: pair hands out the code that
-lets another computer drive a host, and it runs at that host's own terminal;
-devices lists the computers that took one and takes one back out, from that
-terminal or from any computer paired with the host; connect, list, default and
-forget hold the hosts this computer drives; link, unlink, linked and clients put
-a computer on your relay, so it is reachable with no port open to the world.
+You need these only for a host on a computer that is not the one you are sitting
+at: wsp login signs this computer in to your account and wsp hosts lists the
+hosts on it, which need no code at all. pair hands out the code that lets a
+computer outside your account drive a host, and it runs at that host's own
+terminal; devices lists the computers that hold a token for a host and takes one
+back out, from that terminal or from any computer paired with it; connect,
+default and forget hold the hosts this computer reaches by a code; link and
+unlink put the host on this computer onto your account, so it is reachable with
+no port open to the world.
 ```
 
 ## wsp --help dev
@@ -259,8 +257,8 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
   when it has a row to pick, then Build. Beside a host already serving this
   state file the screens are the same and the build runs in that host, on the
   place --on names or its default place, a computer you joined included. With no
-  host serving and no provider key it seals nothing and makes this computer your
-  workspace instead
+  host serving and no provider key it seals nothing and makes your first
+  workspace a copy of a folder here instead
 
   --state              the state file: this word first, else WSP_HOME's
                        state.json, else ./.wsp/state.json when the current
@@ -309,12 +307,12 @@ usage: wsp add
        [--on <computer>] [--name <name>] [--base <branch>] [--yes]
        [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember]
        [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]
-  a computer of yours over ssh, or a project: a folder on this computer worked
-  in place, or a repo a computer clones with --on <computer>; <provider> takes a
-  provider's key, nothing prints the join line another computer types, a
-  computer with --update puts this wsp's daemon on one already in, and a
-  computer with --sign-in signs that agent in there once, outside every
-  workspace on it
+  a computer of yours over ssh, or a project: a folder on this computer, which
+  every workspace of it is a copy of, or a repo a computer clones with --on
+  <computer>; <provider> takes a provider's key, nothing prints the join line
+  another computer types, a computer with --update puts this wsp's daemon on one
+  already in, and a computer with --sign-in signs that agent in there once,
+  outside every workspace on it
 
   --state         the state file: this word first, else WSP_HOME's state.json,
                   else ./.wsp/state.json when the current directory is a
@@ -338,8 +336,8 @@ usage: wsp add
                   workspace there shares the one login. Offered by the join
                   itself; this is the same road for a computer already in
   --on            the computer a project lives on, by the name wsp computers
-                  lists: a repo's url needs one, since this computer works a
-                  folder of yours in place and never clones
+                  lists: a repo's url needs one, since this computer copies a
+                  folder of yours and never clones
   --base          the branch a workspace of the project starts on; the remote's
                   own default branch at the clone without it
   --yes           send the ticked rows of the seed menu; without it a folder
@@ -540,20 +538,16 @@ usage: wsp threads [<workspace>] [--tree] [--watch]
 ## wsp send
 
 ```text
-usage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>]
-       [--detach] "<message>"
-  a message to the thread, on a named model, effort or access, with images; a
-  running turn keeps its own; --detach prints the id and returns
+usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach]
+       "<message>"
+  a message to the thread, on a named model or effort, with images; the thread
+  keeps its own access and a running turn its own picks; --detach prints the id
+  and returns
 
   --model     the model the turn runs on, by the agent's own slug
               (claude-sonnet-5); the thread's own without it
   --effort    how hard the agent thinks, by its own word (low, medium, high,
               xhigh, max); its default without it
-  --access    how far the agent may go without asking, by the agent's own word
-              (plan, acceptEdits, bypassPermissions); without it, what a thread
-              on that workspace starts at: every action without asking on this
-              computer and on a machine wsp forked, asking about each one on a
-              computer you own
   --image     an image file on this computer to send with the message; repeats
   --detach    print the thread's id and return, leaving the reply to the
               thread's finished line

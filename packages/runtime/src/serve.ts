@@ -28,6 +28,10 @@ import {
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
+  DEVICE_ACCOUNT_UNSERVED,
+  DEVICE_AUTH_REFUSAL,
+  DEVICE_REVOKED_REFUSAL,
+  deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
   DAEMON_OPEN_ONE_OF,
   PLACE_CODE_REFUSAL,
@@ -52,6 +56,7 @@ import {
   threadOpRefusal,
   deviceHeldRefusal,
   isObjectFrame,
+  type AccountDevice,
   type AccountView,
   type DeviceView,
   type DoctorLineEvent,
@@ -70,7 +75,7 @@ import {
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
-import { openFrame, type Seal } from "@wsp/keys";
+import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -113,6 +118,9 @@ export interface ServeOptions {
   /** How the host reads the account it is signed in to; without it account.get is refused, since the runtime keeps
    * no records of its own. */
   account?: AccountDoor;
+  /** What the host knows of the account's own computers, for the one door a device with no code comes in by;
+   * without it device.auth is refused, which is what a host on no account answers. */
+  admitted?: AdmittedDevices;
   ticketTtlMs?: number;
   pairTtlMs?: number;
   /** How long a socket that has not been let in yet has to send its first frame, the protocol's own number unless
@@ -146,6 +154,20 @@ export interface AccountDoor {
   read(): Promise<AccountView>;
 }
 
+/** What the door reads of the account this host is on. The host owns the heartbeat that learns it and the file the
+ * key was written in; the runtime owns which of it admits a computer. */
+export interface AdmittedDevices {
+  /** The key this host trusts to sign an admission because the computer that put this host on the account holds
+   * it, as the link recorded it. Nothing when this host is on no account, which is what refuses device.auth. */
+  signer(): { fingerprint: string; publicKey: string } | undefined;
+  /** The account's computers as the last explicit listing said, and nothing when this host has heard none: absent
+   * is unknown and never empty, so a relay that is down or a beat that was refused admits nobody new. */
+  list(): readonly AccountDevice[] | undefined;
+  /** One more beat, for a key the listing does not hold yet; bounded by the host, so a stranger on the tunnel
+   * cannot make this host call its relay once per attempt. */
+  refresh(): Promise<void>;
+}
+
 /** How the runtime asks the host for the door computers a person owns dial. The host owns the listener; the runtime
  * owns who may ask for it. */
 export interface PlaceDoorControl {
@@ -176,6 +198,9 @@ export interface RuntimeServer {
   /** Who the bearer token of an HTTP request names, or nothing when it names nobody. The JSON routes the host
    * serves beyond loopback gate on this, so the WebSocket and those routes read one token store. */
   authorize(token: string | undefined): Promise<Authed | undefined>;
+  /** Takes one device's token away and cuts the sockets it held, which is what the op does: the host's heartbeat
+   * reconcile comes through here, so a device the account dropped goes exactly as a revoke at the terminal goes. */
+  revokeDevice(id: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -277,6 +302,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
    * still driving the host until the client happens to redial. */
   const held = new Set<{ deviceId: string; cut: () => void }>();
 
+  /** The one road a device is taken away by: the record, then whatever the caller wants said, then the sockets it
+   * held. The op and the host's own reconcile of the account's listing both come through here, so a device the
+   * account dropped goes exactly as one revoked at the terminal goes. */
+  const revokeDevice = async (id: string, answer?: (revoked: boolean) => void): Promise<boolean> => {
+    const revoked = await devices().revoke(id);
+    answer?.(revoked);
+    for (const socket of [...held]) if (socket.deviceId === id) socket.cut();
+    return revoked;
+  };
+
   const originAllowed = opts.originAllowed ?? ((): boolean => true);
   /** The host's own reading of the road a request arrived on, the rule and its reason on that host's `ownRoad`.
    * Named apart from the `ownRoad()` a socket carries below, which says what that socket is rather than where its
@@ -364,6 +399,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
      * under the key both ends agreed, and every frame it reads is opened with it. A carrier holding the bytes
      * reads nothing and writes nothing into what follows. */
     let seal: Seal | undefined;
+    /** Set at a native client's seal.open: the bytes that socket's own signature must cover, which is the same
+     * transcript a joined computer answers at place.prove. Read by device.auth alone, so a device proves the key
+     * it is admitted under over this socket's own handshake and not over bytes it chose. */
+    let sealExpect: Uint8Array | undefined;
 
     const detaches: (() => void)[] = [];
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
@@ -523,6 +562,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             deciding = false;
             send({ id: msg.id, ok: true, nonce: opened.nonce, hostPublicKey: opened.hostPublicKey, signature: opened.signature, ephemeral: opened.ephemeral });
             seal = opened.seal;
+            sealExpect = opened.expect;
             return;
           }
           if (msg.op === "place.join" || msg.op === "place.auth") {
@@ -566,6 +606,60 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             throughDoor();
             bind(paired.device);
             send({ id: msg.id, ok: true, deviceId: paired.deviceId, deviceToken: paired.deviceToken });
+            return;
+          }
+          if (msg.op === "device.auth") {
+            // A computer on the account, coming in with no code. The four checks in order, and one sentence for
+            // every way the first three fail: a caller this host will not admit learns nothing from which caught
+            // it. The revoked key is the one that answers for itself, since only a device that proved the key it
+            // holds reaches that check.
+            const account = opts.admitted;
+            const signer = account?.signer();
+            if (account === undefined || signer === undefined || opts.devices === undefined) return refuse(DEVICE_ACCOUNT_UNSERVED);
+            // Inside the seal and over this socket's own handshake: a frame that agreed no key carries a signature
+            // that could have been made for any socket at all.
+            if (sealExpect === undefined) return refuse(UNAUTHORIZED);
+            const fingerprint = keyFingerprint(msg.publicKey);
+            const listed = (): AccountDevice | undefined => account.list()?.find(device => device.fingerprint === fingerprint);
+            let row = listed();
+            if (row === undefined) {
+              // A key the listing does not hold may be one approved a moment ago, and a host that has heard no
+              // listing at all has heard nothing about anybody: one more beat, bounded by the host that beats.
+              await account.refresh().catch(() => undefined);
+              row = listed();
+            }
+            if (row === undefined) return refuse(DEVICE_AUTH_REFUSAL);
+            const admitted = await Promise.resolve()
+              .then(async () => {
+                // The keys this host trusts: the one the computer that linked it holds, and every device it
+                // admitted through the account, whose public key it saw at that admission. Never one off the wire.
+                const here = await devices().list();
+                const keyOf = (by: string): string | undefined =>
+                  by === signer.fingerprint ? signer.publicKey : here.find(device => device.via?.kind === "account" && device.via.fingerprint === by)?.via?.publicKey;
+                for (const admission of row.admissions) {
+                  const key = keyOf(admission.by);
+                  if (key === undefined) continue;
+                  if (verifyPlaceBytes(key, deviceAdmissionTranscript(fingerprint, admission.by, admission.issuedAt), admission.signature)) return admission.by;
+                }
+                return undefined;
+              })
+              .catch(() => undefined);
+            if (admitted === undefined) return refuse(DEVICE_AUTH_REFUSAL);
+            if (!verifyPlaceBytes(msg.publicKey, sealExpect, msg.signature)) return refuse(DEVICE_AUTH_REFUSAL);
+            // A device this host took away: remembered by its key, since the same key signing in again is given a
+            // fresh id on the relay while the admission bytes it holds stay bytes that verify.
+            const refused = await devices()
+              .refuses(fingerprint)
+              .catch(() => true);
+            if (refused) return refuse(DEVICE_REVOKED_REFUSAL);
+            const device = await Promise.resolve()
+              .then(() => devices().admitAccount(msg.name, { kind: "account", relayDeviceId: row.id, fingerprint, publicKey: msg.publicKey, admittedBy: admitted }, now()))
+              .catch(() => undefined);
+            if (device === undefined) return refuse(DEVICE_AUTH_REFUSAL);
+            authed = true;
+            throughDoor();
+            bind(device.device);
+            send({ id: msg.id, ok: true, deviceId: device.deviceId, deviceToken: device.deviceToken });
             return;
           }
           if (msg.op !== "auth") return refuse(UNAUTHORIZED);
@@ -622,6 +716,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "pair.redeem":
               // The door above spends a code; a socket already through it is asking for a second identity.
               send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
+              return;
+            case "device.auth":
+              // The door above admits a computer on the account; this socket is already somebody.
+              send({ id: msg.id, ok: false, error: DEVICE_AUTH_REFUSAL });
               return;
             case "seal.open":
               // The door above agrees the key, before this socket said who it is; one is agreed per socket and
@@ -768,10 +866,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
                 return;
               }
-              const revoked = await devices().revoke(msg.deviceId);
-              send({ id: msg.id, ok: true, revoked });
-              // Cut after the reply so the device that revoked itself reads the answer before its socket goes.
-              for (const socket of [...held]) if (socket.deviceId === msg.deviceId) socket.cut();
+              // The reply goes between the record and the cut, so a device that revoked itself reads the answer
+              // before its own socket goes.
+              await revokeDevice(msg.deviceId, revoked => send({ id: msg.id, ok: true, revoked }));
               return;
             }
             case "ticket.issue": {
@@ -1250,6 +1347,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   return {
     port,
     authorize: async token => (token === undefined || token === "" ? undefined : whoIs(token)),
+    revokeDevice,
     close: async () => {
       for (const server of attachTo) server.off("upgrade", onUpgrade);
       // The socket did not break under a client, the host let it go: the close code is what tells a command waiting

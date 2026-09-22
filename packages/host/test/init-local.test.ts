@@ -105,7 +105,7 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
     roads,
     host: async rt => {
       counters.hosts += 1;
-      return { port: 4400, wsPort: 4410, authToken: "tok", hereCode: async () => CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
+      return { port: 4400, wsPort: 4410, authToken: "tok", revokeDevice: async () => false, hereCode: async () => CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
     },
   };
   const press = async (...keys: string[]): Promise<void> => {

@@ -56,9 +56,10 @@ wsp up
 # public      https://blue-sky-1234.trycloudflare.com
 
 # on your laptop
-wsp host linked https://relay.example
-wsp host pair                     # run this one on the box, for the code
-wsp host connect --relay box --code QWAXC5GT
+wsp login https://relay.example
+# it prints one word; run wsp login <word> on a computer already signed in,
+# or open the page it names and type the code there
+wsp hosts                         # the boxes on the account, the one lines take marked
 wsp threads --host box
 ```
 
@@ -70,11 +71,11 @@ What the relay's own database knows is the whole of what it stores: which boxes 
 This road is not as private as the two above it, and the difference is worth reading twice. A tunnel terminates TLS at Cloudflare's edge, so **Cloudflare sees your traffic in the clear**, including the device token your laptop sends on every request. The relay's operator holds the Cloudflare account the tunnel lives on: they can read the tunnel's own credential and point your hostname somewhere else. Pairing protects you from strangers on the internet, not from Cloudflare and not from whoever runs the relay. The direct road and the private network road have neither of those properties: nothing in the middle holds your traffic. If that matters for what your agents can reach, use one of them, or run the relay yourself on your own Cloudflare account, which is what the last section is for.
 </Callout>
 
-The code still comes from `wsp host pair` on the box and travels to you by whatever channel you like.
+A box on your own account needs no code: your laptop signs in once with `wsp login`, a computer already signed in approves it with `wsp login <word>`, and the first line aimed at a box proves the key your laptop signs with and takes a device token of its own. The key your laptop holds is the one the box was told to trust when `wsp host link` put it on the account, and an approval is bytes one of your computers signed, which the relay carries and cannot make. `wsp host pair` and `wsp host connect` stay for a box outside your account.
 
 `wsp host unlink` on the box takes it off your account, stops the tunnel and deletes the hostname. `wsp up --no-relay` serves without the tunnel for one run, stopping any connector an earlier run left behind first.
 
-On your own computer, `wsp host clients` says which computers hold a token for your relay account and `wsp host clients revoke <id>` signs one out. That token lists your boxes and can take any of them off the account, so a laptop you no longer have is worth revoking; it also runs out on its own after 30 days. It cannot open a box: that still needs a pairing code from the box itself.
+On your own computer, `wsp login` on its own says which computers are signed in to your account, which key each holds and who admitted it, and `wsp logout <id>` signs one out; every box drops what that computer was admitted for on its next beat, within a minute. `wsp logout` with nothing after it signs this computer out. That token lists your boxes, takes any of them off the account and puts one on, so a laptop you no longer have is worth signing out; it also runs out on its own after 30 days. It cannot open a box on its own: that takes an approval signed by a computer the box already trusts.
 
 ### The connector
 
@@ -105,4 +106,4 @@ The API token needs Cloudflare Tunnel write on that account, and DNS write on th
 Give it a zone nothing else depends on. The relay only ever writes and deletes `<host id>.<zone>`, but the API token you hand it can write any record in that zone, so anyone who takes over the Worker or the token takes over the whole zone and every tunnel on the account. A zone that also holds your mail or your main site is the wrong one to pick.
 </Callout>
 
-Then point your boxes at it: `wsp host link https://<your relay>` on each one, and `wsp host linked https://<your relay>` on the computer you drive them from.
+Then point your boxes at it: `wsp host link https://<your relay>` on each one, and `wsp login https://<your relay>` on the computer you drive them from.

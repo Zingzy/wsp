@@ -21,6 +21,10 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 /** The sixteen words, in the order the front page prints them. */
 const FRONT = ["init", "add", "computers", "remove", "projects", "new", "workspaces", "threads", "run", "send", "stop", "pause", "wake", "delete", "status", "mcp"];
 
+/** The three lines about the person's own account, which print in the block under the sixteen rather than among
+ * them: they are not work on a workspace, and a person meets them once. */
+const ACCOUNT = ["login", "logout", "hosts"];
+
 /** Every line the front page draws: one per word, each opening at two spaces. */
 const frontLines = (): string[] => HELP.split("\n").filter(line => line.startsWith("  wsp "));
 
@@ -39,7 +43,7 @@ describe("the pages wsp prints", () => {
     expect(frontLines()).toHaveLength(16);
     expect(frontLines().map(line => line.trim().split(" ")[1])).toEqual(FRONT);
     // Each of the sixteen is a line that declares the front page, and no other line does.
-    expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT].sort());
+    expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT, ...ACCOUNT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
     expect(HELP).toContain("A workspace or a thread comes right after the verb.");
     expect(HELP).toContain("new takes the project when");
@@ -54,6 +58,8 @@ describe("the pages wsp prints", () => {
     const block = HELP.split("\n\n").at(-1)!;
     expect(block).toContain("wsp up ");
     expect(block).toContain("wsp down ");
+    // The account's three lines print there too: a person signs this computer in once and reaches every host on it.
+    for (const words of ACCOUNT) expect(block, words).toContain(`wsp ${words}`);
     expect(HELP).toContain(HOST_STARTS_ITSELF);
     expect(HELP).not.toContain("and up and down");
     // The page for agents still carries their flags, under a title that says who the lines on it are for, and the
@@ -113,8 +119,9 @@ describe("the pages wsp prints", () => {
     for (const pick of ["model", "effort", "access"]) expect(reads("run", pick), `wsp run reads --${pick}`).toBe(true);
     for (const pick of ["model", "effort"]) expect(reads("send", pick), `wsp send reads --${pick}`).toBe(true);
     expect(reads("send", "access"), "wsp send does not read --access").toBe(false);
-    // Forty rows on a normal terminal: the page is read whole or it is not read.
-    expect(HELP.split("\n").length).toBeLessThanOrEqual(40);
+    // A normal terminal's worth of rows: the page is read whole or it is not read. Three of them are the account's
+    // lines, which came with signing in once.
+    expect(HELP.split("\n").length).toBeLessThanOrEqual(43);
   });
 
   it("every line declares a page, and each page names its own lines and no others", () => {
@@ -246,7 +253,9 @@ describe("the pages wsp prints", () => {
 
   it("no page, tool description, skill, instruction, AGENTS.md, README or doc carries a word wsp no longer answers to", () => {
     // "--in <" alone let three rows of the skill keep the flag in backticks with no value after it.
-    const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp hosts", "wsp disconnect", "run wsp up first"];
+    // wsp hosts is a line again, under the ruling that one listing answers for both roads to a host; the words
+    // that are gone for good are the ones below.
+    const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp disconnect", "wsp host list", "wsp host linked", "wsp host clients", "run wsp up first"];
     const docs = filesUnder(join(REPO, "apps/docs/content")).filter(p => p.endsWith(".mdx") || p.endsWith(".md"));
     const texts: [string, string][] = [
       ["the front page", HELP],

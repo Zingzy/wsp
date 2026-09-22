@@ -76,10 +76,26 @@ describe("what wsp says when it will not run a line", () => {
     expect(io.errors[0]!.startsWith("wsp run: wsp run")).toBe(false);
   });
 
+  it("refuses a second word on the account's lines rather than running on the first and dropping it", async () => {
+    // A word nobody reads is a line that did something other than what was typed, and the three account lines
+    // take one word at most.
+    const login = await run("login", "https://relay.example", "extra");
+    expect(login.code).toBe(EXIT_CODES.usage);
+    expect(login.io.errors[0]).toContain("wsp login takes one word, and got 2.");
+    const logout = await run("logout", "c1", "c2");
+    expect(logout.code).toBe(EXIT_CODES.usage);
+    expect(logout.io.errors[0]).toContain("wsp logout takes one word, and got 2.");
+    const hosts = await run("hosts", "box");
+    expect(hosts.code).toBe(EXIT_CODES.usage);
+    expect(hosts.io.errors[0]).toContain("wsp hosts takes no words, and got box.");
+  });
+
   it("answers a word wsp used to have as it answers any other word nothing knows: one line and the pointer, with nothing dialled", async () => {
     // No old word is kept as a road, hidden or otherwise: the release note says what moved, once, and the command
     // line carries none of it.
-    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["hosts"], ["disconnect", "box"]]) {
+    // wsp hosts is a line again, under the ruling that one listing answers for both roads to a host, so the words
+    // below are the ones that are gone for good.
+    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["disconnect", "box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);

@@ -12,11 +12,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
 import { addressLines } from "../src/host-lock.js";
 import { connectCommand } from "../src/connect.js";
-import { dialWindowMs, readHost } from "../src/hosts.js";
+import { defaultHost, dialWindowMs, hostsDir, readHost, setDefaultHost, writeHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
-import { accountHere, publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
+import {
+  BEAT_FLOOR_MS,
+  accountHere,
+  admittedDevices,
+  hostsCommand,
+  loginCommand,
+  logoutCommand,
+  publicHostname,
+  readDeviceKeyPair,
+  readRelayClient,
+  readRelayRecord,
+  relayCommand,
+  relayRecordPath,
+  startRelay,
+  writeRelayRecord,
+  type RelayDeps,
+  type RelayDeviceDoor,
+} from "../src/relay-link.js";
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
+import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
+import { DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, type DeviceView } from "@wsp/protocol";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
@@ -70,8 +89,11 @@ interface FakeRelay {
   tunnel: { tunnelToken: string | null; hostname: string | null; why?: string };
   /** What the approval says about who approved it; empty for a relay from before it named one. */
   login: { login?: string };
-  hosts: { id: string; name: string; hostname: string | null }[];
-  clients: { id: string; name: string; thisOne: boolean }[];
+  hosts: { id: string; name: string; hostname: string | null; hostKey?: string | null; lastSeen?: string | null; connectorVersion?: string | null }[];
+  clients: { id: string; name: string; thisOne: boolean; fingerprint?: string | null; admissions?: { by: string; issuedAt: string; signature: string }[] }[];
+  /** Whether the heartbeat's reply carries a devices field at all: a relay from before the migration carries none,
+   * and absent is unknown rather than empty. */
+  saysDevices: boolean;
   /** Called as each request arrives, for a test that cares what was already true by then. */
   onCall?: (line: string) => void;
   /** A route answers this refusal instead, once armed. */
@@ -82,7 +104,7 @@ interface FakeRelay {
 const isQuickTunnel = (name: string): boolean => /^[a-z0-9-]+\.trycloudflare\.com$/i.test(name);
 
 async function fakeRelay(): Promise<FakeRelay> {
-  const state: FakeRelay = { url: "", calls: [], pending: 1, login: { login: "zingzy" }, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
+  const state: FakeRelay = { url: "", calls: [], pending: 1, login: { login: "zingzy" }, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [], saysDevices: true };
   const server = createServer((req, res) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -100,7 +122,23 @@ async function fakeRelay(): Promise<FakeRelay> {
       };
       if (state.refuse !== undefined && !line.includes("/link/")) return send(state.refuse.status, { error: state.refuse.error });
       if (line === "POST /link/start") {
+        // The Worker's own rule: a computer signing in names the key it will prove to the boxes, and a box's link
+        // names none, since a box names its key on its heartbeat.
+        const fingerprint = body["fingerprint"];
+        if (body["kind"] === "client" && typeof fingerprint !== "string") return send(400, { error: "a sign-in starts with the fingerprint of this computer's device key, which wsp login sends; this wsp sent none" });
+        if (body["kind"] === "host" && fingerprint !== undefined) return send(400, { error: "a box's link carries no fingerprint" });
         return send(200, { code: "ABCD2345", verifyUrl: `${state.url}/link/verify`, pollToken: "poll-token", expiresAt: new Date(Date.now() + 900_000).toISOString(), pollAfterMs: 1 });
+      }
+      if (line === "POST /link/approve") {
+        // The road a wsp already in takes: its own token, the code and the admission it signed, which the relay
+        // keeps and cannot make.
+        const started = state.calls.filter(c => c.line === "POST /link/start").at(-1);
+        return send(200, { approved: true, name: String(started?.body["name"] ?? "") });
+      }
+      if (/^POST \/clients\/[^/]+\/admissions$/.test(line)) return send(200, { recorded: true });
+      if (line === "POST /hosts") {
+        state.hosts.push({ id: "hbox1", name: String(body["name"] ?? ""), hostname: null, hostKey: typeof body["hostKey"] === "string" ? body["hostKey"] : null });
+        return send(200, { hostId: "hbox1", name: String(body["name"] ?? ""), token: "host-token", ...state.login });
       }
       if (line === "POST /link/poll") {
         if (state.pending > 0) {
@@ -110,7 +148,10 @@ async function fakeRelay(): Promise<FakeRelay> {
         const started = state.calls.filter(c => c.line === "POST /link/start").at(-1);
         const kind = started?.body["kind"];
         const name = String(started?.body["name"] ?? "");
-        return send(200, kind === "client" ? { state: "approved", token: "client-token", name, ...state.login } : { state: "approved", token: "host-token", hostId: "hbox1", name, ...state.login });
+        if (kind === "client") return send(200, { state: "approved", token: "client-token", name, ...state.login });
+        // The approval is what makes the box's row, as the Worker's own does, so a listing and a beat find it.
+        if (!state.hosts.some(h => h.id === "hbox1")) state.hosts.push({ id: "hbox1", name, hostname: null, hostKey: null });
+        return send(200, { state: "approved", token: "host-token", hostId: "hbox1", name, ...state.login });
       }
       if (line === "POST /hosts/hbox1/tunnel") return send(200, state.tunnel);
       if (line === "POST /hosts/hbox1/heartbeat") {
@@ -126,7 +167,17 @@ async function fakeRelay(): Promise<FakeRelay> {
         const row = state.hosts.find(h => h.id === "hbox1");
         const managed = row !== undefined && row.hostname !== null && !isQuickTunnel(row.hostname);
         if (row !== undefined && reported !== undefined && !managed) row.hostname = reported;
-        return send(200, { ok: true });
+        // The key is written once: a beat proving another is refused and nothing on that beat is written, which is
+        // what a box whose state was wiped meets.
+        const provedKey = body["hostKey"];
+        if (row !== undefined && typeof provedKey === "string") {
+          if (row.hostKey === null || row.hostKey === undefined) row.hostKey = provedKey;
+          else if (row.hostKey !== provedKey) return send(409, { error: `${row.name} is on this account under the key ${row.hostKey}; take it off with wsp host unlink there and put it back on with wsp host link` });
+        }
+        // The account's own computers, with the admissions signed for them: the box verifies every signature
+        // itself, with keys this relay does not hold. A computer holding no key is on no box's list.
+        const devices = state.clients.flatMap(c => (typeof c.fingerprint === "string" ? [{ id: c.id, name: c.name, fingerprint: c.fingerprint, admissions: c.admissions ?? [] }] : []));
+        return send(200, { ok: true, ...(state.saysDevices ? { devices } : {}) });
       }
       if (line === "GET /hosts") return send(200, { hosts: state.hosts });
       if (line === "GET /clients") return send(200, { clients: state.clients });
@@ -280,7 +331,7 @@ describe("a linked box starting up", () => {
     relay.calls.length = 0;
 
     const lines: string[] = [];
-    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => lines.push(line) }, deps(dir)))!;
     closers.push(() => up.close());
     const hostname = await up.hostname();
 
@@ -299,7 +350,7 @@ describe("a linked box starting up", () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
-    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir)))!;
     closers.push(() => up.close());
     await up.hostname();
     const beat = await vi.waitUntil(() => relay.calls.find(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
@@ -310,7 +361,7 @@ describe("a linked box starting up", () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
-    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir)))!;
     closers.push(() => up.close());
     const hostname = await up.hostname();
     expect(publicHostname(statePath)).toBe(hostname);
@@ -324,7 +375,7 @@ describe("a linked box starting up", () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
-    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir)))!;
     closers.push(() => up.close());
     await vi.waitUntil(() => relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length >= 2, { timeout: 4000 });
   });
@@ -335,14 +386,14 @@ describe("a linked box starting up", () => {
     const { statePath, home, dir } = box();
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
     const lines: string[] = [];
-    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => lines.push(line) }, deps(dir)))!;
     closers.push(() => up.close());
 
     expect(await up.hostname()).toBe("hbox1.boxes.example");
     // The relay already holds the managed name, so the heartbeat carries none: one that named it would be refused
     // and the box would never read as up.
     const beat = await vi.waitUntil(() => relay.calls.find(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
-    expect(beat.body).toEqual({ version: CLOUDFLARED.version });
+    expect(beat.body).toEqual({ version: CLOUDFLARED.version, hostKey: expect.stringMatching(/^SHA256:/) });
     expect(lines.join("\n")).not.toContain("could not say where this host is");
     await vi.waitUntil(() => existsSync(join(dir, "argv")) && readFileSync(join(dir, "argv"), "utf8").trim() !== "", { timeout: 4000 });
     expect(readFileSync(join(dir, "argv"), "utf8").trim()).toBe("tunnel --no-autoupdate run");
@@ -358,7 +409,7 @@ describe("a linked box starting up", () => {
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
 
     const lines: string[] = [];
-    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
     closers.push(() => up.close());
     expect(await up.hostname()).toBe("name-1.trycloudflare.com");
 
@@ -369,7 +420,8 @@ describe("a linked box starting up", () => {
 
     relay.pending = 1;
     const listed: string[] = [];
-    expect(await relayCommand(io(listed), { statePath, home }, ["linked", relay.url], {}, deps(dir))).toBe(0);
+    expect(await loginCommand(io(), { statePath, home }, relay.url, deps(dir))).toBe(0);
+    expect(await hostsCommand(io(listed), { statePath, home }, deps(dir))).toBe(0);
     expect(listed.join("\n")).toContain("https://name-2.trycloudflare.com");
     expect(listed.join("\n")).not.toContain("name-1.trycloudflare.com");
   });
@@ -381,7 +433,7 @@ describe("a linked box starting up", () => {
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
 
     const lines: string[] = [];
-    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
     closers.push(() => up.close());
     expect(await up.hostname()).toBe("hbox1.boxes.example");
 
@@ -389,7 +441,7 @@ describe("a linked box starting up", () => {
     // would be refused and never read as up. This child prints a quick tunnel's line at every start regardless.
     await vi.waitUntil(() => existsSync(join(dir, "runs")) && Number(readFileSync(join(dir, "runs"), "utf8").trim()) >= 2, { timeout: 4000 });
     await vi.waitUntil(() => relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length >= 2, { timeout: 4000 });
-    for (const beat of relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat")) expect(beat.body).toEqual({ version: CLOUDFLARED.version });
+    for (const beat of relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat")) expect(beat.body).toEqual({ version: CLOUDFLARED.version, hostKey: expect.stringMatching(/^SHA256:/) });
     expect(readRelayRecord(statePath)!.hostname).toBe("hbox1.boxes.example");
     expect(lines.join("\n")).not.toContain("trycloudflare.com");
     expect(lines.join("\n")).not.toContain("could not say where this host is");
@@ -407,7 +459,7 @@ describe("a linked box starting up", () => {
     const stub: Connector = { pid: undefined, hostname: async () => undefined, stop: async () => {} };
     const lines: string[] = [];
     const up = (await startRelay(
-      { statePath, port: 4400, log: line => lines.push(line) },
+      { statePath, home, port: 4400, log: line => lines.push(line) },
       deps(dir, {
         connector: opts => {
           arrived = opts.onHostname;
@@ -431,8 +483,8 @@ describe("a linked box starting up", () => {
   });
 
   it("starts nothing at all on a box that never linked", async () => {
-    const { statePath, dir } = box();
-    expect(await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir))).toBeUndefined();
+    const { statePath, home, dir } = box();
+    expect(await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir))).toBeUndefined();
   });
 
   it("leaves the host running when the relay is down, and says so once", async () => {
@@ -441,7 +493,7 @@ describe("a linked box starting up", () => {
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
     relay.refuse = { status: 500, error: "the relay fell over" };
     const lines: string[] = [];
-    expect(await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir))).toBeUndefined();
+    expect(await startRelay({ statePath, home, port: 4400, log: line => lines.push(line) }, deps(dir))).toBeUndefined();
     expect(lines.join("\n")).toContain("relay");
     expect(existsSync(join(dir, "argv"))).toBe(false);
   });
@@ -452,7 +504,7 @@ describe("wsp host unlink", () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
     await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
-    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir)))!;
     await up.hostname();
     const pid = Number(readFileSync(join(dir, "connector.pid"), "utf8").trim());
 
@@ -491,180 +543,423 @@ describe("wsp host unlink", () => {
   });
 });
 
-describe("the person's own client", () => {
-  it("links this computer once and lists the hosts on the account", async () => {
+describe("wsp login", () => {
+  it("mints this computer's key once, sends its fingerprint, prints the word and both roads to approve it, and keeps the token", async () => {
     const relay = await fakeRelay();
-    relay.hosts = [
-      { id: "hbox1", name: "box", hostname: "hbox1.boxes.example" },
-      { id: "hattic", name: "attic", hostname: null },
-    ];
     const { statePath, home, dir } = box();
     const log: string[] = [];
-    expect(await relayCommand(io(log), { statePath, home }, ["linked", relay.url], {}, deps(dir))).toBe(0);
+    expect(await loginCommand(io(log), { statePath, home }, relay.url, deps(dir))).toBe(0);
 
-    expect(readRelayClient(home)).toMatchObject({ relayUrl: relay.url, token: "client-token" });
-    expect(statSync(join(home, "relay-client.json")).mode & 0o777).toBe(0o600);
-    expect(log.join("\n")).toContain("box");
-    expect(log.join("\n")).toContain("hbox1.boxes.example");
-    expect(log.join("\n")).toContain("attic");
+    const pair = readDeviceKeyPair(home)!;
+    const fingerprint = keyFingerprint(pair.publicKey);
+    expect(statSync(join(home, "device-key.json")).mode & 0o777).toBe(0o600);
+    // The key goes up with the name, so the page can show it and an approval can be signed for it.
+    expect(relay.calls[0]!.body).toMatchObject({ kind: "client", name: "the box", fingerprint });
+    // The word carries the code and the key as one string, and the bare code is what the page's field takes.
+    expect(log).toContain(`word        ABCD-2345.${fingerprint}`);
+    expect(log).toContain("code        ABCD2345");
+    expect(log).toContain(`open        ${relay.url}/link/verify`);
+    expect(log.join("\n")).toContain(`wsp login ABCD-2345.${fingerprint}`);
+    expect(log.join("\n")).toContain("wsp login <id>");
     expect(log.join("\n")).not.toContain("client-token");
 
-    const before = relay.calls.length;
+    expect(readRelayClient(home)).toMatchObject({ relayUrl: relay.url, token: "client-token", fingerprint, login: "zingzy" });
+    expect(statSync(join(home, "relay-client.json")).mode & 0o777).toBe(0o600);
+    // The key is this computer's from here on: a second line signs with the same one.
     relay.pending = 1;
-    await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir));
-    // The second listing signs in again for nothing if the token is not kept.
-    expect(relay.calls.slice(before).map(c => c.line)).toEqual(["GET /hosts"]);
+    await loginCommand(io(), { statePath, home }, undefined, deps(dir)).catch(() => undefined);
+    expect(readDeviceKeyPair(home)!.publicKey).toBe(pair.publicKey);
   });
 
-  it("keeps the person's own token apart from the box's, on a computer that is both", async () => {
-    const relay = await fakeRelay();
-    relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example" }];
-    const dir = tempDir("relay-both");
-    // The state folder and the wsp home are one and the same by default, which is where these two would collide.
-    const statePath = join(dir, "state.json");
-    await relayCommand(io(), { statePath, home: dir }, ["link", relay.url], {}, deps(dir));
-    relay.pending = 1;
-    await relayCommand(io(), { statePath, home: dir }, ["linked", relay.url], {}, deps(dir));
-
-    expect(readRelayRecord(statePath)!.token).toBe("host-token");
-    expect(readRelayClient(dir)!.token).toBe("client-token");
-    expect(await relayHostUrl(dir, "box", deps(dir))).toBe("https://hbox1.boxes.example");
-  });
-
-  it("tells a computer already on the relay as a host that listing the account's hosts from here is its own sign-in", async () => {
-    const relay = await fakeRelay();
+  it("signs in to the relay this project runs when the line names none", async () => {
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
-
-    const refused = await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir)).then(() => undefined, (e: unknown) => e as Error);
-    expect(refused).toBeInstanceOf(Error);
-    // The link did happen: a sentence that reads as if it had not is what sent the owner looking for a fault.
-    expect(refused!.message).not.toContain("signed in to no relay");
-    expect(refused!.message).toContain(relay.url);
-    expect(refused!.message).toContain("the box");
-    expect(refused!.message).toContain(`wsp host linked ${relay.url}`);
+    const asked: string[] = [];
+    const refused = await loginCommand(io(), { statePath, home }, undefined, {
+      ...deps(dir),
+      fetch: (async (url: string) => {
+        asked.push(url);
+        throw new Error("nothing answers here");
+      }) as unknown as typeof fetch,
+    }).then(() => undefined, (e: unknown) => e as Error);
+    expect(asked[0]).toBe(`${DEFAULT_RELAY}/link/start`);
+    expect(refused!.message).toContain(DEFAULT_RELAY);
   });
 
-  it("still asks for the relay's address on a computer that is no host either", async () => {
-    const { statePath, home, dir } = box();
-    const refused = await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir)).then(() => undefined, (e: unknown) => e as Error);
-    expect(refused!.message).toContain("signed in to no relay");
-    expect(refused!.message).toContain("wsp host linked <url>");
-  });
-
-  it("refuses a second relay rather than overwriting the sign-in this computer holds", async () => {
+  it("refuses a second sign-in over the first, naming the line that signs this computer out", async () => {
     const relay = await fakeRelay();
     const other = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
-    await expect(relayCommand(io(), { statePath, home }, ["linked", other.url], {}, deps(dir))).rejects.toThrow(relay.url);
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    relay.pending = 1;
+    await expect(loginCommand(io(), { statePath, home }, relay.url, deps(dir))).rejects.toThrow(/wsp logout/);
+    await expect(loginCommand(io(), { statePath, home }, other.url, deps(dir))).rejects.toThrow(relay.url);
     expect(readRelayClient(home)!.relayUrl).toBe(relay.url);
   });
 
-  it("says to sign in again when the relay has taken this computer's sign-in away", async () => {
+  it("signs an admission for the word another computer printed, and refuses a word that carries no key before anything is posted", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
-    relay.refuse = { status: 401, error: "this computer's sign-in was taken away; run wsp host linked <url> to sign in again" };
-    const err: string[] = [];
-    await expect(relayCommand(io([], err), { statePath, home }, ["linked"], {}, deps(dir))).rejects.toThrow(/sign in again/);
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    const mine = readDeviceKeyPair(home)!;
+    relay.calls.length = 0;
+
+    const laptop = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+    const log: string[] = [];
+    expect(await loginCommand(io(log), { statePath, home }, `WXYZ-6789.${laptop}`, deps(dir))).toBe(0);
+    const posted = relay.calls.find(c => c.line === "POST /link/approve")!;
+    expect(posted.token).toBe("client-token");
+    // The code loses the dash the screens group it with, and the admission is bytes this computer signed for that
+    // key: the relay keeps them and can make none of them.
+    expect(posted.body["code"]).toBe("WXYZ6789");
+    const admission = posted.body["admission"] as { device: string; by: string; issuedAt: string; signature: string };
+    expect(admission.device).toBe(laptop);
+    expect(admission.by).toBe(keyFingerprint(mine.publicKey));
+    expect(verifyPlaceBytes(mine.publicKey, deviceAdmissionTranscript(laptop, admission.by, admission.issuedAt), admission.signature)).toBe(true);
+
+    relay.calls.length = 0;
+    await expect(loginCommand(io(), { statePath, home }, "WXYZ-6789", deps(dir))).rejects.toThrow(LOGIN_NO_KEY_REFUSAL);
+    expect(relay.calls).toEqual([]);
   });
 
-  it("lists the computers signed in to the relay and takes one away", async () => {
+  it("admits a computer already on the account by its id, off the key the account holds for it", async () => {
+    const relay = await fakeRelay();
+    const laptop = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+    relay.clients = [
+      { id: "c1", name: "the box", thisOne: true, fingerprint: "SHA256:aaa" },
+      { id: "c2", name: "the laptop", thisOne: false, fingerprint: laptop },
+      { id: "c3", name: "a computer from before keys", thisOne: false, fingerprint: null },
+    ];
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    const mine = readDeviceKeyPair(home)!;
+    relay.calls.length = 0;
+
+    expect(await loginCommand(io(), { statePath, home }, "c2", deps(dir))).toBe(0);
+    const posted = relay.calls.find(c => c.line === "POST /clients/c2/admissions")!;
+    expect(posted.token).toBe("client-token");
+    expect(posted.body).toMatchObject({ device: laptop, by: keyFingerprint(mine.publicKey) });
+    // A computer that signed in before device keys holds none, so no host could admit it and the line says so.
+    await expect(loginCommand(io(), { statePath, home }, "c3", deps(dir))).rejects.toThrow(/wsp logout c3/);
+    await expect(loginCommand(io(), { statePath, home }, "c9", deps(dir))).rejects.toThrow(/c9/);
+  });
+
+  it("lists the account's computers, their keys and who admitted each, when it is asked nothing", async () => {
     const relay = await fakeRelay();
     relay.clients = [
-      { id: "c1", name: "the Mac", thisOne: true },
-      { id: "c2", name: "the laptop", thisOne: false },
+      { id: "c1", name: "the box", thisOne: true, fingerprint: "SHA256:aaa" },
+      { id: "c2", name: "the laptop", thisOne: false, fingerprint: "SHA256:bbb", admissions: [{ by: "SHA256:aaa", issuedAt: "2026-09-22T00:00:00.000Z", signature: "sig" }] },
     ];
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
     const log: string[] = [];
-    expect(await relayCommand(io(log), { statePath, home }, ["clients"], {}, deps(dir))).toBe(0);
-    expect(log.join("\n")).toContain("the Mac");
+    expect(await loginCommand(io(log), { statePath, home }, undefined, deps(dir))).toBe(0);
+    expect(log[0]).toMatch(/^COMPUTER\s+ID\s+KEY\s+ADMITTED BY\s+SIGNED IN\s+LAST SEEN$/);
+    expect(log.join("\n")).toContain("c2");
     expect(log.join("\n")).toContain("this one");
-    expect(log.join("\n")).toContain("the laptop");
-
-    expect(await relayCommand(io(), { statePath, home }, ["clients", "revoke", "c2"], {}, deps(dir))).toBe(0);
-    expect(relay.calls.some(c => c.line === "DELETE /clients/c2" && c.token === "client-token")).toBe(true);
+    // Who admitted it, by the name the account holds that key under rather than by the key alone.
+    expect(log.join("\n")).toContain("2026-09-22T00:00:00.000Z");
+    // A listing has no use for a signature and never prints one.
+    expect(log.join("\n")).not.toContain("sig");
   });
 
-  it("names a host's address for wsp host connect, and says so when the relay has none for it", async () => {
-    const relay = await fakeRelay();
-    relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example" }, { id: "hattic", name: "attic", hostname: null }];
-    const { home, dir } = box();
-    await relayCommand(io(), { statePath: join(dir, "state.json"), home }, ["linked", relay.url], {}, deps(dir));
-
-    expect(await relayHostUrl(home, "box", deps(dir))).toBe("https://hbox1.boxes.example");
-    await expect(relayHostUrl(home, "attic", deps(dir))).rejects.toThrow(/attic/);
-    await expect(relayHostUrl(home, "cellar", deps(dir))).rejects.toThrow(/box/);
-
-    // Two boxes under one name is not a guess to make: a line that could go to either goes to neither.
-    relay.hosts = [
-      { id: "hbox1", name: "box", hostname: "hbox1.boxes.example" },
-      { id: "hbox2", name: "box", hostname: "hbox2.boxes.example" },
-    ];
-    await expect(relayHostUrl(home, "box", deps(dir))).rejects.toThrow(/hbox1/);
-    expect(await relayHostUrl(home, "hbox2", deps(dir))).toBe("https://hbox2.boxes.example");
+  it("refuses every road but the sign-in on a computer that is signed in to nothing", async () => {
+    const { statePath, home, dir } = box();
+    await expect(loginCommand(io(), { statePath, home }, "c2", deps(dir))).rejects.toThrow(/wsp login/);
+    await expect(logoutCommand(io(), { statePath, home }, undefined, deps(dir))).rejects.toThrow(/wsp login/);
   });
 });
 
-describe("wsp host connect --relay", () => {
-  /** The fingerprint the code carried, which the dial holds the host at that address to. */
-  const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
-
-  /** A host that answers the redeem, so this test is about which address the dial was handed and nothing else. */
-  const paired: HostClient = {
-    request: (async () => ({})) as HostClient["request"],
-    events: async () => {},
-    onFrame: () => () => {},
-    closed: Promise.resolve(),
-    closeWords: () => "",
-    paired: { deviceId: "d_1", deviceToken: "device-token" },
-    close: () => {},
-    terminate: () => {},
-  };
-
-  it("pairs with a host on the relay by the name it has there, over the address the relay named", async () => {
+describe("wsp logout", () => {
+  it("deletes this computer's own row, drops the hosts it reached through the account and keeps the key it signs with", async () => {
     const relay = await fakeRelay();
-    relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example" }];
+    relay.clients = [{ id: "c1", name: "the box", thisOne: true, fingerprint: "SHA256:aaa" }];
+    relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example", hostKey: "SHA256:key" }];
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    await hostsCommand(io(), { statePath, home }, deps(dir));
+    // A host this computer paired with a code, which the account has nothing to say about.
+    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "t", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+    expect(readHost(home, "box")).toBeDefined();
+    const key = readDeviceKeyPair(home)!.publicKey;
 
-    const dialled: DialOpts[] = [];
     const log: string[] = [];
-    const code = await connectCommand(io(log), { statePath, home }, { code: `QWAXC5GT.${HOST_KEY}`, relay: "box" }, [], {
-      dial: async (_statePath, opts) => {
-        dialled.push(opts);
-        return paired;
-      },
-      now: () => Date.parse("2026-09-11T12:00:00.000Z"),
-      deviceName: () => "the Mac",
-      relayUrl: (at, name) => relayHostUrl(at, name, deps(dir)),
-      window: dialWindowMs,
-    });
-
-    expect(code).toBe(0);
-    expect(dialled).toHaveLength(1);
-    expect(dialled[0]!.host).toBe("https://hbox1.boxes.example");
-    // The relay names the address and nothing else: the key the dial holds that host to came off the code the
-    // person copied at its own terminal, so a relay that named another host's address is refused over there.
-    expect(dialled[0]!.redeem).toEqual({ code: "QWAXC5GT", name: "the Mac", hostKey: HOST_KEY });
-    expect(readHost(home, "box")!.hostKey).toBe(HOST_KEY);
-    expect(readHost(home, "box")!.url).toBe("https://hbox1.boxes.example");
-    expect(log.join("\n")).not.toContain("device-token");
+    expect(await logoutCommand(io(log), { statePath, home }, undefined, deps(dir))).toBe(0);
+    expect(relay.calls.some(c => c.line === "DELETE /clients/c1" && c.token === "client-token")).toBe(true);
+    expect(readRelayClient(home)).toBeUndefined();
+    expect(readHost(home, "box")).toBeUndefined();
+    expect(readHost(home, "lan")).toBeDefined();
+    // The key opens nothing by itself and is the one the hosts already trust, so it stays.
+    expect(readDeviceKeyPair(home)!.publicKey).toBe(key);
+    expect(log.join("\n")).toContain("box");
   });
 
-  it("refuses an address beside the name, since the relay is what says where that host is", async () => {
-    const { statePath, home } = box();
-    await expect(
-      connectCommand(io(), { statePath, home }, { code: "QWAXC5GT", relay: "box" }, ["https://elsewhere.example"], {
-        dial: async () => paired,
-        now: () => 0,
-        deviceName: () => "the Mac",
-        relayUrl: async () => "https://never.example",
-        window: dialWindowMs,
-      }),
-    ).rejects.toThrow(/--relay/);
+  it("signs another of the account's computers out by its id", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    const log: string[] = [];
+    expect(await logoutCommand(io(log), { statePath, home }, "c2", deps(dir))).toBe(0);
+    expect(relay.calls.some(c => c.line === "DELETE /clients/c2")).toBe(true);
+    expect(readRelayClient(home)).toBeDefined();
+    expect(log.join("\n")).toContain("c2");
+  });
+});
+
+describe("wsp hosts", () => {
+  const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
+
+  /** An account holding one box that is up and one that has never said where it is. */
+  async function signedIn(): Promise<{ relay: FakeRelay; statePath: string; home: string; dir: string }> {
+    const relay = await fakeRelay();
+    relay.hosts = [
+      { id: "hbox1", name: "box", hostname: "hbox1.boxes.example", hostKey: HOST_KEY, connectorVersion: "2026.8.1", lastSeen: new Date().toISOString() },
+      { id: "hattic", name: "attic", hostname: null, hostKey: null },
+    ];
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    return { relay, statePath, home, dir };
+  }
+
+  it("prints one table of both roads and writes a record per account host that has an address, with no token in it", async () => {
+    const { relay, statePath, home, dir } = await signedIn();
+    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "t", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+    setDefaultHost(home, "lan");
+    const log: string[] = [];
+    expect(await hostsCommand(io(log), { statePath, home }, deps(dir))).toBe(0);
+
+    expect(log[0]).toMatch(/^HOST\s+ADDRESS\s+VIA\s+STATE\s+DEVICE\s+CONNECTOR\s+KEY$/);
+    const rows = log.slice(1).map(line => line.split(/\s\s+/));
+    expect(rows.find(r => r[0] === "box")).toEqual(["box", "https://hbox1.boxes.example", "account", expect.stringMatching(/^up /), "2026.8.1", HOST_KEY]);
+    expect(rows.find(r => r[0] === "attic")![1]).toBe(NOT_UP_YET);
+    expect(rows.find(r => r[0] === "lan")).toEqual(["lan", "http://192.168.1.9:4400", "code", "d_9", "SHA256:lan", "default"]);
+
+    const record = readHost(home, "box")!;
+    expect(record).toMatchObject({ url: "https://hbox1.boxes.example", hostKey: HOST_KEY, deviceId: "", deviceToken: "", via: { kind: "account", hostId: "hbox1" } });
+    expect(statSync(join(hostsDir(home), "box.json")).mode & 0o777).toBe(0o600);
+    // A host on the account with no address gets no record: there is nothing to dial until wsp up runs there.
+    expect(readHost(home, "attic")).toBeUndefined();
+    expect(relay.calls.some(c => c.line === "GET /hosts" && c.token === "client-token")).toBe(true);
+  });
+
+  it("marks the single account host as the one every line takes when nothing else is marked", async () => {
+    const { statePath, home, dir } = await signedIn();
+    const log: string[] = [];
+    await hostsCommand(io(log), { statePath, home }, deps(dir));
+    expect(log.find(line => line.startsWith("box"))).toContain("default");
+  });
+
+  it("removes a record whose host the account no longer names, and leaves a code-paired record of the same name alone", async () => {
+    const { relay, statePath, home, dir } = await signedIn();
+    await hostsCommand(io(), { statePath, home }, deps(dir));
+    expect(readHost(home, "box")).toBeDefined();
+
+    relay.hosts = [{ id: "hattic", name: "attic", hostname: "hattic.boxes.example", hostKey: "SHA256:attic" }];
+    const err: string[] = [];
+    await hostsCommand(io([], err), { statePath, home }, deps(dir));
+    expect(readHost(home, "box")).toBeUndefined();
+    expect(err.join("\n")).toContain("box is no longer a host on your account");
+
+    // A code-paired record under the name an account host folds to: the paired one stands and the line says which
+    // command frees the name.
+    writeHost(home, "attic", { url: "http://10.0.0.5:4400", deviceId: "d_5", deviceToken: "t5", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+    const second: string[] = [];
+    await hostsCommand(io([], second), { statePath, home }, deps(dir));
+    expect(readHost(home, "attic")).toMatchObject({ deviceToken: "t5", url: "http://10.0.0.5:4400" });
+    expect(second.join("\n")).toContain("wsp host forget attic");
+  });
+
+  it("refuses a host the account lists under another key, keeps the key it pinned and names the line that frees it", async () => {
+    const { relay, statePath, home, dir } = await signedIn();
+    await hostsCommand(io(), { statePath, home }, deps(dir));
+    relay.hosts = [{ id: "hbox1", name: "box", hostname: "hsomewhere.boxes.example", hostKey: "SHA256:another" }];
+    const err: string[] = [];
+    await hostsCommand(io([], err), { statePath, home }, deps(dir));
+
+    expect(err.join("\n")).toContain(HOST_KEY);
+    expect(err.join("\n")).toContain("SHA256:another");
+    expect(err.join("\n")).toContain("wsp host forget box");
+    // The record keeps the key and the address it pinned: nothing of this computer's goes to whatever answers there.
+    expect(readHost(home, "box")).toMatchObject({ hostKey: HOST_KEY, url: "https://hbox1.boxes.example" });
+  });
+
+  it("prints what this computer holds when the relay does not answer, and says so", async () => {
+    const { relay, statePath, home, dir } = await signedIn();
+    await hostsCommand(io(), { statePath, home }, deps(dir));
+    relay.refuse = { status: 500, error: "this relay is having a moment" };
+    const log: string[] = [];
+    const err: string[] = [];
+    expect(await hostsCommand(io(log, err), { statePath, home }, deps(dir))).toBe(0);
+    expect(err.join("\n")).toContain("this relay is having a moment");
+    expect(log.join("\n")).toContain("box");
+    expect(readHost(home, "box")).toBeDefined();
+  });
+
+  it("says a computer signed in to nothing reaches only what it paired with a code", async () => {
+    const { statePath, home, dir } = box();
+    const err: string[] = [];
+    const log: string[] = [];
+    expect(await hostsCommand(io(log, err), { statePath, home }, deps(dir))).toBe(0);
+    expect(err.join("\n")).toContain("wsp login");
+    expect(log.join("\n")).toContain(NO_HOSTS_LINE);
+  });
+});
+
+describe("what a linked host says on its beat and reads back", () => {
+  /** The devices standing on a host, as the reconcile reads and cuts them. */
+  function devicesHere(devices: DeviceView[]): RelayDeviceDoor & { revoked: string[]; forgotten: string[]; keys: string[] } {
+    const door = {
+      revoked: [] as string[],
+      forgotten: [] as string[],
+      keys: [] as string[],
+      list: async () => devices,
+      revoke: async (id: string) => {
+        door.revoked.push(id);
+        devices = devices.filter(d => d.id !== id);
+        return true;
+      },
+      refused: async () => door.keys,
+      forget: async (fingerprint: string) => {
+        door.forgotten.push(fingerprint);
+        door.keys = door.keys.filter(key => key !== fingerprint);
+      },
+    };
+    return door;
+  }
+
+  const accountDevice = (id: string, fingerprint: string): DeviceView => ({
+    id,
+    name: id,
+    createdAt: "2026-09-01T00:00:00.000Z",
+    lastSeenAt: "2026-09-01T00:00:00.000Z",
+    via: { kind: "account", relayDeviceId: `c_${id}`, fingerprint, publicKey: "pub", admittedBy: "SHA256:signer" },
+  });
+
+  it("records the device key of the computer it was linked from, and the key it proves on its beat", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    const log: string[] = [];
+    await relayCommand(io(log), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const mine = keyFingerprint(readDeviceKeyPair(home)!.publicKey);
+    expect(readRelayRecord(statePath)!.deviceKey).toEqual({ fingerprint: mine, publicKey: readDeviceKeyPair(home)!.publicKey });
+    expect(log.join("\n")).toContain(mine);
+
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {} }, deps(dir)))!;
+    closers.push(() => up.close());
+    await vi.waitUntil(() => relay.calls.some(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
+    // The key this host proves goes up with every beat, and the relay writes it once.
+    expect(relay.calls.find(c => c.line === "POST /hosts/hbox1/heartbeat")!.body["hostKey"]).toMatch(/^SHA256:/);
+    expect(relay.hosts.find(h => h.id === "hbox1")!.hostKey).toMatch(/^SHA256:/);
+  });
+
+  it("records that key at the first start of a host linked before this wsp wrote one", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const held = readRelayRecord(statePath)!;
+    const { deviceKey: _gone, ...older } = held;
+    writeRelayRecord(statePath, older);
+    rmSync(join(home, "device-key.json"), { force: true });
+
+    const log: string[] = [];
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => log.push(line) }, deps(dir)))!;
+    closers.push(() => up.close());
+    const minted = readDeviceKeyPair(home)!;
+    expect(readRelayRecord(statePath)!.deviceKey).toEqual({ fingerprint: keyFingerprint(minted.publicKey), publicKey: minted.publicKey });
+    expect(log.join("\n")).toContain(keyFingerprint(minted.publicKey));
+  });
+
+  it("puts the host on the account with no code and no page from a computer already signed in", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    relay.calls.length = 0;
+    const log: string[] = [];
+    expect(await relayCommand(io(log), { statePath, home }, ["link"], { name: "attic" }, deps(dir))).toBe(0);
+
+    // One call and no waiting: the token this computer holds is what puts the box on its own account.
+    const posted = relay.calls.find(c => c.line === "POST /hosts")!;
+    expect(posted.token).toBe("client-token");
+    expect(posted.body["name"]).toBe("attic");
+    expect(posted.body["hostKey"]).toMatch(/^SHA256:/);
+    expect(relay.calls.map(c => c.line)).not.toContain("POST /link/start");
+    expect(readRelayRecord(statePath)).toMatchObject({ hostId: "hbox1", token: "host-token", name: "attic" });
+    expect(log.join("\n")).not.toContain("type");
+  });
+
+  it("revokes an account device the listing no longer names, and leaves a device that redeemed a code alone", async () => {
+    const relay = await fakeRelay();
+    relay.clients = [{ id: "c1", name: "the laptop", thisOne: false, fingerprint: "SHA256:laptop" }];
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const door = devicesHere([
+      accountDevice("d_1", "SHA256:laptop"),
+      accountDevice("d_2", "SHA256:gone"),
+      { id: "d_3", name: "a paired computer", createdAt: "2026-09-01T00:00:00.000Z", lastSeenAt: "2026-09-01T00:00:00.000Z" },
+    ]);
+    door.keys = ["SHA256:laptop", "SHA256:long-gone"];
+    const log: string[] = [];
+    const up = (await startRelay({ statePath, home, port: 4400, log: line => log.push(line), devices: door }, deps(dir)))!;
+    closers.push(() => up.close());
+
+    await vi.waitUntil(() => door.revoked.length > 0, { timeout: 4000 });
+    expect(door.revoked).toEqual(["d_2"]);
+    expect(log.join("\n")).toContain("no longer on this account");
+    // A key the account still holds a device under stays remembered; one it dropped is forgotten, so that computer
+    // signing in again is admitted afresh.
+    await vi.waitUntil(() => door.forgotten.length > 0, { timeout: 4000 });
+    expect(door.forgotten).toEqual(["SHA256:long-gone"]);
+  });
+
+  it("revokes nobody on a reply carrying no devices field, and nobody on a beat the relay refused", async () => {
+    const relay = await fakeRelay();
+    relay.saysDevices = false;
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const door = devicesHere([accountDevice("d_1", "SHA256:laptop")]);
+    const admitted = admittedDevices(statePath);
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {}, devices: door, admitted }, deps(dir)))!;
+    closers.push(() => up.close());
+
+    await vi.waitUntil(() => relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length >= 2, { timeout: 4000 });
+    expect(door.revoked).toEqual([]);
+    // Absent is unknown and never empty: the door still says it has heard no listing at all.
+    expect(admitted.list()).toBeUndefined();
+
+    relay.refuse = { status: 500, error: "this relay is having a moment" };
+    const beats = relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length;
+    await vi.waitUntil(() => relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length > beats, { timeout: 4000 });
+    expect(door.revoked).toEqual([]);
+    expect(admitted.list()).toBeUndefined();
+  });
+
+  it("costs the relay one extra beat per ten seconds of misses, and carries what that beat learned", async () => {
+    const relay = await fakeRelay();
+    relay.clients = [{ id: "c1", name: "the laptop", thisOne: false, fingerprint: "SHA256:laptop" }];
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    let now = Date.parse("2026-09-22T00:00:00.000Z");
+    const admitted = admittedDevices(statePath, { now: () => now });
+    // A heartbeat far enough off that only the misses below call the relay.
+    const up = (await startRelay({ statePath, home, port: 4400, log: () => {}, admitted }, deps(dir, { heartbeatMs: 600_000 })))!;
+    closers.push(() => up.close());
+    // The beat a start makes of its own, out of the way before the misses below are counted.
+    await vi.waitUntil(() => relay.calls.some(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
+    relay.calls.length = 0;
+
+    await admitted.refresh();
+    await admitted.refresh();
+    expect(relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat")).toHaveLength(1);
+    // The listing that beat learned is what the door reads, and a device on it is admitted at once.
+    expect(admitted.list()).toEqual([{ id: "c1", name: "the laptop", fingerprint: "SHA256:laptop", admissions: [] }]);
+
+    now += BEAT_FLOOR_MS;
+    await admitted.refresh();
+    expect(relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat")).toHaveLength(2);
+    // A host that is on no account beats nowhere at all, so a refresh there asks nothing.
+    const bare = admittedDevices(join(tempDir("relay-bare"), "state.json"));
+    await bare.refresh();
+    expect(bare.signer()).toBeUndefined();
+    expect(bare.list()).toBeUndefined();
   });
 });
 
@@ -687,7 +982,7 @@ describe("who this wsp is signed in to", () => {
   it("names the account this computer signed in under, a wsp home apart from the box's state", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
     expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
   });
 

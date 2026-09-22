@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three commands that give this computer a host on another one: connect
-// spends a pairing code for a device token of this computer's own, hosts says
-// which hosts it holds and which one lines take by default, and disconnect
-// hands a token back and forgets it. Nothing here prints a token: a listing
-// that leaked one would open the host to whoever read the terminal.
+// The three commands that give this computer a host outside its own account:
+// connect spends a pairing code for a device token of this computer's own,
+// default moves which host every line takes, and forget hands a token back and
+// drops it. Nothing here prints a token: a line that leaked one would open the
+// host to whoever read the terminal. The one listing of what this computer can
+// reach is wsp hosts, which reads the account as well as these records.
 import { hostname } from "node:os";
 import { PAIR_NO_KEY_REFUSAL, readJoinToken, servedHostname, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
-import { aliasFrom, checkedAlias, defaultHost, dialWindowMs, listHosts, noAnswerWithin, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostAim, type HostRecord } from "./hosts.js";
-import { relayHostUrl } from "./relay-link.js";
-import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
+import { aliasFrom, checkedAlias, defaultHost, dialWindowMs, noAnswerWithin, noSuchHostLine, readHost, removeHost, READ_THE_HOSTS, setDefaultHost, writeHost, type HostAim, type HostRecord } from "./hosts.js";
+import { dialHost, type DialOpts, type HostClient } from "./verbs.js";
 
-const CONNECT_USAGE = "usage: wsp host connect <url> --code <code> [--name <alias>]\n       wsp host connect --relay <host> --code <code> [--name <alias>]";
-const HOSTS_USAGE = "usage: wsp host list\n       wsp host default <alias>";
+const CONNECT_USAGE = "usage: wsp host connect <url> --code <code> [--name <alias>]";
+const DEFAULT_USAGE = "usage: wsp host default <alias>";
 const DISCONNECT_USAGE = "usage: wsp host forget <alias>";
 
 /** What the commands work on: the state file this computer's own host would serve, and the home holding the hosts
@@ -22,20 +22,18 @@ export interface ConnectOpts {
   home: string;
 }
 
-/** What these commands read of the world: the dial, the clock, this computer's name, the relay that says where a
- * host answers, and how long a road is given to answer. */
+/** What these commands read of the world: the dial, the clock, this computer's name and how long a road is given
+ * to answer. */
 export interface ConnectDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
   now(): number;
   /** What the host calls this computer in its own listing; the person at that terminal reads it to know who paired. */
   deviceName(): string;
-  /** Where a host on the person's relay answers, for the one road that names a host rather than an address. */
-  relayUrl(home: string, name: string): Promise<string>;
   /** How long the hand back waits on the road, which is the window a dial to that host gets. */
   window(aim: HostAim): number;
 }
 
-const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, relayUrl: (home, name) => relayHostUrl(home, name), window: dialWindowMs };
+const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, window: dialWindowMs };
 
 /** What wsp host connect prints: which host this computer now holds and where, never the token it holds it by. */
 export function connectedLines(alias: string, record: HostRecord, madeDefault: boolean): string[] {
@@ -49,21 +47,11 @@ export function connectedLines(alias: string, record: HostRecord, madeDefault: b
   ];
 }
 
-/** The rows wsp host list prints, one per host this computer paired with, the default marked. */
-export function hostLines(hosts: ReturnType<typeof listHosts>): string[] {
-  if (hosts.length === 0) return ["This computer is connected to no host on another computer. Run wsp host connect <url> --code <code> with a code from wsp host pair on that computer."];
-  return table([["ALIAS", "URL", "DEVICE", ""], ...hosts.map(h => [h.alias, h.url, h.deviceId, h.default ? "default" : ""])]);
-}
-
-export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { code?: string; name?: string; relay?: string }, args: readonly string[], deps: ConnectDeps = systemDeps): Promise<number> {
-  const named = values.relay;
-  if (named !== undefined && args.length !== 0) throw usageRefusal("wsp host connect --relay names a host on your relay, so there is no address to give beside it.", CONNECT_USAGE);
-  if (named === undefined && (args[0] === undefined || args.length !== 1)) throw usageRefusal("wsp host connect takes one address, or --relay and a host name.", CONNECT_USAGE);
+export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { code?: string; name?: string }, args: readonly string[], deps: ConnectDeps = systemDeps): Promise<number> {
+  if (args[0] === undefined || args.length !== 1) throw usageRefusal("wsp host connect takes one address.", `A host on your own account needs no code and no address: wsp login signs this computer in and wsp hosts lists them.\n\n${CONNECT_USAGE}`);
   const code = values.code;
   if (code === undefined || code.trim() === "") throw usageRefusal("wsp host connect needs the code wsp host pair printed on that computer.", `Pass it as --code <code>.\n\n${CONNECT_USAGE}`);
-  // The relay says where a host answers and nothing more: the code still comes from wsp host pair on the box itself,
-  // and the road from here is the ordinary one against the address it named.
-  const url = named !== undefined ? await deps.relayUrl(opts.home, named) : args[0]!;
+  const url = args[0];
   // One sentence for every address this cannot dial, and the name of the computer for one it can: the protocol's
   // reading of an address is what says which it is, so a ws or wss address, an http:// with no computer after it
   // and a word that is no address at all read alike rather than one of them reaching the URL parser and throwing
@@ -72,7 +60,7 @@ export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { cod
   if (at === undefined) throw usageRefusal(`wsp host connect takes the address the host is served at, and got ${JSON.stringify(url)}.`, `An address starts http:// or https:// and names the computer it runs on.\n\n${CONNECT_USAGE}`);
   // Checked before the dial, never after it: a code is spent the moment it is redeemed, and a name refused on the
   // way back would leave the host holding a device whose only token went nowhere.
-  const alias = checkedAlias(values.name ?? aliasFrom(named ?? at));
+  const alias = checkedAlias(values.name ?? aliasFrom(at));
   if (readHost(opts.home, alias) !== undefined) {
     throw usageRefusal(`a host named ${alias} is already connected.`, `Run wsp host forget ${alias} first, or give this one another name with --name.`);
   }
@@ -97,16 +85,14 @@ export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { cod
   return 0;
 }
 
-export async function hostsCommand(io: CliIO, opts: ConnectOpts, args: readonly string[]): Promise<number> {
-  const [word, alias] = args;
-  if (word !== undefined && (word !== "default" || alias === undefined || args.length !== 2)) throw usageRefusal("wsp host list takes no words, and wsp host default takes one alias.", HOSTS_USAGE);
-  if (word === "default") {
-    if (readHost(opts.home, alias!) === undefined) throw usageRefusal(noSuchHostLine(alias!, opts.home), "Run wsp host list to read the names this computer knows.");
-    setDefaultHost(opts.home, alias!);
-    io.log(`${alias!} is now the host every wsp line runs against; --host or WSP_HOST names another.`);
-    return 0;
-  }
-  for (const line of hostLines(listHosts(opts.home))) io.log(line);
+/** Which host every line on this computer takes, moved by name. The name is one this computer holds a record for,
+ * whether a code paired it or wsp hosts wrote it off the account. */
+export async function hostDefaultCommand(io: CliIO, opts: ConnectOpts, args: readonly string[]): Promise<number> {
+  const alias = args[0];
+  if (alias === undefined || args.length !== 1) throw usageRefusal("wsp host default takes one alias.", DEFAULT_USAGE);
+  if (readHost(opts.home, alias) === undefined) throw usageRefusal(noSuchHostLine(alias, opts.home), READ_THE_HOSTS);
+  setDefaultHost(opts.home, alias);
+  io.log(`${alias} is now the host every wsp line runs against; --host or WSP_HOST names another.`);
   return 0;
 }
 
@@ -133,7 +119,7 @@ export async function disconnectCommand(io: CliIO, opts: ConnectOpts, args: read
   const alias = args[0];
   if (alias === undefined || args.length !== 1) throw usageRefusal("wsp host forget takes one alias.", DISCONNECT_USAGE);
   const record = readHost(opts.home, alias);
-  if (record === undefined) throw usageRefusal(noSuchHostLine(alias, opts.home), "Run wsp host list to read the names this computer knows.");
+  if (record === undefined) throw usageRefusal(noSuchHostLine(alias, opts.home), READ_THE_HOSTS);
   // One window for the whole act, read once off the road this host is on: the dial and the reply that hands the
   // token back are two halves of one hand back, and a reply nobody waits for is a device left standing over there.
   const aim: HostAim = { kind: "alias", alias, record };

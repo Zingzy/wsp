@@ -3,6 +3,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  HOST_BEAT_MS,
+  NOT_UP_YET,
+  NO_HOSTS_LINE,
+  hostAliasHeldLine,
+  hostBeatWord,
+  hostDroppedLine,
+  hostKeyMovedLine,
+  hostsTable,
+  relayQuietLine,
   backgroundTasksLine,
   taskFinishedLine,
   psCpuSeconds,
@@ -1947,5 +1956,44 @@ describe("a desktop shell and the host that served it its page", () => {
     expect(shellVersionNotice("0.1.6-rc.2", "0.1.6-rc.10")?.update).toBe(true);
     // Build metadata carries no precedence, so two builds of one release say nothing.
     expect(shellVersionNotice("0.1.6+a1b2c3d", "0.1.6+9f8e7d6")).toBeUndefined();
+  });
+});
+
+describe("the one listing of the hosts a computer can reach", () => {
+  it("puts the road each host is held by in a column of its own, and marks the one every line takes", () => {
+    const cells = hostsTable([
+      { host: "macbook", address: "https://h1.singhi.me", via: "account", awayMs: 12_000, connector: "2026.8.1", hostKey: "SHA256:aaa", deviceId: "d_1", default: true },
+      { host: "attic", via: "account", awayMs: null },
+      { host: "box", address: "http://192.168.1.9:4400", via: "code", deviceId: "d_2", hostKey: "SHA256:bbb" },
+    ]);
+    expect(cells[0]).toEqual(["HOST", "ADDRESS", "VIA", "STATE", "DEVICE", "CONNECTOR", "KEY", ""]);
+    expect(cells[1]).toEqual(["macbook", "https://h1.singhi.me", "account", "up 12s", "d_1", "2026.8.1", "SHA256:aaa", "default"]);
+    // A host on the account that has not said where it is: there is nothing to dial and the row says so.
+    expect(cells[2]).toEqual(["attic", NOT_UP_YET, "account", "not yet", "", "", "", ""]);
+    // A host reached by a code says nothing about itself until it is dialled, so its state is left empty rather
+    // than read as away.
+    expect(cells[3]).toEqual(["box", "http://192.168.1.9:4400", "code", "", "d_2", "", "SHA256:bbb", ""]);
+  });
+
+  it("calls a host up inside two beats and away after them, since one missed beat is a slow minute", () => {
+    expect(hostBeatWord(0)).toBe("up 1ms");
+    expect(hostBeatWord(HOST_BEAT_MS)).toBe("up 1m");
+    expect(hostBeatWord(2 * HOST_BEAT_MS)).toBe("up 2m");
+    expect(hostBeatWord(2 * HOST_BEAT_MS + 1)).toBe("away 2 min");
+    expect(hostBeatWord(6 * 60 * 60_000)).toBe("away 6 h");
+    expect(hostBeatWord(null)).toBe("not yet");
+  });
+
+  it("says which key a host is pinned under when the account lists another, and names the line that frees it", () => {
+    const said = hostKeyMovedLine("macbook", "SHA256:held", "SHA256:listed");
+    expect(said).toContain("SHA256:held");
+    expect(said).toContain("SHA256:listed");
+    expect(said).toContain("wsp host pair");
+    expect(said).toContain("wsp host forget macbook");
+    expect(hostAliasHeldLine("box")).toContain("wsp host forget box");
+    expect(hostDroppedLine("attic")).toContain("attic");
+    expect(relayQuietLine("the relay at https://r did not answer")).toContain("the rows below");
+    expect(NO_HOSTS_LINE).toContain("wsp login");
+    expect(NO_HOSTS_LINE).toContain("wsp host connect");
   });
 });
