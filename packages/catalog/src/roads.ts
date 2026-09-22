@@ -102,7 +102,7 @@ export function versionOf<R extends { road: string; version?: string; pin?: Tool
 export const GUEST_HOME = "/root";
 /** Where uv and pipx link their commands on a machine wsp forked, which is their own default there. */
 export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
-/** Where every pinned binary lands, and every manager links its commands on a computer somebody owns: on every job's
+/** Where every pinned command lands, and every manager links its commands on a computer somebody owns: on every job's
  * PATH, a box's included, and read-only inside every workspace on a box. */
 export const LOCAL_BIN = "/usr/local/bin";
 /** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
@@ -128,7 +128,7 @@ export const CLAUDE_CODE = {
 const CLAUDE_DOWNLOADS = "https://downloads.claude.ai/claude-code-releases";
 
 /** The binary alone, since the vendor's installer reads the current version off the network, in the folder every
- * pinned binary lands in: the home a box shares with its workspaces is off its job's PATH and each can write it. */
+ * pinned command lands in: the home a box shares with its workspaces is off its job's PATH and each can write it. */
 export const CLAUDE_INSTALL = [
   'arch="$(uname -m)"',
   'case "$arch" in',
@@ -144,8 +144,9 @@ export const CLAUDE_INSTALL = [
 ].join("\n");
 
 /** What the image build runs to put the harness on a first-life builder, recorded in the manifest as setupSha; the
- * smoke is what proves the result. */
-export const GOLDEN_SETUP = CLAUDE_INSTALL;
+ * smoke is what proves the result. An update runs it too, on an image that may hold the harness under the home,
+ * first on TOOLS_PATH, so that file goes first: a builder's home is root's alone. */
+export const GOLDEN_SETUP = [`rm -f ${HOME_BIN}/claude`, CLAUDE_INSTALL].join("\n");
 export const GOLDEN_SMOKE = "claude --version";
 
 /** uv by its release tarball, checksummed against the sums astral publishes

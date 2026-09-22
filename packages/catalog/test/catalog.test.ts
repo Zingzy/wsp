@@ -274,7 +274,7 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
-    expect(installLine(catalogEntry("claude")!)).toBe(catalog.GOLDEN_SETUP);
+    expect(installLine(catalogEntry("claude")!)).toBe(catalog.CLAUDE_INSTALL);
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
@@ -520,9 +520,11 @@ describe("catalog", () => {
   });
 
   it("the default agent is the vendor's own binary at a pinned version, checked against the sums its manifest publishes, and no road runs a vendor installer", () => {
-    expect(catalog.GOLDEN_SETUP).toBe(catalog.CLAUDE_INSTALL);
+    // The image's setup takes off the file an image sealed before held under the home, first on its PATH; the row's
+    // script names no folder under the home, since a box shares that home with every workspace on it.
+    expect(catalog.GOLDEN_SETUP).toBe(`rm -f /root/.local/bin/claude\n${catalog.CLAUDE_INSTALL}`);
     expect(catalog.CLAUDE_CODE.version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(catalog.GOLDEN_SETUP).toBe([
+    expect(catalog.CLAUDE_INSTALL).toBe([
       'arch="$(uname -m)"',
       'case "$arch" in',
       `  x86_64) plat=linux-x64 sha=${catalog.CLAUDE_CODE.sha256.x86_64} ;;`,
@@ -538,7 +540,7 @@ describe("catalog", () => {
     // The row installs into the one directory it names, at the version its own text fixes, so a copy gets that version.
     const claude = catalogEntry("claude")!;
     const road = claude.installRoad;
-    expect(road).toEqual({ road: "script", script: catalog.GOLDEN_SETUP, version: catalog.CLAUDE_CODE.version, bins: [LOCAL_BIN] });
+    expect(road).toEqual({ road: "script", script: catalog.CLAUDE_INSTALL, version: catalog.CLAUDE_CODE.version, bins: [LOCAL_BIN] });
     expect(fixesVersion(road)).toBe(true);
     expect(roadModule(road).bins(road as never)).toEqual([LOCAL_BIN]);
     // A box's job reads the row under its prefix and finds the harness in the same folder, which its PATH holds.
@@ -558,7 +560,7 @@ describe("catalog", () => {
     const installed = join(dir, "bin", "claude");
     // The script road's step carries `set -euo pipefail`, pinned above, so a refused sum ends the script where it stands.
     // The arch is forced so the case reads the checksum road on any machine that runs the suite, not the arch word of the machine's own uname.
-    const script = `set -euo pipefail\n${catalog.GOLDEN_SETUP}`
+    const script = `set -euo pipefail\n${catalog.CLAUDE_INSTALL}`
       .replace('arch="$(uname -m)"', "arch=x86_64")
       .replace(`${LOCAL_BIN}/claude`, installed)
       .replaceAll("/tmp/claude", download)

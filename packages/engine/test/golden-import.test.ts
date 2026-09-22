@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -1377,7 +1377,7 @@ describe("agentInstallsFor", () => {
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
     // The harness installs at the version its own text fixes, so a copy built from the pin gets that version.
-    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: true, words: "by its own installer" } });
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: CLAUDE_INSTALL, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: true, words: "by its own installer" } });
     // The road each line walks, which is what bounds a step that runs it on a computer somebody owns.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script" });
     expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
@@ -1407,7 +1407,7 @@ describe("agentInstallsFor", () => {
       ["agents/claude", "Claude Code", "claude --version"],
       ["agents/codex", "Codex", "codex --version"],
     ]);
-    expect(a.installs[0]!.install).toBe(GOLDEN_SETUP);
+    expect(a.installs[0]!.install).toBe(CLAUDE_INSTALL);
     expect(a.installs[1]!.install).toContain("npm install -g @openai/codex@");
     expect(a.skipped).toEqual([{ id: "agents/unknown-thing", note: "no installer known" }]);
   });
