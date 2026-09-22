@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
 import { addressLines } from "../src/host-lock.js";
 import { connectCommand } from "../src/connect.js";
-import { defaultHost, dialWindowMs, hostsDir, readHost, setDefaultHost, writeHost } from "../src/hosts.js";
+import { aimedHost, defaultHost, dialWindowMs, hostsDir, readHost, setDefaultHost, writeHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
 import {
   BEAT_FLOOR_MS,
@@ -25,6 +25,7 @@ import {
   readDeviceKeyPair,
   readRelayClient,
   readRelayRecord,
+  reconcileAccountDevices,
   relayCommand,
   relayRecordPath,
   startRelay,
@@ -35,6 +36,7 @@ import {
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
+import { makeDevices, memoryStore } from "@wsp/runtime";
 import { DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, type DeviceView } from "@wsp/protocol";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -693,6 +695,22 @@ describe("wsp logout", () => {
     expect(log.join("\n")).toContain("box");
   });
 
+  it("says the account may still hold this computer when the relay will not say which row is this one", async () => {
+    const relay = await fakeRelay();
+    relay.clients = [{ id: "c1", name: "the box", thisOne: true, fingerprint: "SHA256:aaa" }];
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+    relay.refuse = { status: 500, error: "this relay is having a moment" };
+
+    const err: string[] = [];
+    expect(await logoutCommand(io([], err), { statePath, home }, undefined, deps(dir))).toBe(0);
+    expect(err.join("\n")).toContain("this relay is having a moment");
+    // The reading never got an id, so the line names the word wsp login prints beside every row over there.
+    expect(err.join("\n")).toContain("wsp logout <id>");
+    // The records go whatever the relay said: a token this computer cannot use must not be left behind.
+    expect(readRelayClient(home)).toBeUndefined();
+  });
+
   it("signs another of the account's computers out by its id", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
@@ -739,6 +757,20 @@ describe("wsp hosts", () => {
     // A host on the account with no address gets no record: there is nothing to dial until wsp up runs there.
     expect(readHost(home, "attic")).toBeUndefined();
     expect(relay.calls.some(c => c.line === "GET /hosts" && c.token === "client-token")).toBe(true);
+  });
+
+  it("writes no record for an account host that has said no key, prints it as not up yet and refuses a line aimed at it", async () => {
+    const { relay, statePath, home, dir } = await signedIn();
+    // A host beating from a wsp from before it sent its key: it says where it is and nothing about what it proves.
+    relay.hosts = [{ id: "hattic", name: "attic", hostname: "hattic.boxes.example", hostKey: null, lastSeen: new Date().toISOString() }];
+    const log: string[] = [];
+    expect(await hostsCommand(io(log), { statePath, home }, deps(dir))).toBe(0);
+
+    expect(log.find(line => line.startsWith("attic"))).toContain(NOT_UP_YET);
+    // Nothing to dial and nothing to pin: a record here would send this computer's token at whatever answers.
+    expect(readHost(home, "attic")).toBeUndefined();
+    // The refusal is the one for a name this computer holds nothing under, which names the listing and not a code.
+    expect(() => aimedHost(statePath, { home, host: "attic", env: {} })).toThrow(/no host named attic is connected[\s\S]*wsp hosts/);
   });
 
   it("marks the single account host as the one every line takes when nothing else is marked", async () => {
@@ -806,21 +838,14 @@ describe("wsp hosts", () => {
 
 describe("what a linked host says on its beat and reads back", () => {
   /** The devices standing on a host, as the reconcile reads and cuts them. */
-  function devicesHere(devices: DeviceView[]): RelayDeviceDoor & { revoked: string[]; forgotten: string[]; keys: string[] } {
+  function devicesHere(devices: DeviceView[]): RelayDeviceDoor & { revoked: string[] } {
     const door = {
       revoked: [] as string[],
-      forgotten: [] as string[],
-      keys: [] as string[],
       list: async () => devices,
       revoke: async (id: string) => {
         door.revoked.push(id);
         devices = devices.filter(d => d.id !== id);
         return true;
-      },
-      refused: async () => door.keys,
-      forget: async (fingerprint: string) => {
-        door.forgotten.push(fingerprint);
-        door.keys = door.keys.filter(key => key !== fingerprint);
       },
     };
     return door;
@@ -896,7 +921,6 @@ describe("what a linked host says on its beat and reads back", () => {
       accountDevice("d_2", "SHA256:gone"),
       { id: "d_3", name: "a paired computer", createdAt: "2026-09-01T00:00:00.000Z", lastSeenAt: "2026-09-01T00:00:00.000Z" },
     ]);
-    door.keys = ["SHA256:laptop", "SHA256:long-gone"];
     const log: string[] = [];
     const up = (await startRelay({ statePath, home, port: 4400, log: line => log.push(line), devices: door }, deps(dir)))!;
     closers.push(() => up.close());
@@ -904,10 +928,19 @@ describe("what a linked host says on its beat and reads back", () => {
     await vi.waitUntil(() => door.revoked.length > 0, { timeout: 4000 });
     expect(door.revoked).toEqual(["d_2"]);
     expect(log.join("\n")).toContain("no longer on this account");
-    // A key the account still holds a device under stays remembered; one it dropped is forgotten, so that computer
-    // signing in again is admitted afresh.
-    await vi.waitUntil(() => door.forgotten.length > 0, { timeout: 4000 });
-    expect(door.forgotten).toEqual(["SHA256:long-gone"]);
+  });
+
+  it("keeps refusing a key it took away when a listing stops naming that computer and then names it again", async () => {
+    const devices = makeDevices(memoryStore());
+    const laptop = { kind: "account", relayDeviceId: "c1", fingerprint: "SHA256:laptop", publicKey: "pub", admittedBy: "SHA256:signer" } as const;
+    const paired = await devices.admitAccount("the laptop", laptop, Date.parse("2026-09-22T00:00:00.000Z"));
+    expect(await devices.revoke(paired.deviceId)).toBe(true);
+
+    // The relay leaves that computer off one beat's list and puts it back on the next. The revocation was made
+    // here, so neither beat is any part of undoing it: the key stands refused and a code is the road back in.
+    await reconcileAccountDevices(devices, [], () => {});
+    await reconcileAccountDevices(devices, [{ id: "c1", name: "the laptop", fingerprint: "SHA256:laptop", admissions: [] }], () => {});
+    expect(await devices.refuses("SHA256:laptop")).toBe(true);
   });
 
   it("revokes nobody on a reply carrying no devices field, and nobody on a beat the relay refused", async () => {

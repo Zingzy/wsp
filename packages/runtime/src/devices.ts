@@ -14,7 +14,8 @@ const DEVICES = "devices";
 const PAIRINGS = "pairings";
 /** One document per key this host took away, keyed by the fingerprint: a device admitted through the account
  * carries the same key when it signs in again while the relay mints it a fresh id, so the key is what a refusal
- * has to remember. Kept until the account stops holding a device under it. */
+ * has to remember. Kept for good: a revocation made here is not the account's to undo, and a code from
+ * wsp host pair is the road back in for that computer. */
 const REVOKED = "revoked-keys";
 
 /** Two strings of the same bytes, in a time that does not say where they first differ. The one compare every road
@@ -118,11 +119,6 @@ export interface DeviceDoor {
   /** Whether this host took a device holding that key away and still remembers it, which is what keeps an
    * admission it still holds from letting it back in through the account. */
   refuses(fingerprint: string): Promise<boolean>;
-  /** Every key this host took away and still remembers. */
-  refused(): Promise<string[]>;
-  /** Forgets one, which the reconcile does for a key the account no longer holds a device under: a computer signed
-   * out of the account and signed in again is a fresh admission and not the one that was taken away. */
-  forget(fingerprint: string): Promise<void>;
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
@@ -205,8 +201,6 @@ export function makeDevices(store: Store): DeviceDoor {
     admitAccount: (name, via, now) => oneAtATime(() => admit(name, undefined, now, { via })),
     mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
     refuses: async fingerprint => isRevoked(await store.get(REVOKED, fingerprint)),
-    refused: async () => (await store.list(REVOKED)).filter(isRevoked).map(held => held.fingerprint),
-    forget: fingerprint => oneAtATime(() => store.delete(REVOKED, fingerprint)),
     match: async token => {
       const digest = tokenDigest(token);
       // Every record is compared, and the first match is kept rather than returned: a loop that leaves early would

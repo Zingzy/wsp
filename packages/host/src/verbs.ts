@@ -425,6 +425,10 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     timer = setTimeout(() => fail(noAnswerWithin(where, deadlineMs)), deadlineMs);
   });
   let paired: { deviceId: string; deviceToken: string } | undefined;
+  /** Whether the refusal that ended this dial was the answer to the frame that carried the token or the code: the
+   * one refusal a second dial can do anything about, since a host that never proved the key this computer pinned
+   * refuses the same way however often it is asked. */
+  let refusedTheToken = false;
   /** The first frame of every dial that holds a key: this computer's nonce and its half of a fresh key agreement,
    * answered by the host with the key it proves. The fingerprint is read before the signature, since anything
    * answering at this address signs for itself perfectly well and the only thing that tells it from the host is
@@ -455,6 +459,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
    * says so with its alias and the line that pairs again, since its token is this computer's to renew. Only those
    * two frames come here: a host that did not prove its key was answered before either of them was sent. */
   const tokenRefused = async (e: unknown): Promise<never> => {
+    refusedTheToken = true;
     const kind = (e as { kind?: unknown }).kind;
     if (kind === undefined) {
       await Promise.race([closed, new Promise(r => setTimeout(r, CLOSE_GRACE_MS))]);
@@ -503,7 +508,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     ws.terminate();
     // The one road that tries again: a host that refused the token this computer holds, where the caller above
     // knows another first frame to send. Anything else, and any second refusal, is the person's to read.
-    if (again !== undefined && (e as { kind?: unknown }).kind === "auth") {
+    if (again !== undefined && refusedTheToken && (e as { kind?: unknown }).kind === "auth") {
       const next = again(e);
       if (next !== undefined) return dialOnce(statePath, next);
     }

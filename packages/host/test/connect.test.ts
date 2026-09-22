@@ -674,7 +674,7 @@ describe("a host on the account, reached with no code", () => {
   /** A host of this process that is on an account: the key it trusts and the listing its beat learned, which a
    * test moves under it. The home is this computer's, holding the key this computer signs with and the record wsp
    * hosts wrote off the listing. */
-  async function accountBox(): Promise<{ url: string; home: string; runtime: Runtime; laptop: string; devices: () => Promise<DeviceView[]>; listed: (rows: AccountDevice[]) => void; wsPort: number; authToken: string }> {
+  async function accountBox(): Promise<{ url: string; home: string; devices: () => Promise<DeviceView[]>; listed: (rows: AccountDevice[]) => void; wsPort: number; authToken: string }> {
     const { runtime, statePath } = testRuntime();
     let listed: AccountDevice[] = [];
     handle = await startHost({
@@ -693,8 +693,6 @@ describe("a host on the account, reached with no code", () => {
     return {
       url: `http://127.0.0.1:${up.port}`,
       home,
-      runtime,
-      laptop: keyFingerprint(laptop.publicKey),
       wsPort: up.wsPort,
       authToken: up.authToken,
       devices: async () => (await overHostToken(up.wsPort, up.authToken, "devices.list"))["devices"] as DeviceView[],
@@ -728,19 +726,30 @@ describe("a host on the account, reached with no code", () => {
     const box = await accountBox();
     const first = await dialHost(STATE, { host: "box", home: box.home, env: {} });
     first.close();
-    const gone = readHost(box.home, "box")!.deviceId;
-    // The host no longer holds the device the record names and refuses no key: a state file put back from a copy,
-    // or a computer the account dropped and took back. The token this computer holds opens nothing there.
-    await box.runtime.devices.revoke(gone);
-    await box.runtime.devices.forget(box.laptop);
-    expect(await box.devices()).toEqual([]);
+    const before = readHost(box.home, "box")!;
+    // A token that host never minted and no key it refuses: a state file put back from a copy, or a record carried
+    // over from a host that was rebuilt. The account still names this computer, so it proves its key and carries on.
+    writeHost(box.home, "box", { ...before, deviceToken: "a token no host minted" });
 
     const again = await dialHost(STATE, { host: "box", home: box.home, env: {} });
     expect((await again.request("workspaces.list")).ok).toBe(true);
     again.close();
     const kept = readHost(box.home, "box")!;
-    expect(kept.deviceId).not.toBe(gone);
-    expect((await box.devices()).map(d => d.id)).toEqual([kept.deviceId]);
+    expect(kept.deviceId).not.toBe(before.deviceId);
+    expect((await box.devices()).map(d => d.id)).toContain(kept.deviceId);
+  });
+
+  it("writes no token into the record on a dial that spent a code there, since this computer proved no key for it", async () => {
+    const box = await accountBox();
+    const issued = await overHostToken(box.wsPort, box.authToken, "pair.issue");
+    const held = readHost(box.home, "box")!;
+    const client = await dialHost(STATE, { host: "box", home: box.home, env: {}, redeem: { code: issued["code"] as string, name: "the laptop", hostKey: held.hostKey! } });
+    expect((await client.request("workspaces.list")).ok).toBe(true);
+    client.close();
+
+    // The token a redeem bought belongs to the line that spent the code, which writes its own record; the account
+    // record stands as the listing wrote it until this computer proves its key at that host.
+    expect(readHost(box.home, "box")).toMatchObject({ deviceId: "", deviceToken: "" });
   });
 
   it("is not re-admitted at a host that revoked it and remembers the key, whatever admission the account still carries", async () => {
@@ -767,6 +776,25 @@ describe("a host on the account, reached with no code", () => {
     expect(await box.devices()).toEqual([]);
   });
 
+  it("dials a host that proves another key once, since only a refused token is worth a second dial", async () => {
+    const other = await olderHost();
+    const home = tempDir("connect-moved");
+    deviceKeyHere(home);
+    // A record with a token and a key that host does not prove: the seal refuses before any frame of this
+    // computer's crosses, and proving the device key at the same seal would refuse for the same reason.
+    writeHost(home, "box", {
+      url: other.url,
+      deviceId: "d_1",
+      deviceToken: "t",
+      hostKey: keyFingerprint(newPlaceKeyPair().publicKey),
+      pairedAt: "2026-09-22T00:00:00.000Z",
+      via: { kind: "account", hostId: "hbox1" },
+    });
+    const refused = await dialHost(STATE, { host: "box", home, env: {} }).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toBe(pairKeyRefusal(other.url));
+    expect(other.dials()).toBe(1);
+  });
+
   it("reads an older host's refusal of that frame as an older wsp, and names the code road there", async () => {
     // A host whose door knows no device.auth: it answers the frame with its request schema's own words, no kind
     // on the frame and the unauthorized close behind it, which is what every wsp before this one does.
@@ -784,11 +812,13 @@ describe("a host on the account, reached with no code", () => {
 /** A host of an older wsp, for the one case about what this computer reads off one: it proves its key as every host
  * has since keys were pinned, seals what follows, and answers the frame it does not know with its schema's own
  * refusal, no kind and the unauthorized close. */
-async function olderHost(): Promise<{ url: string; hostKey: string }> {
+async function olderHost(): Promise<{ url: string; hostKey: string; dials: () => number }> {
   const key = newPlaceKeyPair();
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   servers.push(server);
+  let dials = 0;
   server.on("connection", ws => {
+    dials += 1;
     let seal: Seal | undefined;
     ws.on("message", raw => {
       const frame = JSON.parse(openFrame(seal, raw)) as { id: number; op: string; nonce?: string; ephemeral?: string };
@@ -815,5 +845,5 @@ async function olderHost(): Promise<{ url: string; hostKey: string }> {
   });
   await new Promise<void>(done => server.once("listening", () => done()));
   const address = server.address();
-  return { url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`, hostKey: keyFingerprint(key.publicKey) };
+  return { url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`, hostKey: keyFingerprint(key.publicKey), dials: () => dials };
 }

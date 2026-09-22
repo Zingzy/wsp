@@ -93,8 +93,7 @@ describe("what wsp says when it will not run a line", () => {
   it("answers a word wsp used to have as it answers any other word nothing knows: one line and the pointer, with nothing dialled", async () => {
     // No old word is kept as a road, hidden or otherwise: the release note says what moved, once, and the command
     // line carries none of it.
-    // wsp hosts is a line again, under the ruling that one listing answers for both roads to a host, so the words
-    // below are the ones that are gone for good.
+    // wsp hosts is a line wsp answers to; the words below are the ones that are gone for good.
     for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["disconnect", "box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");

@@ -682,7 +682,6 @@ describe("a computer the account admitted", () => {
     expect(await runtime.devices.list()).toEqual([]);
     // The memory is the key, not the id the relay minted: the same computer signing in again is refused too.
     expect(await runtime.devices.refuses(keyFingerprint(laptopKey.publicKey))).toBe(true);
-    expect(await runtime.devices.refused()).toEqual([keyFingerprint(laptopKey.publicKey)]);
   });
 
   it("asks the host for one more beat when the key is not on the list yet, and admits what that beat learned", async () => {

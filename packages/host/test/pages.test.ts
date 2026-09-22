@@ -253,8 +253,7 @@ describe("the pages wsp prints", () => {
 
   it("no page, tool description, skill, instruction, AGENTS.md, README or doc carries a word wsp no longer answers to", () => {
     // "--in <" alone let three rows of the skill keep the flag in backticks with no value after it.
-    // wsp hosts is a line again, under the ruling that one listing answers for both roads to a host; the words
-    // that are gone for good are the ones below.
+    // wsp hosts is a line wsp answers to, so it is no banned word; the ones below are gone for good.
     const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp disconnect", "wsp host list", "wsp host linked", "wsp host clients", "run wsp up first"];
     const docs = filesUnder(join(REPO, "apps/docs/content")).filter(p => p.endsWith(".mdx") || p.endsWith(".md"));
     const texts: [string, string][] = [

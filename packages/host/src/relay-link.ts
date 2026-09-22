@@ -323,18 +323,24 @@ export async function logoutCommand(io: CliIO, opts: RelayCommandOpts, id: strin
     io.log(`${id} is signed out of ${client.relayUrl}; the token it held opens nothing, its admissions are gone, and every host on the account drops what it admitted on them within ${fmtDuration(HOST_BEAT_MS)}`);
     return 0;
   }
+  // What is left to do over there when this computer's own row could not be taken off: the one line says so
+  // whether the reading or the delete is what failed, and where the reading never got an id, wsp login on a
+  // computer still signed in is what prints it.
+  const mayStillHold = (id: string | undefined): string =>
+    `the account may still hold this computer as ${client.name}; sign it out from another computer with ${id === undefined ? "wsp logout <id>, reading the id off wsp login there" : `wsp logout ${id}`}.`;
   // The relay first, while the token is still here: the records go whatever it says, since a relay that is down
   // must not leave this computer holding a token it cannot use.
   const own = await Promise.resolve()
     .then(async () => (await relayClients(client, deps)).find(c => c.thisOne === true))
     .catch((e: unknown) => {
       io.error(e instanceof Error ? e.message : String(e));
+      io.error(mayStillHold(undefined));
       return undefined;
     });
   if (own !== undefined) {
     await relayCall(deps, `${client.relayUrl}/clients/${encodeURIComponent(own.id)}`, { method: "DELETE", token: client.token }).catch((e: unknown) => {
       io.error(e instanceof Error ? e.message : String(e));
-      io.error(`the account may still hold this computer as ${own.name}; sign it out from another computer with wsp logout ${own.id}.`);
+      io.error(mayStillHold(own.id));
     });
   }
   removeRelayClient(opts.home);
@@ -414,7 +420,10 @@ function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHo
       io.error(hostKeyMovedLine(alias, pinned, listedKey));
     }
     const hostKey = pinned ?? listedKey;
-    if (!code && !moved && address !== undefined) {
+    // A host that has not said which key it proves cannot be dialled: no record is written for it, so a line
+    // aimed at that name is refused with the sentence that names wsp hosts rather than the code road, and the
+    // row below reads as not up yet until a beat carries the key.
+    if (!code && !moved && address !== undefined && hostKey !== undefined) {
       const record: HostRecord = {
         url: address,
         deviceId: held?.deviceId ?? "",
@@ -428,8 +437,8 @@ function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHo
     } else if (held !== undefined) kept.add(alias);
     const beat = host.lastSeen === null || host.lastSeen === undefined ? null : Date.parse(host.lastSeen);
     // What a line aimed at this name would dial: the record's own address where it stands, since a listing naming
-    // another key changes nothing about the host this computer pinned.
-    const shown = moved && held !== undefined ? held.url : address;
+    // another key changes nothing about the host this computer pinned, and nothing at all where no key is held.
+    const shown = moved && held !== undefined ? held.url : hostKey === undefined ? undefined : address;
     rows.push({
       host: alias,
       ...(shown === undefined ? {} : { address: shown }),
@@ -608,26 +617,24 @@ export function admittedDevices(statePath: string, deps: Pick<RelayDeps, "now"> 
   };
 }
 
-/** The devices of this host as the reconcile reads and cuts them: the store's own listing, the one revoke road the
- * op takes, and the memory of a key this host took away. */
+/** The devices of this host as the reconcile reads and cuts them: the store's own listing and the one revoke road
+ * the op takes. */
 export interface RelayDeviceDoor {
   list(): Promise<DeviceView[]>;
   revoke(id: string): Promise<boolean>;
-  refused(): Promise<readonly string[]>;
-  forget(fingerprint: string): Promise<void>;
 }
 
 /** What a beat's listing does to the devices standing here: every device admitted through the account whose key
- * the account no longer names is taken away and its sockets cut, and a key this host revoked is forgotten once the
- * account holds no device under it, so a computer signed out and in again is admitted afresh. A device that
- * redeemed a code is never touched: the account has nothing to say about it. */
+ * the account no longer names is taken away and its sockets cut. A device that redeemed a code is never touched:
+ * the account has nothing to say about it. Nothing here forgets a key this host revoked: a revocation made at the
+ * host is not the account's to undo, so a listing that stops naming a computer and names it again leaves it
+ * refused, and a code from wsp host pair is the road back in. */
 export async function reconcileAccountDevices(door: RelayDeviceDoor, listed: readonly AccountDevice[], log: (line: string) => void): Promise<void> {
   const keys = new Set(listed.map(device => device.fingerprint));
   for (const device of await door.list()) {
     if (device.via?.kind !== "account" || keys.has(device.via.fingerprint)) continue;
     if (await door.revoke(device.id)) log(`relay: ${device.name} is no longer on this account, so its token here is taken away`);
   }
-  for (const fingerprint of await door.refused()) if (!keys.has(fingerprint)) await door.forget(fingerprint);
 }
 
 export interface RelayStartOpts {

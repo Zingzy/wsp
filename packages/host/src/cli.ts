@@ -1391,7 +1391,7 @@ async function hostFor(
             admitted,
             // The revoke the reconcile takes is the op's own, so a device the account dropped loses its sockets
             // here exactly as one revoked at this terminal does.
-            devices: { list: () => rt.devices.list(), revoke: id => handle.revokeDevice(id), refused: () => rt.devices.refused(), forget: fingerprint => rt.devices.forget(fingerprint) },
+            devices: { list: () => rt.devices.list(), revoke: id => handle.revokeDevice(id) },
           })
         : undefined;
     if (linked && opts.relay === false) await stopRecordedConnector(dirname(opts.statePath));
