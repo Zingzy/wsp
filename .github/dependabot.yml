@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Every action in .github/workflows is pinned to a commit sha, which no update
+# service moves on its own. This is what moves them: a weekly pull request per
+# action, carrying the new sha and the version comment beside it, gated by ci
+# and daemon like any other. Nothing else is listed here; the lockfiles keep
+# their update-by-hand road.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

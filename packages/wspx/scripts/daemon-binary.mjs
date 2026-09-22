@@ -7,16 +7,21 @@
 //
 //   node daemon-binary.mjs                        this machine's binary, out of daemon/target/release
 //   node daemon-binary.mjs --triple T [--from F]  T's binary, out of daemon/target/T/release unless --from names it
-//   node daemon-binary.mjs --from-artifacts DIR   every DIR/wsp-daemon-<triple>/wsp-daemon-<triple> a release job downloaded
+//   node daemon-binary.mjs --from-artifacts DIR   every DIR/wsp-daemon-<triple>/wsp-daemon-<triple> a release job downloaded, inside that run
+//   node daemon-binary.mjs --from-run ID          the artifacts of that run, read and downloaded here, outside one
 //   node daemon-binary.mjs --check                every target the host names is there and executable; sizes printed
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { REPO } from "./bundles.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const folder = fileURLToPath(new URL("../daemon", import.meta.url));
 const ARTIFACT_PREFIX = "wsp-daemon-";
+/** This repository as gh names one, off the one home for every download's address. */
+const SLUG = new URL(REPO).pathname.slice(1);
 const PT_LOAD = 1;
 const PT_DYNAMIC = 2;
 const DT_NULL = 0;
@@ -95,17 +100,53 @@ async function check() {
   if (missing.length !== 0) throw new Error(`daemon binaries missing or not executable:\n${missing.join("\n")}`);
 }
 
+/** Every wsp-daemon-<triple> folder under a directory, placed where the host reads it. */
+function stage(dir) {
+  const names = readdirSync(dir).filter(name => name.startsWith(ARTIFACT_PREFIX));
+  if (names.length === 0) throw new Error(`no ${ARTIFACT_PREFIX}* folders under ${dir}`);
+  for (const name of names) place(join(dir, name, name), name.slice(ARTIFACT_PREFIX.length));
+}
+
+/** Why a workflow run's artifacts do not stand for this checkout, or nothing. A fork's run carries a fork's bytes
+ * under the same artifact names, and a run of another commit carries another tree's daemon. */
+export function runRefusal(id, run, head) {
+  const built = run.head_repository?.full_name;
+  if (built !== SLUG) return `run ${id} was built in ${built ?? "a repository gh did not name"}, and the daemon binaries staged here come from ${SLUG}: name a run of ${SLUG}`;
+  if (run.head_sha !== head) return `run ${id} built ${run.head_sha}, and this checkout is at ${head}: name a run of this commit`;
+  return undefined;
+}
+
+/** The binaries of one workflow run, read off the run record and then downloaded from that same run, so the record
+ * that was checked and the bytes that are staged are one run's and no folder a person filled stands between them. */
+function fromRun(id) {
+  const gh = args => execFileSync("gh", args, { encoding: "utf8" });
+  const run = JSON.parse(gh(["api", `repos/${SLUG}/actions/runs/${id}`]));
+  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const why = runRefusal(id, run, head);
+  if (why !== undefined) throw new Error(why);
+  const into = mkdtempSync(join(tmpdir(), "wsp-daemon-run-"));
+  try {
+    gh(["run", "download", String(id), "-R", SLUG, "--pattern", `${ARTIFACT_PREFIX}*`, "--dir", into]);
+    stage(into);
+  } finally {
+    rmSync(into, { recursive: true, force: true });
+  }
+}
+
 function main(args) {
   const flag = name => {
     const at = args.indexOf(name);
     return at === -1 ? undefined : args[at + 1];
   };
   if (args.includes("--check")) return check();
+  const run = flag("--from-run");
+  if (run !== undefined) return fromRun(run);
   const artifacts = flag("--from-artifacts");
   if (artifacts !== undefined) {
-    const names = readdirSync(artifacts).filter(name => name.startsWith(ARTIFACT_PREFIX));
-    if (names.length === 0) throw new Error(`no ${ARTIFACT_PREFIX}* folders under ${artifacts}`);
-    for (const name of names) place(join(artifacts, name, name), name.slice(ARTIFACT_PREFIX.length));
+    // Inside a run the download-artifact step has already brought that run's own artifacts; outside one, a folder
+    // says nothing about which run or which tree filled it, which is what --from-run reads.
+    if (process.env["GITHUB_ACTIONS"] !== "true") throw new Error("outside a workflow run the daemon binaries come from --from-run <id>, which checks the run and downloads it");
+    stage(artifacts);
     return;
   }
   const triple = flag("--triple") ?? tripleHere();
@@ -114,5 +155,10 @@ function main(args) {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main(process.argv.slice(2));
+  try {
+    await main(process.argv.slice(2));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  }
 }

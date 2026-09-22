@@ -1436,7 +1436,8 @@ export interface Runtime {
     /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
      * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
      * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
-     * decides: a turn the agent refused did none, however far its launch got. */
+     * decides: a turn the agent refused did none, however far its launch got. A thread of another tree reads the
+     * absence a name nothing holds reads, before any of that. */
     forget(threadId: string, origin?: Caller): Promise<void>;
   };
   readonly harnesses: {
@@ -7052,7 +7053,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const record = threadRecords.get(threadId);
       const workspaceId = held[0]?.[1].view.workspaceId ?? record?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-      await entryOf(workspaceId, origin);
+      // The same absence a name nothing holds gets: a sentence of its own would tell a thread of another tree that
+      // the thread it named is there, and the refusal past this gate says its turn ran.
+      if ((await entryOfRow({ threadId, workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });

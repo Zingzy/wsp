@@ -14,6 +14,8 @@ import type { PackedProject, PackedState, ProjectBundler, StateRequest } from "@
 /** A virtual environment goes by any name; this file inside it says what it is. */
 const VENV_MARKER = "pyvenv.cfg";
 const GIT_DIR = ".git";
+/** What git names the file it holds while one command writes: index.lock, HEAD.lock, packed-refs.lock, a ref's, maintenance's. */
+const GIT_LOCK = ".lock";
 /** The one file judged under a .git directory, the repository's own and each submodule's under .git/modules: remote
  * URLs, credential helpers and http headers live here, and a nested repository's .git travels whole like the root one. */
 const GIT_CONFIG = /(^|\/)\.git(\/modules\/[^/]+)*\/config$/;
@@ -110,6 +112,7 @@ interface Walk {
   trackedDirs: ReadonlySet<string>;
   files: BundleFile[];
   secrets: ProjectSecret[];
+  /** The files and the directories left behind, by relative path: the caches, the Finder's metadata, git's locks. */
   excluded: string[];
   skipped: { path: string; note: string }[];
   scans: Promise<void>[];
@@ -218,6 +221,11 @@ function walk(w: Walk, dir: string, relDir: string, inGit: boolean, onlyTracked:
       continue;
     }
     if (!inGit && !isTracked && name === FINDER_METADATA) {
+      w.excluded.push(rel);
+      continue;
+    }
+    // A lock is one git command's own moment on this computer; carried, it is a repository that refuses to open.
+    if (inGit && name.endsWith(GIT_LOCK)) {
       w.excluded.push(rel);
       continue;
     }

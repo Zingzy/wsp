@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWord, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -44,6 +44,22 @@ const ASK: PermissionAsk = {
     { id: "mode:acceptEdits", label: "acceptEdits", effect: "mode", mode: "acceptEdits" },
   ],
 };
+
+/** A harness that dies before it announces a session: the launch that leaves a thread no turn ever ran on, which is
+ * the one shape sessions.forget takes. */
+const dying: HarnessAdapterFactory = () => ({
+  steers: false,
+  start: o => {
+    const localId = randomUUID();
+    const result: TurnResult = { status: "failed", error: "the harness exited with code 1 before emitting a result" };
+    const finished = Promise.resolve().then(() => {
+      o.onEvent({ type: "turn.done", sessionId: localId, result });
+      o.onEvent({ type: "session.end", sessionId: localId, exitCode: 1, sawResult: false });
+      return result;
+    });
+    return { localId, finished, interrupt: async () => {} };
+  },
+});
 
 /** An adapter whose turn raises whatever prompt the test tells it to and answers by handing the answer back, the way
  * the claude adapter's control channel does; the close event is the adapter's, as it is there. */
@@ -110,7 +126,8 @@ describe("a permission prompt relayed into the chat", () => {
   let rt: Runtime;
   let wait: ReturnType<typeof fakeClock>;
 
-  const runtime = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns) }, local: localWiring, clock: wait.clock });
+  const runtime = (extra: Record<string, HarnessAdapterFactory> = {}): Runtime =>
+    createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns), ...extra }, local: localWiring, clock: wait.clock });
 
   /** A started turn on the one local workspace, with the fake turn it opened. */
   const started = async (): Promise<{ handle: SessionHandle; turn: Turn; workspaceId: string }> => {
@@ -298,6 +315,29 @@ describe("a permission prompt relayed into the chat", () => {
     wait.advance(20 * 60_000);
     expect(turn.answers).toHaveLength(0);
     expect(closes(await history(cloud.id))).toHaveLength(1);
+  });
+
+  it("a thread of another tree forgetting a thread on the workspace is told not-found, and the thread stands", async () => {
+    rt = runtime({ codex: dying });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    // A launch that never got going: the one thread shape forget takes, so what holds it back here is the tree.
+    const junk = await rt.sessions.start(ws.id, { prompt: "never got going", harness: "codex" });
+    await junk.finished.catch(() => {});
+    const target = junk.view().threadId!;
+    const beside = await rt.sessions.start(ws.id, { prompt: "beside it", harness: "claude" });
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    const besideThread = beside.view().threadId!;
+    const outside = { origin: "here", by: { kind: "thread", threadId: besideThread, workspaceId: ws.id, rootThreadId: besideThread } } as const;
+
+    // The absence a thread id nothing holds answers, so the caller learns nothing about a tree that is not its own.
+    await expect(rt.sessions.forget(target, outside)).rejects.toMatchObject({ message: `no thread ${threadWord(target)}`, kind: "not-found" });
+
+    expect(foldThreads(await rt.sessions.list(ws.id)).map(t => t.id)).toContain(target);
+    // The person, who is no thread, forgets it as before.
+    await rt.sessions.forget(target);
+    expect(foldThreads(await rt.sessions.list(ws.id)).map(t => t.id)).toEqual([besideThread]);
+    turns[0]!.reply();
+    await beside.finished;
   });
 
   it("answers what it can rather than throwing: an unknown session, an unknown prompt, an option the prompt never carried", async () => {
