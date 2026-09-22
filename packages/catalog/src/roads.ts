@@ -5,8 +5,8 @@
 // Swift and rustup by their checksummed releases, Playwright's Chromium at the
 // Playwright the render tests run, 1Password's CLI from its own apt repository
 // under its pinned signing key, Hermes by a git checkout at a commit, Claude Code
-// by its vendor's installer. Every pin here is checked on the machine before
-// anything runs.
+// by the vendor's own binary at a pinned version. Every pin here is checked on
+// the machine before anything runs.
 import { SUM_SHOWN, pinMismatchLine, shellQuote, shortSum, type ToolPin } from "@wsp/protocol";
 import type { LinuxCask } from "./linux-casks.js";
 
@@ -40,6 +40,19 @@ export function pinCheckLine(what: string, tag: string, sha256: string): string 
   return `[ "$sum" = ${shellQuote(sha256)} ] || { echo "Error: ${pinMismatchLine(what, tag, shortSum(sha256), `\${sum:0:${SUM_SHOWN}}`)}" >&2; exit 1; }`;
 }
 
+/** One release asset wsp recorded: the file's name under its tag's download address and its sha256, which the
+ * machine checks before anything the file carries runs. */
+export interface ReleaseAsset {
+  name: string;
+  sha256: string;
+}
+
+/** A release's recorded assets by the arch a machine reports; an arch with none has no Linux build in that release. */
+export interface ReleaseAssets {
+  x86_64?: ReleaseAsset;
+  aarch64?: ReleaseAsset;
+}
+
 /** A package manager's global: at `version` when the row names one (the laptop's), else at the recorded `pin` while
  * it stands, else the current one. */
 export interface PackageRoad<K extends string> {
@@ -59,10 +72,12 @@ export type InstallRoad =
   | PackageRoad<"cargo">
   /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
   | { road: "go"; module?: string; version?: string; pin?: ToolPin }
-  /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
-   * install of that tag recorded and `go` the main package `go install` falls back to, at its own version or the tag's;
-   * with none there is no fall-through. A row that came back from a golden's digest names no repository: it only ever comes off. */
-  | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
+  /** A GitHub repository's Linux asset for the arch at `version`, the tag the catalog pinned or the one a person's own
+   * row names; `assets` is the file and the sha256 wsp recorded per arch, which every catalog row carries, and a row
+   * without them takes the release's own listing with the sum its first install recorded (`pin`). `go` is the main
+   * package `go install` falls back to for an arch the release has no asset for; with none there is no fall-through.
+   * A row that came back from a golden's digest names no repository: it only ever comes off. */
+  | { road: "release"; repo?: string; version?: string; assets?: ReleaseAssets; pin?: ToolPin; go?: string }
   /** A vendor's own Linux download, as its cask row scripts and hashes it. */
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
   | { road: "apt"; packages: readonly string[]; pin?: ToolPin }
@@ -83,27 +98,11 @@ export function versionOf<R extends { road: string; version?: string; pin?: Tool
   return road.version ?? standingPin(road)?.tag;
 }
 
-/** A vendor installer its vendor documents as curl piped into bash, run the one way a road may: the script is
- * downloaded to a file through the road's curl function, so a retry re-reads the download and never a body a shell
- * has begun to run; checked to be a shell script, since the vendor publishes no sum; then run from the file with
- * nothing on stdin. */
-export function installerScript(url: string): string {
-  return [
-    'f="$(mktemp)"',
-    `trap 'rm -f "$f"' EXIT`,
-    `curl -o "$f" ${shellQuote(url)}`,
-    `test "$(head -c 2 "$f")" = '#!' || { echo ${shellQuote(`Error: what ${url} served is not a shell script`)} >&2; exit 1; }`,
-    'bash "$f" </dev/null',
-  ].join("\n");
-}
-
-/** The one vendor installer the rules allow: the harness vendor's own, run on a first-life builder and recorded in
- * the manifest as setupSha; the smoke is what proves the result. */
-export const GOLDEN_SETUP = installerScript("https://claude.ai/install.sh");
-export const GOLDEN_SMOKE = "claude --version";
-
 /** The guest's home directory: every machine runs as root. */
 export const GUEST_HOME = "/root";
+/** Where a road that installs under the machine's own home links its commands: the installers below write into it
+ * and the road modules answer with it, so the path has one home. */
+export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
 /** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
 export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** Claude Code's config dir on the guest under the guest home, which the pack rewrites `.claude/` to. */
@@ -112,6 +111,40 @@ export const CLAUDE_CONFIG_REL = ".claude-cfg";
 export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/${CLAUDE_CONFIG_REL}`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
+
+/** Claude Code by the vendor's own Linux binary at the version the owner's Mac runs, checksummed against the sums
+ * that version's manifest publishes (https://downloads.claude.ai/claude-code-releases/2.1.280/manifest.json, the
+ * glibc platform keys linux-x64 and linux-arm64, which are the sums the vendor's own installer checks). */
+export const CLAUDE_CODE = {
+  version: "2.1.280",
+  sha256: {
+    x86_64: "1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b",
+    aarch64: "92f2b4fd05d0bdcf7b9a0d4e0ecef4a1e4b368b290cd8fd07cff9a50013f45a2",
+  },
+} as const;
+
+const CLAUDE_DOWNLOADS = "https://downloads.claude.ai/claude-code-releases";
+
+/** The binary alone, in the folder the vendor's installer links its launcher into: that installer reads the current
+ * version off the network before it downloads, which is the road the pin above closes. */
+export const CLAUDE_INSTALL = [
+  'arch="$(uname -m)"',
+  'case "$arch" in',
+  `  x86_64) plat=linux-x64 sha=${CLAUDE_CODE.sha256.x86_64} ;;`,
+  `  aarch64) plat=linux-arm64 sha=${CLAUDE_CODE.sha256.aarch64} ;;`,
+  '  *) echo "unsupported arch: $arch" >&2; exit 1 ;;',
+  "esac",
+  // The trap stands ahead of the download so the file goes whichever way the script leaves, a refused sum included.
+  "trap 'rm -f /tmp/claude' EXIT",
+  `curl -o /tmp/claude "${CLAUDE_DOWNLOADS}/${CLAUDE_CODE.version}/$plat/claude"`,
+  'echo "$sha  /tmp/claude" | sha256sum -c - >/dev/null',
+  `install -D -m 0755 /tmp/claude ${HOME_BIN}/claude`,
+].join("\n");
+
+/** What the image build runs to put the harness on a first-life builder, recorded in the manifest as setupSha; the
+ * smoke is what proves the result. */
+export const GOLDEN_SETUP = CLAUDE_INSTALL;
+export const GOLDEN_SMOKE = "claude --version";
 
 /** uv by its release tarball, checksummed against the sums astral publishes
  * next to it (https://github.com/astral-sh/uv/releases). */
@@ -263,8 +296,11 @@ export const RUSTUP_INSTALL = [
 /** Debian ships fd as fdfind to dodge a name clash; agents type fd, so the row links it onto PATH under that name. */
 export const FD_INSTALL = [APT_ENV, "apt-get install -y -qq fd-find", "ln -sfn /usr/bin/fdfind /usr/local/bin/fd"].join("\n");
 
-/** Yarn through the corepack Node 22 ships, pinned to the current stable line, with the download prompt off. */
-export const YARN_INSTALL = ["corepack enable yarn", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@stable"].join("\n");
+/** Yarn through the corepack Node 22 ships, at the exact version corepack's own `stable` alias named on 2026-09-22
+ * (https://repo.yarnpkg.com/tags, aliases.stable), with the download prompt off: the alias moves under an image
+ * build, a version does not. */
+export const YARN_VERSION = "4.18.0";
+export const YARN_INSTALL = ["corepack enable yarn", `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@${YARN_VERSION}`].join("\n");
 
 export const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 

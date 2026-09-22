@@ -147,7 +147,7 @@ describe("scanTools", () => {
     const rows = await scanTools(laptop({ brew: false, npm: false, cargo: true }));
     expect(rows).toEqual([
       { id: "uv/httpie", name: "httpie", manager: "uv", group: "uv and pipx tools", install: "uv tool install httpie", check: "uv tool list | grep -q '^httpie '", version: "0.14.0" },
-      { id: "cargo/bacon", name: "bacon", manager: "cargo", group: "cargo installs", install: "cargo install bacon", check: "cargo install --list | grep -q '^bacon '", version: "3.1.0" },
+      { id: "cargo/bacon", name: "bacon", manager: "cargo", group: "cargo installs", install: "cargo install bacon --locked", check: "cargo install --list | grep -q '^bacon '", version: "3.1.0" },
     ]);
   });
 

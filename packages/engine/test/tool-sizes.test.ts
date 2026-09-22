@@ -281,7 +281,7 @@ describe("tap formulae without a Linux bottle", () => {
     // The asset's checksum rides on the WSP_ROAD line so the first install records it; nothing is checked yet.
     expect(road.cmd).toContain(`sum="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"`);
     expect(road.cmd).toContain("tag='v0.1.0'");
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    expect(road.cmd).toContain('echo "WSP_ROAD release $asset $sum $tag"');
     expect(road.cmd).not.toContain("checksum recorded");
     expect(road.cmd).toMatch(/WSP_ROAD go/);
     // Nothing is piped into a shell, and the tag and repository from the Mac's formula only ever reach the shell single-quoted.
@@ -313,7 +313,7 @@ describe("tap formulae without a Linux bottle", () => {
     expect(road.cmd.indexOf("curl -o")).toBeLessThan(road.cmd.indexOf('[ "$sum" ='));
     expect(road.cmd.indexOf('[ "$sum" =')).toBeLessThan(road.cmd.indexOf('case "$asset" in'));
     expect(road.cmd).toContain("tag='v0.1.0'");
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    expect(road.cmd).toContain('echo "WSP_ROAD release $asset $sum $tag"');
   });
 
   it("a pin from an older tag is not checked against the new release: the tag moved, so it is a first install again", () => {
@@ -322,6 +322,6 @@ describe("tap formulae without a Linux bottle", () => {
     expect(road.cmd).not.toContain('[ "$sum" =');
     expect(road.cmd).not.toContain("e".repeat(64));
     expect(road.cmd).toContain("tag='v0.1.0'");
-    expect(road.cmd).toContain('echo "WSP_ROAD release ${asset:-$url} $sum $tag"');
+    expect(road.cmd).toContain('echo "WSP_ROAD release $asset $sum $tag"');
   });
 });

@@ -14,7 +14,8 @@ export interface PinnedBinary {
 }
 
 // Release binaries are pinned and checksum-verified; curl|sh installers are
-// banned here because they execute unpinned remote code as root.
+// banned, here and on every catalog road, because they execute unpinned
+// remote code as root.
 export function pinnedBinaryInstall(bin: PinnedBinary): string {
   return `${CURL_NET}
 if ! command -v ${bin.name} >/dev/null 2>&1; then
