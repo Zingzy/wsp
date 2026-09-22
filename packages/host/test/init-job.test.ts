@@ -150,7 +150,7 @@ async function forkable(f: Fake): Promise<void> {
   await f.rt.projects.add({ source: "https://github.com/dev/first.git", on: "default" });
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean; /** Saves keys the way the command line wires it, through the one writer of the .env beside the state. */ writesEnv?: boolean } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The provider this host forks on, which a terminal run beside it reads off the setup. */ forksOn?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean; /** Saves keys the way the command line wires it, through the one writer of the .env beside the state. */ writesEnv?: boolean } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -197,6 +197,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     // the stub backend behind the check, so the check the keys step runs is this test's own.
     keysHeld: held => ({ box: held["BOX_API_KEY"] !== undefined, solari: held["SOLARI_API_KEY"] !== undefined }),
     keyProvider: () => ("keyProvider" in over ? over.keyProvider : "solari"),
+    forksOn: () => over.forksOn ?? "solari",
     keySet: (key, provider): Record<string, string> | undefined => {
       const names: Record<string, string> = { box: "BOX_API_KEY", solari: "SOLARI_API_KEY" };
       if (provider === undefined) return { SOLARI_API_KEY: key };
@@ -293,8 +294,12 @@ describe("the init job, manual road", () => {
       // Priced at the place the build boots on, off that place's own backend: the stub caps no builder disk.
       pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number },
       place: { id: "default", name: "default" },
+      // The provider this host forks on, which the place a build boots on need not be: a terminal run beside it
+      // reads this to refuse a provider of its own rather than build on one nobody named.
+      forksOn: "solari",
       job: null,
     });
+    expect((await fake({ forksOn: "box" }).jobs.get()).forksOn).toBe("box");
   });
 
   it("saving the provider key writes it to the wsp home's .env through the one writer and wires the provider; the view says held, never the key", async () => {
