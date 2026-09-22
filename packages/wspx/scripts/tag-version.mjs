@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // node scripts/tag-version.mjs v1.2.3: prints the version a release tag names,
-// once every manifest that carries a version agrees with it. A tag that says one
-// number while the manifests say another fails here, with both numbers in the line,
-// before anything is built.
+// once main's own line carries the commit it points at and every manifest that
+// carries a version agrees with it. A tag on a commit main never took, or one
+// that says a number the manifests do not, fails here before anything is built.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,9 +30,21 @@ export function manifestMismatches(repo, version) {
     .filter(manifest => manifest.version !== version);
 }
 
-/** The version to build, or an error naming the tag's number and each manifest's. */
-export function checkTag(repo, tag) {
+/** The commit a release tag points at, and whether the line named by `ref` carries it. First parents only: a
+ * commit inside a branch someone merged is reachable from main without main ever having taken it, so the read and
+ * the sentence below agree only on the line main walked itself. */
+function tagOnLine(repo, tag, ref) {
+  const git = args => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  const commit = git(["rev-parse", `${tag}^{commit}`]).trim();
+  return { commit, on: git(["rev-list", "--first-parent", ref]).split("\n").includes(commit) };
+}
+
+/** The version to build, or an error naming the commit off main's line, else the tag's number and each manifest's.
+ * The ancestry read comes first, so a tag on a side branch reads that sentence and not a manifest's. */
+export function checkTag(repo, tag, ref = "origin/main") {
   const version = versionFromTag(tag);
+  const { commit, on } = tagOnLine(repo, tag, ref);
+  if (!on) throw new Error(`tag ${tag} points at ${commit}, which is not on main's own line; tag a commit main carries`);
   const wrong = manifestMismatches(repo, version);
   if (wrong.length > 0) {
     const said = wrong.map(manifest => `${manifest.file} says ${manifest.version}`).join(", ");

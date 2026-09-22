@@ -5,19 +5,14 @@ name: release
 # package on npm through trusted publishing, and the draft turned into a
 # release once every part landed. Every bundle also goes up under a name no
 # version moves, which is what releases/latest/download serves and what the
-# site links. Run by hand it is a dry run: the daemon binaries are built and
-# uploaded as artifacts and the command line package is staged with them, and
-# nothing is drafted, attached or published.
+# site links. A run started by hand is the dry run and there is no box to untick:
+# the daemon binaries are built and uploaded as artifacts and the command line
+# package is staged with them, and nothing is drafted, attached or published.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build the daemon binaries and stage the command line package with them; publish nothing
-        type: boolean
-        default: true
 
 # A job holds the grant its own steps use and no other, and no job holds the identity token beside a write on the
 # repository: a compromised dependency compiling in the daemon, mac or linux job runs under a read token, and the one
@@ -94,7 +89,7 @@ jobs:
 
   draft:
     name: Draft release
-    if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -107,7 +102,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: The tag and the manifests say the same version
+      # The check below reads main's own line off origin/main, and a checkout of a tag brings no branch; the ref is
+      # named on both sides so the fetch writes it whatever refspec the checkout left configured.
+      - name: Main's own line, which the tag has to stand on
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: The tag stands on main's line and says what the manifests say
         id: version
         run: |
           version="$(node packages/wspx/scripts/tag-version.mjs "$GITHUB_REF_NAME")"
@@ -239,8 +238,8 @@ jobs:
   npm:
     name: Command line package on npm
     needs: [draft, daemon]
-    # On a dry run the draft is skipped and this still runs, to stage the package with the four binaries.
-    if: ${{ !cancelled() && needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success') }}
+    # On a run by hand the draft is skipped and this still runs, to stage the package with the four binaries.
+    if: ${{ !cancelled() && needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success') }}
     runs-on: ubuntu-24.04
     # Read because a block that names one grant sets every other to none and the checkout needs it; no write of any
     # kind, so the job that builds every workspace package can publish and can touch nothing here.
@@ -276,7 +275,7 @@ jobs:
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
       - name: Publish
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'push' }}
         run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
 
   publish:
@@ -286,6 +285,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # The binaries are attached here and not from the job that publishes to npm, so no job holds the identity
       # token and a write on this repository at once.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -297,8 +297,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
-      - name: Turn the draft into a release
+      # Latest is what releases/latest/download serves and what the site's download buttons link, so it is decided
+      # by version: a release below the one served today, or one carrying a prerelease part, moves neither. The flag
+      # is left unquoted because a prerelease answers two words.
+      - name: Turn the draft into a release, latest where its version says so
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        run: |
+          current="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || echo)"
+          flag="$(node packages/wspx/scripts/latest-flag.mjs "$GITHUB_REF_NAME" "$current")"
+          echo "$GITHUB_REF_NAME against the release served as latest (${current:-none}): $flag"
+          gh release edit "$GITHUB_REF_NAME" --draft=false $flag

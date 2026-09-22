@@ -24,22 +24,40 @@ const envNames = bundleEnv("0.1.5")
 const SIGNING_SECRETS = ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
 
 describe("the release workflow", () => {
-  it("runs on a pushed release tag, and by hand as a dry run that publishes nothing", () => {
+  it("runs on a pushed release tag, and by hand as a dry run with no box to untick", () => {
     expect(workflow).toContain('on:\n  push:\n    tags:\n      - "v*"\n');
     expect(workflow).not.toContain("branches:");
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("schedule:");
-    // A dispatch is a dry run unless it says otherwise, and a draft is only ever opened for a tag.
-    expect(workflow).toContain("workflow_dispatch:\n    inputs:\n      dry_run:\n");
-    expect(workflow).toContain("type: boolean\n        default: true");
-    expect(workflow).toContain("if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}");
-    expect(npmJob).toContain("name: Publish\n        if: ${{ !inputs.dry_run }}");
-    // The job that can mint the identity token writes nothing here, so the binaries are attached from the job that
-    // flips the draft instead.
+    // A run started by hand publishes nothing whatever ref it runs on, so there is no input to read.
+    expect(workflow).toContain("workflow_dispatch:\n");
+    expect(workflow).not.toContain("dry_run");
+    expect(workflow).not.toContain("inputs.");
+    expect(workflow).toContain("if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}");
+    expect(npmJob).toContain("name: Publish\n        if: ${{ github.event_name == 'push' }}");
+    expect(npmJob).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
+  });
+
+  it("refuses a tag off main's own line before it drafts anything", () => {
+    const draftJob = workflow.slice(workflow.indexOf("\n  draft:\n"), workflow.indexOf("\n  mac:\n"));
+    expect(draftJob).toContain("git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main");
+    expect(draftJob).toContain('node packages/wspx/scripts/tag-version.mjs "$GITHUB_REF_NAME"');
+    // Every job that drafts, builds, publishes or flips waits on that check.
+    for (const job of [macJob, linuxJob]) expect(job).toContain("needs: [draft, daemon]");
+    expect(publishJob).toContain("needs: [draft, mac, linux, npm]");
+  });
+
+  it("attaches the binaries and decides latest from the job that flips the draft, not from the one that publishes", () => {
+    // The job that can mint the identity token writes nothing here, so the attach moved to the job that flips.
     expect(npmJob).not.toContain("gh release upload");
     expect(publishJob).toContain("name: Attach the binaries to the draft");
-    expect(publishJob).toContain("gh release upload \"$GITHUB_REF_NAME\" daemon-bins/*/wsp-daemon-* --clobber");
-    expect(npmJob).toContain("needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success')");
+    expect(publishJob).toContain('gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber');
+    expect(publishJob).toContain("pattern: wsp-daemon-*");
+    expect(publishJob).toContain("- uses: actions/checkout@");
+    expect(publishJob).toContain('gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name');
+    expect(publishJob).toContain('node packages/wspx/scripts/latest-flag.mjs "$GITHUB_REF_NAME" "$current"');
+    expect(publishJob).toContain('gh release edit "$GITHUB_REF_NAME" --draft=false $flag');
+    expect(publishJob).not.toContain("--latest");
   });
 
   it("builds one static daemon per target the host names, uploads each under the artifact name the host spells, and places all of them before every build", () => {
@@ -83,7 +101,7 @@ describe("the release workflow", () => {
   });
 
   it("asks the scripts in the repo for the version, the notes and every asset name", () => {
-    for (const script of ["packages/wspx/scripts/tag-version.mjs", "packages/wspx/scripts/release-notes.mjs", "packages/wspx/scripts/bundle-env.mjs"]) {
+    for (const script of ["packages/wspx/scripts/tag-version.mjs", "packages/wspx/scripts/release-notes.mjs", "packages/wspx/scripts/bundle-env.mjs", "packages/wspx/scripts/latest-flag.mjs"]) {
       expect(workflow).toContain(`node ${script}`);
       expect(existsSync(join(repo, script))).toBe(true);
     }
