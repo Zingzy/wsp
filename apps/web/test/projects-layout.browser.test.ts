@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The composer's project pick and the thread rows' project word in a real
-// Chromium: the pick sits in the footer beside the access pick at the same
-// height, reads the record's last project for the workspace in muted mono,
-// its menu lists the workspace's projects and other folder, the line under
-// the box names the folder that project lands in, and each thread row's
-// second line carries the project its folder sits in beside the agent's
-// mark, in the meta line's muted mono, every row one height whether or not
-// it has one; photographed in both themes. Then the Machine tab's PROJECTS
+// The composer's project pick in a real Chromium: the pick sits in the footer
+// beside the access pick at the same height, reads the record's last project
+// for the workspace in muted mono, its menu lists the workspace's projects and
+// other folder, and the line under the box names the folder that project
+// lands in; photographed in both themes. Then the Machine tab's PROJECTS
 // section with two projects and with none, its rows one height in mono with no
-// chip. Vite serves test/shell to
-// Playwright's browser, so like the shell layout test it runs only when asked
-// for (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
+// chip. The thread rows carry no project word: the tree over them names it.
+// Vite serves test/shell to Playwright's browser, so like the shell layout
+// test it runs only when asked for (WSP_RENDER=1) and skips without
+// Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -32,7 +30,7 @@ interface Box {
 
 if (renderSkipped !== undefined) console.info(`projects layout render test skipped: ${renderSkipped}`);
 
-describe.skipIf(renderSkipped !== undefined)("the project pick and the thread rows' project word laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the project pick laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -115,47 +113,6 @@ describe.skipIf(renderSkipped !== undefined)("the project pick and the thread ro
       console.info(`composer project menu screenshot: ${menu}`);
       await page!.keyboard.press("Escape");
       await page!.waitForSelector("[role=menu]", { state: "detached" });
-    }
-  }, 60_000);
-
-  it("each thread row's second line carries its project beside the agent's mark in the meta line's muted mono, and rows with and without one are one height, in both themes", async () => {
-    for (const theme of ["dark", "light"] as const) {
-      await page!.goto(`${base}?theme=${theme}&projects=1`);
-      await page!.waitForSelector("[data-thread-project]");
-      const read = await page!.locator("[data-slot=sidebar]").first().evaluate(el => {
-        const rows = [...el.querySelectorAll<HTMLElement>("[data-thread-item] [data-sidebar-row]")];
-        return rows.map(row => {
-          const word = row.querySelector<HTMLElement>("[data-thread-project]");
-          const meta = row.querySelector<HTMLElement>("[data-thread-meta]")!;
-          const opener = row.querySelector<HTMLElement>("[data-thread-provenance] > span:last-child")!;
-          const w = word === null ? null : getComputedStyle(word);
-          return {
-            title: row.querySelector("[data-thread-title]")?.textContent ?? "",
-            height: row.getBoundingClientRect().height,
-            project: word?.textContent ?? null,
-            text: row.querySelector("[data-thread-provenance]")?.textContent ?? "",
-            mono: w === null ? null : /mono/i.test(w.fontFamily),
-            size: w?.fontSize ?? null,
-            metaSize: getComputedStyle(meta).fontSize,
-            color: w?.color ?? null,
-            openerColor: getComputedStyle(opener).color,
-            background: w?.backgroundColor ?? null,
-            cut: word === null ? false : word.scrollWidth > word.clientWidth,
-          };
-        });
-      });
-      const [pong, hi, ...rest] = read;
-      expect(pong).toMatchObject({ project: "spoo", text: "·spoo·you", mono: true, cut: false, background: "rgba(0, 0, 0, 0)" });
-      expect(hi).toMatchObject({ project: "wsp", text: "·wsp·cli", mono: true, cut: false });
-      // The word wears the meta line's own size and colour: the grey the opener word wears, not a tone of its own.
-      expect(pong!.size).toBe(pong!.metaSize);
-      expect(pong!.color).toBe(pong!.openerColor);
-      // Rows on the other workspaces carry no project and stand at the same height.
-      expect(rest.some(r => r.project === null)).toBe(true);
-      expect(new Set(read.map(r => Math.round(r.height))).size).toBe(1);
-      const shot = join(SHOTS_DIR, `thread-rows-project-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: shot });
-      console.info(`thread rows project word screenshot: ${shot}`);
     }
   }, 60_000);
 

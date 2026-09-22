@@ -6,8 +6,8 @@ import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { FirstRun, landsLine } from "./FirstRun.js";
 import { FIRST_RUN_WORDS } from "../sidebar/words.js";
-import { ROW_MADE_OF_SLOT } from "../sidebar/rowGrammar.js";
 import { TWO_LINE_SLOT } from "../settings/format.js";
+import { requestFirstRunFocus } from "./shellRequests.js";
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false } as PlaceView;
 const CLAUDE: InitAgent = { id: "claude", name: "Claude Code", configured: true, takesTools: true };
@@ -124,8 +124,16 @@ describe("the first run on this Mac", () => {
     // Two of the line's own line heights, written once and read here: a height written as a figure was short of two
     // lines at 390 and moved the title and the button by a pixel between the one-line and two-line states.
     expect(k("agents").className).toContain(TWO_LINE_SLOT);
-    expect(ROW_MADE_OF_SLOT).toContain(TWO_LINE_SLOT);
     expect(t.start().getAttribute("data-held")).toBe("");
+  });
+
+  it("takes focus on its folder field when the sidebar's one row on an empty wsp asks for it", async () => {
+    const t = mount();
+    await settle();
+    act(() => t.work().focus());
+    expect(document.activeElement).toBe(t.work());
+    act(() => requestFirstRunFocus());
+    expect(document.activeElement).toBe(t.folder());
   });
 
   it("says nothing under the fields until a folder is named, then what this first piece of work will be", async () => {

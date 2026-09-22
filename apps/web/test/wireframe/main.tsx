@@ -7,12 +7,25 @@
 // machine, so the real sidebar, the real dialog and the real first run are fed
 // records here instead of pixels being drawn by hand.
 //
-// ?screen=<name> picks one, ?theme=light the light side:
-//   sidebar          two projects, three workspaces with all three made-of
-//                    lines, a thread that forked a workspace nested under it,
-//                    and a project with no workspace yet
+// ?screen=<name> picks one, ?theme=light the light side, ?sidebar=<px> opens
+// the sidebar at that remembered width, ?pick=<project id> is the project
+// the switcher is filtered to, written to this window's storage before the
+// store binds:
+//   sidebar          three projects (spoo and wsp on this Mac, landing on the
+//                    box), three workspaces with their branches, a lead thread
+//                    with a thread its agent opened and one that opened under
+//                    that stopped on a question, a workspace the lead forked
+//                    nested under it, and a project with no workspace yet
 //   sidebar-fallback the same with the forking thread's workspace collapsed,
 //                    where the forked workspace falls back to its project's list
+//   sidebar-empty    no project and no workspace: the first run in the centre
+//                    and the sidebar's one row pointing at it
+//   sidebar-one-project  spoo alone with its two workspaces
+//   sidebar-picked   the sidebar screen filtered to spoo, with the thread three
+//                    deep selected, so the lifted row is the deepest one
+//   sidebar-hosts    the sidebar screen in a desktop window that knows a second
+//                    host, so the foot names the computer this window is on
+//   switcher-open    the sidebar screen with the switcher's menu open
 //   dialog           New workspace over that sidebar with three projects, so
 //                    the pick is the segmented control
 //   first-run        the first run with nothing typed
@@ -44,7 +57,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { SettingsPage } from "../../src/settings/SettingsPage";
@@ -162,7 +175,13 @@ const WORKSPACES: WorkspaceView[] = [
 ];
 const SESSIONS: Record<string, SessionView[]> = {
   ws_here: [thread("th_quiet", "ws_here", "read the redirect middleware", { status: "completed", endedAt: Date.parse(AT) })],
-  ws_copy: [thread("th_lead", "ws_copy", "retry the webhook queue")],
+  ws_copy: [
+    thread("th_lead", "ws_copy", "retry the webhook queue"),
+    // The lead's agent opened a builder, and the builder's agent a reviewer, which stopped on a question: the tree
+    // three deep, with the deepest row the one a person has to act on.
+    thread("th_build", "ws_copy", "build the rows", { startedBy: "agent", parentThreadId: "th_lead" } as Partial<SessionView>),
+    thread("th_review", "ws_copy", "review the rows", { startedBy: "agent", parentThreadId: "th_build", asking: "Write out review.md in the repo root" } as Partial<SessionView>),
+  ],
   ws_box: [thread("th_box", "ws_box", "import the stripe customers")],
   ws_fork: [thread("th_child", "ws_fork", "move the pricing table", { startedBy: "agent", parentThreadId: "th_lead" } as Partial<SessionView>)],
 };
@@ -248,26 +267,35 @@ const settings = computerScreens.includes(screen);
 const manyComputers = ["computers-many", "computers-open", "computers-failed", "remove-computer"].includes(screen);
 const computers = settings ? (manyComputers ? COMPUTERS : [COMPUTERS[0]!]) : places;
 const drawsSidebar = !firstRunScreens.includes(screen) && screen !== "creating";
+/** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
+const emptyScreen = screen === "sidebar-empty";
+const oneProject = screen === "sidebar-one-project";
+const RECORDED: ProjectView[] = emptyScreen ? [] : oneProject ? [SPOO] : [SPOO, WSP, LANDING];
 
 /** The workspaces this screen's store holds, which is also what the fake host answers with: a bind that answered
  * something else would paint over the record the screen is about. */
-const HELD: WorkspaceView[] = drawsSidebar
-  ? // A host that holds no row for a computer holds no workspace standing on it either, since a workspace there
-    // is what puts its row on the table: the fresh screens drop the one that stands on the box.
-    WORKSPACES.filter(w => w.place === undefined || computers.some(place => place.id === w.place))
-  : screen === "creating"
-    ? [copyHere(CREATED_ID, "add a LICENSE file", SPOO, 3100, "agent/license")]
-    : [];
+const HELD: WorkspaceView[] = emptyScreen
+  ? []
+  : drawsSidebar
+    ? // A host that holds no row for a computer holds no workspace standing on it either, since a workspace there
+      // is what puts its row on the table: the fresh screens drop the one that stands on the box. The one-project
+      // screen keeps spoo's two workspaces of their own and nothing else.
+      WORKSPACES.filter(w => w.place === undefined || computers.some(place => place.id === w.place)).filter(w => !oneProject || (w.project.id === SPOO.id && w.parentThreadId === undefined))
+    : screen === "creating"
+      ? [copyHere(CREATED_ID, "add a LICENSE file", SPOO, 3100, "agent/license")]
+      : [];
+/** The threads of the workspaces this screen holds and no other. */
+const HELD_SESSIONS: Record<string, SessionView[]> = Object.fromEntries(Object.entries(SESSIONS).filter(([workspace]) => HELD.some(w => w.id === workspace)));
 
 const api = {
   subscribe: () => () => {},
   listWorkspaces: async () => HELD,
-  listSessions: async () => (drawsSidebar ? Object.values(SESSIONS).flat() : []),
+  listSessions: async () => (drawsSidebar ? Object.values(HELD_SESSIONS).flat() : []),
   watchStatuses: async () => [],
   capabilities: async () => caps({}),
   getGolden: async () => ({ head: null, versions: [] }),
   placesList: async () => computers,
-  projectsList: async () => (drawsSidebar ? [SPOO, WSP, LANDING] : []),
+  projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
   listHarnesses: async () => [],
   initGet: async () => ({
@@ -308,25 +336,37 @@ const api = {
   },
 } as unknown as Api;
 
+// The desktop shell's bridge, on the one screen about the foot: the hosts this window can move between, which is
+// what draws the row naming the computer it is on. Every other screen is a browser tab and draws no foot row.
+if (screen === "sidebar-hosts") {
+  window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
+}
+
+// The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
+const pick = params.get("pick");
+if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
+const sidebarWidth = params.get("sidebar");
 useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
-  preferences: { ...DEFAULT_PREFERENCES },
+  preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}) },
   places: computers,
   settingsOpen: settings,
   addComputerOpen: ["add-computer", "add-computer-run", "add-computer-refused"].includes(screen),
-  projects: drawsSidebar ? [SPOO, WSP, LANDING] : [],
+  projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},
-  sessions: drawsSidebar ? SESSIONS : {},
+  sessions: drawsSidebar ? HELD_SESSIONS : {},
   selectedId: null,
   selectedThreadId: null,
 } as never);
 useStore.getState().bind(api);
 // A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
-// creation view is what this shot is of, so the panel on that workspace is shut before the first paint.
-if (screen === "creating") useRightPanelStore.setState({ byWorkspaceId: { [CREATED_ID]: { isOpen: false, activeSurfaceId: null, surfaces: [] } } });
+// sidebar and the creation view are what these shots are of, so the panel on every workspace a screen can select
+// is shut before the first paint.
+const shutPanel = { isOpen: false, activeSurfaceId: null, surfaces: [] };
+useRightPanelStore.setState({ byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, shutPanel])) });
 
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
@@ -351,6 +391,8 @@ const creation = {
 function Centre() {
   if (screen === "creating") return <WorkspaceCreation creation={creation as never} />;
   if (settings) return <SettingsPage />;
+  // With no project the first run is the whole centre, as the app draws it, beside the sidebar's one row.
+  if (emptyScreen) return <FirstRun />;
   return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">center content</div>;
 }
 
@@ -421,6 +463,9 @@ setTimeout(() => {
   if (screen === "computers-open") clickWhenThere('[data-place-row="p_spoo"]');
   if (screen === "computers-failed") clickWhenThere('[data-place-row="p_lab"]');
   if (screen === "computers-here") clickWhenThere('[data-place-row="here"]');
+  // The thread three deep, whose row is the lifted one on the filtered screen, and the switcher's menu.
+  if (screen === "sidebar-picked") clickWhenThere("[data-row-id='thread:th_review']");
+  if (screen === "switcher-open") clickWhenThere("[data-k=project-switcher]");
   if (screen === "remove-computer") clickWhenThere('[data-place-row="p_spoo"]', () => clickWhenThere('[data-k="place-detail"] [data-k="remove"]'));
   if (screen === "add-computer-run" || screen === "add-computer-refused") {
     typed("login", "root@spoo");

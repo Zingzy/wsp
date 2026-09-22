@@ -33,7 +33,7 @@ describe("the search row", () => {
     expect(row.querySelector("kbd")).toBeNull();
   });
 
-  it("sits on the selected row's surface with the sidebar's hairline, no fill of its own, so it reads as a field on the rows' tier", () => {
+  it("is a plain row at the rows' height with no fill and no hairline of its own, the hover every other row has", () => {
     render(
       <SidebarProvider defaultOpen>
         <SearchRow />
@@ -41,9 +41,9 @@ describe("the search row", () => {
     );
     const row = screen.getByRole("button", { name: "Search" });
     expect(row.hasAttribute("data-search-row")).toBe(true);
-    expect(row.className).toContain("bg-sidebar-row-selected");
-    expect(row.className).toContain("border-sidebar-border");
-    expect(row.className).not.toMatch(/bg-sidebar-control-surface|bg-black|bg-white|tint/);
+    expect(row.className).not.toMatch(/(^|\s)(bg-sidebar-row-selected|border-sidebar-border|bg-sidebar-control-surface|bg-black|bg-white|tint|ring-1)(\s|$)/);
+    expect(row.className).toContain("hover:bg-sidebar-row-hover");
+    expect(row.className).toContain("h-7");
   });
 
   it("is still the palette's door with the tooltip around it", () => {

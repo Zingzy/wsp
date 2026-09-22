@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { cloneElement, type ReactElement, type ReactNode } from "react";
+import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type Capabilities, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
 import { workspaceActions } from "../actions/workspaceActions.js";
@@ -19,10 +19,22 @@ vi.mock("../components/ui/tooltip.js", () => ({
   TooltipPopup: () => null,
 }));
 
-const project = (id: string, name: string): ProjectView => ({
+// The switcher's menu on a plain open/closed context: Base UI's popover never settles under jsdom.
+vi.mock("../components/ui/popover.js", () => {
+  const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
+  const Popover = ({ children, open, onOpenChange }: { children: ReactNode; open: boolean; onOpenChange: (open: boolean) => void }) => <Ctx.Provider value={{ open, set: onOpenChange }}>{children}</Ctx.Provider>;
+  const PopoverTrigger = ({ children, render: element, disabled, ...props }: { children: ReactNode; render: ReactElement<Record<string, unknown>>; disabled?: boolean; [key: string]: unknown }) => {
+    const ctx = useContext(Ctx);
+    return cloneElement(element, { ...props, disabled, onClick: () => ctx.set(!ctx.open) }, children);
+  };
+  const PopoverPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="dialog" data-slot="popover-popup">{children}</div> : null);
+  return { Popover, PopoverTrigger, PopoverPopup };
+});
+
+const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
   name,
-  computer: "here",
+  computer,
   source: { kind: "folder", path: `/Users/dev/${name}` },
   path: `/Users/dev/${name}`,
   remote: `https://github.com/dev/${name}.git`,
@@ -69,6 +81,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     api,
     conn: "live",
     ready: true,
+    projectsRead: true,
     workspaces,
     projects,
     statuses: {},
@@ -90,33 +103,52 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
   return { create };
 }
 
-/** Every project header row the sidebar drew, in order, with the count beside it once its section is shut. */
-const headers = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-k^=project\\:]")].map(row => row.textContent ?? "");
+/** Every project row the sidebar drew, in order, with the count beside it once its row is shut. */
+const headers = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-row-id^=project\\:]")].map(row => row.textContent ?? "");
 const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
+const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
+const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   useStore.setState({ api: null, projects: [], workspaces: [], landings: {} } as never);
 });
 
 describe("the sidebar under the four nouns", () => {
-  it("draws one section row per project with its workspaces under it, and no row over them all", async () => {
+  it("draws one row per project with its workspaces one step in under it, shuts on a click and carries the count while shut", async () => {
     mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_1")] });
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
     expect(headers()).toEqual(["spoo", "wsp"]);
     expect(screen.queryByLabelText("Workspaces")).toBeNull();
-    expect(rowIds()).toEqual(["ws:ws_a", "ws:ws_b"]);
-    // The count rides the header while its section is shut, so a shut project still says how much it holds.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_b", "project:pr_2"]);
+    expect(depthOf("spoo")).toBe(0);
+    expect(depthOf("pricing page")).toBe(1);
+    // A project row is one line, sentence case, no caps and no letter-spacing: a project is a noun, not a zone.
+    expect(rowOf("spoo").className).toContain("h-7");
+    expect(rowOf("spoo").className).not.toMatch(/uppercase|tracking-/);
+    expect(rowOf("spoo").querySelector("[data-project-name]")!.className).not.toMatch(/uppercase|tracking-/);
+    // The count rides the row while its children are shut, so a shut project still says how much it holds.
     fireEvent.click(screen.getByLabelText("spoo"));
     await waitFor(() => expect(headers()[0]).toBe("spoo2"));
-    expect(rowIds()).toEqual([]);
+    expect(rowIds()).toEqual(["project:pr_1", "project:pr_2"]);
   });
 
-  it("says a project has no workspaces yet, and its plus opens the dialog with that project picked", async () => {
+  it("says a project has no workspaces yet as one leaf under its row, and its plus opens the dialog with that project picked", async () => {
     mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
-    expect(screen.getByText(PROJECT_WORDS.noWorkspaces)).toBeDefined();
+    const leaf = screen.getByText(PROJECT_WORDS.noWorkspaces);
+    expect(leaf.closest("li")!.parentElement!.previousElementSibling!.querySelector("[data-row-id='project:pr_2']")).not.toBeNull();
+    expect(leaf.className).toContain("h-7");
+    // A sentence with a period is read, not glanced at: the sans at the rows' size in the prose ink, never the mono.
+    expect(leaf.className).toContain("text-[13px]");
+    expect(leaf.className).toContain("text-[var(--sidebar-prose)]");
+    expect(leaf.className).not.toContain("font-mono");
     const plus = [...document.querySelectorAll<HTMLElement>(`[data-k=new-workspace]`)].find(el => el.dataset["project"] === "pr_2")!;
+    // The plus sits in the row's frame and reads at rest as nothing at every width: the hover and the keyboard focus lift it.
+    expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    expect(plus.className).toContain("group-hover/menu-item:opacity-100");
+    expect(plus.getAttribute("aria-label")).toBe(NEW_WORKSPACE);
     fireEvent.click(plus);
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain(NEW_WORKSPACE);
@@ -125,9 +157,12 @@ describe("the sidebar under the four nouns", () => {
     expect(dialog.querySelector<HTMLElement>("[data-segment=pr_1]")!.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("holds one row under the projects that records another, which opens the sheet", async () => {
+  it("records another project from the foot of the switcher's menu, which opens the sheet, and from nowhere else at rest", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [] });
-    fireEvent.click(await screen.findByLabelText(PROJECT_WORDS.add));
+    await waitFor(() => expect(screen.getByText("spoo")).toBeDefined());
+    expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
+    fireEvent.click(await screen.findByText(PROJECT_WORDS.add));
     const sheet = await screen.findByRole("dialog");
     expect(sheet.querySelector("[data-k=title]")!.textContent).toBe(PROJECT_WORDS.add);
   });
@@ -143,7 +178,7 @@ describe("the sidebar under the four nouns", () => {
     expect(workspaceActions.some(action => "labs" in action)).toBe(false);
   });
 
-  it("draws a workspace an agent forked one step in under the thread that forked it", async () => {
+  it("draws a workspace an agent forked one step in under the thread that forked it, inside that thread's own item", async () => {
     const lead = workspace("ws_a", "pricing page", "pr_1");
     const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
     mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
@@ -156,10 +191,16 @@ describe("the sidebar under the four nouns", () => {
       } as never);
     });
     await waitFor(() => expect(screen.getByText("move the pricing table")).toBeDefined());
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]);
-    // Its row carries the same lines a top-level row does, off its own record.
-    const row = screen.getByText("pricing table").closest<HTMLElement>("[data-sidebar-row]")!;
-    expect(row.querySelector("[data-workspace-made-of]")!.textContent).toBe("a copy · shares this Mac's ports, PORT 3100");
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]);
+    expect([depthOf("spoo"), depthOf("pricing page"), depthOf("move the pricing table"), depthOf("pricing table"), depthOf("write the migration")]).toEqual([0, 1, 2, 3, 4]);
+    // Real nesting: the fork's block is a child of the thread's list item, so the rails can be drawn per item.
+    const threadItem = rowOf("move the pricing table").closest("li[data-thread-item]")!;
+    expect(threadItem.contains(rowOf("pricing table"))).toBe(true);
+    expect(threadItem.contains(rowOf("write the migration"))).toBe(true);
+    // Its row carries the same two lines a top-level row does, off its own record: the name and the branch.
+    const row = rowOf("pricing table");
+    expect(row.querySelector("[data-workspace-meta]")!.textContent).toBe("agent/pricing-page");
+    expect(row.querySelector("[data-workspace-made-of]")).toBeNull();
   });
 
   it("keeps that forked workspace's row in its project's list whenever the thread that forked it is not drawn", async () => {
@@ -179,10 +220,11 @@ describe("the sidebar under the four nouns", () => {
     // The opener is in the shut archive, so no thread row carries it; the fork stands in the project's own list
     // with its own thread under it, where the plain rule puts it.
     await waitFor(() => expect(rowIds()).toContain("ws:ws_fork"));
-    // The shelf's own header and the archive's under it, both shut over the opener, then the fork's row.
-    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
+    // The archive's fold alone, shut over the opener, since the shelf has no row of its own; then the fork's row.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
     expect(screen.queryByText("move the pricing table")).toBeNull();
     expect(screen.getByText("pricing table")).toBeDefined();
+    expect(depthOf("pricing table")).toBe(1);
   });
 
   it("keeps it in the list while the opener's own workspace is collapsed, and nests it again when that opens", async () => {
@@ -200,9 +242,9 @@ describe("the sidebar under the four nouns", () => {
     await waitFor(() => expect(screen.getByText("move the pricing table")).toBeDefined());
     fireEvent.click(screen.getByLabelText("Collapse pricing page"));
     await waitFor(() => expect(screen.queryByText("move the pricing table")).toBeNull());
-    expect(rowIds()).toEqual(["ws:ws_a", "ws:ws_fork", "thread:th_child"]);
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_fork", "thread:th_child"]);
     fireEvent.click(screen.getByLabelText("Expand pricing page"));
-    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]));
+    await waitFor(() => expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]));
   });
 
   it("keeps it in the list once the opener thread is forgotten, so no workspace the host holds loses its row", async () => {
@@ -218,6 +260,6 @@ describe("the sidebar under the four nouns", () => {
       } as never);
     });
     await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
-    expect(rowIds()).toEqual(["ws:ws_a", "ws:ws_fork", "thread:th_child"]);
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_fork", "thread:th_child"]);
   });
 });

@@ -7,8 +7,9 @@
 // workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
 import { broughtBackRowLine } from "../actions/format.js";
-import { isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
+import { HERE_PLACE_ID, computerNamed, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import type { ProjectRef } from "./threadTree.js";
 import { APP_PLATFORM, PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -82,7 +83,7 @@ export function madeOfLine({ project, landing, computer }: { project: Pick<Sideb
 }
 
 /** The branch the agent is working on, off the record the copy was made with; empty where the record carries
- * none, which is a fork and the folder worked in place, whose branch is whatever the person has it on now. */
+ * none, which is a workspace whose copy was made with no branch of its own. */
 export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): string {
   return project.workspace.copy?.branch ?? "";
 }
@@ -240,30 +241,18 @@ export function threadStateWord(thread: Pick<SidebarThreadSnapshot, "status" | "
   }
 }
 
-/** How a workspace's glyph dims while its machine is paused, on the row's lead and the space bar's icon alike: half
- * ink and no hue. The bar's colour is the space's own (the theme's ink on the current one, muted on the others), so
- * this is all the state does there. */
-function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
-  return project.state === "paused" ? "opacity-50" : undefined;
+/** The computer a project lives on, as the switcher and a project row name it: nothing for a project on the
+ * computer this window runs on, which every row would otherwise carry, and the name this host has for the computer
+ * otherwise, through the protocol's one rule for the question. */
+export function projectComputerWord(project: Pick<ProjectRef, "computer">, named: ReadonlyMap<string, string>): string | null {
+  if (project.computer === undefined || project.computer === HERE_PLACE_ID) return null;
+  return computerNamed(project.computer, named, APP_PLATFORM);
 }
 
-/** The class the row's kind glyph wears for its machine's state. Green means running and nothing else in this app,
- * so the glyph takes the success ink while the machine runs, on a fork and on this computer; paused dims it by the
- * rule above; every other state leaves it whole and muted, and the state slot's word says which. The tier of the
- * green is the theme's foreground one, since emerald 500 reads 2.4:1 on the light sidebar and a mark has to clear
- * 3:1 there; the running dot wears the same token, so a sidebar holds one emerald. A workspace on a computer that
- * has gone quiet takes no green whatever it last said: nothing is known about it while that computer sleeps, and
- * the green would be a claim this window cannot make. */
-export function glyphStateClass(project: Pick<SidebarProjectSnapshot, "state">, quiet = false): string | undefined {
-  if (quiet) return undefined;
-  return project.state === "running" ? "text-success-foreground" : leadDimClass(project);
-}
-
-/** Whether this workspace sits on the computer that has gone quiet: the wsp this window shows runs on that
- * computer, so its own workspace sleeps with it, while a workspace at a provider or on another computer keeps
- * running and keeps the state it was last known in. */
-export function onQuietComputer(project: Pick<SidebarProjectSnapshot, "workspace">, asleep: boolean): boolean {
-  return asleep && isLocalWorkspace(project.workspace);
+/** Every computer this host holds by the name a person reads it as, keyed by its id, which is what a project record
+ * names its computer by. */
+export function placeNames(places: readonly PlaceView[]): ReadonlyMap<string, string> {
+  return new Map(places.map(place => [place.id, placeName(place)]));
 }
 
 export function dotClassForTone(tone: StatusIndicatorTone): string {

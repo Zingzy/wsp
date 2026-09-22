@@ -123,7 +123,8 @@ describe("workspace creation view", () => {
     expect(view.getAttribute("aria-busy")).toBe("true");
     expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("beta");
     expect(screen.getByRole("banner").textContent).toContain("beta");
-    expect(screen.queryByRole("button", { name: "New thread" })).toBeNull();
+    // The compose glyph stays and is held: a creation is not yet a workspace to open a thread in.
+    expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
     const wave = within(view).getByRole("progressbar", { name: "Creating" });
     expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("moving");
     expect(wave.querySelector("pattern path")!.getAttribute("stroke")).toBe("currentColor");

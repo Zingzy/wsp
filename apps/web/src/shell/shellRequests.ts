@@ -3,8 +3,9 @@
 // another region to fulfil, as window events so the raiser does not own that
 // region's state. The sidebar answers new-workspace, add-project, forget-
 // workspace and the project trips with its dialogs and sheets, and
-// rename-workspace with the name box on
-// that row; new-thread waits for a chat container to subscribe. Composer
+// rename-workspace with the name box on that row; the first run answers
+// first-run-focus with its folder field; new-thread waits for a chat
+// container to subscribe. Composer
 // focus is held rather than broadcast: the workspace switch selects and asks
 // in one handler, and the composer it names remounts after that handler
 // returns.
@@ -122,6 +123,19 @@ export function onProjectTripRequest(listener: (detail: ProjectTripRequest) => v
   const handler = (event: Event) => listener((event as CustomEvent<ProjectTripRequest>).detail);
   window.addEventListener(PROJECT_TRIP_EVENT, handler);
   return () => window.removeEventListener(PROJECT_TRIP_EVENT, handler);
+}
+
+const FIRST_RUN_FOCUS_EVENT = "wsp:first-run-focus";
+
+/** Asks the first run in the centre to take focus on its folder field; the sidebar's one row on an empty wsp
+ * raises it, since that screen is the one road that records a project. */
+export function requestFirstRunFocus(): void {
+  window.dispatchEvent(new CustomEvent(FIRST_RUN_FOCUS_EVENT));
+}
+
+export function onFirstRunFocusRequest(listener: () => void): () => void {
+  window.addEventListener(FIRST_RUN_FOCUS_EVENT, listener);
+  return () => window.removeEventListener(FIRST_RUN_FOCUS_EVENT, listener);
 }
 
 let composerFocusWanted: string | null = null;

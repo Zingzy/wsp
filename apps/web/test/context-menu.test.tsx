@@ -146,7 +146,8 @@ async function mountSidebar(api: FakeApi, firstName: string) {
 }
 
 /** The name the project's header row carries, which is the record every workspace in this file is made of. */
-const PROJECT_NAME = "the-project";
+/** The project row's name leads its label, which goes on to name the computer the project is on and the count while shut. */
+const PROJECT_NAME = /^the-project/;
 
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 /** A row by the id it carries, for a row whose own text is being edited. */
@@ -475,7 +476,10 @@ describe("a thread row's menu", () => {
     );
     await mountSidebar(api, "api");
     await waitFor(() => expect(screen.getByText("rebuild the index")).toBeDefined());
-    expect(rowOf("rebuild the index").className).toContain("pl-5");
+    // One step in under the thread that opened it, whichever workspace its session is filed against.
+    const lead = Number(rowOf("fix the port list").dataset["depth"]);
+    expect(lead).toBeGreaterThanOrEqual(0);
+    expect(Number(rowOf("rebuild the index").dataset["depth"])).toBe(lead + 1);
     rightClick(rowOf("rebuild the index"));
     await screen.findByRole("menu");
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");

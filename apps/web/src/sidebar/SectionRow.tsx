@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one section row the sidebar has, over a project and Forwarded ports
-// alike: a caps mono zone label, the count of what the row hides while it is
-// shut, a chevron that shuts the group, room at the right edge for a group
-// action the caller places, and the section's own menu on a right-click where
-// the caller has one. A row with no group under it to shut (Add a project) is
-// pressed for its own act: it draws no chevron and no count and keeps the
-// label, so the bottom of the list reads in the same column as the headers
-// above it.
+// The one section row the sidebar has, the head over Forwarded ports: a caps
+// mono zone label, the count of what the row hides while it is shut, a
+// chevron that shuts the group, room at the right edge for a group action the
+// caller places, and the section's own menu on a right-click where the caller
+// has one. A row with no group under it to shut is pressed for its own act: it
+// draws no chevron and no count and keeps the label. Projects are rows in the
+// tree, not zones, so none of them wears this.
 import { ChevronDownIcon } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
