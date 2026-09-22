@@ -687,7 +687,8 @@ interface LiveWorkspace {
   /** What the row says about the wake in flight, for as long as it is in flight: every status the poll builds carries
    * it, since a line pushed once would be wiped by the next tick and the row would fall silent between two asks. */
   wakeSaid?: string;
-  /** What the last delete said when the provider kept the machine: held here, not on the record, so a restart forgets it. */
+  /** What the last delete said when the provider kept the machine, until the next delete or wake starts: held here,
+   * not on the record, so a restart forgets it. */
   deleteSaid?: string;
   /** Which ask the host is on and how many it will make, while it is asking again on its own; the surfaces read it
    * at the length each has room for rather than being handed a sentence built for one of them. */
@@ -5212,6 +5213,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const asks = lifecycleOf(entry).budgets.resumeAsks;
         const wakeAsks = asks === undefined ? 1 : wakeAsksIn(asks.forMs, asks.everyMs);
         try {
+          delete entry.deleteSaid;
           entry.record.phase = "waking";
           await persist(entry.record);
           await emitStatus(entry, "napping");
@@ -5412,6 +5414,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.deleting) return entry.deleting;
       entry.deleting = (async () => {
         try {
+          delete entry.deleteSaid;
           endSessions(id, DELETED_REASON);
           // A machine wsp never forked reads running whatever is asked of it, so only a forked one is read back.
           if (!kindWords(entry.record.kind).driven) {

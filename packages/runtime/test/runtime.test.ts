@@ -215,6 +215,38 @@ describe("runtime", () => {
     expect((await backend.list()).map(m => m.id)).toEqual(["m1"]);
   });
 
+  it("a kept machine's delete sentence leaves the row's reason when the next delete fails another way or a wake runs", async () => {
+    const backend = stubBackend();
+    const made = backend.create.bind(backend);
+    let kill = async (): Promise<void> => {};
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      m.kill = () => kill();
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    const said = "x's machine m1 is still running after two asks; run wsp delete again or delete it at the provider";
+    const reason = async (): Promise<string | undefined> => (await rt.status.list()).find(s => s.id === ws.id)?.reason;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ message: said });
+      kill = async () => {
+        throw new Error("link down");
+      };
+      await expect(rt.workspaces.delete(ws.id)).rejects.toThrow("link down");
+      expect(await reason()).toBeUndefined();
+      kill = async () => {};
+      await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ message: said });
+      expect(await reason()).toBe(said);
+      await rt.workspaces.nap(ws.id);
+      await rt.workspaces.wake(ws.id);
+      expect(await reason()).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("a delete the provider takes on the second ask drops the record, and a machine already missing at the first read drops it after one ask", async () => {
     const backend = stubBackend();
     const made = backend.create.bind(backend);

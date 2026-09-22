@@ -179,10 +179,11 @@ export async function freeBytes(machine: Machine): Promise<FreeDisk> {
  * no pair of numbers is reported, never assumed. */
 export async function diskUse(machine: Machine): Promise<DiskUse> {
   const res = await machine.exec(dfKbCmd(["used", "size"]), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-  const [used, size] = res.stdout.trim().split(/\s+/).map(Number);
-  return res.exitCode === 0 && Number.isFinite(used) && Number.isFinite(size) && size! > 0
-    ? { kind: "use", usedBytes: used! * 1024, sizeBytes: size! * 1024 }
-    : { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+  const printed = res.stdout.trim();
+  const [used, size] = printed.split(/\s+/).map(Number);
+  if (res.exitCode === 0 && Number.isFinite(used) && Number.isFinite(size) && size! > 0) return { kind: "use", usedBytes: used! * 1024, sizeBytes: size! * 1024 };
+  // The pipe exits as awk does, so a df that failed exits 0 having printed nothing.
+  return { kind: "unknown", reason: res.exitCode === 0 && printed !== "" ? `df answered ${printed.slice(0, 160)}` : `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
 }
 
 /** What a snapshot of the disk comes to: what the backend says the machine has written since it booted, where it

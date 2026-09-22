@@ -173,7 +173,7 @@ describe("a project golden", () => {
     expect(await rt.golden.projects()).toEqual([]);
   });
 
-  it("a refused snapshot of a disk 41 percent full says the disk is not the reason, and one whose df fails says why the disk went unread", async () => {
+  it("a refused snapshot of a disk 41 percent full says the disk is not the reason, one whose df fails says why, and one whose df answers no size says what it printed", async () => {
     const { rt, advance, backend } = await setup();
     const ws = await loaded(rt, advance);
     refusing(backend, { exitCode: 0, stdout: "8598400 20971520\n", stderr: "" });
@@ -185,6 +185,10 @@ describe("a project golden", () => {
     refusing(backend, { exitCode: 1, stdout: "", stderr: "df: /root: No such file or directory" });
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({
       message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; the disk could not be read \\(df failed: df: /root: No such file or directory\\)$`)),
+    });
+    refusing(backend, { exitCode: 0, stdout: "123 0\n", stderr: "" });
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({
+      message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; the disk could not be read \\(df answered 123 0\\)$`)),
     });
     expect(backend.snapshots).toEqual([]);
   });
