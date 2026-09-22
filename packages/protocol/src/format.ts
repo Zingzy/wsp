@@ -2478,6 +2478,17 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
  * session with. Spelled once so the two roads into this host cannot drift apart in what they say. */
 export const UNAUTHORIZED = "unauthorized";
 
+/** Whether parsed JSON is a frame with fields to read: an object and not an array. Null, a number, a string, a
+ * boolean and an array all parse as JSON and carry no op and no id, and reading a field off null throws, so every
+ * door reads this ahead of anything else it reads off a frame. */
+export function isObjectFrame(parsed: unknown): parsed is Record<string, unknown> {
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+}
+
+/** The one sentence such a frame is refused with, on the socket and on the JSON routes alike, under a null id
+ * since none could be read. */
+export const REQUEST_NOT_AN_OBJECT = "a request is one JSON object, not a bare value or an array";
+
 /** What a guest session is refused with when it asks for a kind this host serves no module for; its own words, since
  * a kind nobody built is not a token nobody holds. */
 export function guestNoKindLine(kind: string): string {

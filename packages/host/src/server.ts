@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
@@ -352,7 +352,9 @@ export function routeRefusal(route: string, caller: Caller | undefined): string 
   return op !== undefined && DEVICE_OPS.includes(op) ? undefined : deviceHeldRefusal(op ?? route);
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+/** A request's body as fields to read, or nothing when it parsed as JSON of another shape. The one reading a route
+ * takes a body through, so no route reads a field off a null. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | undefined> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -360,7 +362,8 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     if (size > 64 * 1024) throw new Error("body too large");
     chunks.push(chunk as Buffer);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  return isObjectFrame(parsed) ? parsed : undefined;
 }
 
 /** Where a computer you own is told to dial this host, in the order its link tries them: the address the person
@@ -483,7 +486,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       if (req.method === "POST" && path === "/api/workspaces") {
-        const body = (await readJsonBody(req)) as { name?: unknown };
+        const body = await readJsonBody(req);
+        if (body === undefined) {
+          sendJson(res, 400, { error: REQUEST_NOT_AN_OBJECT });
+          return;
+        }
         const name = typeof body.name === "string" ? body.name.trim() : "";
         if (!name) {
           sendJson(res, 400, { error: "a workspace needs a name" });
@@ -491,7 +498,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         }
         let created: CreatedWorkspace;
         try {
-          created = await createWorkspace(name, who.caller, typeof (body as { project?: unknown }).project === "string" ? (body as { project: string }).project : undefined);
+          created = await createWorkspace(name, who.caller, typeof body.project === "string" ? body.project : undefined);
         } catch (e) {
           if (!(e instanceof NoGoldenError)) throw e;
           sendJson(res, 409, { error: e.message });

@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
@@ -194,6 +194,21 @@ describe("a host on this computer alone", () => {
     expect((await bare.json()) as { error: string }).toEqual({ error: API_UNAUTHORIZED });
     const own = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } });
     expect(own.status).toBe(200);
+  });
+
+  it("refuses a body that is JSON but not an object in one sentence, creates nothing, and answers the next request", async () => {
+    const { handle: h, runtime } = await up();
+    await projectOn(runtime);
+    const own = { authorization: `Bearer ${h.authToken}` };
+    for (const body of ["null", "[]", "7"]) {
+      const refused = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body });
+      expect(refused.status, body).toBe(400);
+      expect(JSON.parse(refused.body) as { error: string }).toEqual({ error: REQUEST_NOT_AN_OBJECT });
+    }
+    expect(await runtime.workspaces.list()).toEqual([]);
+    const made = await raw(h.port, { method: "POST", path: "/api/workspaces", headers: own, body: JSON.stringify({ name: "after" }) });
+    expect(made.status).toBe(200);
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["after"]);
   });
 
   it("reads the browser wsp init let in as the owner on the routes, and a browser wsp host pair let in as a paired computer", async () => {
