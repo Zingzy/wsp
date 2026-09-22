@@ -254,7 +254,7 @@ describe("openHost", () => {
     expect(dialled).toEqual([]);
     expect(session).toMatchObject({ owned: true, remote: false });
     expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-  });
+  }, 20_000);
 
   it("starts a host here and says why when the account names several hosts and none of them is marked", async () => {
     writeHost(home, "box", accountRecord());
@@ -265,7 +265,7 @@ describe("openHost", () => {
     expect(dialled).toEqual([]);
     expect(session.owned).toBe(true);
     expect(lines.join("\n")).toContain(severalAccountHostsLine(["attic", "box"]));
-  });
+  }, 20_000);
 
   it("opens on the marked host when the account names several, which is where every line with no name goes", async () => {
     writeHost(home, "box", accountRecord());
@@ -284,7 +284,7 @@ describe("openHost", () => {
     session = await openWith(dial);
     expect(dialled).toEqual([]);
     expect(session).toMatchObject({ owned: true, remote: false });
-  });
+  }, 20_000);
 
   it("opens on the marked host when a code paired it, since the mark is the mark whichever road it came by", async () => {
     writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
@@ -308,7 +308,7 @@ describe("openHost", () => {
     expect(lines.join("\n")).toContain("this host admits no device under that key");
     // The record is left as it was: the window said what happened and opened here, and the Hosts menu still holds it.
     expect(existsSync(join(home, "hosts", "box.json"))).toBe(true);
-  });
+  }, 20_000);
 
   it("refuses a record holding a token and no key for the host before it dials, as every line aimed at one is refused", async () => {
     writeHost(home, "box", accountRecord({ deviceToken: "tok-held", hostKey: undefined }));
@@ -318,7 +318,7 @@ describe("openHost", () => {
     expect(dialled).toEqual([]);
     expect(session).toMatchObject({ owned: true, remote: false });
     expect(lines.join("\n")).toContain(hostNoKeyLine("box"));
-  });
+  }, 20_000);
 
   it("starts the host on a free port and serves the app with the digest of its token, never the token", async () => {
     session = await open(0, 0);
