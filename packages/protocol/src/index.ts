@@ -5011,6 +5011,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.snapshot"), workspaceId: z.string() }),
   /** Replies with { projectGoldens: ProjectGolden[] }, every project golden this runtime took, newest last. */
   z.object({ id: reqId, op: z.literal("projectGoldens.list") }),
+  /** Deletes a project golden's snapshot at the provider of the place its record names and replies with a
+   * ProjectGoldenRemoved once the listing no longer holds it; the record leaves last. Refused while any workspace
+   * stands on it, whatever its phase (kind "conflict"), and for an id no project golden holds (kind "not-found"). */
+  z.object({ id: reqId, op: z.literal("projectGoldens.remove"), snapshotId: z.string() }),
   /** A person acted in the workspace through a road the runtime cannot see (typed into
    * a terminal over the browser's daemon link); the idle countdown starts over. */
   z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
@@ -5383,6 +5387,7 @@ export const DEVICE_OPS: readonly string[] = [
   "projects.resolve",
   "projects.remove",
   "projectGoldens.list",
+  "projectGoldens.remove",
   "sys.subscribe",
   "harnesses.list",
   "sessions.list",
@@ -5556,12 +5561,21 @@ export const ProjectGolden = z.object({
 });
 export type ProjectGolden = z.infer<typeof ProjectGolden>;
 
+/** What a project golden's removal answers: the record that left, and whether the provider had already lost the
+ * snapshot rather than deleting it now. */
+export const ProjectGoldenRemoved = z.object({ projectGolden: ProjectGolden, alreadyGone: z.boolean() });
+export type ProjectGoldenRemoved = z.infer<typeof ProjectGoldenRemoved>;
+
+/** A project golden as the image view lists it: the record, and its size where the place's provider lists one. */
+export const SealedProjectImage = ProjectGolden.extend({ sizeBytes: z.number().optional() });
+export type SealedProjectImage = z.infer<typeof SealedProjectImage>;
+
 /** What Settings > Image and `wsp image` draw: the record, every copy at every place, the project goldens under it.
  * Beside ProjectGolden because it carries them; the rest of the image shapes sit with the golden ones above. */
 export const SealedImageView = z.object({
   image: SealedImage.nullable(),
   copies: z.array(SealedImageCopy),
-  projects: z.array(ProjectGolden),
+  projects: z.array(SealedProjectImage),
 });
 export type SealedImageView = z.infer<typeof SealedImageView>;
 

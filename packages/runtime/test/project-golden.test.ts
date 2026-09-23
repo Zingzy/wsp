@@ -3,7 +3,7 @@
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
 import { gunzipSync } from "node:zlib";
 import { tarOf } from "@wsp/engine";
-import type { GoldenManifest, ProjectGolden, ProjectPlan } from "@wsp/protocol";
+import { DEVICE_OPS, THREAD_OPS, noProjectImageLine, projectImageInUseRefusal, projectImageStillListedLine, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -44,11 +44,14 @@ function bundler(): ProjectBundler {
   };
 }
 
+/** The read-back window a snapshot's delete polls the listing under, short enough for a test to run it out. */
+const QUICK = { graceMs: 40, pollMs: 1 };
+
 async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backend: StubBackend; store: Store; advance: (ms: number) => void }> {
   const backend = stubBackend();
   await store.put("goldens", copyKey("default", "default"), MANIFEST);
   const { clock, advance } = fakeClock(T0);
-  const rt = createRuntime({ backend, store, adapters: {}, clock, hostId: HOST });
+  const rt = createRuntime({ backend, store, adapters: {}, clock, hostId: HOST, killConfirm: QUICK });
   return { rt, backend, store, advance };
 }
 
@@ -255,6 +258,124 @@ describe("a project golden", () => {
       await rt.workspaces.wake(ws.id);
       const refused = await client.request("workspaces.snapshot", { workspaceId: ws.id });
       expect(refused).toMatchObject({ ok: false, kind: "notFirstLife" });
+    } finally {
+      client.close();
+    }
+  });
+});
+
+describe("removing a project image", () => {
+  /** A project image taken off a workspace of the project, and the provider's delete as the stub answers it. */
+  async function taken() {
+    const s = await setup();
+    const ws = await loaded(s.rt, s.advance);
+    const golden = await s.rt.workspaces.snapshot(ws.id);
+    const deleteSnapshot = s.backend.deleteSnapshot.bind(s.backend);
+    const listSnapshots = s.backend.listSnapshots.bind(s.backend);
+    return { ...s, ws, golden, deleteSnapshot, listSnapshots };
+  }
+
+  it("deletes the snapshot at the provider, reads the listing until the id leaves, and drops the record last", async () => {
+    const { rt, backend, store, golden, deleteSnapshot, listSnapshots } = await taken();
+    let deleted = false;
+    backend.deleteSnapshot = async id => {
+      await deleteSnapshot(id);
+      deleted = true;
+    };
+    // The listing lags the delete by one read, as a best-effort listing may; the record stands through the wait.
+    const held: unknown[] = [];
+    let reads = 0;
+    backend.listSnapshots = async () => {
+      const rows = await listSnapshots();
+      if (!deleted) return rows;
+      held.push(await store.get("project-goldens", golden.snapshotId));
+      return ++reads === 1 ? [...rows, { id: golden.snapshotId, sizeBytes: 1 }] : rows;
+    };
+    expect(await rt.golden.removeProject(golden.snapshotId)).toEqual({ projectGolden: golden, alreadyGone: false });
+    expect(reads).toBe(2);
+    expect(held).toEqual([golden, golden]);
+    expect(backend.snapshots).toEqual([]);
+    expect(await store.get("project-goldens", golden.snapshotId)).toBeUndefined();
+    expect(await rt.golden.projects()).toEqual([]);
+    expect((await rt.image.get()).projects).toEqual([]);
+  });
+
+  it("is refused while a workspace stands on the image, running, napping or gone, naming them, and nothing is deleted", async () => {
+    const { rt: first, backend, store, ws, golden } = await taken();
+    await first.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-a" });
+    const napping = await first.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-b" });
+    await first.workspaces.nap(napping.id);
+    const lost = await first.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-c" });
+    await first.close();
+    // A machine the provider lost while no host ran reads gone at the next load, and its record still stands.
+    backend.machines.find(m => m.id === lost.machineId)!.killed = true;
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: HOST, killConfirm: QUICK });
+    expect((await rt.workspaces.get(lost.id)).phase).toBe("gone");
+    await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toMatchObject({ kind: "conflict", message: projectImageInUseRefusal(golden.snapshotId, ["task-a", "task-b", "task-c"]) });
+    expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
+    expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);
+  });
+
+  it("keeps the record and says so when the listing still holds the id after the window", async () => {
+    const { rt, backend, store, golden, listSnapshots } = await taken();
+    backend.listSnapshots = async () => [...(await listSnapshots()), { id: golden.snapshotId, sizeBytes: 1 }];
+    await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toThrow(projectImageStillListedLine(golden.snapshotId, QUICK.graceMs));
+    expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);
+    expect(await rt.golden.projects()).toEqual([golden]);
+  });
+
+  it("drops the record of a snapshot the provider already lost, with the line saying it was gone", async () => {
+    const { rt, backend, store, golden } = await taken();
+    backend.deleteSnapshot = async () => {
+      throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
+    };
+    expect(await rt.golden.removeProject(golden.snapshotId)).toEqual({ projectGolden: golden, alreadyGone: true });
+    expect(await store.get("project-goldens", golden.snapshotId)).toBeUndefined();
+  });
+
+  it("keeps the record on any other refusal and fails in the provider's words with its kind and status", async () => {
+    const { rt, backend, store, golden } = await taken();
+    backend.deleteSnapshot = async () => {
+      throw Object.assign(new Error("SnapshotHasChildren"), { kind: "conflict", status: 409 });
+    };
+    await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toMatchObject({
+      kind: "conflict",
+      status: 409,
+      message: expect.stringMatching(new RegExp(`^project image ${golden.snapshotId} was not removed: the provider answered 409 SnapshotHasChildren \\(no request id from the provider, at \\S+\\); its record stays$`)),
+    });
+    expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);
+  });
+
+  it("refuses a golden version's snapshot and an id nothing holds as no project image", async () => {
+    const { rt, backend } = await taken();
+    for (const id of ["snap_golden-v12", "snap_nope"]) await expect(rt.golden.removeProject(id)).rejects.toMatchObject({ kind: "not-found", message: noProjectImageLine(id) });
+    expect(backend.snapshots).toHaveLength(1);
+  });
+
+  it("image.get carries each project image's size off the listing, one listing per place, and none where the provider lists no snapshots", async () => {
+    const { rt, backend, golden, ws, advance, listSnapshots } = await taken();
+    let listings = 0;
+    backend.listSnapshots = async () => (listings++, listSnapshots());
+    expect((await rt.image.get()).projects).toEqual([{ ...golden, sizeBytes: backend.snapshotBytes }]);
+    const one = listings;
+    advance(60_000);
+    const second = await rt.workspaces.snapshot(ws.id);
+    listings = 0;
+    expect((await rt.image.get()).projects).toEqual([golden, second].map(g => ({ ...g, sizeBytes: backend.snapshotBytes })));
+    expect(listings).toBe(one);
+    backend.capabilities.snapshotListing = false;
+    expect((await rt.image.get()).projects).toEqual([golden, second]);
+  });
+
+  it("over the wire: projectGoldens.remove replies with the record and the line, a refusal carries its kind, and the op is a paired device's and no thread's", async () => {
+    const { rt, golden } = await taken();
+    expect(DEVICE_OPS).toContain("projectGoldens.remove");
+    expect(THREAD_OPS).not.toContain("projectGoldens.remove");
+    srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+    const client = await WsClient.connect(srv.port, { token: "t" });
+    try {
+      expect(await client.request("projectGoldens.remove", { snapshotId: golden.snapshotId })).toEqual({ id: expect.anything(), ok: true, projectGolden: golden, alreadyGone: false });
+      expect(await client.request("projectGoldens.remove", { snapshotId: golden.snapshotId })).toMatchObject({ ok: false, kind: "not-found", error: noProjectImageLine(golden.snapshotId) });
     } finally {
       client.close();
     }

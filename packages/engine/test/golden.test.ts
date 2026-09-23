@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CLAUDE_INSTALL, CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
@@ -2830,5 +2830,54 @@ describe("the manifest of what the recipe wrote into home", () => {
     const { backend } = recordingBackend({}, { exec: hashed });
     const builder = await prepareBuilder({ backend, setup: "true", import: { recipeHash: "h1", recipe: { ticks: [], files: [] }, tools: [], agents: [] } });
     expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.owned).toEqual([]);
+  });
+});
+
+describe("snapshotUntilGone", () => {
+  const QUICK = { graceMs: 30, pollMs: 1 };
+  /** A provider whose DELETE answers as asked and whose listing answers each read off the queue, the last one again. */
+  function provider(del: () => void, reads: (readonly string[] | Error)[], listing = true) {
+    const seen = { deletes: 0, reads: 0 };
+    const backend = {
+      capabilities: { snapshotListing: listing },
+      async deleteSnapshot() {
+        seen.deletes++;
+        del();
+      },
+      async listSnapshots() {
+        const r = reads[Math.min(seen.reads++, reads.length - 1)]!;
+        if (r instanceof Error) throw r;
+        return r.map(id => ({ id, sizeBytes: 1 }));
+      },
+    } as unknown as MachineBackend;
+    return { backend, seen };
+  }
+
+  it("answers deleted once the listing no longer holds the id, a failed read counting as one that still does", async () => {
+    const { backend, seen } = provider(() => {}, [["snap_1", "snap_2"], new Error("GET /snapshots answered 502"), ["snap_2"]]);
+    expect(await snapshotUntilGone(backend, "snap_1", QUICK)).toBe("deleted");
+    expect(seen).toEqual({ deletes: 1, reads: 3 });
+  });
+
+  it("answers missing without a read when the provider had already lost the snapshot, and throws any other refusal", async () => {
+    const lost = provider(() => {
+      throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
+    }, [["snap_1"]]);
+    expect(await snapshotUntilGone(lost.backend, "snap_1", QUICK)).toBe("missing");
+    expect(lost.seen.reads).toBe(0);
+    const refused = provider(() => {
+      throw Object.assign(new Error("SnapshotHasChildren"), { kind: "conflict", status: 409 });
+    }, [["snap_1"]]);
+    await expect(snapshotUntilGone(refused.backend, "snap_1", QUICK)).rejects.toMatchObject({ status: 409 });
+    expect(refused.seen.reads).toBe(0);
+  });
+
+  it("answers listed when the id outlives the window, and deleted on the DELETE alone where the provider lists nothing", async () => {
+    const held = provider(() => {}, [["snap_1"]]);
+    expect(await snapshotUntilGone(held.backend, "snap_1", QUICK)).toBe("listed");
+    expect(held.seen.reads).toBeGreaterThan(1);
+    const unlisted = provider(() => {}, [["snap_1"]], false);
+    expect(await snapshotUntilGone(unlisted.backend, "snap_1", QUICK)).toBe("deleted");
+    expect(unlisted.seen.reads).toBe(0);
   });
 });

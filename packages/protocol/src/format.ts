@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SealedProjectImage, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
@@ -952,10 +952,36 @@ export function sealedBuiltLine(image: SealedImage, built: { copy: SealedImageCo
   return built.built ? line : `${line} · already built from this image; nothing was built`;
 }
 
-/** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
-export function sealedProjectLine(project: ProjectGolden): string {
-  return [`project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), project.createdAt].join(" · ");
+/** One project image under the image, as a line: the id a remove or a --from takes, the workspace it was taken off,
+ * the projects on that disk, its size where the provider lists one, and when. */
+export function sealedProjectLine(project: SealedProjectImage): string {
+  const size = project.sizeBytes === undefined ? [] : [fmtBytes(project.sizeBytes)];
+  return [project.snapshotId, `project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), ...size, project.createdAt].join(" · ");
 }
+
+/** Why a word names no project image here: a golden version's snapshot, a project's name and a typo alike, since a
+ * remove takes the id alone. */
+export const noProjectImageLine = (word: string): string => `no project image ${word}; wsp image lists them with their ids`;
+
+/** Why a project image cannot be removed yet, with the workspaces standing on it whatever their phase: a gone one's
+ * record stands on it too until a forget takes it. */
+export const projectImageInUseRefusal = (id: string, workspaces: readonly string[]): string =>
+  `project image ${id} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${nameList(workspaces)}; delete ${workspaces.length === 1 ? "it" : "them"} first, and forget any whose machine is already gone`;
+
+/** What a removal takes, the one sentence the command line's question and the tool's unconfirmed answer both say. */
+export const projectImageRemoveNotice = (g: Pick<ProjectGolden, "workspaceName" | "createdAt">): string =>
+  `Its snapshot, taken from ${g.workspaceName} on ${g.createdAt.slice(0, 10)}, is deleted at the provider, and no workspace starts from it again.`;
+
+/** What a removal came to: a snapshot the provider had already lost is gone either way, so its record went too. */
+export const projectImageRemovedLine = (id: string, alreadyGone: boolean): string =>
+  alreadyGone ? `project image ${id} was already gone at the provider; its record is removed` : `removed project image ${id}: its snapshot is gone at the provider, and its record with it`;
+
+/** The delete answered and the listing held the id through the whole read-back window, so the record stays. */
+export const projectImageStillListedLine = (id: string, graceMs: number): string =>
+  `project image ${id} is still at the provider ${Math.round(graceMs / 1000)} s after the delete answered, so its record stays; run wsp image remove ${id} again`;
+
+export const projectImageRefusedLine = (id: string, answer: ProviderAnswer): string =>
+  `project image ${id} was not removed: the provider answered ${providerAnswerLine(answer)}; its record stays`;
 
 /** What an export wrote, as the line a person reads after it. */
 export function sealedExportLine(exported: SealedImageExport): string {

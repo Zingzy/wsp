@@ -236,13 +236,14 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
     await last("rename", "rename", "renamed", "alpha");
     // A snapshot takes a first-life machine, so it comes before the pause that resumes it.
-    await last("snapshot", "snapshot", "alpha");
+    const { projectGolden } = (await last("snapshot", "snapshot", "alpha")) as { projectGolden: { snapshotId: string } };
     await last("pause", "pause", "alpha");
     await last("wake", "wake", "alpha");
     // Already on the golden's head, so the move is the answer alone: the workspace untouched and nothing kept.
     expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
     // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
     expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
+    expect(await last("image remove", "image", "remove", projectGolden.snapshotId, "--yes")).toEqual({ projectGolden: expect.objectContaining({ snapshotId: projectGolden.snapshotId }), alreadyGone: false });
     // A place already standing on the record answers with the copy it holds and builds nothing, which is the road
     // that costs no machine: the record and that place's copy are written here at one hash.
     await store.put("images", "default", RECORD);
