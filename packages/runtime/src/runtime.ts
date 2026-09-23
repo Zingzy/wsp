@@ -33,6 +33,7 @@ import {
   refuseForeignMembers,
   importInto,
   isMissing,
+  NapRefusedError,
   installScript,
   INSTALL_MS,
   landBundle,
@@ -219,7 +220,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -3513,6 +3514,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * reach and the runtime has no probe of its own. */
   const polledReach = new Map<string, { machineId: string; reach: ReachState }>();
 
+  /** A pause the provider refused outright stands for that machine until one lands: Solari refuses every pause past its size cap (measured 2026-09-23). */
+  const napRefusals = new Map<string, { machineId: string; said: string }>();
+  const napRefusedOf = (entry: LiveWorkspace): string | undefined => {
+    const refused = napRefusals.get(entry.record.id);
+    if (refused === undefined) return undefined;
+    if (refused.machineId === entry.machine.id) return refused.said;
+    napRefusals.delete(entry.record.id);
+    return undefined;
+  };
+  const napRefusedReason = (entry: LiveWorkspace): string | undefined => {
+    const said = napRefusedOf(entry);
+    return said === undefined ? undefined : napRefusedLine(said);
+  };
+
   /** The reach a status pushed for a running machine carries: what the poll last measured, and where it has
    * measured nothing, the claim this kind's road makes. A measurement outranks the claim because the pushes that
    * carry a line about the daemon happen exactly when the daemon is dead: claiming reachable there paints the row
@@ -4182,6 +4197,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 await importInto(m, payload, "/");
               },
               stashVault: async m => {
+                // The vault the last landed nap stored stands until the provider pauses this machine at all.
+                if (napRefusedOf(entry) !== undefined) return;
                 try {
                   await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
                   record.vaultedAt = new Date(clock.now()).toISOString();
@@ -4268,6 +4285,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     unreadAt.delete(id);
     unreached.delete(id);
     polledReach.delete(id);
+    napRefusals.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
@@ -4307,11 +4325,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (isMissing(e) && (await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) }))) !== "not-gone") throw e;
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
+          if (e instanceof NapRefusedError) {
+            if (napRefusedOf(entry) === undefined) console.warn(`the provider does not pause ${entry.machine.id} of ${id} (${e.said}); an idle nap waits for the backstop and exports no vault until a pause lands`);
+            napRefusals.set(id, { machineId: entry.machine.id, said: e.said });
+          }
           await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
           throw e;
         }
         // The reason says the machine paused, so it is written once the provider has confirmed that.
         endSessions(id, PAUSED_REASON);
+        napRefusals.delete(id);
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
@@ -4341,6 +4364,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adoptPause = async (entry: LiveWorkspace): Promise<void> => {
     if (entry.record.phase !== "running" || entry.napping || entry.waking) return;
     entry.ws.notePaused();
+    napRefusals.delete(entry.record.id);
     entry.record.phase = "napping";
     await persist(entry.record);
     endSessions(entry.record.id, PAUSED_REASON);
@@ -4460,7 +4484,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const idle = createIdlePolicy({
     windowOf: id => {
       const entry = live.get(id);
-      return entry === undefined ? null : idleWindowOf(entry.record);
+      if (entry === undefined) return null;
+      const windowMs = idleWindowOf(entry.record);
+      // A refusal that stands is asked again only at the backstop; a window that is off stays off.
+      return windowMs !== null && napRefusedOf(entry) !== undefined ? backstopMs(windowMs) : windowMs;
     },
     onIdle: async (id, windowMs) => {
       // What the computer running it can see of the workspace working, asked once here rather than counted by
@@ -4479,11 +4506,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A machine the pause found gone settled its record on the way out; the gone event dropped this window.
         if (isMissing(e)) return;
         // The provider answered with a refusal: asking again at once changes nothing, so a full window starts from
-        // its answer and the row is pushed once more with that window, the words unchanged.
+        // its answer, the backstop where the refusal stands for the machine, and the row is pushed once more with
+        // that window, the words unchanged. A refusal that stands was logged once, where the pause met it.
         idle.touch(id);
         const entry = live.get(id);
-        if (entry !== undefined) await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
-        console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
+        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
+        if (!(e instanceof NapRefusedError)) console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
     retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
@@ -8818,7 +8846,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
-        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused)! } : {},
+        // A pause the provider refused stays on the row as long as it stands, for the same reason.
+        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e)) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e))! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
