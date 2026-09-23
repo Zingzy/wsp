@@ -102,8 +102,8 @@ describe("local exec stream", () => {
       const attached = await localExecStream({ root, runDir, pollMs: 10 }).attach!(base, { input: false });
       expect(attached).not.toBe("gone");
       const stream = attached as ExecStream;
-      // Many polls at the limit above, and none of them settles on a file with nothing in it.
-      const waited = new Promise<string>(resolve => setTimeout(() => resolve("still writing"), 100));
+      // Longer than the reap's 200 ms group poll, so a poll that settled on the empty file would be seen here.
+      const waited = new Promise<string>(resolve => setTimeout(() => resolve("still writing"), 500));
       expect(await Promise.race([stream.exited, waited])).toBe("still writing");
       writeFileSync(`${base}.exit`, "7\n");
       expect(await stream.exited).toBe(7);

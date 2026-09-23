@@ -3794,7 +3794,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return;
       }
       try {
-        // The entry this sync holds, never the verb's own lookup: that door refuses a workspace still creating, which is when the create's sync runs.
+        // The update verb's door refuses a workspace still creating, which is when the create's sync runs.
         await deployDaemonOn(entry, module.deployDaemon!);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
@@ -4749,8 +4749,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
-      // Every sync the hydrations handed back, started here and nowhere else: the re-attach above has settled the
-      // rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
+      // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
       for (const entry of toSync) void syncDaemon(entry);
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
