@@ -2168,6 +2168,60 @@ describe("a turn the host comes back to", () => {
     }
   });
 
+  it("waits out the running turn on a store whose sessions listing answers last, since the sync starts after the rows are in", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId, run } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      let rowsIn = (): void => {};
+      // A deploy is what releases the held listing, so a host that starts the sync before the rows are in reaches
+      // this read with its deploy already done rather than with a wait nobody can time.
+      const held = new Promise<void>(resolve => (rowsIn = resolve));
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async (m: { id: string }) => {
+          deployed.push(m.id);
+          rowsIn();
+        },
+      };
+      const late: Store = {
+        ...store,
+        list: async collection => {
+          if (collection === "sessions") await held;
+          return store.list(collection);
+        },
+      };
+      const rt2 = createRuntime({ backend, store: late, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      const listing = rt2.sessions.list(workspaceId);
+      const rows = setTimeout(rowsIn, 300);
+      expect((await listing).map(s => s.status)).toEqual(["running"]);
+      clearTimeout(rows);
+      // Nothing was deployed while the rows were still coming in, because no sync had started.
+      expect(deployed).toEqual([]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      expect(deployed).toEqual([]);
+
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
   it("hands no deploy to a machine that napped while the update waited for its turn, and leaves no note on its row", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;

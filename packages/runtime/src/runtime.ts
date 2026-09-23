@@ -2820,7 +2820,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await ready();
         for (const raw of await store.list(WORKSPACES)) {
           const stored = raw as WorkspaceRecord;
-          if (stored.place === e.placeId && isHeldAway(stored.id)) await hydrateWorkspace(raw);
+          if (stored.place !== e.placeId || !isHeldAway(stored.id)) continue;
+          // This road runs after ready, so every session row is already in and the sync can wait out a running turn.
+          const entry = await hydrateWorkspace(raw);
+          if (entry !== undefined) void syncDaemon(entry);
         }
       })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
     });
@@ -4561,8 +4564,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** One stored workspace read into a live one: what the provider says about its machine decides the phase, and
    * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
-   * place dials in, since until then nothing could be asked about its machine. */
-  const hydrateWorkspace = async (raw: unknown): Promise<void> => {
+   * place dials in, since until then nothing could be asked about its machine. Answers the entry whose daemon wants
+   * syncing, since the sync waits out a running turn and only the caller knows when its session rows are in. */
+  const hydrateWorkspace = async (raw: unknown): Promise<LiveWorkspace | undefined> => {
     const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
     const kind: WorkspaceKind = stored.kind ?? "cloud";
     const rest = stored;
@@ -4645,10 +4649,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${String(atProvider)} at the provider; the record hydrates ${phase}`);
       await persist(record);
     }
-    if (phase === "running" && !absent) {
-      idle.touch(stored.id);
-      void syncDaemon(live.get(stored.id)!);
-    }
+    if (phase !== "running" || absent) return undefined;
+    idle.touch(stored.id);
+    return live.get(stored.id)!;
   };
 
   let hydrated: Promise<void> | undefined;
@@ -4674,7 +4677,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (project === raw) projectsHeld.set(project.id, project);
         else await rememberProject(project);
       }
-      for (const raw of await store.list(WORKSPACES)) await hydrateWorkspace(raw);
+      const toSync: LiveWorkspace[] = [];
+      for (const raw of await store.list(WORKSPACES)) {
+        const entry = await hydrateWorkspace(raw);
+        if (entry !== undefined) toSync.push(entry);
+      }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
@@ -4742,6 +4749,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      // Every sync the hydrations handed back, started here and nowhere else: the re-attach above has settled the
+      // rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
+      for (const entry of toSync) void syncDaemon(entry);
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
       await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
