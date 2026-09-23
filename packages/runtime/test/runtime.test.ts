@@ -2168,6 +2168,37 @@ describe("a turn the host comes back to", () => {
     }
   });
 
+  it("hands no deploy to a machine that napped while the update waited for its turn, and leaves no note on its row", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      // The nap moves the phase before it ends the turn the update is waiting on, so the wait comes back to a
+      // machine the provider has paused.
+      await rt2.workspaces.nap(workspaceId);
+      await new Promise(r => setTimeout(r, 100));
+      expect(deployed).toEqual([]);
+      expect((await rt2.workspaces.get(workspaceId)).daemonNote).toBeUndefined();
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
   it("a turn cut on the way back takes its open prompt with it, so no settled thread is left reading as waiting on a person", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -3014,6 +3045,59 @@ describe("runtime daemon reach", () => {
       await daemon.close();
       await bare.close();
       await boxed.close();
+    }
+  });
+
+  it("puts this wsp's daemon on a fresh fork inside its own create, where the image carries an older one, and says nothing about a workspace that is not there yet", async () => {
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const deployed: string[] = [];
+    const warned: string[] = [];
+    let cloneStarted = (): void => {};
+    let deployEnded = (): void => {};
+    // The clone the create runs is held until the deploy has landed, and the deploy waits for the clone to be
+    // asked, so the deploy provably runs while the record is still creating rather than early by timing. A sync
+    // refused at the verb's door releases the clone too, so a red run ends rather than hanging on the hold.
+    const cloneAsked = new Promise<void>(resolve => (cloneStarted = resolve));
+    const deployDone = new Promise<void>(resolve => (deployEnded = resolve));
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => {
+      warned.push(String(line));
+      if (String(line).includes("not updated")) deployEnded();
+    });
+    try {
+      const backend = stubBackend();
+      backend.execImpl = async (m, cmd) => {
+        if (cmd.includes("clone")) {
+          cloneStarted();
+          await deployDone;
+        }
+        return tokenGuest(m, cmd);
+      };
+      const create = backend.create.bind(backend);
+      backend.create = async spec => {
+        const m = await create(spec);
+        m.previewUrl = async () => ({ url: `http://127.0.0.1:${daemon.port}/`, token: "e", expiresAt: Date.now() + 3_600_000 });
+        return m;
+      };
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async (m: { id: string }) => {
+          await cloneAsked;
+          deployed.push(m.id);
+          daemon.announce(DAEMON_VERSION);
+          deployEnded();
+        },
+      };
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      expect(deployed).toEqual(["m1"]);
+      // Nothing about the daemon reached the log: no refusal for a workspace the verb's door cannot see yet.
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([]);
+      expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
+      await rt.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
     }
   });
 

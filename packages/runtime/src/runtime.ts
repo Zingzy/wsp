@@ -3785,8 +3785,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
       // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
       while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
+      // The last read before the deploy: a machine that napped under the wait is handed no exec on a paused sandbox.
+      if (entry.record.phase !== "running") {
+        await noteDaemon(entry, undefined);
+        return;
+      }
       try {
-        await workspaces.updateDaemon(entry.record.id);
+        // The entry this sync holds, never the verb's own lookup: that door refuses a workspace still creating, which is when the create's sync runs.
+        await deployDaemonOn(entry, module.deployDaemon!);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
       } catch (e) {
@@ -3833,10 +3839,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const last = revivedAt.get(entry.record.id);
     if (last !== undefined && last.machineId === key && clock.now() - last.at < DAEMON_REVIVE_AGAIN_MS) return;
     revivedAt.set(entry.record.id, { machineId: key, at: clock.now() });
+    const deploy = moduleOf(entry.record.kind).deployDaemon!;
     const work = (async () => {
       await noteDaemon(entry, DAEMON_RESTARTING);
+      // The last read before the deploy: a machine that napped under the note is handed no exec on a paused sandbox.
+      if (entry.record.phase !== "running") {
+        await noteDaemon(entry, undefined);
+        return;
+      }
       try {
-        await workspaces.updateDaemon(entry.record.id);
+        await deployDaemonOn(entry, deploy);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
       } catch (e) {
