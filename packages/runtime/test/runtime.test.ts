@@ -3327,6 +3327,7 @@ describe("runtime daemon reach", () => {
       refusing.add("m1");
       await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
       refusing.delete("m1");
+      const before = pushed.length;
       const stop = await watch();
       try {
         expect(probes(backend.machines[0]!)).toBe(1);
@@ -3334,8 +3335,8 @@ describe("runtime daemon reach", () => {
       } finally {
         stop();
       }
-      expect(pushed.at(-1)).toMatchObject({ id: ws.id, reach: { state: "reachable" } });
-      expect(pushed.at(-1)!.reason).toBeUndefined();
+      // The marked tick's row, then the next tick's with the probe's word: the answer itself pushes nothing.
+      expect(pushed.slice(before).map(st => `${st.reach.state} ${st.reason ?? "-"}`)).toEqual([`unreachable ${LINE}`, "reachable -"]);
       expect(probes(backend.machines[0]!)).toBe(1);
     });
 

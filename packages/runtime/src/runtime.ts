@@ -4043,7 +4043,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
   };
   /** The entry's machine with every exec and run read for the provider's word that it cannot reach it: that refusal
-   * marks the workspace and puts the sentence on the row now, and any answer takes the mark off. */
+   * marks the workspace and puts the sentence on the row now, and any answer takes the mark off for the next tick to
+   * say, since a push here would carry the marked tick's reach without its sentence. */
   const watched = (entry: LiveWorkspace, machine: Machine): Machine => {
     const heard = async (call: () => Promise<ExecResult>): Promise<ExecResult> => {
       let res: ExecResult;
@@ -4057,10 +4058,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         throw e;
       }
-      if (unreached.get(entry.record.id)?.machineId === machine.id) {
-        unreached.delete(entry.record.id);
-        await pushStatus(entry);
-      }
+      if (unreached.get(entry.record.id)?.machineId === machine.id) unreached.delete(entry.record.id);
       return res;
     };
     const exec = (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => heard(() => machine.exec(cmd, o));

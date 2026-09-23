@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -1206,6 +1206,8 @@ describe("a machine the provider answered it cannot reach", () => {
     openServers.push(daemon.server);
     const fc = fakeClock();
     const calls = { state: 0, exec: 0, mints: 0 };
+    /** Down, the mint fails the way a lookup on this computer does, which is a tick that learns nothing. */
+    const road = { down: false };
     const record: StatusRecord = {
       id: "ws_u",
       name: "far",
@@ -1220,6 +1222,7 @@ describe("a machine the provider answered it cannot reach", () => {
       generation: 1,
       daemonReach: async () => {
         calls.mints++;
+        if (road.down) throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN edge.example"), { code: "EAI_AGAIN" }) });
         return { url: `http://127.0.0.1:${daemon.port}/?port=7681`, expiresAt: EXPIRES };
       },
       providerState: async () => {
@@ -1234,11 +1237,11 @@ describe("a machine the provider answered it cannot reach", () => {
       ...over,
     };
     const tracker = createStatusTracker({ records: async () => [record], store: memoryStore(), emit: () => {}, on: () => () => {}, clock: fc.clock, defaults: { zombieProbeTimeoutMs: 2_000 } });
-    const poll = async (): Promise<WorkspaceStatus> => {
+    const poll = async (opts?: StatusListOptions): Promise<WorkspaceStatus> => {
       fc.advance(POLL_INTERVAL_MS);
-      return (await tracker.list())[0]!;
+      return (await tracker.list(opts))[0]!;
     };
-    return { record, fc, calls, poll };
+    return { record, fc, calls, road, poll };
   }
   const refused = async (): Promise<ExecResult> => {
     throw new Error(LINE);
@@ -1259,6 +1262,25 @@ describe("a machine the provider answered it cannot reach", () => {
     expect(calls.mints).toBe(1);
     expect(status.reach.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?port=7681$/);
     expect(status.reach.expiresAt).toBe(EXPIRES);
+  });
+
+  it("keeps Unreachable and the sentence across a tick where this computer's own road fails", async () => {
+    const { road, poll } = await marked(refused);
+    expect((await poll()).reach.state).toBe("unreachable");
+    road.down = true;
+    const status = await poll();
+    expect(status).toMatchObject({ reach: { state: "unreachable", offline: true }, reason: LINE });
+    expect(wordOf(status)).toBe("Unreachable");
+  });
+
+  it("spends no exec on a listing that will not wait, and keeps the sentence and the route there, while the poll still probes", async () => {
+    const { calls, poll } = await marked(refused);
+    const table = await poll({ zombieProbe: false, reader: "table" });
+    expect(table).toMatchObject({ reach: { state: "unreachable", expiresAt: EXPIRES }, reason: LINE });
+    expect(table.reach.url).toContain("127.0.0.1");
+    expect(calls.exec).toBe(0);
+    expect((await poll()).reason).toBe(LINE);
+    expect(calls.exec).toBe(1);
   });
 
   it("holds one exec probe in flight however many ticks pass while the provider hangs", async () => {

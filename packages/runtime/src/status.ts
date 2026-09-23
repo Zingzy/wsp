@@ -658,7 +658,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         const memory = probesOf(r, opts?.reader ?? "app");
         const at = route === undefined ? {} : { url: route.url, expiresAt: route.expiresAt };
         // Nothing was learnt about the machine: the row keeps its word, the run of probes under it is left as it was.
-        if (probed.offline === true) return done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true });
+        if (probed.offline === true) return { ...done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true }), ...(r.unreached !== undefined ? { reason: r.unreached } : {}) };
         if (probed.fromDaemon) sawAwake(r.id);
         const shown = reachShown(memory.last, probed.state);
         memory.last = probed.state;
@@ -666,10 +666,13 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         // The provider's refusal is an answer, not a silence: the row turns at once, keeps its route, and one exec probe heals it.
         if (r.unreached !== undefined) {
           const s = suspectOf(r);
-          s.probe ??= probeExec(r).finally(() => {
-            s.probe = undefined;
-          });
+          if (opts?.zombieProbe !== false) {
+            s.probe ??= probeExec(r).finally(() => {
+              s.probe = undefined;
+            });
+          }
           const judged = await judge(r, { state: "unreachable", ...at }, opts);
+          memory.shown = judged.reach.state;
           return { ...done(judged.state, judged.reach), ...(judged.state === "running" ? { reason: r.unreached } : {}) };
         }
         // A route the reach itself depended on and could not get is a failed reach with no zombie window: the guest
