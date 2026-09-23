@@ -1647,8 +1647,8 @@ const goneLogLine = (workspaceId: string, words: string): string => `workspace $
 /** The host log's one line for the runs a connecting host ended on a machine because no row of its own held them. */
 const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): string =>
   `ended ${runs.length === 1 ? "1 harness run" : `${runs.length} harness runs`} on ${workspaceId} that no thread here holds: ${runs.join(", ")}`;
-/** The host log's one line for a harness store that would not give a title; the read window keeps it to one line
- * per session rather than one per refresh. */
+/** The host log's one line for a harness store that would not give a title, said once per session until a read
+ * answers. */
 const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
   `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
 /** The host log's one line for a thread its harness would not name; the thread keeps its opening turn's words and
@@ -5767,8 +5767,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
-   * clients reload the index on every session event and each reload must not cost an exec. */
-  const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean }>();
+   * clients reload the index on every session event and each reload must not cost an exec. `failed` holds from a
+   * read that failed until one answers, so a store that fails every window is said once. */
+  const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean; failed: boolean }>();
   /** Asks the harness what it calls a row's session and keeps the answer on every row that shares it, so the title
    * a client folds a thread by follows a rename made inside the harness. `force` reads past the TTL: a turn has just
    * ended, which is when the harness writes its own title. Nothing happens while the machine cannot be asked, or
@@ -5778,7 +5779,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const sessionId = view.claudeSessionId;
     const entry = live.get(view.workspaceId);
     if (sessionId === undefined || entry === undefined) return Promise.resolve();
-    if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return Promise.resolve();
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || unreachedOf(entry) !== undefined || adapters[view.harness] === undefined) return Promise.resolve();
     const key = `${entry.machine.id}:${sessionId}`;
     const hit = titleReads.get(key);
     const now = clock.now();
@@ -5786,7 +5787,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The adapter is built after the window is checked, so a refresh inside it costs nothing at all.
     const read = adapterFor(entry, view.harness).adapter.sessionTitle;
     if (read === undefined) return Promise.resolve();
-    const pending: { at: number; done: Promise<void>; live: boolean } = { at: now, live: true, done: Promise.resolve() };
+    const pending: { at: number; done: Promise<void>; live: boolean; failed: boolean } = { at: now, live: true, done: Promise.resolve(), failed: hit?.failed ?? false };
     // The read is started inside a promise and never on this stack: an adapter that refuses the id throws where it
     // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
@@ -5800,6 +5801,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       })
       .then(
         async title => {
+          pending.failed = false;
           if (title === null) return;
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
@@ -5813,7 +5815,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           await persistSessions(entry.record.id);
         },
-        (e: unknown) => console.warn(noTitleLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
+        (e: unknown) => {
+          if (!pending.failed) console.warn(noTitleLogLine(sessionId, entry.record.id, providerSaid(e)));
+          pending.failed = true;
+        },
       );
     titleReads.set(key, pending);
     return pending.done;

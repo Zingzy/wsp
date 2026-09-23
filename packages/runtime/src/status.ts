@@ -10,7 +10,7 @@
 // resets Solari's idle timer, so a poller that asked per tick kept every
 // workspace awake and billing forever.
 
-import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
+import { MachineUnreachableError, isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
 import { appendCostPoint, goneWords, monthStart, reachShown, spentSince, workspacePlaceId, type EventUnion, type MachineFacts, type PlaceSpend, type PlaceView, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
@@ -41,9 +41,10 @@ export function phaseLeavingGone(read: MachineState): "running" | "napping" | un
   return read === "running" ? "running" : read === "paused" ? "napping" : undefined;
 }
 
-/** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both. */
+/** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both.
+ * The typed refusal's message is wsp's own sentence, so the words quoted are the provider's it carries. */
 export function providerSaid(e: unknown): string {
-  const message = e instanceof Error ? e.message : String(e);
+  const message = e instanceof MachineUnreachableError ? e.said : e instanceof Error ? e.message : String(e);
   const status = (e as { status?: unknown } | null)?.status;
   return typeof status === "number" ? `${status} ${message}` : message;
 }
