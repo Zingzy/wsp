@@ -23,6 +23,8 @@ interface Step {
   nap?: boolean;
   /** The backend reads the guest as dead: its shell will not start again for this poll or any other. */
   unusable?: boolean;
+  /** The provider no longer has the machine: this poll and every exec after it throw this answer. */
+  gone?: Error;
 }
 
 interface Call {
@@ -79,6 +81,7 @@ function guest(steps: Step[]) {
   let exit = "";
   let alive = true;
   let step = 0;
+  let gone: Error | undefined;
   const calls: Call[] = [];
   const kills: string[] = [];
   const polls: { out: number; err: number }[] = [];
@@ -88,6 +91,7 @@ function guest(steps: Step[]) {
     id: "m1",
     async exec(cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> {
       calls.push({ cmd, timeoutMs: o?.timeoutMs });
+      if (gone !== undefined) throw gone;
       if (cmd.includes("echo WSP_PIECE")) {
         if (disk.apply(cmd).pieces !== 1) throw new Error(`piece exec without a numbered file: ${cmd}`);
         return { exitCode: 0, stdout: "WSP_PIECE\n", stderr: "" };
@@ -111,6 +115,7 @@ function guest(steps: Step[]) {
           step++;
           if (s.nap) throw Object.assign(new Error("Bad Gateway"), { kind: "transient", status: 502 });
           if (s.unusable) throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200);
+          if (s.gone !== undefined) throw (gone = s.gone);
           if (s.out !== undefined) out = Buffer.concat([out, Buffer.from(s.out)]);
           if (s.err !== undefined) err = Buffer.concat([err, Buffer.from(s.err)]);
           if (s.exit !== undefined) exit = String(s.exit);
@@ -196,6 +201,18 @@ describe("execDetached over a scripted guest", () => {
     expect(g.cleaned()).toBe(0);
   });
 
+  it("a poll that meets the provider's 404 ends the run with the provider's own answer at once", async () => {
+    const missing = Object.assign(new Error("Sandbox not found"), { kind: "missing", status: 404, requestId: "req-1" });
+    const g = guest([{ out: "started\n" }, { gone: missing }]);
+    const t0 = Date.now();
+    await expect(execDetached(g.machine, "sleep 999", { deadlineMs: 1_000, pollMs: 1 })).rejects.toBe(missing);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    // The poll that met the 404 is the last exec sent: no kill, no cleanup and no further poll.
+    const polls = g.calls.flatMap((c, at) => (c.cmd.includes("echo WSP_POLL") ? [at] : []));
+    expect(polls).toHaveLength(2);
+    expect(g.calls).toHaveLength(polls[1]! + 1);
+  });
+
   it("a nap that outlasts the deadline still ends in 124, with the kill attempted", async () => {
     const g = guest(Array.from({ length: 200 }, () => ({ nap: true })));
     const res = await execDetached(g.machine, "true", { deadlineMs: 30, pollMs: 1 });
@@ -270,6 +287,22 @@ describe("execDetached over a scripted guest", () => {
     await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(
       "launch failed on m9: nothing came back saying WSP_LAUNCHED, the word the guest prints once the run is up; it printed nothing and exited 0",
     );
+  });
+
+  it("a launch that meets the provider's 404 fails with that answer before any poll, the cleanup attempted", async () => {
+    const missing = Object.assign(new Error("Sandbox not found"), { kind: "missing", status: 404 });
+    const calls: string[] = [];
+    const machine = {
+      id: "m9",
+      exec: async (cmd: string) => {
+        calls.push(cmd);
+        throw missing;
+      },
+    } as unknown as Machine;
+    await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toBe(missing);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("echo WSP_LAUNCHED");
+    expect(calls[1]).toMatch(/^rm -rf /);
   });
 
   it("a launch that does not confirm fails the run before any poll", async () => {
