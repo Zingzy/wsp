@@ -57,6 +57,7 @@ export interface RelayHarness {
 }
 
 export const RELAY_ORIGIN = "https://relay.example";
+export const VERIFY_PAGE_URL = `${RELAY_ORIGIN}/link/verify`;
 export const TEST_ZONE = "boxes.example";
 
 /** The relay's own tables, apart from the bookkeeping D1 keeps in the same database. */

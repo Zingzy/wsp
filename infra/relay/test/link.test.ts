@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE, mintStamp, readToken } from "../src/tokens.js";
-import { RELAY_ORIGIN, fakeAdmission, fingerprintFor, firstCookie, linkedVia, relayHarness, signIn, typeCode, type RelayHarness } from "./relay.js";
+import { RELAY_ORIGIN, VERIFY_PAGE_URL, fakeAdmission, fingerprintFor, firstCookie, linkedVia, relayHarness, signIn, typeCode, type RelayHarness } from "./relay.js";
 
 /** A start, from an address of its own where the case makes several: the relay counts its caps per source, and a
  * case that shared one would be held to them. */
@@ -41,7 +41,7 @@ describe("the device code flow", () => {
     const relay = await relayHarness();
     const { code, pollToken, verifyUrl } = await started(relay, "host", "box");
     expect(code).toMatch(/^[A-Z0-9]{8}$/);
-    expect(verifyUrl).toBe(`${RELAY_ORIGIN}/link/verify`);
+    expect(verifyUrl).toBe(VERIFY_PAGE_URL);
     const row = (await relay.db.prepare("SELECT * FROM link_codes WHERE code = ?").bind(code).first()) as Record<string, string>;
     expect(row["state"]).toBe("pending");
     expect(row["kind"]).toBe("host");
@@ -685,7 +685,7 @@ describe("a key is one computer's on an account", () => {
     const said = await refused.text();
     expect(said).toContain("the Mac");
     expect(said).toContain(`wsp logout ${mac.id}`);
-    expect(said).toContain(`or from ${RELAY_ORIGIN}/link/verify in your browser`);
+    expect(said).toContain(`or from ${VERIFY_PAGE_URL} in your browser`);
     expect(await linkRow(relay, again.code)).toEqual({ state: "pending", account_id: null, admission: null });
     expect(await (await poll(relay, again.pollToken)).json()).toEqual({ state: "pending" });
     expect(await count(relay, "clients")).toBe(1);
@@ -717,7 +717,7 @@ describe("a key is one computer's on an account", () => {
     const said = ((await refused.json()) as { error: string }).error;
     expect(said).toContain("the Mac");
     expect(said).toContain(`wsp logout ${mac.id}`);
-    expect(said).toContain(`or from ${RELAY_ORIGIN}/link/verify in your browser`);
+    expect(said).toContain(`or from ${VERIFY_PAGE_URL} in your browser`);
     expect(await linkRow(relay, claim.code)).toEqual({ state: "pending", account_id: null, admission: null });
     expect(await (await poll(relay, claim.pollToken)).json()).toEqual({ state: "pending" });
     expect(await count(relay, "clients")).toBe(2);
@@ -747,6 +747,7 @@ describe("a key is one computer's on an account", () => {
     const said = ((await two.json()) as { error: string }).error;
     expect(said).toContain("the laptop");
     expect(said).toContain(`wsp logout ${claims!.subject}`);
+    expect(said).toContain(`or from ${VERIFY_PAGE_URL} in your browser`);
     // One row under the key, the second's admission never landed, and both codes are spent.
     expect(await count(relay, "clients")).toBe(2);
     expect(await count(relay, "admissions")).toBe(1);
