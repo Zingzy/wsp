@@ -7,6 +7,7 @@ import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
   INLINE_EXEC_MS,
+  MachineUnreachableError,
   MoveUnansweredError,
   NotFirstLifeError,
   ResumeUnansweredError,
@@ -3517,6 +3518,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * carry a line about the daemon happen exactly when the daemon is dead: claiming reachable there paints the row
    * as answering, and leaves the poll's own no-daemon looking like a repeat of the claim, which the bus drops. */
   const reachOf = (entry: LiveWorkspace): ReachState => {
+    if (unreachedOf(entry) !== undefined) return "unreachable";
     const seen = polledReach.get(entry.record.id);
     if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
     // The same reading the status poll makes: a machine wsp can ask at all, by a route or by its own answer.
@@ -3825,6 +3827,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const revivedAt = new Map<string, MachineMoment>();
   /** Every workspace whose last sync could not read its daemon's version, and when that read gave up. */
   const unreadAt = new Map<string, MachineMoment>();
+  /** Every workspace whose machine the provider last answered it cannot reach, with the sentence its row carries. */
+  const unreached = new Map<string, { machineId: string; line: string }>();
+  /** The mark on the entry's own machine; one a replaced machine left is dropped here. */
+  const unreachedOf = (entry: LiveWorkspace): string | undefined => {
+    const mark = unreached.get(entry.record.id);
+    if (mark === undefined) return undefined;
+    if (mark.machineId === entry.machine.id) return mark.line;
+    unreached.delete(entry.record.id);
+    return undefined;
+  };
   const daemonRevivals = new Map<string, Promise<void>>();
 
   /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
@@ -3838,7 +3850,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * no ptys to lose. One run per machine at a time. */
   const reviveDaemon = (entry: LiveWorkspace, reach: ReachState): void => {
     if (reach !== "no-daemon" || entry.record.phase !== "running") return;
-    if (!canDeployDaemon(entry)) return;
+    // A deploy rides the exec the provider is refusing, and its failure would flash over the row's own sentence.
+    if (!canDeployDaemon(entry) || unreachedOf(entry) !== undefined) return;
     const key = entry.machine.id;
     if (daemonRevivals.has(key)) return;
     const last = revivedAt.get(entry.record.id);
@@ -4029,6 +4042,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       },
     });
   };
+  /** The entry's machine with every exec and run read for the provider's word that it cannot reach it: that refusal
+   * marks the workspace and puts the sentence on the row now, and any answer takes the mark off. */
+  const watched = (entry: LiveWorkspace, machine: Machine): Machine => {
+    const heard = async (call: () => Promise<ExecResult>): Promise<ExecResult> => {
+      let res: ExecResult;
+      try {
+        res = await call();
+      } catch (e) {
+        if (e instanceof MachineUnreachableError && entry.machine.id === machine.id) {
+          const standing = unreached.get(entry.record.id)?.machineId === machine.id;
+          unreached.set(entry.record.id, { machineId: machine.id, line: e.message });
+          if (!standing && entry.record.phase === "running") await emitStatus(entry, "unreachable", e.message);
+        }
+        throw e;
+      }
+      if (unreached.get(entry.record.id)?.machineId === machine.id) {
+        unreached.delete(entry.record.id);
+        await pushStatus(entry);
+      }
+      return res;
+    };
+    const exec = (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => heard(() => machine.exec(cmd, o));
+    const run = (script: string, o: RunOptions): Promise<ExecResult> => heard(() => machine.run(script, o));
+    return new Proxy(machine, {
+      get(target, prop) {
+        if (prop === "exec") return exec;
+        if (prop === "run") return run;
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+  };
   const observing = (b: MachineBackend): MachineBackend => ({ ...b, create: async spec => observed(await b.create(spec)), get: async id => observed(await b.get(id)) });
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
@@ -4110,6 +4155,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace, generation: (live.get(record.id)?.generation ?? -1) + 1 };
+    entry.machine = watched(entry, machine);
     const at = backendFor(record);
     /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
      * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
@@ -4129,7 +4175,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         wakeAttempts: at.lifecycle?.budgets.wakeAttempts ?? 0,
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
-            entry.machine = m;
+            entry.machine = watched(entry, m);
           }, override),
         ...(vaulted
           ? ({
@@ -4222,6 +4268,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     live.delete(id);
     revivedAt.delete(id);
     unreadAt.delete(id);
+    unreached.delete(id);
     polledReach.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
@@ -8772,6 +8819,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
+        ...(unreachedOf(e) !== undefined ? { unreached: unreachedOf(e)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),

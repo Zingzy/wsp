@@ -192,6 +192,8 @@ export interface StatusRecord extends WorkspaceView {
    * lives on is not connected. The row says so and the provider is asked nothing, since the road to the provider
    * is that computer. Absent on every machine that can be asked. */
   away?: string;
+  /** The provider's sentence for a machine it answered that it cannot reach, standing until any command answers. */
+  unreached?: string;
 }
 
 export interface StatusTrackerOptions {
@@ -597,8 +599,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, ...view } = r;
+        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, unreached, ...view } = r;
         void away;
+        void unreached;
         void providerState;
         void metrics;
         void exec;
@@ -659,6 +662,15 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         const shown = reachShown(memory.last, probed.state);
         memory.last = probed.state;
         memory.shown = shown;
+        // The provider's refusal is an answer, not a silence: the row turns at once, keeps its route, and one exec probe heals it.
+        if (r.unreached !== undefined) {
+          const s = suspectOf(r);
+          s.probe ??= probeExec(r).finally(() => {
+            s.probe = undefined;
+          });
+          const judged = await judge(r, { state: "unreachable", ...at }, opts);
+          return { ...done(judged.state, judged.reach), ...(judged.state === "running" ? { reason: r.unreached } : {}) };
+        }
         // A route the reach itself depended on and could not get is a failed reach with no zombie window: the guest
         // was never dialled. Where the machine answered for its own daemon the route is only the app's road, and
         // its absence says nothing about the guest.

@@ -7,9 +7,9 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
+import { machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -3260,6 +3260,171 @@ describe("runtime daemon reach", () => {
     const fresh = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
     expect(fresh).not.toBe(gone);
     expect(backend.machines[1]!.execLog.filter(c => c.includes(TOKEN_PATH))).toEqual([rotateDaemonTokenScript(fresh)]);
+  });
+
+  describe("a machine the provider answers it cannot reach", () => {
+    const LINE = machineUnreachableLine("Sandbox is not reachable");
+    /** What `wsp workspaces --json` asks the runtime for. */
+    const TABLE = { reconcile: "on-failure", zombieProbe: false, reader: "table" } as const;
+
+    /** A fork whose daemon answers over its route while the provider refuses every command on the machines in
+     * `refusing`, and answers none on those in `hanging`. */
+    async function refusedFork(o: { up?: () => boolean; recipe?: { setup: string; smoke: string; deployDaemon: (m: { id: string }) => Promise<void> } } = {}) {
+      const backend = stubBackend();
+      const refusing = new Set<string>();
+      const hanging = new Set<string>();
+      backend.execImpl = (m, cmd) => {
+        if (refusing.has(m.id)) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502);
+        if (hanging.has(m.id)) return new Promise<never>(() => {});
+        return tokenGuest(m, cmd);
+      };
+      const fc = fakeClock();
+      const edge = await daemonPort(o.up ?? (() => true));
+      const store = memoryStore();
+      const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, clock: fc.clock, ...(o.recipe !== undefined ? { goldenRecipe: o.recipe } : {}), status: { costIntervalMs: 24 * 3_600_000, reconcileMinMs: 60_000 } });
+      const ws = await createOn(rt, { golden: "snap_g", name: "far" });
+      const routed = (m: StubMachine): void => {
+        m.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: fc.clock.now() + 3_600_000 });
+      };
+      routed(backend.machines[0]!);
+      // The route's token is read once and kept, as on a fork a host has dialled before the provider lost it.
+      await rt.workspaces.daemonReach(ws.id);
+      const pushed: WorkspaceStatus[] = [];
+      rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
+      /** One poll tick, waited out: the timer runs on the fake clock, the probe and the heal on real promises. */
+      const ticked = async (tick: () => void): Promise<void> => {
+        const before = edge.hits();
+        tick();
+        await until(() => edge.hits() > before);
+        await new Promise(r => setTimeout(r, 30));
+      };
+      const poll = (): Promise<void> => ticked(() => fc.advance(POLL_INTERVAL_MS));
+      /** The watch polls once at once; that tick is waited out too, so each poll after it is one tick. */
+      const watch = async (): Promise<() => void> => {
+        let stop = (): void => {};
+        await ticked(() => {
+          stop = rt.status.watch();
+        });
+        return stop;
+      };
+      const probes = (m: StubMachine): number => m.execLog.filter(c => c === "echo ok").length;
+      return { backend, store, rt, ws, fc, refusing, hanging, routed, pushed, poll, watch, probes };
+    }
+
+    it("puts the provider's sentence on the row the moment an exec is refused, and the table reads the same", async () => {
+      const { backend, rt, ws, refusing, pushed } = await refusedFork();
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
+      expect(pushed.at(-1)).toMatchObject({ id: ws.id, machineState: "running", reach: { state: "unreachable" }, reason: LINE });
+      const row = (await rt.status.list(TABLE))[0]!;
+      expect(row).toMatchObject({ id: ws.id, machineState: "running", reach: { state: "unreachable" }, reason: LINE });
+      expect(row.reach.url).toContain("127.0.0.1");
+      expect(backend.machines[0]!.execLog.filter(c => c === "echo ok").length).toBeLessThanOrEqual(1);
+    });
+
+    it("heals at the next tick when the tracker's own probe answers through the machine, and the row reads the probe again", async () => {
+      const { backend, rt, ws, refusing, pushed, poll, watch, probes } = await refusedFork();
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
+      refusing.delete("m1");
+      const stop = await watch();
+      try {
+        expect(probes(backend.machines[0]!)).toBe(1);
+        await poll();
+      } finally {
+        stop();
+      }
+      expect(pushed.at(-1)).toMatchObject({ id: ws.id, reach: { state: "reachable" } });
+      expect(pushed.at(-1)!.reason).toBeUndefined();
+      expect(probes(backend.machines[0]!)).toBe(1);
+    });
+
+    it("probes a machine the provider keeps refusing once per tick, and the row keeps its word", async () => {
+      const { backend, rt, ws, refusing, pushed, poll, watch, probes } = await refusedFork();
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
+      const stop = await watch();
+      try {
+        expect(probes(backend.machines[0]!)).toBe(1);
+        for (let i = 2; i <= 4; i++) {
+          await poll();
+          expect(probes(backend.machines[0]!)).toBe(i);
+        }
+      } finally {
+        stop();
+      }
+      expect(pushed.at(-1)).toMatchObject({ id: ws.id, reach: { state: "unreachable" }, reason: LINE });
+    });
+
+    it("leaves a marked machine whose daemon reads dead alone: no deploy over the refused exec, no restart line, no flash", async () => {
+      const deployed: string[] = [];
+      let rt!: ReturnType<typeof createRuntime>;
+      let id = "";
+      let refusing!: Set<string>;
+      let asked = 0;
+      // The provider starts refusing while the tick's own reach probe is out, so the probe's no-daemon reaches the revive with the mark standing.
+      const fork = await refusedFork({
+        up: () => {
+          if (++asked === 1) {
+            refusing.add("m1");
+            void rt.workspaces.exec(id, "true").catch(() => {});
+          }
+          return false;
+        },
+        recipe: { setup: "true", smoke: "true", deployDaemon: async m => void deployed.push(m.id) },
+      });
+      ({ rt, refusing } = fork);
+      id = fork.ws.id;
+      const warned: string[] = [];
+      const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+      const stop = await fork.watch();
+      try {
+        // Long enough for a revive's deploy, its roots write and its flash to have run on real promises.
+        await new Promise(r => setTimeout(r, 150));
+        expect(deployed).toEqual([]);
+        expect(warned.filter(l => l.includes("not restarted"))).toEqual([]);
+        expect(fork.pushed.filter(st => st.daemonNote === DAEMON_RESTART_FAILED || st.daemonNote === DAEMON_RESTARTING)).toEqual([]);
+        await fork.poll();
+        expect(fork.pushed.at(-1)).toMatchObject({ reach: { state: "unreachable" }, reason: LINE });
+      } finally {
+        stop();
+        warn.mockRestore();
+      }
+    });
+
+    it("a rebuild that puts another machine under the record drops the mark", async () => {
+      const { backend, rt, ws, refusing, routed } = await refusedFork();
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
+      await rt.workspaces.rebuild(ws.id);
+      routed(backend.machines[1]!);
+      const row = (await rt.status.list(TABLE))[0]!;
+      expect(row.machineId).toBe("m2");
+      expect(row.reach.state).toBe("reachable");
+      expect(row.reason).toBeUndefined();
+    });
+
+    it("a workspace forgotten leaves no mark behind for the same machine should the sweep record it again", async () => {
+      const { backend, store, rt, ws, refusing, hanging } = await refusedFork();
+      const m1 = backend.machines[0]!;
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(LINE);
+      const stamp = await store.get("workspace-names", ws.id);
+      m1.killed = true;
+      await rt.workspaces.forget(ws.id);
+      m1.killed = false;
+      // The stamp the sweep names a machine's workspace from, as a store the machine outlived still holds it.
+      await store.put("workspace-names", ws.id, stamp);
+      // Neither a refusal nor an answer from here on: only what the forget left can put the sentence back.
+      refusing.delete("m1");
+      hanging.add("m1");
+      m1.spec.labels!["createdAt"] = new Date(Date.now() - 2 * 60_000).toISOString();
+      expect((await rt.reap()).adopted).toMatchObject([{ id: "m1", workspaceId: ws.id }]);
+      const row = (await rt.status.list(TABLE))[0]!;
+      expect(row).toMatchObject({ id: ws.id, machineId: "m1" });
+      expect(row.reach.state).toBe("reachable");
+      expect(row.reason).not.toBe(LINE);
+    });
   });
 });
 
