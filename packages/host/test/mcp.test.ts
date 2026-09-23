@@ -671,7 +671,7 @@ describe("the MCP server over the host", () => {
     const bare = await call("run", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
     // The model and the effort the composer shows for it, since a tool that names neither runs what the app would.
-    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5", effort: "high" });
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5-5", effort: "high" });
     const threadId = (bare.structured as { threadId: string }).threadId;
     const sent = await call("send", { thread: threadId, message: "now think", model: "claude-fable-5-1", effort: "max" });
     expect(sent.isError).toBe(false);
@@ -692,14 +692,14 @@ describe("the MCP server over the host", () => {
     const before = claude.starts.length;
     const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(refused.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
     const mode = await call("run", { workspace: "alpha", task: "go", access: "yolo" });
     expect(mode.isError).toBe(true);
     expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
     const minted = (await rt.workspaces.list()).map(w => w.name);
     const fork = await call("fork", { workspace: "alpha", name: "cheap", task: "review", model: "claude-haiku-4-5" });
     expect(fork.isError).toBe(true);
-    expect(fork.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(fork.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(minted);
     expect(claude.starts).toHaveLength(before);
   });

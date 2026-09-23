@@ -924,9 +924,9 @@ describe("runtime session history", () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
-    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
-    expect(handle.view()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
     // The CLI announces the model it resolved; that name replaces the request's on the view.
     m.start();
     expect((await rt.sessions.list(ws.id))[0]!.model).toBe("claude-sonnet-4-5");
@@ -959,7 +959,7 @@ describe("runtime session history", () => {
     // cwd rides every start now: a workspace is one project's copy and the thread opens in that project's folder.
     expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "cwd", "model", "effort", "permissionMode", "onEvent"]);
     const view = handle.view();
-    expect(view.model).toBe("claude-opus-5");
+    expect(view.model).toBe("claude-opus-5-5");
     expect(view.effort).toBe("high");
     // The access is named too: unnamed, it reached the adapter as nothing, which every adapter here reads as its
     // own skip-everything flag, so what the picker showed and what the CLI ran could differ.
@@ -996,7 +996,7 @@ describe("runtime session history", () => {
       // The wire's isDefault is the harness an unnamed start runs, whichever source answered.
       expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
       expect(claude.models.map(m => m.value)).toEqual(["claude-opus-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
-      expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
+      expect(claude.models[0]).toMatchObject({ label: "Opus", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
@@ -1161,7 +1161,7 @@ describe("runtime session history", () => {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(first).toMatchObject({ source: "table", version: CLAUDE_PIN });
-      expect(first.models.map(m => m.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
+      expect(first.models.map(m => m.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
       backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? "garbage\n" : "", stderr: "" });
       await rt.harnesses.list(ws.id);
       expect(probes(backend)).toHaveLength(1);
@@ -1179,7 +1179,7 @@ describe("runtime session history", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter } });
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await expect(rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-4-1" })).rejects.toThrow(
-        'model "claude-opus-4-1" is not one claude takes; one of: Opus 5 (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku (claude-haiku-4-5-20251001)',
+        'model "claude-opus-4-1" is not one claude takes; one of: Opus (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)',
       );
       await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
       expect(m.lastStart()).toBeUndefined();
