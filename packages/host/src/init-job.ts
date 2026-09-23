@@ -637,9 +637,9 @@ export class InitJobs implements InitDoor {
   }
 
   /** Opens the agent's thread on this computer with the model an unnamed start runs, never the title question's cheap
-   * row, since this thread configures the person's agents. The server rides the
-   * launch because the config the harness reads here is the person's own, and the access is the harness's bypass
-   * mode because the person is at the setup screen, not at the thread. */
+   * row, since this thread configures the person's agents. The server rides the launch because the config the harness
+   * reads here is the person's own, and the access is the harness's bypass mode because the person is at the setup
+   * screen, not at the thread. */
   private async openAgent(s: State, harness: string | undefined): Promise<void> {
     if (harness === undefined) throw new Error("the agent road needs a harness: which agent on this computer writes the recipe");
     const local = (await this.deps.rt.workspaces.list()).find(isLocalWorkspace);
