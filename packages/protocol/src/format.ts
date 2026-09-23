@@ -976,9 +976,10 @@ export const projectImageRemoveNotice = (g: Pick<ProjectGolden, "workspaceName" 
 export const projectImageRemovedLine = (id: string, alreadyGone: boolean): string =>
   alreadyGone ? `project image ${id} was already gone at the provider; its record is removed` : `removed project image ${id}: its snapshot is gone at the provider, and its record with it`;
 
-/** The delete answered and the listing held the id through the whole read-back window, so the record stays. */
+/** The delete answered and no read of the listing within the window showed the id gone, whether the listing held it
+ * or would not answer, so the record stays. */
 export const projectImageStillListedLine = (id: string, graceMs: number): string =>
-  `project image ${id} is still at the provider ${Math.round(graceMs / 1000)} s after the delete answered, so its record stays; run wsp image remove ${id} again`;
+  `project image ${id} could not be read gone within ${Math.round(graceMs / 1000)} s of the delete answering, so its record stays; run wsp image remove ${id} again`;
 
 export const projectImageRefusedLine = (id: string, answer: ProviderAnswer): string =>
   `project image ${id} was not removed: the provider answered ${providerAnswerLine(answer)}; its record stays`;

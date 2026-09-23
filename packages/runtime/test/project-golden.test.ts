@@ -3,7 +3,7 @@
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
 import { gunzipSync } from "node:zlib";
 import { tarOf } from "@wsp/engine";
-import { DEVICE_OPS, THREAD_OPS, noProjectImageLine, projectImageInUseRefusal, projectImageStillListedLine, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
+import { DEVICE_OPS, THREAD_OPS, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -316,10 +316,10 @@ describe("removing a project image", () => {
     expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);
   });
 
-  it("keeps the record and says so when the listing still holds the id after the window", async () => {
+  it("keeps the record and says the image could not be read gone when the listing holds the id through the window", async () => {
     const { rt, backend, store, golden, listSnapshots } = await taken();
     backend.listSnapshots = async () => [...(await listSnapshots()), { id: golden.snapshotId, sizeBytes: 1 }];
-    await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toThrow(projectImageStillListedLine(golden.snapshotId, QUICK.graceMs));
+    await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toThrow(`project image ${golden.snapshotId} could not be read gone within 0 s of the delete answering, so its record stays; run wsp image remove ${golden.snapshotId} again`);
     expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);
     expect(await rt.golden.projects()).toEqual([golden]);
   });
@@ -365,6 +365,13 @@ describe("removing a project image", () => {
     expect(listings).toBe(one);
     backend.capabilities.snapshotListing = false;
     expect((await rt.image.get()).projects).toEqual([golden, second]);
+  });
+
+  it("image.get lists a project image whose place this host no longer holds without a size, beside one it can size", async () => {
+    const { rt, backend, store, golden } = await taken();
+    const elsewhere = { ...golden, snapshotId: "snap_elsewhere", place: "left", createdAt: "2026-09-07T00:00:00.000Z" };
+    await store.put("project-goldens", elsewhere.snapshotId, elsewhere);
+    expect((await rt.image.get()).projects).toEqual([{ ...golden, sizeBytes: backend.snapshotBytes }, elsewhere]);
   });
 
   it("over the wire: projectGoldens.remove replies with the record and the line, a refusal carries its kind, and the op is a paired device's and no thread's", async () => {

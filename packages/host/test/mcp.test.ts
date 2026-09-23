@@ -174,6 +174,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "image_remove")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "image"]);
+    expect(tools.find(t => t.name === "image")!.description).toContain("The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.");
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "engine", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));

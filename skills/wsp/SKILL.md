@@ -97,7 +97,7 @@ The command line and the MCP server call the same functions. Every verb takes `-
 
 ### The app's own roads
 
-These seven stand behind the app's own screens rather than a page of the command line: they are still parsed, still served as tools, and `wsp <verb> --help` still answers for each.
+These stand behind the app's own screens rather than a page of the command line: they are still parsed, still served as tools, and `wsp <verb> --help` still answers for each.
 
 | command line | MCP tool | what it does |
 |---|---|---|

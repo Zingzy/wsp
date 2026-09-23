@@ -2855,7 +2855,7 @@ describe("snapshotUntilGone", () => {
 
   it("answers deleted once the listing no longer holds the id, a failed read counting as one that still does", async () => {
     const { backend, seen } = provider(() => {}, [["snap_1", "snap_2"], new Error("GET /snapshots answered 502"), ["snap_2"]]);
-    expect(await snapshotUntilGone(backend, "snap_1", QUICK)).toBe("deleted");
+    expect(await snapshotUntilGone(backend, "snap_1", QUICK)).toEqual({ verdict: "deleted" });
     expect(seen).toEqual({ deletes: 1, reads: 3 });
   });
 
@@ -2863,7 +2863,7 @@ describe("snapshotUntilGone", () => {
     const lost = provider(() => {
       throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
     }, [["snap_1"]]);
-    expect(await snapshotUntilGone(lost.backend, "snap_1", QUICK)).toBe("missing");
+    expect(await snapshotUntilGone(lost.backend, "snap_1", QUICK)).toEqual({ verdict: "missing" });
     expect(lost.seen.reads).toBe(0);
     const refused = provider(() => {
       throw Object.assign(new Error("SnapshotHasChildren"), { kind: "conflict", status: 409 });
@@ -2872,12 +2872,12 @@ describe("snapshotUntilGone", () => {
     expect(refused.seen.reads).toBe(0);
   });
 
-  it("answers listed when the id outlives the window, and deleted on the DELETE alone where the provider lists nothing", async () => {
+  it("answers listed with the window it read for when the id outlives it, and deleted on the DELETE alone where the provider lists nothing", async () => {
     const held = provider(() => {}, [["snap_1"]]);
-    expect(await snapshotUntilGone(held.backend, "snap_1", QUICK)).toBe("listed");
+    expect(await snapshotUntilGone(held.backend, "snap_1", QUICK)).toEqual({ verdict: "listed", graceMs: QUICK.graceMs });
     expect(held.seen.reads).toBeGreaterThan(1);
     const unlisted = provider(() => {}, [["snap_1"]], false);
-    expect(await snapshotUntilGone(unlisted.backend, "snap_1", QUICK)).toBe("deleted");
+    expect(await snapshotUntilGone(unlisted.backend, "snap_1", QUICK)).toEqual({ verdict: "deleted" });
     expect(unlisted.seen.reads).toBe(0);
   });
 });

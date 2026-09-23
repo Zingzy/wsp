@@ -129,8 +129,8 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
 }
 
 /** What a snapshot's delete came to once read back: gone off the listing, already lost at the provider, or still
- * listed when the window ran out. */
-export type SnapshotDeleted = "deleted" | "missing" | "listed";
+ * listed when the window it was read for ran out. */
+export type SnapshotDeleted = { verdict: "deleted" | "missing" } | { verdict: "listed"; graceMs: number };
 
 /** A snapshot's delete is read back the way a machine's kill is, under the same window: the listing is best-effort
  * and may still hold an id the delete took, so it is read until the id leaves, and a read that fails counts as one
@@ -139,18 +139,19 @@ export async function snapshotUntilGone(backend: MachineBackend, snapshotId: str
   try {
     await backend.deleteSnapshot(snapshotId);
   } catch (e) {
-    if (isMissing(e)) return "missing";
+    if (isMissing(e)) return { verdict: "missing" };
     throw e;
   }
   const list = backend.capabilities.snapshotListing ? backend.listSnapshots : undefined;
-  if (list === undefined) return "deleted";
-  const deadline = Date.now() + (confirm.graceMs ?? KILL_GRACE_MS);
+  if (list === undefined) return { verdict: "deleted" };
+  const graceMs = confirm.graceMs ?? KILL_GRACE_MS;
+  const deadline = Date.now() + graceMs;
   do {
     const rows = await list.call(backend).catch(() => undefined);
-    if (rows !== undefined && !rows.some(r => r.id === snapshotId)) return "deleted";
+    if (rows !== undefined && !rows.some(r => r.id === snapshotId)) return { verdict: "deleted" };
     await new Promise(r => setTimeout(r, confirm.pollMs ?? 1_000));
   } while (Date.now() < deadline);
-  return "listed";
+  return { verdict: "listed", graceMs };
 }
 
 /** The template calls of a backend whose capabilities say it has them, or nothing: the one read of that flag, so a

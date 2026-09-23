@@ -52,7 +52,6 @@ import {
   stateListing,
   killUntilGone,
   snapshotUntilGone,
-  KILL_GRACE_MS,
   MachineAliveError,
   answerOf,
   diskUse,
@@ -8046,13 +8045,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const standing = forkedFrom(snapshotId);
       if (standing.length > 0) throw conflict(projectImageInUseRefusal(snapshotId, standing));
       const at = backendAt(projectGolden.place ?? places.wired);
-      const verdict = await snapshotUntilGone(at, snapshotId, opts.killConfirm).catch((e: unknown) => {
+      const read = await snapshotUntilGone(at, snapshotId, opts.killConfirm).catch((e: unknown) => {
         const { kind, status } = e as { kind?: unknown; status?: unknown };
         throw Object.assign(new Error(projectImageRefusedLine(snapshotId, answerOf(e))), kind !== undefined ? { kind } : {}, status !== undefined ? { status } : {});
       });
-      if (verdict === "listed") throw new Error(projectImageStillListedLine(snapshotId, opts.killConfirm?.graceMs ?? KILL_GRACE_MS));
+      if (read.verdict === "listed") throw new Error(projectImageStillListedLine(snapshotId, read.graceMs));
       await store.delete(PROJECT_GOLDENS, snapshotId);
-      return { projectGolden, alreadyGone: verdict === "missing" };
+      return { projectGolden, alreadyGone: read.verdict === "missing" };
     },
 
   };
@@ -8099,8 +8098,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const projects = await golden.projects();
     const sizes = new Map<string, number>();
     for (const place of new Set(projects.map(p => p.place ?? places.wired))) {
-      const at = places.backend(place) ?? placeDoor?.backendOf(place);
-      if (at === undefined) continue;
+      let at: MachineBackend;
+      try {
+        at = backendAt(place);
+      } catch {
+        continue;
+      }
       for (const [id, bytes] of await snapshotSizes(at, projects.filter(p => (p.place ?? places.wired) === place).map(p => p.snapshotId))) sizes.set(id, bytes);
     }
     return projects.map(p => (sizes.has(p.snapshotId) ? { ...p, sizeBytes: sizes.get(p.snapshotId)! } : p));
