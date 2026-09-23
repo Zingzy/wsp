@@ -3335,9 +3335,37 @@ describe("runtime daemon reach", () => {
       } finally {
         stop();
       }
-      // The marked tick's row, then the next tick's with the probe's word: the answer itself pushes nothing.
-      expect(pushed.slice(before).map(st => `${st.reach.state} ${st.reason ?? "-"}`)).toEqual([`unreachable ${LINE}`, "reachable -"]);
+      // The answer pushes nothing and the tick it healed under drops the row it built marked: the next tick speaks once.
+      expect(pushed.slice(before).map(st => `${st.reach.state} ${st.reason ?? "-"}`)).toEqual(["reachable -"]);
       expect(probes(backend.machines[0]!)).toBe(1);
+    });
+
+    it("a refusal that lands while a tick is being built is not painted over by the row that tick built before it", async () => {
+      let rt!: ReturnType<typeof createRuntime>;
+      let id = "";
+      let refusing!: Set<string>;
+      let asked = 0;
+      // The provider starts refusing while the first tick's reach probe is out, after that tick read its records.
+      const fork = await refusedFork({
+        up: () => {
+          if (++asked === 1) {
+            refusing.add("m1");
+            void rt.workspaces.exec(id, "true").catch(() => {});
+          }
+          return true;
+        },
+      });
+      ({ rt, refusing } = fork);
+      id = fork.ws.id;
+      const said = (): string[] => fork.pushed.map(st => `${st.reach.state} ${st.reason ?? "-"}`);
+      const stop = await fork.watch();
+      try {
+        expect(said()).toEqual([`unreachable ${LINE}`]);
+        await fork.poll();
+      } finally {
+        stop();
+      }
+      expect(said()).toEqual([`unreachable ${LINE}`, `unreachable ${LINE}`]);
     });
 
     it("probes a machine the provider keeps refusing once per tick, and the row keeps its word", async () => {

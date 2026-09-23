@@ -1273,6 +1273,15 @@ describe("a machine the provider answered it cannot reach", () => {
     expect(wordOf(status)).toBe("Unreachable");
   });
 
+  it("reads Unreachable with the sentence when this computer's own road is down from a reader's first read", async () => {
+    const { road, poll } = await marked(refused);
+    road.down = true;
+    for (const status of [await poll(), await poll({ zombieProbe: false, reader: "table" })]) {
+      expect(status).toMatchObject({ reach: { state: "unreachable", offline: true }, reason: LINE });
+      expect(wordOf(status)).toBe("Unreachable");
+    }
+  });
+
   it("spends no exec on a listing that will not wait, and keeps the sentence and the route there, while the poll still probes", async () => {
     const { calls, poll } = await marked(refused);
     const table = await poll({ zombieProbe: false, reader: "table" });

@@ -657,8 +657,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         }
         const memory = probesOf(r, opts?.reader ?? "app");
         const at = route === undefined ? {} : { url: route.url, expiresAt: route.expiresAt };
-        // Nothing was learnt about the machine: the row keeps its word, the run of probes under it is left as it was.
-        if (probed.offline === true) return { ...done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true }), ...(r.unreached !== undefined ? { reason: r.unreached } : {}) };
+        // Nothing was learnt about the machine: the row keeps its word, or the provider's sentence where one stands.
+        if (probed.offline === true) return { ...done(await machineState(r, reconcile, false), { state: r.unreached !== undefined ? "unreachable" : memory.shown, ...at, offline: true }), ...(r.unreached !== undefined ? { reason: r.unreached } : {}) };
         if (probed.fromDaemon) sawAwake(r.id);
         const shown = reachShown(memory.last, probed.state);
         memory.last = probed.state;
@@ -778,9 +778,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const pollTick = async (): Promise<void> => {
     const records = await o.records();
     const statuses = await statusesOf(records, { reconcile: "on-failure" });
-    // A record written while its poll was in flight pushed its own row since; the poll's older row would put a phase the record has left back on the screen.
-    const built = new Map(records.map(r => [r.id, r.generation]));
-    const now = new Map((await o.records()).map(r => [r.id, r.generation]));
+    // A record written or marked while its poll was in flight pushed its own row since; the poll's older row would put back what the record has left.
+    const stamp = (r: StatusRecord): string => `${r.generation} ${r.unreached ?? ""}`;
+    const built = new Map(records.map(r => [r.id, stamp(r)]));
+    const now = new Map((await o.records()).map(r => [r.id, stamp(r)]));
     o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
     for (const status of statuses) {
       if (now.get(status.id) !== built.get(status.id)) continue;
