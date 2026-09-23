@@ -272,8 +272,9 @@ export interface HarnessAdapterContext {
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
- * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1). */
-export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1" };
+ * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1).
+ * DISABLE_AUTOUPDATER=1 holds the agent at the version the image pinned, inside a fork or a box, at run time too. */
+export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1" };
 
 /** The guest's login environment: who it runs as, the PATH the golden's login shells get, and the sandbox flag every
  * machine carries. Every fork carries it in its envs at create and every adapter exports it under the harness's own. */
@@ -693,9 +694,9 @@ interface LiveWorkspace {
   /** What the row says about the wake in flight, for as long as it is in flight: every status the poll builds carries
    * it, since a line pushed once would be wiped by the next tick and the row would fall silent between two asks. */
   wakeSaid?: string;
-  /** What the last delete said when the provider kept the machine, until the next delete or wake starts: held here,
-   * not on the record, so a restart forgets it. */
-  deleteSaid?: string;
+  /** What the last delete said when the provider kept the machine, read while the record's phase is still the one it
+   * was said under, until the next delete or wake starts: held here, not on the record, so a restart forgets it. */
+  deleteSaid?: { phase: WorkspacePhase; line: string };
   /** Which ask the host is on and how many it will make, while it is asking again on its own; the surfaces read it
    * at the length each has room for rather than being handed a sentence built for one of them. */
   wakeAsk?: { ask: number; of: number };
@@ -3767,9 +3768,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const said = await lacksSaid(entry);
       if (said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
       await writeDaemonRoots(entry);
-      const version = await module.daemonVersion(entry);
-      if (version === null || version >= DAEMON_VERSION) return;
+      // A host that cannot deploy asks no version: a line would promise an ask that changes nothing, at every connect.
       if (!canDeployDaemon(entry)) return;
+      const version = await module.daemonVersion(entry);
+      if (version === null) {
+        unreadAt.set(entry.record.id, { machineId: key, at: clock.now() });
+        console.warn(`daemon on ${key} (workspace ${entry.record.id}): version not read within ${daemonHelloTimeoutMs / 1000} s; asking again at the next reach probe`);
+        return;
+      }
+      unreadAt.delete(entry.record.id);
+      if (version >= DAEMON_VERSION) return;
+      if (turnRuns(entry.record.id)) console.warn(`daemon on ${key} (workspace ${entry.record.id}): update waits for the running turn`);
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);
@@ -3799,10 +3808,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return work;
   };
 
-  /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was: a machine
-   * replaced under the record leaves nothing behind, since the entry is keyed by the workspace and holds the
-   * machine it was about. */
-  const revivedAt = new Map<string, { machineId: string; at: number }>();
+  /** Keyed by the workspace and holding the machine it was about, so a machine replaced under the record inherits nothing. */
+  type MachineMoment = { machineId: string; at: number };
+  /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was. */
+  const revivedAt = new Map<string, MachineMoment>();
+  /** Every workspace whose last sync could not read its daemon's version, and when that read gave up. */
+  const unreadAt = new Map<string, MachineMoment>();
   const daemonRevivals = new Map<string, Promise<void>>();
 
   /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
@@ -3860,6 +3871,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * good, so that kind answers for itself here first. */
   const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
     if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
+    void syncDaemon(entry);
+  };
+
+  /** Nothing else runs the sync again before the next connect, and a hello that missed it leaves an old daemon serving. */
+  const readVersionAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
+    const unread = unreadAt.get(entry.record.id);
+    if (unread === undefined) return;
+    if (unread.machineId !== entry.machine.id) {
+      unreadAt.delete(entry.record.id);
+      return;
+    }
+    if (polled.phase !== "running" || polled.reach.state !== "reachable" || clock.now() - unread.at < DAEMON_REVIVE_AGAIN_MS) return;
     void syncDaemon(entry);
   };
 
@@ -4181,6 +4204,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     live.delete(id);
     revivedAt.delete(id);
+    unreadAt.delete(id);
     polledReach.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
@@ -5466,9 +5490,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           } else {
             await unfork(entry).catch((e: unknown) => {
               if (!(e instanceof MachineAliveError)) throw e;
-              entry.deleteSaid = deleteRefusedLine(entry.record.name, e.machineId, e.state);
-              console.warn(entry.deleteSaid);
-              throw Object.assign(new Error(entry.deleteSaid), { kind: e.kind });
+              const line = deleteRefusedLine(entry.record.name, e.machineId, e.state);
+              entry.deleteSaid = { phase: entry.record.phase, line };
+              console.warn(line);
+              throw Object.assign(new Error(line), { kind: e.kind });
             });
           }
           await drop(id);
@@ -8697,6 +8722,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return absentComputer(placeDoor.nameOf(at), null).sentence;
   };
 
+  /** A nap, a pause the poll adopts or a gone verdict moves the phase, and the sentence was about the phase it left. */
+  const deleteLine = (e: LiveWorkspace): string | undefined => (e.deleteSaid?.phase === e.record.phase ? e.deleteSaid.line : undefined);
+
   const status = createStatusTracker({
     store,
     records: async () => {
@@ -8710,7 +8738,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
-        ...(e.deleteSaid ?? e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (e.deleteSaid ?? e.wakeSaid ?? e.record.wakeRefused)! } : {},
+        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused)! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
@@ -8736,6 +8764,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else polledReach.delete(s.id);
         reviveDaemon(entry, s.reach.state);
         offerDaemonAgain(entry, s);
+        readVersionAgain(entry, s);
       }
     },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
