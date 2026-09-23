@@ -8,11 +8,12 @@
 
 import { createHash } from "node:crypto";
 import { NEVER_IN_IMAGE, ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, credentialOnBuilderLine, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
+import { ALREADY_APPLIED, DISK_SYNC_LINE, MCP_ID_PREFIX, credentialOnBuilderLine, diskUnsettledLine, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { DiskSyncError, diskUnsettled, syncDisk } from "./disk-sync.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, pinRead, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
@@ -967,6 +968,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
   };
   try {
+    stage("snapshotting", DISK_SYNC_LINE);
+    const left = await syncDisk(builder.machine);
+    if (diskUnsettled(left)) stage("snapshotting", diskUnsettledLine(left));
     const used = await usedBytes(builder.machine);
     stage("snapshotting", snapshotStageLine(used));
     snapshotId = await takeSnapshot();
@@ -1042,9 +1046,10 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
       left.push(machine.id);
     };
-    // A refused snapshot changed nothing on the builder, whether the provider refused it or the backend refused a
-    // resumed machine: it is left as the person set it up, and whoever holds the record decides what becomes of it.
-    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError) && !(e instanceof NotFirstLifeError)) await kill(builder.machine).catch(leaked(builder.machine));
+    // A refused snapshot changed nothing on the builder, whether the provider refused it, the backend refused a
+    // resumed machine or the guest's sync failed: it is left as the person set it up, and whoever holds the record
+    // decides what becomes of it.
+    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError) && !(e instanceof NotFirstLifeError) && !(e instanceof DiskSyncError)) await kill(builder.machine).catch(leaked(builder.machine));
     if (fork) await kill(fork).catch(leaked(fork));
     // A template that read ready and then lost its smoke goes first: the provider refuses to delete a snapshot while
     // a template stands on it.

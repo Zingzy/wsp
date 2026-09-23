@@ -118,6 +118,8 @@ import {
   landsBytes,
   LOCAL_MACHINE_ID,
   TOOLS_PATH,
+  DiskSyncError,
+  syncDisk,
 } from "@wsp/engine";
 import type { DaemonFrame, DaemonResponse, PlaceReport } from "@wsp/protocol";
 import type {
@@ -4199,6 +4201,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               stashVault: async m => {
                 // The vault the last landed nap stored stands until the provider pauses this machine at all.
                 if (napRefusedOf(entry) !== undefined) return;
+                // A box's pause keeps the disk alone, so it is synced first; a machine that cannot be asked still pauses.
+                await syncDisk(entry.machine).catch((e: unknown) => {
+                  console.warn(`disk sync before the nap of ${record.id} failed: ${e instanceof DiskSyncError ? e.answer : e instanceof Error ? e.message : String(e)}; napping anyway`);
+                });
                 try {
                   await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
                   record.vaultedAt = new Date(clock.now()).toISOString();
@@ -5535,6 +5541,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const project: WorkspaceProject = { name: held.name, dest: held.path, importedAt: held.createdAt };
       const projects = [project];
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running machine can be snapshotted`);
+      await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();
       const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
@@ -8529,7 +8536,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       },
       land: async (machine, path, bytes) => void (await landBytes(machine, path, bytes)),
       // A first-life fork of the image: the one snapshot road, the same the project goldens take.
-      checkpoint: (machine, name) => machine.snapshot(name, { firstLife: true }),
+      checkpoint: async (machine, name) => {
+        await syncDisk(machine);
+        return machine.snapshot(name, { firstLife: true });
+      },
       scratch: () => GUEST_TMP,
       ...(at?.projects !== undefined ? { projectsDir: at.projects } : {}),
       // One command on the computer itself, where that computer runs any: how the folder wsp keeps for a project
