@@ -37,7 +37,7 @@ import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
 import { makeDevices, memoryStore } from "@wsp/runtime";
-import { ADDRESS_NEXT_START, DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, type DeviceView } from "@wsp/protocol";
+import { ADDRESS_NEXT_START, DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, exitClassOf, type DeviceView } from "@wsp/protocol";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
@@ -643,6 +643,20 @@ describe("wsp login", () => {
     // A computer that signed in before device keys holds none, so no host could admit it and the line says so.
     await expect(loginCommand(io(), { statePath, home }, "c3", deps(dir))).rejects.toThrow(/wsp logout c3/);
     await expect(loginCommand(io(), { statePath, home }, "c9", deps(dir))).rejects.toThrow(/c9/);
+  });
+
+  it("names the page beside the command when the row it was given holds no device key", async () => {
+    const relay = await fakeRelay();
+    relay.clients = [
+      { id: "c1", name: "the box", thisOne: true, fingerprint: "SHA256:aaa" },
+      { id: "c3", name: "a computer from before keys", thisOne: false, fingerprint: null },
+    ];
+    const { statePath, home, dir } = box();
+    await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
+
+    const refused = await loginCommand(io(), { statePath, home }, "c3", deps(dir)).then(() => undefined, (e: unknown) => e);
+    expect(exitClassOf(refused)).toBe("usage");
+    expect((refused as Error).message).toContain(`Sign it out with wsp logout c3, or from ${relay.url}/link/verify in your browser, and run wsp login there again.`);
   });
 
   it("lists the account's computers, their keys and who admitted each, when it is asked nothing", async () => {

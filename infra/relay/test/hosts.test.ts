@@ -499,7 +499,7 @@ describe("the admissions a box reads off its heartbeat", () => {
     expect(told).toContain("wsp login");
     expect(await count(relay, "admissions")).toBe(2);
 
-    // Nor can a box admit a computer that holds none, whoever signs for it.
+    // Nor can another computer admit a computer that holds none, whoever signs for it.
     await relay.db.prepare("UPDATE clients SET fingerprint = NULL WHERE id = ?").bind(laptop.id).run();
     const unkeyed = await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(mac.token), body: JSON.stringify(fakeAdmission(laptop.fingerprint!, mac.fingerprint!)) });
     expect(unkeyed.status).toBe(400);
