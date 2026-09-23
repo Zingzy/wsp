@@ -97,7 +97,8 @@ export const STATE_READ_MS = 30_000;
 /** The longest idleTimeoutMs the create API has taken from us: six hours, the golden builder's. */
 export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
 
-/** The longest one exec may ask the provider for: "timeoutMs must be at most 26000 for a dedicated sandbox" (400 on 26001, measured 2026-09-23), so anything longer runs detached on the guest instead. */
+/** The longest one exec may ask the provider for: "timeoutMs must be at most 26000 for a dedicated sandbox" (400 on
+ * 26001, measured 2026-09-23), so anything longer runs detached on the guest instead. */
 export const SOLARI_INLINE_MAX_MS = 26_000;
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
