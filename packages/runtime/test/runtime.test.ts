@@ -278,11 +278,11 @@ describe("runtime", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     // IS_SANDBOX is a machine's fact, a cloud fork's here and an ssh machine's in its own test: it is what lets
     // --dangerously-skip-permissions run as root there, and this computer never carries it.
-    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1" });
+    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1" });
     await createOn(rt, { golden: "snap_g", name: "plain" });
     await createOn(rt, { golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
     expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
-    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", FOO: "1" });
+    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1", FOO: "1" });
   });
 
   it("wake after the paused machine vanished resurrects a fresh golden fork", async () => {

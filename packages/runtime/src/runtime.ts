@@ -272,8 +272,9 @@ export interface HarnessAdapterContext {
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
- * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1). */
-export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1" };
+ * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1).
+ * DISABLE_AUTOUPDATER=1 holds the agent at the version the image pinned, inside a fork or a box, at run time too. */
+export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1" };
 
 /** The guest's login environment: who it runs as, the PATH the golden's login shells get, and the sandbox flag every
  * machine carries. Every fork carries it in its envs at create and every adapter exports it under the harness's own. */

@@ -277,7 +277,7 @@ describe("local workspace", () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every(c => c.env["IS_SANDBOX"] === undefined)).toBe(true);
+    expect(seen.every(c => c.env["IS_SANDBOX"] === undefined && c.env["DISABLE_AUTOUPDATER"] === undefined)).toBe(true);
     expect(seen.every(c => c.env["PATH"] === localWiring.env()["PATH"])).toBe(true);
   });
 
