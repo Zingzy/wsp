@@ -1085,6 +1085,34 @@ describe("runtime session history", () => {
       await rt.close();
     });
 
+    it("a probe the machine refused is said once, and the table answers until the next probe", async () => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => {
+        if (cmd.includes("claude --help")) throw new Error("timeoutMs must be at most 26000 for a dedicated sandbox");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      };
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
+        const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+        const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+        expect(claude).toMatchObject({ source: "table", version: CLAUDE_PIN });
+        expect(claude.models.map(m => m.value)).toEqual(harnessCatalog("claude")!.models.map(m => m.value));
+        const said = warn.mock.calls.map(c => String(c[0])).filter(line => line.includes("the probe of the agent failed"));
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain(backend.machines[0]!.id);
+        expect(said[0]).toContain("claude");
+        expect(said[0]).toContain("timeoutMs must be at most 26000 for a dedicated sandbox");
+        // The cache holds the failure too, so a person opening the composer twice reads one line and costs one exec.
+        await rt.harnesses.list(ws.id);
+        expect(warn.mock.calls.map(c => String(c[0])).filter(line => line.includes("the probe of the agent failed"))).toHaveLength(1);
+        expect(probes(backend)).toHaveLength(1);
+        await rt.close();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it("a session start asks the binary of the harness that starts, when its adapter probes, and no other", async () => {
       const backend = stubBackend();
       twoBinaries(backend);

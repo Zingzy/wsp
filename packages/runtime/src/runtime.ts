@@ -5684,7 +5684,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
-      .then(answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)), () => known);
+      .then(
+        answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)),
+        (e: unknown) => {
+          // The lists a start is checked against are then wsp's own, which refuse a model the binary there takes.
+          console.warn(`${table.harness} on ${machine.id}: the probe of the agent failed (${e instanceof Error ? e.message : String(e)}); wsp's built-in list answers until the next probe`);
+          return known;
+        },
+      );
     catalogs.set(key, { at: now, catalog });
     return catalog.then(forMachine);
   };
