@@ -73,6 +73,9 @@ import {
   DAEMON_INSTALLING,
   DAEMON_UPDATE_FAILED,
   DAEMON_UPDATING,
+  DISK_SYNC_LINE,
+  diskSyncFailedLine,
+  diskUnsettledLine,
   RECORD_RESTORED,
   nameDeletingRefusal,
   nameTakenRefusal,
@@ -1454,6 +1457,14 @@ describe("behindGoldenLine", () => {
   it("names the version it is on and the one available, in words short enough for the row", () => {
     expect(behindGoldenLine(11, 12)).toBe("on image v11, v12 available");
     expect(behindGoldenLine(11, 12).length).toBeLessThanOrEqual(30);
+  });
+});
+
+describe("DISK_SYNC_LINE, diskUnsettledLine and diskSyncFailedLine", () => {
+  it("the sync's stage line, what a writer left after it, and the refusal when the guest's sync failed", () => {
+    expect(DISK_SYNC_LINE).toBe("syncing the disk");
+    expect(diskUnsettledLine({ dirtyKb: 12288, writebackKb: 0 })).toBe("synced, Dirty 12 MB and Writeback 0 B remain; a writer is still running");
+    expect(diskSyncFailedLine("it exited 1 and said: sync: Input/output error")).toBe("the disk could not be synced (it exited 1 and said: sync: Input/output error); nothing was snapshotted");
   });
 });
 
