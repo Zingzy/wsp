@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { machineUnreachableLine, napRefusedLine, RESUME_UNANSWERED } from "@wsp/protocol";
-import { fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
+import { execFailedLine, machineUnreachableLine, napRefusedLine, RESUME_UNANSWERED } from "@wsp/protocol";
+import { ExecFailedError, fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -412,6 +412,25 @@ describe("SolariBackend exec on a machine the provider cannot reach", () => {
     const e = await m.exec("true").catch((err: unknown) => err);
     expect(e).toMatchObject({ name: "Error", message: "Bad gateway", kind: "transient", status: 502 });
     expect(execCalls(f)).toBe(3);
+  });
+
+  it("reads a 502 exec failed as the same refusal with its own sentence once the gateway retries are spent", async () => {
+    const f = refusing(502, "exec failed");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f, clock: noWait }).create({ kind: "sandbox" });
+    const e = await m.exec("true").catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(ExecFailedError);
+    expect(e).toBeInstanceOf(MachineUnreachableError);
+    expect(e).toMatchObject({ name: "ExecFailedError", machineId: "sbx_1", said: "exec failed", status: 502 });
+    expect((e as Error).message).toBe(execFailedLine("exec failed"));
+    expect(execCalls(f)).toBe(3);
+  });
+
+  it("leaves exec failed on any other status the plain error it was", async () => {
+    const f = refusing(500, "exec failed");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f, clock: noWait }).create({ kind: "sandbox" });
+    const e = await m.exec("true").catch((err: unknown) => err);
+    expect(e).not.toBeInstanceOf(MachineUnreachableError);
+    expect(e).toMatchObject({ name: "Error", message: "exec failed", status: 500 });
   });
 });
 

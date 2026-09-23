@@ -3,7 +3,7 @@
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
 import { gunzipSync } from "node:zlib";
 import { DISK_SYNC_CMD, DiskSyncError, MachineUnreachableError, machineAnswer, tarOf } from "@wsp/engine";
-import { DEVICE_OPS, THREAD_OPS, diskSyncFailedLine, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
+import { DEVICE_OPS, THREAD_OPS, diskSyncFailedLine, machineUnreachableLine, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -237,7 +237,7 @@ describe("a project golden", () => {
     const ws = await loaded(rt, advance);
     const plain = backend.execImpl;
     backend.execImpl = (m, cmd) => {
-      if (cmd === DISK_SYNC_CMD) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502);
+      if (cmd === DISK_SYNC_CMD) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502, machineUnreachableLine("Sandbox is not reachable"));
       return plain(m, cmd);
     };
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toBeInstanceOf(MachineUnreachableError);

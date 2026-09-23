@@ -10,8 +10,8 @@ import { randomUUID } from "node:crypto";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
 import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
-import { MachineUnreachableError, type Machine } from "@wsp/engine";
-import { EMPTY_TITLE_LINE, foldThreads, keepsRename, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
+import { ExecFailedError, MachineUnreachableError, type Machine } from "@wsp/engine";
+import { EMPTY_TITLE_LINE, foldThreads, keepsRename, machineUnreachableLine, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { machineExecStream } from "../src/machine-exec.js";
@@ -305,7 +305,7 @@ describe("a title read that fails", () => {
   const titleLines = (warn: { mock: { calls: unknown[][] } }): string[] => warn.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith("no title for session"));
 
   it("says once, with the provider's status, that a machine the provider cannot reach gave no title, and reads nothing more while the mark stands", async () => {
-    const { backend, reads } = failingBackend(() => new MachineUnreachableError("m1", "Sandbox is not reachable", 503));
+    const { backend, reads } = failingBackend(() => new MachineUnreachableError("m1", "Sandbox is not reachable", 503, machineUnreachableLine("Sandbox is not reachable")));
     const { clock, advance } = fakeClock();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -319,6 +319,27 @@ describe("a title read that fails", () => {
       }
       await new Promise(r => setTimeout(r, 20));
       expect(titleLines(warn)).toEqual([`no title for session ${SESSION.slice(0, 8)} on ${ws.id}: 503 Sandbox is not reachable`]);
+      expect(reads).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("says once that a machine the provider cannot run commands on gave no title, with the status, and reads nothing more while the mark stands", async () => {
+    const { backend, reads } = failingBackend(() => new ExecFailedError("m1", "exec failed", 502));
+    const { clock, advance } = fakeClock();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
+      await until(() => titleLines(warn).length === 1);
+      for (let i = 0; i < 3; i++) {
+        advance(SESSION_TITLE_TTL_MS + 1);
+        await rt.sessions.list(ws.id);
+      }
+      await new Promise(r => setTimeout(r, 20));
+      expect(titleLines(warn)).toEqual([`no title for session ${SESSION.slice(0, 8)} on ${ws.id}: 502 exec failed`]);
       expect(reads).toHaveLength(1);
     } finally {
       warn.mockRestore();

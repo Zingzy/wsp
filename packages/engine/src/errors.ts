@@ -1,4 +1,4 @@
-import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachableLine, machineUnreachedLine, napRefusedLine } from "@wsp/protocol";
+import { execFailedLine, guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachedLine, napRefusedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -67,17 +67,27 @@ export class GuestUnusableError extends Error {
 /** Thrown by a backend whose provider answered a command with its own word that it cannot reach the machine, while
  * its state read may still say running. Not a GuestUnusableError: that class's two readers act on it, a wake giving
  * the machine up for a fresh fork and a detached run ending at once, where this refusal must not be acted on, and its
- * sentence names the machine id, which a thread's failure line must not. */
+ * sentence names the machine id, which a thread's failure line must not. Minted as itself for "Sandbox is not
+ * reachable", with `machineUnreachableLine`; each other answer of the same kind is a subclass that passes its own. */
 export class MachineUnreachableError extends Error {
   constructor(
     readonly machineId: string,
     /** The provider's own words, as it answered them. */
     readonly said: string,
-    /** The status the answer carried, which the backend's match does not read. */
+    /** The status the answer carried. */
     readonly status: number,
+    line: string,
   ) {
-    super(machineUnreachableLine(said));
+    super(line);
     this.name = "MachineUnreachableError";
+  }
+}
+
+/** The provider's 502 "exec failed" on a running machine: the same refusal to every reader, with its own sentence. */
+export class ExecFailedError extends MachineUnreachableError {
+  constructor(machineId: string, said: string, status: number) {
+    super(machineId, said, status, execFailedLine(said));
+    this.name = "ExecFailedError";
   }
 }
 
