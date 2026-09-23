@@ -6,10 +6,11 @@ import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
 import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CLAUDE_INSTALL, CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
-import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
+import { credentialOnBuilderLine, diskSyncFailedLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, TOOLS_PATH, type ToolInstall } from "../src/golden-import.js";
-import { INLINE_EXEC_MS } from "../src/exec-detached.js";
+import { INLINE_EXEC_MS, machineAnswer } from "../src/exec-detached.js";
+import { DISK_SYNC_CMD, DiskSyncError } from "../src/disk-sync.js";
 import { MIB, USED_KB_CMD, installTools } from "../src/golden-tools.js";
 import { READS_PER_EXEC } from "../src/exec-detached.js";
 import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
@@ -338,7 +339,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(manifest.head).toBe(1);
     expect(sansBase(stages)).toEqual([
       "creating:desktop from default", "deploying-daemon", "installing-harness", "ready",
-      "snapshotting:snapshotting, usually under a minute", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:syncing the disk", "snapshotting:snapshotting, usually under a minute", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
@@ -446,6 +447,49 @@ describe("interactive golden: prepare then seal", () => {
     expect(version.version).toBe(1);
     const probe = asked.find(c => c.startsWith("for p in "))!;
     for (const path of NEVER_IN_IMAGE) expect(probe).toContain(path);
+  });
+
+  it("seal syncs the builder's disk before it asks for the snapshot, and says so on the snapshot stage first", async () => {
+    const order: string[] = [];
+    const { backend, inline } = recordingBackend({}, {
+      exec: cmd => {
+        if (cmd === DISK_SYNC_CMD) order.push("sync");
+        return { exitCode: 0, stdout: cmd === DISK_SYNC_CMD ? "Dirty: 0\nWriteback: 0\n" : "", stderr: "" };
+      },
+      snapshot: () => order.push("snapshot"),
+    });
+    const { stages, onStage } = stageRecorder();
+    const b = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(b, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(order).toEqual(["sync", "snapshot"]);
+    expect(inline.filter(x => x.cmd === DISK_SYNC_CMD)).toEqual([{ id: "m1", cmd: DISK_SYNC_CMD, timeoutMs: INLINE_EXEC_MS }]);
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:syncing the disk", "snapshotting:snapshotting, usually under a minute"]);
+  });
+
+  it("a sync the builder fails stops the seal before the snapshot and leaves the builder alive, the sentence on the failed stage", async () => {
+    const res = { exitCode: 1, stdout: "", stderr: "sync: Input/output error" };
+    const { backend, timeline, killed } = recordingBackend({ [DISK_SYNC_CMD]: res });
+    const { stages, onStage } = stageRecorder();
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const err = await sealGolden(b, { backend, hostId: "h1", smoke: "true", onStage }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(DiskSyncError);
+    expect(timeline).toEqual(["create m1"]);
+    expect(killed).toEqual([]);
+    expect(stages.at(-1)).toBe(`failed:${diskSyncFailedLine(machineAnswer(res))}`);
+  });
+
+  it("a disk a writer keeps dirty past the sync seals anyway, with what was left said on the snapshot stage", async () => {
+    const { backend, timeline } = recordingBackend({ [DISK_SYNC_CMD]: { exitCode: 0, stdout: "Dirty: 12288\nWriteback: 0\n", stderr: "" } });
+    const { stages, onStage } = stageRecorder();
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(b, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(version.snapshotId).toBe("snap_wsp-h1-default-v1");
+    expect(timeline).toContain("snapshot m1");
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual([
+      "snapshotting:syncing the disk",
+      "snapshotting:synced, Dirty 12 MB and Writeback 0 B remain; a writer is still running",
+      "snapshotting:snapshotting, usually under a minute",
+    ]);
   });
 
   it("seal records the disk the snapshot took, read once for the stage line and the version", async () => {
@@ -618,6 +662,7 @@ describe("interactive golden: prepare then seal", () => {
     const builder = await prepareBuilder({ backend, setup: "true" });
     await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
     expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual([
+      "snapshotting:syncing the disk",
       "snapshotting:snapshotting, usually under a minute",
       "snapshotting:snapshotting, 0 B written",
       "snapshotting:snapshotting, 1 GB of about 5 GB written",
@@ -631,7 +676,7 @@ describe("interactive golden: prepare then seal", () => {
     const builder = await prepareBuilder({ backend, setup: "true" });
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
     expect(version.usedBytes).toBe(5284823040);
-    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:snapshotting about 4.9 GB, usually under a minute"]);
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:syncing the disk", "snapshotting:snapshotting about 4.9 GB, usually under a minute"]);
     expect(inline.filter(x => x.cmd === USED_KB_CMD)).toEqual([]);
   });
 
@@ -663,7 +708,7 @@ describe("golden templates", () => {
     expect(created[1]!.fromSnapshot).toBeUndefined();
     expect(version).toMatchObject({ version: 1, snapshotId: "snap_wsp-h1-work-v1", templateId: "tpl_snap_wsp-h1-work-v1" });
     expect(sansBase(stages).slice(4)).toEqual([
-      "snapshotting:snapshotting, usually under a minute", "promoting:saving the image", "promoting:the image is saved", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:syncing the disk", "snapshotting:snapshotting, usually under a minute", "promoting:saving the image", "promoting:the image is saved", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
@@ -707,7 +752,7 @@ describe("golden templates", () => {
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
     await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT });
-    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:snapshotting about 13 GB, usually under a minute"]);
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:syncing the disk", "snapshotting:snapshotting about 13 GB, usually under a minute"]);
     expect(stages.filter(s => s.startsWith("promoting"))).toEqual(["promoting:saving the image", "promoting:the image is saved"]);
     expect(stages.some(s => s.includes("wsp-h1") || s.includes("tpl_"))).toBe(false);
   });

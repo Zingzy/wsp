@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, DISK_SYNC_CMD, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -50,7 +50,7 @@ function guestCounting(answer: () => { exitCode: number; stdout: string; stderr:
   return { backend, askedAt };
 }
 const counted = (kb: number) => () => ({ exitCode: 0, stdout: `memkb ${kb}\n`, stderr: "" });
-const memoryReads = (m: StubMachine): number[] => m.execLog.flatMap((c, i) => (c.includes("/proc/meminfo") ? [i] : []));
+const memoryReads = (m: StubMachine): number[] => m.execLog.flatMap((c, i) => (c.includes("MemTotal") ? [i] : []));
 
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
@@ -4695,6 +4695,42 @@ describe("runtime verified wake", () => {
     }
   });
 
+  it("syncs the machine's disk before the vault is read off it and the provider pauses it", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    const m = backend.machines[0]!;
+    const before = m.execLog.length;
+    await rt.workspaces.nap(ws.id);
+    const log = m.execLog.slice(before);
+    const synced = log.indexOf(DISK_SYNC_CMD);
+    expect(synced).toBeGreaterThan(-1);
+    expect(synced).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
+    expect(m.paused).toBe(true);
+  });
+
+  it.each([
+    ["an exec that throws", (): ExecResult => { throw new Error("socket hang up"); }, "socket hang up"],
+    ["a sync that exits 1", (): ExecResult => ({ exitCode: 1, stdout: "", stderr: "sync: Input/output error" }), "it exited 1 and said: sync: Input/output error"],
+  ])("%s is one warning naming the nap with the machine's own answer, and the vault is still stored and the machine still paused", async (_shape, answer, said) => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd === DISK_SYNC_CMD ? answer() : plain(m, cmd));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`disk sync before the nap of ${ws.id} failed: ${said}; napping anyway`]);
+      expect(await store.getBlob("vaults", ws.id)).toBeDefined();
+      expect(backend.machines[0]!.paused).toBe(true);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("a healthy wake stays on the same machine even though createdAt moved, imports nothing, and reports the daemon reachable", async () => {
     const { backend, untars } = guestBackend();
     try {
@@ -6027,6 +6063,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",
+      "snapshotting:syncing the disk",
       "snapshotting:snapshotting about 2.9 GB, usually under a minute",
       "smoke-forking:codex --version",
       "smoke-forking:1 agent answers: Codex",

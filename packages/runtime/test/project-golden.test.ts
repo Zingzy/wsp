@@ -2,8 +2,8 @@
 // A workspace with its project loaded is snapshotted as a project golden, and forks of that snapshot start with the
 // project in place: the record the snapshot keeps, the refusals, what a fork inherits, and the two ops over the wire.
 import { gunzipSync } from "node:zlib";
-import { tarOf } from "@wsp/engine";
-import { DEVICE_OPS, THREAD_OPS, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
+import { DISK_SYNC_CMD, DiskSyncError, MachineUnreachableError, machineAnswer, tarOf } from "@wsp/engine";
+import { DEVICE_OPS, THREAD_OPS, diskSyncFailedLine, noProjectImageLine, projectImageInUseRefusal, type GoldenManifest, type ProjectGolden, type ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -104,6 +104,19 @@ describe("a project golden", () => {
     expect((await rt.golden.projects()).map(p => p.snapshotId)).toEqual([expected.snapshotId, second.snapshotId]);
   });
 
+  it("snapshot syncs the machine's disk before the provider is asked for the copy", async () => {
+    const { rt, advance, backend } = await setup();
+    const ws = await loaded(rt, advance);
+    const synced: boolean[] = [];
+    backend.beforeSnapshot = m => {
+      synced.push(m.execLog.includes(DISK_SYNC_CMD));
+    };
+    const before = backend.machines[0]!.execLog.length;
+    await rt.workspaces.snapshot(ws.id);
+    expect(synced).toEqual([true]);
+    expect(backend.machines[0]!.execLog.slice(before).filter(c => c === DISK_SYNC_CMD)).toHaveLength(1);
+  });
+
   it("a woken workspace on a provider whose snapshots copy the disk from any life is snapshotted: the backend saw firstLife false and nothing in the runtime refused", async () => {
     const { rt, advance, backend } = await setup();
     backend.capabilities.snapshotsAnyLife = true;
@@ -194,6 +207,42 @@ describe("a project golden", () => {
       message: expect.stringMatching(new RegExp(`^task was not snapshotted: the provider answered ${ANSWER}; the disk could not be read \\(df answered 123 0\\)$`)),
     });
     expect(backend.snapshots).toEqual([]);
+  });
+
+  it("a sync the machine fails refuses the snapshot in one sentence with its answer, takes nothing and changes nothing", async () => {
+    const { rt, advance, backend, store } = await setup();
+    const ws = await loaded(rt, advance);
+    const plain = backend.execImpl;
+    const res = { exitCode: 1, stdout: "", stderr: "sync: Input/output error" };
+    backend.execImpl = (m, cmd) => (cmd === DISK_SYNC_CMD ? res : plain(m, cmd));
+    const before = await store.get("workspaces", ws.id);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let err: unknown;
+    try {
+      err = await rt.workspaces.snapshot(ws.id).catch((e: unknown) => e);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(err).toBeInstanceOf(DiskSyncError);
+    expect((err as Error).message).toBe(diskSyncFailedLine(machineAnswer(res)));
+    expect((err as { kind?: unknown }).kind).toBeUndefined();
+    expect(backend.snapshots).toEqual([]);
+    expect(await rt.golden.projects()).toEqual([]);
+    expect(await store.get("workspaces", ws.id)).toEqual(before);
+  });
+
+  it("a sync the provider refuses to run passes as that refusal and takes nothing", async () => {
+    const { rt, advance, backend } = await setup();
+    const ws = await loaded(rt, advance);
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => {
+      if (cmd === DISK_SYNC_CMD) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502);
+      return plain(m, cmd);
+    };
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toBeInstanceOf(MachineUnreachableError);
+    expect(backend.snapshots).toEqual([]);
+    expect(await rt.golden.projects()).toEqual([]);
   });
 
   it("a fork of a project golden boots from its snapshot as the root version's kind and size, carries the project, and its own snapshot still lists under that version", async () => {
