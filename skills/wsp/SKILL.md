@@ -168,7 +168,7 @@ The command line streams the reply to stderr as it arrives and prints it once: i
 
 ```
 wsp send 1a2b3c4d "Also cover the codex case in the test."
-wsp send 1a2b3c4d --model claude-opus-5 --effort high "Now the hard part."
+wsp send 1a2b3c4d --model claude-opus-5-5 --effort high "Now the hard part."
 ```
 
 A send is never refused for meeting a turn. Into a thread whose turn is not running the message starts a new turn (outcome `started`), on the model, effort and access named or the thread's own. Into a thread whose turn is running: when the agent can take input mid-turn (Claude Code does) the message joins the running turn (outcome `steered`) and arrives at that turn's next tool round, the way a person's message does, and the reply is that turn's, on that turn's picks; otherwise the message waits for the running turn to end and then runs (outcome `queued`). A reply the agent gave while a command it started was still running is not a reply yet: that turn is still running and the message steers it. Into a thread whose turn has replied and is waiting only on its agent process to exit, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the host says as `This thread replied, still working; the message runs as its next turn once that process exits`; the app's composer shows the same words, and `threads` reads the thread running until the agent process exits. Two sends keep the order they arrived in. The command line says which outcome on stderr. A person's message on the same thread lands in order with yours. Never start a second thread to hurry a running one.

@@ -11,6 +11,7 @@
 // carry no pin of our own reading and the pickers are right the day one lands.
 // A list is empty where the CLI has no such flag or takes open values.
 import { CLAUDE_SCREEN_COMMANDS } from "@wsp/adapter-claude";
+import { CLAUDE_CODE } from "@wsp/catalog";
 import type { HarnessCatalog, HarnessCatalogProbe, HarnessModel, HarnessOption } from "@wsp/protocol";
 
 /** What one row's table was read against: what was run on the row's own binary, the version it reported and the day it
@@ -63,19 +64,21 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
   fromTable({
     harness: "claude",
     label: "Claude Code",
-    pin: { read: "--help", version: "2.1.257", date: "2026-09-05" },
+    // The models below are the pinned binary's handshake; harness-catalog.test.ts holds them to its recording.
+    pin: { read: "--help", version: CLAUDE_CODE.version, date: "2026-09-23" },
     // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
     mcpServers: true,
     // Its control channel takes a mode change while a turn runs, and the prompt that turn is stopped on is answered
     // with it, so an access picked mid-turn lands on the turn in front of the person.
     movesAccess: true,
     screenCommands: [...CLAUDE_SCREEN_COMMANDS],
-    // The cheapest of the three at $2/$10 per Mtok, as the CLI's own handshake prices them (read 2026-09-07).
-    smallModel: "claude-sonnet-5",
+    // The cheapest of the four at $1/$5 per Mtok, as the CLI's own handshake prices them (read 2026-09-23).
+    smallModel: "claude-haiku-4-5-20251001",
     models: [
-      { ...option("claude-fable-5-1", "Fable 5.1"), contextWindows: ["200k", "1m"] },
-      { ...option("claude-opus-5", "Opus 5"), isDefault: true, contextWindows: ["200k", "1m"] },
-      { ...option("claude-sonnet-5", "Sonnet 5"), contextWindows: [] },
+      { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
+      { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
     ],
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,

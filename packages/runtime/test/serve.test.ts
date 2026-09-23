@@ -437,9 +437,9 @@ describe("serveRuntime harness catalog", () => {
     expect((scoped["harnesses"] as { harness: string; source: string }[]).find(x => x.harness === "claude")?.source).toBe("table");
     const missing = await c.request("harnesses.list", { workspaceId: "ws_nope" });
     expect(missing.ok).toBe(false);
-    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan", contextWindow: "1m", requestId: "req_9" });
+    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m", requestId: "req_9" });
     expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
-    expect(h.lastStart).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
+    expect(h.lastStart).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
     expect(h.lastStart).not.toHaveProperty("requestId");
     h.complete();
     const history = (await c.request("sessions.history", { workspaceId }))["events"] as { type: string; requestId?: string }[];

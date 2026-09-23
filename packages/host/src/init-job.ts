@@ -16,8 +16,8 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
-import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { harnessCatalog, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { vaultOf } from "./env-keys.js";
 import { firstWorkspaceName, folderOf } from "./init-first.js";
@@ -636,9 +636,10 @@ export class InitJobs implements InitDoor {
       .finally(() => this.emit());
   }
 
-  /** Opens the agent's thread on this computer with the cheapest model its harness offers. The server rides the
-   * launch because the config the harness reads here is the person's own, and the access is the harness's bypass
-   * mode because the person is at the setup screen, not at the thread. */
+  /** Opens the agent's thread on this computer with the model an unnamed start runs, never the title question's cheap
+   * row, since this thread configures the person's agents. The server rides the launch because the config the harness
+   * reads here is the person's own, and the access is the harness's bypass mode because the person is at the setup
+   * screen, not at the thread. */
   private async openAgent(s: State, harness: string | undefined): Promise<void> {
     if (harness === undefined) throw new Error("the agent road needs a harness: which agent on this computer writes the recipe");
     const local = (await this.deps.rt.workspaces.list()).find(isLocalWorkspace);
@@ -649,7 +650,7 @@ export class InitJobs implements InitDoor {
     if (!takesTools(harness)) throw new Error(noMcpServersLine(name));
     if (!agent.configured) this.tools(s, this.deps.installTools(new Set([harness])));
     const table = harnessCatalog(harness);
-    const model = smallestModel(table);
+    const { model } = startPicks(table, {}, true);
     const handle = await this.deps.rt.sessions.start(local.id, {
       prompt: initAgentPrompt(smallRecipePath(this.deps.statePath)),
       harness,
