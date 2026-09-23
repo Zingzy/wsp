@@ -2019,6 +2019,46 @@ describe("golden import stages", () => {
     expect(builder.import?.applied).toContain("installing-harness");
   });
 
+  it("a df that exits 0 printing something it cannot use names what it printed", async () => {
+    const words = backendFor([[FREE_KB_CMD, { exitCode: 0, stdout: "abc\n", stderr: "" }]]);
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend: words.backend, setup: "true", fetch: words.fetch, onStage, import: importOf() });
+    expect(stages.filter(s => s.includes("free disk unknown"))).toEqual([
+      "deploying-daemon:free disk unknown (df answered abc); installing without the 2 GB floor",
+      "uploading-files:free disk unknown (df answered abc); uploading 1 KB anyway",
+      "installing-tools:free disk unknown (df answered abc); installing without the 2 GB floor",
+    ]);
+  });
+
+  it("a df that exits 0 printing nothing is a failure, since the pipe exits as awk does", async () => {
+    const silent = backendFor([[FREE_KB_CMD, { exitCode: 0, stdout: "", stderr: "df: /root: No such file or directory" }]]);
+    const { stages, onStage } = stageRecorder();
+    await prepareBuilder({ backend: silent.backend, setup: "true", fetch: silent.fetch, onStage, import: importOf() });
+    expect(stages.filter(s => s.includes("free disk unknown"))).toEqual([
+      "deploying-daemon:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2 GB floor",
+      "uploading-files:free disk unknown (df failed: df: /root: No such file or directory); uploading 1 KB anyway",
+      "installing-tools:free disk unknown (df failed: df: /root: No such file or directory); installing without the 2 GB floor",
+    ]);
+  });
+
+  it("an exec that rejects under the free read throws out of the install loop before anything installs", async () => {
+    const ran: string[] = [];
+    const machine = {
+      id: "spoo",
+      kind: "sandbox",
+      exec: async (cmd: string) => {
+        if (cmd === FREE_KB_CMD) throw new Error("exec lost the machine");
+        return ok;
+      },
+      run: async (script: string) => {
+        ran.push(script);
+        return ok;
+      },
+    } as unknown as Machine;
+    await expect(installTools(machine, [{ id: "tools/brew/gh", label: "gh", manager: "brew", cmd: "brew install gh" }], () => {})).rejects.toThrow("exec lost the machine");
+    expect(ran).toEqual([]);
+  });
+
   it("a tool waits on the install it needs: a manager that did not install skips its rows with the manager's name", async () => {
     const tools: ToolInstall[] = [
       { id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: "brew-bootstrap" },
