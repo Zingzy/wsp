@@ -36,6 +36,9 @@ const VERIFY_PAGE = "verify";
 export const VERIFY_PAGE_PATH = "/link/verify";
 export const verifyPage = (ctx: Ctx): string => `${ctx.url.origin}${VERIFY_PAGE_PATH}`;
 
+/** Where GitHub sends the person back, which the redirect and the token exchange must spell the same or GitHub refuses it. */
+const callbackUrl = (ctx: Ctx): string => `${ctx.url.origin}/link/callback`;
+
 /** Each stamp has its own purpose word, so no approve stamp signs a computer out and no sign-out stamp approves a code. */
 const SIGN_IN_STAMP = "sign-in";
 const APPROVE_STAMP = "approve";
@@ -111,7 +114,7 @@ export async function signedIn(ctx: Ctx): Promise<{ id: string; login: string } 
 export async function toSignIn(ctx: Ctx): Promise<Response> {
   const nonce = newSecret(ctx.deps.random);
   const state = await mintStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_IN_STAMP, VERIFY_PAGE, ctx.deps.now(), await sha256Hex(nonce));
-  const sent = Response.redirect(authorizeUrl(ctx.env, `${ctx.url.origin}/link/callback`, state), 302);
+  const sent = Response.redirect(authorizeUrl(ctx.env, callbackUrl(ctx), state), 302);
   return new Response(sent.body, { status: 302, headers: { location: sent.headers.get("location") ?? "/", "set-cookie": nonceCookie(nonce) } });
 }
 
@@ -150,7 +153,7 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
   const nonce = cookieOf(ctx.req.headers.get("cookie"), NONCE_COOKIE);
   const started = nonce === undefined ? undefined : await readStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_IN_STAMP, state, ctx.deps.now(), await sha256Hex(nonce));
   if (started === undefined || oauthCode === "") throw refuse(400, "that sign-in did not start in this browser; open the page the command line printed again");
-  const user = await githubUser(ctx.env, ctx.deps, oauthCode, `${ctx.url.origin}/link/callback`);
+  const user = await githubUser(ctx.env, ctx.deps, oauthCode, callbackUrl(ctx));
   const now = ctx.deps.now();
   let account = await accountByProvider(ctx.env, GITHUB_PROVIDER, user.id);
   if (account === undefined) {
