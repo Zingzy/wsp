@@ -693,9 +693,9 @@ interface LiveWorkspace {
   /** What the row says about the wake in flight, for as long as it is in flight: every status the poll builds carries
    * it, since a line pushed once would be wiped by the next tick and the row would fall silent between two asks. */
   wakeSaid?: string;
-  /** What the last delete said when the provider kept the machine, until the next delete or wake starts: held here,
-   * not on the record, so a restart forgets it. */
-  deleteSaid?: string;
+  /** What the last delete said when the provider kept the machine, read while the record's phase is still the one it
+   * was said under, until the next delete or wake starts: held here, not on the record, so a restart forgets it. */
+  deleteSaid?: { phase: WorkspacePhase; line: string };
   /** Which ask the host is on and how many it will make, while it is asking again on its own; the surfaces read it
    * at the length each has room for rather than being handed a sentence built for one of them. */
   wakeAsk?: { ask: number; of: number };
@@ -5489,9 +5489,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           } else {
             await unfork(entry).catch((e: unknown) => {
               if (!(e instanceof MachineAliveError)) throw e;
-              entry.deleteSaid = deleteRefusedLine(entry.record.name, e.machineId, e.state);
-              console.warn(entry.deleteSaid);
-              throw Object.assign(new Error(entry.deleteSaid), { kind: e.kind });
+              const line = deleteRefusedLine(entry.record.name, e.machineId, e.state);
+              entry.deleteSaid = { phase: entry.record.phase, line };
+              console.warn(line);
+              throw Object.assign(new Error(line), { kind: e.kind });
             });
           }
           await drop(id);
@@ -8720,6 +8721,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return absentComputer(placeDoor.nameOf(at), null).sentence;
   };
 
+  /** A nap, a pause the poll adopts or a gone verdict moves the phase, and the sentence was about the phase it left. */
+  const deleteLine = (e: LiveWorkspace): string | undefined => (e.deleteSaid?.phase === e.record.phase ? e.deleteSaid.line : undefined);
+
   const status = createStatusTracker({
     store,
     records: async () => {
@@ -8733,7 +8737,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
-        ...(e.deleteSaid ?? e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (e.deleteSaid ?? e.wakeSaid ?? e.record.wakeRefused)! } : {},
+        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused)! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),

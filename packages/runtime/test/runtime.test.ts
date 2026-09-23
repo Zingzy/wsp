@@ -439,9 +439,36 @@ describe("runtime", () => {
       kill = async () => {};
       await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ message: said });
       expect(await reason()).toBe(said);
+      // The sentence was about a running machine: the paused row does not carry it, and the log still does.
       await rt.workspaces.nap(ws.id);
+      expect(await reason()).toBeUndefined();
+      expect(warn.mock.calls.map(c => c[0])).toContain(said);
       await rt.workspaces.wake(ws.id);
       expect(await reason()).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a paused machine the provider keeps says still paused on its napping row until a wake starts", async () => {
+    const backend = stubBackend();
+    const made = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await made(spec)) as StubMachine;
+      m.kill = async () => {};
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    await rt.workspaces.nap(ws.id);
+    const said = "x's machine m1 is still paused after two asks; run wsp delete again or delete it at the provider";
+    const row = async (): Promise<WorkspaceStatus | undefined> => (await rt.status.list()).find(s => s.id === ws.id);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ kind: "machineAlive", message: said });
+      expect(await row()).toMatchObject({ phase: "napping", reason: said });
+      await rt.workspaces.wake(ws.id);
+      expect((await row())?.reason).toBeUndefined();
     } finally {
       warn.mockRestore();
     }
