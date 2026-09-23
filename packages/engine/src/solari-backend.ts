@@ -366,7 +366,7 @@ class SolariMachine implements Machine {
       });
     } catch (e) {
       if (e instanceof Error && e.message === SANDBOX_UNREACHABLE) throw new MachineUnreachableError(this.id, e.message, (e as { status?: number }).status ?? 0, machineUnreachableLine(e.message));
-      if ((e as { status?: unknown }).status === 502 && e instanceof Error && e.message === EXEC_FAILED) throw new ExecFailedError(this.id, e.message, 502);
+      if (e instanceof Error && (e as { status?: unknown }).status === 502 && e.message === EXEC_FAILED) throw new ExecFailedError(this.id, e.message, 502);
       throw e;
     }
   }
