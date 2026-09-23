@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { RESUME_UNANSWERED } from "@wsp/protocol";
-import { fetchCapMs, isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
+import { machineUnreachableLine, RESUME_UNANSWERED } from "@wsp/protocol";
+import { fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -375,6 +375,43 @@ describe("SolariBackend list", () => {
       { id: "c", state: "gone", labels: { poc: "p1" } },
     ]);
     expect(f).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SolariBackend exec on a machine the provider cannot reach", () => {
+  const noWait: RetryClock = { now: Date.now, sleep: async () => {} };
+  const refusing = (status: number, error: string) =>
+    fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "sbx_1", kind: "sandbox" } },
+      "POST /sandboxes/sbx_1/exec": { status, body: { error } },
+    });
+  const execCalls = (f: ReturnType<typeof fakeFetch>): number => f.mock.calls.filter(c => String(c[0]).endsWith("/exec")).length;
+
+  it("reads the provider's words on a 502 as the typed refusal once the gateway retries are spent", async () => {
+    const f = refusing(502, "Sandbox is not reachable");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f, clock: noWait }).create({ kind: "sandbox" });
+    const e = await m.exec("true").catch((err: unknown) => err);
+    expect(e).toMatchObject({ name: "MachineUnreachableError", machineId: "sbx_1", said: "Sandbox is not reachable", status: 502 });
+    expect(e).toBeInstanceOf(MachineUnreachableError);
+    expect((e as Error).message).toBe(machineUnreachableLine("Sandbox is not reachable"));
+    expect(execCalls(f)).toBe(3);
+  });
+
+  it("reads the same words on a 400 as the same refusal, carrying the 400", async () => {
+    const f = refusing(400, "Sandbox is not reachable");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f, clock: noWait }).create({ kind: "sandbox" });
+    const e = await m.exec("true").catch((err: unknown) => err);
+    expect(e).toMatchObject({ name: "MachineUnreachableError", machineId: "sbx_1", said: "Sandbox is not reachable", status: 400 });
+    expect((e as Error).message).toBe(machineUnreachableLine("Sandbox is not reachable"));
+    expect(execCalls(f)).toBe(1);
+  });
+
+  it("leaves a 502 with any other words the plain error it was", async () => {
+    const f = refusing(502, "Bad gateway");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f, clock: noWait }).create({ kind: "sandbox" });
+    const e = await m.exec("true").catch((err: unknown) => err);
+    expect(e).toMatchObject({ name: "Error", message: "Bad gateway", kind: "transient", status: 502 });
+    expect(execCalls(f)).toBe(3);
   });
 });
 

@@ -1,4 +1,4 @@
-import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachedLine } from "@wsp/protocol";
+import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachableLine, machineUnreachedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -61,6 +61,23 @@ export class GuestUnusableError extends Error {
   ) {
     super(guestUnusableLine(provider, machineId, detail));
     this.name = "GuestUnusableError";
+  }
+}
+
+/** Thrown by a backend whose provider answered a command with its own word that it cannot reach the machine, while
+ * its state read may still say running. Not a GuestUnusableError: that class's two readers act on it, a wake giving
+ * the machine up for a fresh fork and a detached run ending at once, where this refusal must not be acted on, and its
+ * sentence names the machine id, which a thread's failure line must not. */
+export class MachineUnreachableError extends Error {
+  constructor(
+    readonly machineId: string,
+    /** The provider's own words, as it answered them. */
+    readonly said: string,
+    /** The status the answer carried, which the backend's match does not read. */
+    readonly status: number,
+  ) {
+    super(machineUnreachableLine(said));
+    this.name = "MachineUnreachableError";
   }
 }
 
