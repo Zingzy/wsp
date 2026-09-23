@@ -159,6 +159,112 @@ describe("runtime", () => {
     }
   });
 
+  it.each([
+    ["a wake that resurrects", async (rt: ReturnType<typeof createRuntime>, backend: StubBackend, id: string) => {
+      await rt.workspaces.nap(id);
+      backend.machines[0]!.killed = true;
+      await rt.workspaces.wake(id);
+    }],
+    ["an upgrade", async (rt: ReturnType<typeof createRuntime>, _backend: StubBackend, id: string) => {
+      await rt.workspaces.upgrade(id);
+    }],
+  ])("%s asks the provider for the size its view holds and writes the guest's count on the row again", async (_road, replace) => {
+    const { backend } = guestCounting(counted(4_128_768));
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+      await replace(rt, backend, ws.id);
+      const fresh = backend.machines[1]!;
+      expect(fresh.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+      expect(memoryReads(fresh)).toHaveLength(1);
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ machineId: fresh.id, size: { cpu: 2, memMb: 4096 }, shape: { cpu: 2, memMb: 8192 } });
+      expect((await rt.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 4096 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a record with no view of its machine's size asks the provider for the size on its row", async () => {
+    const { backend } = guestCounting(counted(4_128_768));
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await create(spec);
+      (m as { describe?: unknown }).describe = undefined;
+      return m;
+    };
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+      expect(await store.get("workspaces", ws.id)).not.toHaveProperty("shape");
+      await rt.workspaces.nap(ws.id);
+      backend.machines[0]!.killed = true;
+      await rt.workspaces.wake(ws.id);
+      expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a create whose daemon did not answer asks the guest nothing of its memory and says so in one line", async () => {
+    const { backend } = guestCounting(counted(4_128_768));
+    backend.lifecycle.budgets.daemonAnswersMs = 300;
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = (await create(spec)) as StubMachine;
+      m.daemonAnswers = async () => false;
+      return m;
+    };
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+      expect(memoryReads(backend.machines[0]!)).toEqual([]);
+      expect(ws).not.toHaveProperty("notice");
+      expect(await store.get("workspaces", ws.id)).toMatchObject({ size: { cpu: 2, memMb: 8192 } });
+      expect(warn.mock.calls.map(c => String(c[0])).filter(l => l.includes("memory"))).toEqual([`workspace ${ws.id}: memory not read: the daemon did not answer`]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a guest counting more than the largest size offered is recorded and priced at that size", async () => {
+    const { backend } = guestCounting(counted(20_000_000));
+    backend.capabilities.sizes = [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }];
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+      const [status] = await rt.status.list();
+      expect(status!.size).toEqual({ cpu: 2, memMb: 8192 });
+      expect(status!.rateUsdPerHour).toBeCloseTo(0.15, 10);
+      expect(ws).not.toHaveProperty("notice");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the created line names the image's size where no size was asked, and the size asked where one was", async () => {
+    const { backend } = guestCounting(counted(4_128_768));
+    const store = memoryStore();
+    const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
+    await store.put("goldens", copyKey("default", "big"), { head: 1, versions: [version] });
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const inherited = await createOn(rt, { golden: "snap_golden-v1", name: "a" });
+      expect(inherited.notice).toBe("the image's size is 2 vCPU · 8 GB; the machine has 2 vCPU · 4 GB");
+      const asked = await createOn(rt, { golden: "snap_golden-v1", name: "b", cpu: 2, memMb: 8192 });
+      expect(asked.notice).toBe("asked for 2 vCPU · 8 GB; the machine has 2 vCPU · 4 GB");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("same behavior over the wire: serveRuntime round-trips create via WS", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });

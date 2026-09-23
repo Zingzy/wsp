@@ -124,9 +124,10 @@ export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
   return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
 }
 
-/** What the create says where the machine it got is not the size asked for: both sizes, in the row's own words. */
-export function sizeGotLine(asked: WorkspaceSize, got: WorkspaceSize): string {
-  return `asked for ${fmtSize(asked)}; the machine has ${fmtSize(got)}`;
+/** What the create says where the machine it got is not the size it was forked at, the one asked for or else the
+ * image's own: both sizes, in the row's own words. */
+export function sizeGotLine(asked: WorkspaceSize, got: WorkspaceSize, named: boolean): string {
+  return `${named ? "asked for" : "the image's size is"} ${fmtSize(asked)}; the machine has ${fmtSize(got)}`;
 }
 
 /** What a computer of the person's own is worth saying in one line: the cores and memory it has, and the room left
