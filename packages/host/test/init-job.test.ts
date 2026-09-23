@@ -14,9 +14,9 @@ import { basename, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
+import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
-import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
+import { createRuntime, goldenHead, memoryStore, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { buildBesideHost, type DoorClient } from "../src/init-beside.js";
@@ -1393,7 +1393,7 @@ describe("the init job, manual road", () => {
 });
 
 describe("the init job, agent road", () => {
-  it("adds the wsp tools to the agent, opens a thread on this computer with the cheapest model and the one prompt, and shows the screens prefilled from the recipe the thread wrote", async () => {
+  it("adds the wsp tools to the agent, opens a thread on this computer with the default model and the one prompt, and shows the screens prefilled from the recipe the thread wrote", async () => {
     const f = fake();
     const local = await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     const started = await f.jobs.start({ road: "agent", harness: "claude" });
@@ -1409,10 +1409,25 @@ describe("the init job, agent road", () => {
     const transcript = await f.rt.sessions.history(local.id);
     const start = transcript.find(e => e.type === "session.start") as { prompt?: string; model?: string } | undefined;
     expect(start?.prompt).toBe(initAgentPrompt(smallRecipePath(f.statePath)));
-    expect(smallestModel(harnessCatalog("claude"))).toBeDefined();
+    expect(f.starts[0]!.model).toBe(markedDefault(harnessCatalog("claude")!.models)!.value);
     // The screens open on what the agent wrote: Codex ticked on beside Claude Code.
     expect(view.screens[0]!.ticks.sort()).toEqual(["claude", "codex"]);
     expect(phases(f)).toEqual(["agent", "reading", "answering"]);
+  });
+
+  it("opens the setup thread on the table's default model, and a change of the row's title model moves nothing there", async () => {
+    const f = fake();
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
+    const row = harnessCatalog("claude")!;
+    const small = row.smallModel;
+    row.smallModel = "claude-sonnet-5";
+    try {
+      await f.jobs.start({ road: "agent", harness: "claude" });
+      await f.settled();
+    } finally {
+      row.smallModel = small;
+    }
+    expect(f.starts[0]!.model).toBe("claude-opus-5-5");
   });
 
   it("two agent-road starts in flight leave one job: the second is refused while the first's thread is still being opened", async () => {

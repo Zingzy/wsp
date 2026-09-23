@@ -1235,7 +1235,8 @@ const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.m
 
 function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined): void {
   if (value === undefined || options.some(o => o.value === value)) return;
-  throw new Error(options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}`);
+  const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}`;
+  throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
