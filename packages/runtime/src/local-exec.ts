@@ -404,14 +404,15 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (cut !== undefined) return settle(null, cut);
 
         // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
-        const ended = readFile(`${base}.exit`);
+        // An empty one is a run still writing: the shell's write truncates before it writes, as the cloud road reads it too.
+        const ended = readFile(`${base}.exit`)?.trim();
         const chunk = readLog();
         if (chunk.length > 0) {
           activity.touch(now());
           lines.feed(chunk.toString("utf8"));
           continue; // there may be more than one chunk waiting
         }
-        if (ended !== undefined) return settle(Number.parseInt(ended.trim(), 10));
+        if (ended !== undefined && ended !== "") return settle(Number.parseInt(ended, 10));
         // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
         if ((pid === undefined || !alive(pid)) && ++downs > 1) return settle(null);
         await nap(pollMs);
