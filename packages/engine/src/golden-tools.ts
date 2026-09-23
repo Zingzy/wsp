@@ -51,6 +51,17 @@ const DF_COLUMN = { size: 2, used: 3, free: 4 } as const;
 export const dfKbCmd = (columns: readonly (keyof typeof DF_COLUMN)[], path = "/root"): string => `df -Pk ${path} | awk 'NR==2{print ${columns.map(c => `$${DF_COLUMN[c]}`).join(", ")}}'`;
 export const FREE_KB_CMD = dfKbCmd(["free"]);
 export const USED_KB_CMD = dfKbCmd(["used"]);
+/** How a df that did not answer reads, for dfRead and for the rejected exec diskUse catches. */
+const dfFailed = (res: ExecResult): string => `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}`;
+/** The columns asked for off one df, in bytes, the last being the disk's own figure; a rejected exec throws. */
+async function dfRead(machine: Machine, columns: readonly (keyof typeof DF_COLUMN)[]): Promise<{ bytes: number[] } | { reason: string }> {
+  const res = await machine.exec(dfKbCmd(columns), { timeoutMs: INLINE_EXEC_MS });
+  const printed = res.stdout.trim();
+  const kb = printed.split(/\s+/).map(Number);
+  if (res.exitCode === 0 && kb.length === columns.length && kb.every(Number.isFinite) && kb.at(-1)! > 0) return { bytes: kb.map(n => n * 1024) };
+  // The pipe exits as awk does, so a df that failed exits 0 having printed nothing.
+  return { reason: res.exitCode === 0 && printed !== "" ? `df answered ${printed.slice(0, 160)}` : dfFailed(res) };
+}
 export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
 export const TOOLS_DISK_FLOOR = 2048 * MIB;
@@ -164,9 +175,8 @@ export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reas
 
 /** One df column read off the machine, in bytes; a df that fails or prints no number is reported, never assumed. */
 async function dfRootBytes(machine: Machine, column: "used" | "free"): Promise<{ bytes: number } | { reason: string }> {
-  const res = await machine.exec(dfKbCmd([column]), { timeoutMs: INLINE_EXEC_MS });
-  const kb = Number(res.stdout.trim());
-  return res.exitCode === 0 && Number.isFinite(kb) && kb > 0 ? { bytes: kb * 1024 } : { reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+  const read = await dfRead(machine, [column]);
+  return "bytes" in read ? { bytes: read.bytes[0]! } : read;
 }
 
 /** What df says is free under /root. */
@@ -178,12 +188,8 @@ export async function freeBytes(machine: Machine): Promise<FreeDisk> {
 /** What df says is used under /root and the size of the disk it sits on, off one exec; a df that fails or prints
  * no pair of numbers is reported, never assumed. */
 export async function diskUse(machine: Machine): Promise<DiskUse> {
-  const res = await machine.exec(dfKbCmd(["used", "size"]), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-  const printed = res.stdout.trim();
-  const [used, size] = printed.split(/\s+/).map(Number);
-  if (res.exitCode === 0 && Number.isFinite(used) && Number.isFinite(size) && size! > 0) return { kind: "use", usedBytes: used! * 1024, sizeBytes: size! * 1024 };
-  // The pipe exits as awk does, so a df that failed exits 0 having printed nothing.
-  return { kind: "unknown", reason: res.exitCode === 0 && printed !== "" ? `df answered ${printed.slice(0, 160)}` : `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+  const read = await dfRead(machine, ["used", "size"]).catch((e: unknown) => ({ reason: dfFailed({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }) }));
+  return "bytes" in read ? { kind: "use", usedBytes: read.bytes[0]!, sizeBytes: read.bytes[1]! } : { kind: "unknown", reason: read.reason };
 }
 
 /** What a snapshot of the disk comes to: what the backend says the machine has written since it booted, where it
