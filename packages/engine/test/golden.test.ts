@@ -455,6 +455,13 @@ describe("interactive golden: prepare then seal", () => {
     expect(version.usedBytes).toBe(13631488 * 1024);
   });
 
+  it("a used column of zero is a disk nothing has been written to, not a df that could not be read", async () => {
+    const { backend } = recordingBackend({ [USED_KB_CMD]: { exitCode: 0, stdout: "0\n", stderr: "" } });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(b, { backend, hostId: "h1", smoke: "true" });
+    expect(version.usedBytes).toBe(0);
+  });
+
   it("seal stamps the logins it is given onto the version, name and state only", async () => {
     const { backend } = recordingBackend();
     const b = await prepareBuilder({ backend, setup: "true" });
@@ -1967,12 +1974,32 @@ describe("golden import stages", () => {
       "installing-tools:Homebrew (1/3)",
       "installing-tools:1.8 GB free, under the 2 GB floor; cleaning up before skipping",
       "installing-tools:caches swept; df failed: df: /root: Input/output error",
-      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free before cleanup, df failed after, keeping 2 GB free); caches swept",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (1.8 GB free before cleanup and unknown after (df failed: df: /root: Input/output error), keeping 2 GB free); caches swept",
     ]);
     expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
       ["tools/homebrew", "installed", undefined],
-      ["tools/brew/gh", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2 GB free"],
-      ["tools/npm/bun", "skipped", "1.8 GB free before cleanup, df failed after, keeping 2 GB free"],
+      ["tools/brew/gh", "skipped", "1.8 GB free before cleanup and unknown after (df failed: df: /root: Input/output error), keeping 2 GB free"],
+      ["tools/npm/bun", "skipped", "1.8 GB free before cleanup and unknown after (df failed: df: /root: Input/output error), keeping 2 GB free"],
+    ]);
+  });
+
+  it("a full disk is a reading of zero, not an unknown one: the cleanup runs once and the tools left are skipped at the floor", async () => {
+    let bootstrapped = false;
+    const { backend, cmds, fetch } = backendFor([["brew-bootstrap", () => ((bootstrapped = true), ok)]], () => mb(bootstrapped ? 0 : 3000));
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ onResult: r => void results.push(r) }) });
+    expect(stages.filter(s => s.startsWith("installing-tools"))).toEqual([
+      "installing-tools:Homebrew (1/3)",
+      "installing-tools:0 B free, under the 2 GB floor; cleaning up before skipping",
+      "installing-tools:caches swept; 0 B free",
+      "installing-tools:1 installed, 2 skipped: gh, bun@1.4.0 (0 B free after cleanup, keeping 2 GB free); caches swept; 0 B free",
+    ]);
+    expect(cmds.some(c => c.includes("brew install gh"))).toBe(false);
+    expect(results[0]!.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["tools/homebrew", "installed", undefined],
+      ["tools/brew/gh", "skipped", "0 B free after cleanup, keeping 2 GB free"],
+      ["tools/npm/bun", "skipped", "0 B free after cleanup, keeping 2 GB free"],
     ]);
   });
 
