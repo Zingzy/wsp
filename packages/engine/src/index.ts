@@ -13,7 +13,7 @@ export * from "./link-backend.js";
 export * from "./place-machine.js";
 // What a machine that already existed answers about itself, for the two kinds that ask it: read over a connection
 // on one, in a shell of its own on the other.
-export { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+export { ARCH_READ, HOME_READ, MEM_READ, OS_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 export * from "./child-exec.js";
 export * from "./copier.js";
 export * from "./no-provider-backend.js";
