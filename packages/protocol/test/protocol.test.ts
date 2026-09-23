@@ -1752,6 +1752,21 @@ describe("project goldens", () => {
     for (const r of [snapshot, list]) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(RuntimeRequest.safeParse({ id: 32, op: "workspaces.snapshot" }).success).toBe(false);
   });
+
+  it("projectGoldens.remove names the snapshot, replies with the record and its line, and a view's project row may carry a size", () => {
+    const remove = { id: 33, op: "projectGoldens.remove", snapshotId: "snap_project-proj" };
+    expect(RuntimeRequest.parse(remove)).toEqual(remove);
+    expect(RuntimeRequest.safeParse({ id: 34, op: "projectGoldens.remove" }).success).toBe(false);
+    // The records of wsp's own machines, which a paired computer manages and a thread never deletes.
+    expect(wire.DEVICE_OPS).toContain("projectGoldens.remove");
+    expect(THREAD_OPS).not.toContain("projectGoldens.remove");
+    const golden = { snapshotId: "snap_project-proj", projects: [{ name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" }], golden: "snap_golden-v12", workspaceId: "ws_1", workspaceName: "task", createdAt: "2026-09-06T10:05:00.000Z" };
+    expect(wire.ProjectGoldenRemoved.parse({ projectGolden: golden, alreadyGone: true })).toEqual({ projectGolden: golden, alreadyGone: true });
+    expect(wire.ProjectGoldenRemoved.safeParse({ projectGolden: golden }).success).toBe(false);
+    const view = { image: null, copies: [], projects: [{ ...golden, sizeBytes: 5_000_000_000 }, golden] };
+    expect(wire.SealedImageView.parse(view)).toEqual(view);
+    expect(wire.sealedProjectLine(view.projects[0]!)).toBe("snap_project-proj · project task · proj · 4.7 GB · 2026-09-06T10:05:00.000Z");
+  });
 });
 
 describe("packageOf", () => {

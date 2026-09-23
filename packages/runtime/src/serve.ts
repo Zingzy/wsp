@@ -1004,6 +1004,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
               return;
+            case "projectGoldens.remove":
+              send({ id: msg.id, ok: true, ...(await rt.golden.removeProject(msg.snapshotId)) });
+              return;
             case "workspaces.touch":
               await rt.workspaces.touch(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });

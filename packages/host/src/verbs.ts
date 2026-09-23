@@ -46,10 +46,12 @@ import {
   placeLinkTranscript,
   ProjectExportResult,
   ProjectGolden,
+  ProjectGoldenRemoved,
   SealedImage,
   SealedImageBuilt,
   SealedImageCopy,
   SealedImageView,
+  SealedProjectImage,
   NO_SEALED_IMAGE,
   IMAGE_PASSPHRASE_ENV,
   IMAGE_PASSPHRASE_MIN,
@@ -60,6 +62,9 @@ import {
   sealedExportLine,
   sealedImageLine,
   sealedProjectLine,
+  noProjectImageLine,
+  projectImageRemoveNotice,
+  projectImageRemovedLine,
   type GoldenStageEvent,
   type SealedImageExport,
   ProjectImportResult,
@@ -1275,6 +1280,11 @@ export function deleteQuestion(d: Dropping): string {
   return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace))}`;
 }
 
+/** The one confirmation a project image's removal asks: the id, and what goes with it. */
+export function imageRemoveQuestion(g: ProjectGolden): string {
+  return `Remove project image ${g.snapshotId}?\n${projectImageRemoveNotice(g)}`;
+}
+
 /** Kills the workspace's machine at the provider, then drops its record here; a machine already gone is no error. */
 export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<void> {
   await client.request("workspaces.delete", { workspaceId: d.workspace.id });
@@ -1539,6 +1549,18 @@ export async function projectGoldenOf(client: HostClient, ref: string): Promise<
   const byName = projectGoldens.filter(g => g.projects.some(p => p.name === ref)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (byName[0] !== undefined) return byName[0];
   throw new Error(`no project image named ${ref}; wsp snapshot <workspace> takes one`);
+}
+
+/** The project image a snapshot id names, and nothing else: a remove never picks one by a project's name. */
+async function projectImageOf(client: HostClient, id: string): Promise<ProjectGolden> {
+  const { projectGoldens } = await client.request<{ projectGoldens: ProjectGolden[] }>("projectGoldens.list");
+  const golden = projectGoldens.find(g => g.snapshotId === id);
+  if (golden === undefined) throw notFoundRefusal(noProjectImageLine(id));
+  return golden;
+}
+
+async function removeProjectImage(client: HostClient, id: string): Promise<ProjectGoldenRemoved> {
+  return ProjectGoldenRemoved.parse(await client.request("projectGoldens.remove", { snapshotId: id }));
 }
 
 /** Sets what the agents on the workspace a person names may ask of this host; the record, as every director shows it. */
@@ -2385,11 +2407,11 @@ export function agentsFlag(value: string | undefined): string[] | undefined {
 
 /** The one question a drop asks unless --yes, and the one line it prints when the answer is anything but yes. Off a
  * terminal nobody can answer, so the line without --yes is refused as written. */
-async function confirmed(ctx: VerbContext, question: string, d: Dropping): Promise<boolean> {
+async function confirmed(ctx: VerbContext, question: string, name: string): Promise<boolean> {
   if (ctx.flags["yes"] === true) return true;
   if (ctx.io.isTTY !== true) throw usageRefusal(`${question.split("\n")[0]} There is no terminal to answer on.`, "Pass --yes to say yes.");
   if ((await ctx.io.ask(question)) === "yes") return true;
-  ctx.io.error(`${d.workspace.name} kept`);
+  ctx.io.error(`${name} kept`);
   return false;
 }
 
@@ -3190,9 +3212,9 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it.",
+        "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.",
       input: {},
-      output: { image: SealedImage.nullable(), copies: z.array(SealedImageCopy), projects: z.array(ProjectGolden) },
+      output: { image: SealedImage.nullable(), copies: z.array(SealedImageCopy), projects: z.array(SealedProjectImage) },
       call: async (_args, deps) => {
         const view = await imageView(await deps.client());
         return asText(imageLines(view).join("\n"), view);
@@ -3270,6 +3292,41 @@ export const VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "image remove",
+    usage: "wsp image remove <snapshot id> [--yes]",
+    about: "deletes a project image's snapshot at the provider and drops its record; refused while a workspace stands on it",
+    page: "app",
+    options: { yes: { type: "boolean" } },
+    run: async ctx => {
+      const [id] = ctx.args;
+      if (id === undefined || ctx.args.length !== 1) throw usageRefusal("wsp image remove takes one project image, by the id wsp image lists it under.", usageIs(ctx));
+      const client = await ctx.client();
+      const golden = await projectImageOf(client, id);
+      if (!(await confirmed(ctx, imageRemoveQuestion(golden), id))) return 1;
+      const removed = await removeProjectImage(client, id);
+      ctx.out.emit(removed, projectImageRemovedLine(id, removed.alreadyGone));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Deletes a project image's snapshot at the provider its place names and then drops its record, so no later fork starts from it; the id is the one the image tool lists each project image under, never a project's name. The provider's listing is read back until the id has left it: a snapshot the provider had already lost drops its record and answers `alreadyGone` true, a listing that still holds the id after the wait keeps the record and says to ask again, and any other refusal of the provider's keeps the record and carries the provider's own words. Refused in one line while any workspace stands on the image, whatever its state, naming them: delete those first, or forget one whose machine is gone. Called without confirm it removes nothing and answers with what would go, which is the line to put to the person.",
+      input: {
+        image: z.string().describe("the project image's snapshot id, as the image tool lists it"),
+        confirm: z.boolean().optional().describe("true deletes the snapshot; absent or false answers with what would go and deletes nothing, so a person can be asked first"),
+      },
+      output: ProjectGoldenRemoved.shape,
+      call: async ({ image: id, confirm }, deps) => {
+        const client = await deps.client();
+        const golden = await projectImageOf(client, id);
+        if (confirm !== true) {
+          return { ...asText(`${id} kept. ${projectImageRemoveNotice(golden)} Ask the person, then call image_remove again with confirm true.`, { projectGolden: golden, alreadyGone: false }), isError: true };
+        }
+        const removed = await removeProjectImage(client, id);
+        return asText(projectImageRemovedLine(id, removed.alreadyGone), removed);
+      },
+    }),
+  },
+  {
     name: "forget",
     usage: "wsp forget <workspace> [--yes]",
     about: "drops a gone workspace and its threads from this computer; refused while its machine exists",
@@ -3280,7 +3337,7 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp forget takes one workspace.", usageIs(ctx));
       const client = await ctx.client();
       const f = await dropping(client, ref);
-      if (!(await confirmed(ctx, forgetQuestion(f), f))) return 1;
+      if (!(await confirmed(ctx, forgetQuestion(f), f.workspace.name))) return 1;
       await forget(client, f);
       ctx.out.emit({ workspaceId: f.workspace.id, name: f.workspace.name, threads: f.threads }, forgotLine(f));
       return 0;
@@ -3309,7 +3366,7 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp delete takes one workspace.", usageIs(ctx));
       const client = await ctx.client();
       const d = await dropping(client, ref);
-      if (!(await confirmed(ctx, deleteQuestion(d), d))) return 1;
+      if (!(await confirmed(ctx, deleteQuestion(d), d.workspace.name))) return 1;
       await deleteWorkspace(client, d);
       ctx.out.emit({ workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads }, deletedLine(d));
       return 0;

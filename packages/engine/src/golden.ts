@@ -37,6 +37,9 @@ export interface KillConfirm {
   pollMs?: number;
 }
 
+/** How long a delete is read back for when the caller names no window. */
+export const KILL_GRACE_MS = 30_000;
+
 /** A machine that answered two kills with a success status and is still there.
  * Typed so the wizard can say "still billing, reap it" rather than "try again". */
 export class MachineAliveError extends Error {
@@ -105,7 +108,7 @@ const readState = async (machine: Machine): Promise<{ state: BuilderReading; rea
  * wizard run reported its seal done and the builder was still running 25 minutes
  * later, so a kill is only done once get(id) reads the machine gone. */
 export async function killUntilGone(backend: MachineBackend, machine: Machine, confirm: KillConfirm = {}): Promise<void> {
-  const graceMs = confirm.graceMs ?? 30_000;
+  const graceMs = confirm.graceMs ?? KILL_GRACE_MS;
   const pollMs = confirm.pollMs ?? 1_000;
   let state: MachineState = "running";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -123,6 +126,32 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
     } while (Date.now() < deadline);
   }
   throw new MachineAliveError(machine.id, state);
+}
+
+/** What a snapshot's delete came to once read back: gone off the listing, already lost at the provider, or still
+ * listed when the window it was read for ran out. */
+export type SnapshotDeleted = { verdict: "deleted" | "missing" } | { verdict: "listed"; graceMs: number };
+
+/** A snapshot's delete is read back the way a machine's kill is, under the same window: the listing is best-effort
+ * and may still hold an id the delete took, so it is read until the id leaves, and a read that fails counts as one
+ * that still holds it. A backend with no listing answers on the DELETE alone; a refusal other than missing throws. */
+export async function snapshotUntilGone(backend: MachineBackend, snapshotId: string, confirm: KillConfirm = {}): Promise<SnapshotDeleted> {
+  try {
+    await backend.deleteSnapshot(snapshotId);
+  } catch (e) {
+    if (isMissing(e)) return { verdict: "missing" };
+    throw e;
+  }
+  const list = backend.capabilities.snapshotListing ? backend.listSnapshots : undefined;
+  if (list === undefined) return { verdict: "deleted" };
+  const graceMs = confirm.graceMs ?? KILL_GRACE_MS;
+  const deadline = Date.now() + graceMs;
+  do {
+    const rows = await list.call(backend).catch(() => undefined);
+    if (rows !== undefined && !rows.some(r => r.id === snapshotId)) return { verdict: "deleted" };
+    await new Promise(r => setTimeout(r, confirm.pollMs ?? 1_000));
+  } while (Date.now() < deadline);
+  return { verdict: "listed", graceMs };
 }
 
 /** The template calls of a backend whose capabilities say it has them, or nothing: the one read of that flag, so a

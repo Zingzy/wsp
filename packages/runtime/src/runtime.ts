@@ -51,6 +51,7 @@ import {
   projectInstalls,
   stateListing,
   killUntilGone,
+  snapshotUntilGone,
   MachineAliveError,
   answerOf,
   diskUse,
@@ -149,6 +150,7 @@ import type {
   SealedImageBuilt,
   SealedImageCopy,
   SealedImageView,
+  SealedProjectImage,
   SealedVault,
   ScreenCommand,
   TerminalConfig,
@@ -161,6 +163,7 @@ import type {
   ProjectExportResult,
   ProjectExportStage,
   ProjectGolden,
+  ProjectGoldenRemoved,
   ProjectImportResult,
   ProjectRef,
   ProjectSource,
@@ -215,7 +218,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1499,6 +1502,10 @@ export interface Runtime {
     promote(name?: string): Promise<GoldenPromotion[] | undefined>;
     /** Every project golden this runtime took, oldest first. */
     projects(): Promise<ProjectGolden[]>;
+    /** Deletes a project golden's snapshot at the provider of its place and drops the record once the listing reads
+     * it gone, or at once where the provider already lost it. Refused while any workspace stands on it; a refusal
+     * of the provider's, or a listing that holds the id through the read-back window, keeps the record. */
+    removeProject(snapshotId: string): Promise<ProjectGoldenRemoved>;
     /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
      * listing and split by who made each one; undefined on a backend that cannot list snapshots. */
     storage(): Promise<SnapshotStorage | undefined>;
@@ -5426,6 +5433,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId: id,
         workspaceName: name,
         createdAt,
+        ...(entry.record.place !== undefined ? { place: entry.record.place } : {}),
       };
       await store.put(PROJECT_GOLDENS, snapshotId, golden);
       return golden;
@@ -8028,6 +8036,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       return (await store.list(PROJECT_GOLDENS)).map(projectGoldenOf).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
+
+    async removeProject(snapshotId) {
+      await ready();
+      const stored = await store.get(PROJECT_GOLDENS, snapshotId);
+      if (stored === undefined) throw notFoundRefusal(noProjectImageLine(snapshotId));
+      const projectGolden = projectGoldenOf(stored);
+      const standing = forkedFrom(snapshotId);
+      if (standing.length > 0) throw conflict(projectImageInUseRefusal(snapshotId, standing));
+      const at = backendAt(projectGolden.place ?? places.wired);
+      const read = await snapshotUntilGone(at, snapshotId, opts.killConfirm).catch((e: unknown) => {
+        const { kind, status } = e as { kind?: unknown; status?: unknown };
+        throw Object.assign(new Error(projectImageRefusedLine(snapshotId, answerOf(e))), kind !== undefined ? { kind } : {}, status !== undefined ? { status } : {});
+      });
+      if (read.verdict === "listed") throw new Error(projectImageStillListedLine(snapshotId, read.graceMs));
+      await store.delete(PROJECT_GOLDENS, snapshotId);
+      return { projectGolden, alreadyGone: read.verdict === "missing" };
+    },
+
   };
 
   /** The sizes a place's provider reports for the snapshots named, keyed by id; empty where it has no listing or
@@ -8066,6 +8092,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const conflict = (message: string): Error => Object.assign(new Error(message), { kind: "conflict" });
 
+  /** Every project golden, oldest first, with its size off the listing of the place each record names: one listing
+   * per place, and none for a place this host no longer holds. */
+  const projectImagesSized = async (): Promise<SealedProjectImage[]> => {
+    const projects = await golden.projects();
+    const sizes = new Map<string, number>();
+    for (const place of new Set(projects.map(p => p.place ?? places.wired))) {
+      let at: MachineBackend;
+      try {
+        at = backendAt(place);
+      } catch {
+        continue;
+      }
+      for (const [id, bytes] of await snapshotSizes(at, projects.filter(p => (p.place ?? places.wired) === place).map(p => p.snapshotId))) sizes.set(id, bytes);
+    }
+    return projects.map(p => (sizes.has(p.snapshotId) ? { ...p, sizeBytes: sizes.get(p.snapshotId)! } : p));
+  };
+
   const image: Runtime["image"] = {
     async get(name) {
       await ready();
@@ -8073,7 +8116,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return {
         image: (await recordOf(key)) ?? null,
         copies: await copiesOf(key),
-        projects: (await store.list(PROJECT_GOLDENS)).map(projectGoldenOf).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        projects: await projectImagesSized(),
       };
     },
 

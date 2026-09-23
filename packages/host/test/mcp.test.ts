@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, HERE_PLACE_ID, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -160,7 +160,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
@@ -173,6 +173,8 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
     expect(Object.keys((tools.find(t => t.name === "exec")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["argv", "cwd", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "delete")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "image_remove")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["confirm", "image"]);
+    expect(tools.find(t => t.name === "image")!.description).toContain("The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.");
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "engine", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
@@ -527,6 +529,30 @@ describe("the MCP server over the host", () => {
     expect(forgot.text).toBe(`forgot alpha ${alpha!.id}: its record and 0 threads are gone from this computer`);
     expect(await rt.workspaces.list()).toEqual([]);
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
+  });
+
+  it("image_remove without confirm removes nothing and answers with what would go; with confirm it deletes the snapshot and drops the record, and a workspace standing on it refuses", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    const golden = await rt.workspaces.snapshot(alpha!.id);
+
+    const asked = await call("image_remove", { image: golden.snapshotId });
+    expect(asked.isError).toBe(true);
+    expect(asked.text).toBe(`${golden.snapshotId} kept. ${projectImageRemoveNotice(golden)} Ask the person, then call image_remove again with confirm true.`);
+    expect(asked.structured).toEqual({ projectGolden: golden, alreadyGone: false });
+    expect(backend.snapshots.map(s => s.id)).toContain(golden.snapshotId);
+
+    await call("new", { name: "task-a", from: golden.snapshotId });
+    expect(await call("image_remove", { image: golden.snapshotId, confirm: true })).toEqual(failedWith(projectImageInUseRefusal(golden.snapshotId, ["task-a"])));
+    await call("delete", { workspace: "task-a", confirm: true });
+
+    const removed = await call("image_remove", { image: golden.snapshotId, confirm: true });
+    expect(removed.isError).toBe(false);
+    expect(removed.structured).toEqual({ projectGolden: golden, alreadyGone: false });
+    expect(removed.text).toBe(projectImageRemovedLine(golden.snapshotId, false));
+    expect(backend.snapshots.map(s => s.id)).not.toContain(golden.snapshotId);
+    expect(await rt.golden.projects()).toEqual([]);
+    expect(await call("image_remove", { image: golden.snapshotId, confirm: true })).toEqual(failedWith(noProjectImageLine(golden.snapshotId), "usage"));
   });
 
   it("delete without confirm deletes nothing and answers with what would go; with confirm it kills the machine and drops the record and threads", async () => {

@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -3326,6 +3326,44 @@ describe("wsp verbs over the host", () => {
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp new: no project image named nope; wsp snapshot <workspace> takes one"]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
+  });
+
+  it("wsp image lists every project image by its id, project, size and date; image remove asks once, deletes the snapshot at the provider and drops the record, and is refused while a workspace stands on it", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    const taken = await rt.workspaces.snapshot(alpha!.id);
+    const listed = await run("image");
+    expect(listed.io.lines.join("\n").split("\n")).toContain(`${taken.snapshotId} · project alpha · ${alpha!.project.name} · 7.5 GB · ${taken.createdAt}`);
+
+    expect((await run("new", cloud.name, "task-a", "--from", taken.snapshotId)).code).toBe(0);
+    const standing = await run("image", "remove", taken.snapshotId, "--yes");
+    expect(standing.code).toBe(1);
+    expect(standing.io.errors).toEqual([`wsp image remove: ${projectImageInUseRefusal(taken.snapshotId, ["task-a"])}`]);
+    expect(backend.snapshots.map(s => s.id)).toContain(taken.snapshotId);
+    expect((await run("delete", "task-a", "--yes")).code).toBe(0);
+
+    const kept = await answer("no", "image", "remove", taken.snapshotId);
+    const asJson = await run("image", "remove", taken.snapshotId, "--json");
+    expect(asJson.code).toBe(EXIT_CODES.usage);
+    expect(kept.code).toBe(1);
+    expect(kept.io.errors).toEqual([`${taken.snapshotId} kept`]);
+    expect(asked.at(-1)).toBe(`Remove project image ${taken.snapshotId}?\n${projectImageRemoveNotice(taken)}`);
+    expect(backend.snapshots.map(s => s.id)).toContain(taken.snapshotId);
+
+    const removed = await answer("yes", "image", "remove", taken.snapshotId);
+    expect(removed.code).toBe(0);
+    expect(removed.io.lines).toEqual([projectImageRemovedLine(taken.snapshotId, false)]);
+    expect(backend.snapshots.map(s => s.id)).not.toContain(taken.snapshotId);
+    expect(await rt.golden.projects()).toEqual([]);
+
+    const missing = await run("image", "remove", taken.snapshotId, "--yes");
+    expect(missing.code).toBe(EXIT_CODES.usage);
+    expect(missing.io.errors).toEqual([`wsp image remove: ${noProjectImageLine(taken.snapshotId)}`]);
+    // A project's name is no id: a remove never picks one of several images by the newest.
+    const named = await run("image", "remove", cloud.name, "--yes");
+    expect(named.code).toBe(EXIT_CODES.usage);
+    expect(named.io.errors).toEqual([`wsp image remove: ${noProjectImageLine(cloud.name)}`]);
+    expect((await run("image", "remove")).code).toBe(EXIT_CODES.usage);
   });
 
   /** A folder on this computer with one source file and one secret-shaped file, not a repository. */

@@ -2174,6 +2174,30 @@ describe("a fork at a provider this host is not wired to", () => {
     expect(here.place).toBeUndefined();
   });
 
+  it("a project image taken at that provider records the place and is removed there, never at the wired one", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
+      killConfirm: { graceMs: 40, pollMs: 1 },
+    });
+    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
+    const golden = await runtime.workspaces.snapshot(there.id);
+    expect(golden.place).toBe("box");
+    expect((await runtime.image.get()).projects).toEqual([{ ...golden, sizeBytes: box.snapshotBytes }]);
+    // The wired provider answers a delete of an id it never held as a success, which is how a wrong door would pass.
+    const wiredDeletes: string[] = [];
+    solari.deleteSnapshot = async id => void wiredDeletes.push(id);
+    await runtime.golden.removeProject(golden.snapshotId);
+    expect(wiredDeletes).toEqual([]);
+    expect(box.snapshots).toEqual([]);
+    expect(await runtime.golden.projects()).toEqual([]);
+  });
+
   it("carries each provider's own sizes at its own rates on its row, so a picker reads the row it is under", async () => {
     // One list of sizes for every row is what priced a workspace at another provider's rates to the cent: the
     // dialog quoted the wired provider's three sizes under a row that bills nothing. The list is per row on the
