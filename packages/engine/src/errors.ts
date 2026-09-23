@@ -1,4 +1,4 @@
-import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachableLine, machineUnreachedLine } from "@wsp/protocol";
+import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachableLine, machineUnreachedLine, napRefusedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -78,6 +78,18 @@ export class MachineUnreachableError extends Error {
   ) {
     super(machineUnreachableLine(said));
     this.name = "MachineUnreachableError";
+  }
+}
+
+/** Thrown by a backend whose provider refuses a machine's pause outright, which asking again does not change. */
+export class NapRefusedError extends Error {
+  constructor(
+    readonly machineId: string,
+    /** The provider's own words, as it answered them. */
+    readonly said: string,
+  ) {
+    super(napRefusedLine(said));
+    this.name = "NapRefusedError";
   }
 }
 

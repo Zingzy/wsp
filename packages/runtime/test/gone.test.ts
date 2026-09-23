@@ -4,10 +4,13 @@
 // sweep. The awake stretch closes there, the idle clock is dropped, the row's
 // words name the call and the time, and the host log carries one line. A poll
 // that began before the record settled lands nothing. A nap the provider
-// refuses in words (Not pausable) is a refusal, not a vanish.
+// refuses in words (Not pausable) is a refusal that stands for the machine,
+// not a vanish.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { goneRefusal, goneWords, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { goneRefusal, goneWords, napRefusedLine, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { NapRefusedError } from "@wsp/engine";
+import { backstopMs } from "../src/idle.js";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -53,8 +56,8 @@ function testRuntime(extra: Partial<RuntimeOptions> = {}, seed: Seed = {}) {
 
 const missing = (message: string) => Object.assign(new Error(message), { kind: "missing", status: 404 });
 
-/** The provider's answer to a pause it will not do: what a 409 from the sandbox api reads as. */
-const notPausable = () => Object.assign(new Error("Not pausable"), { kind: "conflict", status: 409 });
+/** The provider's answer to a pause it will not do, as the Solari backend types its 409. */
+const notPausable = (machineId: string) => new NapRefusedError(machineId, "Not pausable");
 
 const openServers: Server[] = [];
 afterEach(async () => {
@@ -819,35 +822,145 @@ describe("the awake meter across a verdict that did not hold", () => {
 });
 
 describe("a nap the provider refuses in words", () => {
-  it("Not pausable is a refusal: one full window from the answer, the words on the row, the log names the provider's answer, and the record stays running", async () => {
+  /** A machine whose pause is refused until the test says otherwise, with every call counted. */
+  const refusingPause = (m: StubMachine): { calls: number; refusing: boolean } => {
+    const pause = m.pause.bind(m);
+    const said = { calls: 0, refusing: true };
+    m.pause = async () => {
+      said.calls++;
+      if (said.refusing) throw notPausable(m.id);
+      await pause();
+    };
+    return said;
+  };
+  const vaultPuts = (store: ReturnType<typeof memoryStore>): { n: number } => {
+    const putBlob = store.putBlob.bind(store);
+    const puts = { n: 0 };
+    store.putBlob = async (collection, id, blob) => {
+      if (collection === "vaults") puts.n++;
+      return putBlob(collection, id, blob);
+    };
+    return puts;
+  };
+
+  it("Not pausable is a refusal that stands for the machine: the next window is the backstop, the sentence is on the row and on the poll, the log names the provider's answer once, and the record stays running", async () => {
     const { rt, backend, fc, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-      const m = backend.machines[0]!;
-      const pause = m.pause.bind(m);
-      let calls = 0;
-      let refusing = true;
-      m.pause = async () => {
-        calls++;
-        if (refusing) throw notPausable();
-        await pause();
-      };
+      const pause = refusingPause(backend.machines[0]!);
       fc.advance(WINDOW);
       const answered = fc.clock.now();
-      await until(() => statuses.some(s => s.phase === "running" && s.idleAt === answered + WINDOW));
-      expect(calls).toBe(1);
+      await until(() => statuses.some(s => s.phase === "running" && s.idleAt === answered + backstopMs(WINDOW)));
+      expect(pause.calls).toBe(1);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
-      const last = statuses.at(-1)!;
-      expect(last).toMatchObject({ phase: "running", machineState: "running", reason: "Not pausable", idleAt: answered + WINDOW });
-      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`idle nap of ${ws.id} was answered with 409 Not pausable; a full 5 min window starts over`]);
-      fc.advance(WINDOW - 1);
+      expect(statuses.at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: napRefusedLine("Not pausable"), idleAt: answered + backstopMs(WINDOW) });
+      expect((await rt.status.list())[0]).toMatchObject({ reason: napRefusedLine("Not pausable"), idleAt: answered + backstopMs(WINDOW) });
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`the provider does not pause m1 of ${ws.id} (Not pausable); an idle nap waits for the backstop and exports no vault until a pause lands`]);
+      fc.advance(backstopMs(WINDOW) - 1);
       await new Promise(r => setImmediate(r));
-      expect(calls).toBe(1);
-      refusing = false;
+      expect(pause.calls).toBe(1);
+      pause.refusing = false;
       fc.advance(1);
       await until(async () => (await rt.workspaces.get(ws.id)).phase === "napping");
-      expect(calls).toBe(2);
+      expect(pause.calls).toBe(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a second window with the refusal standing exports no vault, asks the provider once more only at the backstop, and logs nothing new", async () => {
+    const store = memoryStore();
+    const { rt, backend, fc, statuses } = testRuntime({}, { store });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const pause = refusingPause(backend.machines[0]!);
+      const puts = vaultPuts(store);
+      fc.advance(WINDOW);
+      const first = fc.clock.now();
+      await until(() => statuses.some(s => s.idleAt === first + backstopMs(WINDOW)));
+      // The first refusal came after the export the nap always ran; nothing yet said the pause would be refused.
+      expect(puts.n).toBe(1);
+      fc.advance(WINDOW);
+      await new Promise(r => setImmediate(r));
+      expect(pause.calls).toBe(1);
+      fc.advance(backstopMs(WINDOW) - WINDOW);
+      const second = fc.clock.now();
+      await until(() => statuses.some(s => s.idleAt === second + backstopMs(WINDOW)));
+      expect(pause.calls).toBe(2);
+      expect(puts.n).toBe(1);
+      expect(statuses.at(-1)).toMatchObject({ phase: "running", reason: napRefusedLine("Not pausable") });
+      expect(warn.mock.calls).toHaveLength(1);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a pause that lands clears the refusal: after the wake the window is the full one again, the row carries no sentence, and the next nap exports its vault", async () => {
+    const store = memoryStore();
+    const { rt, backend, fc, statuses } = testRuntime({}, { store });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const pause = refusingPause(backend.machines[0]!);
+      const puts = vaultPuts(store);
+      fc.advance(WINDOW);
+      const answered = fc.clock.now();
+      await until(() => statuses.some(s => s.idleAt === answered + backstopMs(WINDOW)));
+      pause.refusing = false;
+      await rt.workspaces.nap(ws.id);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+      expect(puts.n).toBe(1);
+      await rt.workspaces.wake(ws.id);
+      const woke = fc.clock.now();
+      const row = (await rt.status.list())[0]!;
+      expect(row.idleAt).toBe(woke + WINDOW);
+      expect(row.reason).toBeUndefined();
+      fc.advance(WINDOW);
+      await until(async () => (await rt.workspaces.get(ws.id)).phase === "napping");
+      expect(puts.n).toBe(2);
+      expect(pause.calls).toBe(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a pause asked for is rejected with the typed refusal and its sentence, and the refusal stands as the idle nap's does", async () => {
+    const { rt, backend, fc, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const pause = refusingPause(backend.machines[0]!);
+      const asked = fc.clock.now();
+      const e = await rt.workspaces.nap(ws.id).catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(NapRefusedError);
+      expect((e as Error).message).toBe(napRefusedLine("Not pausable"));
+      expect(pause.calls).toBe(1);
+      expect(statuses.at(-1)).toMatchObject({ phase: "running", reason: napRefusedLine("Not pausable") });
+      expect((await rt.status.list())[0]).toMatchObject({ reason: napRefusedLine("Not pausable"), idleAt: asked + WINDOW });
+      expect(warn.mock.calls).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a rebuild that puts another machine under the record drops the refusal: the full window and no sentence on the new machine", async () => {
+    const { rt, backend, fc, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      refusingPause(backend.machines[0]!);
+      fc.advance(WINDOW);
+      const answered = fc.clock.now();
+      await until(() => statuses.some(s => s.idleAt === answered + backstopMs(WINDOW)));
+      await rt.workspaces.rebuild(ws.id);
+      const rebuilt = fc.clock.now();
+      const row = (await rt.status.list())[0]!;
+      expect(row.machineId).toBe("m2");
+      expect(row.reason).toBeUndefined();
+      expect(row.idleAt).toBe(rebuilt + WINDOW);
     } finally {
       warn.mockRestore();
     }

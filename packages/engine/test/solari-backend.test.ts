@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { machineUnreachableLine, RESUME_UNANSWERED } from "@wsp/protocol";
-import { fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
+import { machineUnreachableLine, napRefusedLine, RESUME_UNANSWERED } from "@wsp/protocol";
+import { fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -412,6 +412,33 @@ describe("SolariBackend exec on a machine the provider cannot reach", () => {
     const e = await m.exec("true").catch((err: unknown) => err);
     expect(e).toMatchObject({ name: "Error", message: "Bad gateway", kind: "transient", status: 502 });
     expect(execCalls(f)).toBe(3);
+  });
+});
+
+describe("SolariBackend pause the provider refuses", () => {
+  const refusing = (error: string) =>
+    fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "sbx_1", kind: "sandbox" } },
+      "POST /sandboxes/sbx_1/pause": { status: 409, body: { error } },
+    });
+  const pauseCalls = (f: ReturnType<typeof fakeFetch>): number => f.mock.calls.filter(c => String(c[0]).endsWith("/pause")).length;
+
+  it("reads a 409 whose words are Not pausable as the typed refusal, asked once", async () => {
+    const f = refusing("Not pausable");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f }).create({ kind: "sandbox" });
+    const e = await m.pause().catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(NapRefusedError);
+    expect(e).toMatchObject({ name: "NapRefusedError", machineId: "sbx_1", said: "Not pausable" });
+    expect((e as Error).message).toBe(napRefusedLine("Not pausable"));
+    expect(pauseCalls(f)).toBe(1);
+  });
+
+  it("leaves a 409 with any other words the plain conflict it was", async () => {
+    const f = refusing("sandbox is not running");
+    const m = await new SolariBackend({ apiKey: "k", fetch: f }).create({ kind: "sandbox" });
+    const e = await m.pause().catch((err: unknown) => err);
+    expect(e).not.toBeInstanceOf(NapRefusedError);
+    expect(e).toMatchObject({ name: "Error", message: "sandbox is not running", kind: "conflict", status: 409 });
   });
 });
 

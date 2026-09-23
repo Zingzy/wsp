@@ -102,6 +102,7 @@ import {
   machineCapRefusal,
   machineUnreachableLine,
   machineUnreachedLine,
+  napRefusedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
   RESUME_UNANSWERED,
@@ -978,6 +979,12 @@ describe("guestUnusableLine", () => {
 describe("machineUnreachableLine", () => {
   it("quotes the provider's words and names the two roads open on a running machine, with no machine id", () => {
     expect(machineUnreachableLine("Sandbox is not reachable")).toBe("the provider cannot reach the machine (Sandbox is not reachable); pause and wake the workspace, or delete it");
+  });
+});
+
+describe("napRefusedLine", () => {
+  it("quotes the provider's words, says why it will not pause and names the road left", () => {
+    expect(napRefusedLine("Not pausable")).toBe("the provider does not pause this machine (Not pausable): its memory and disk together are over what it pauses; it runs until you delete it");
   });
 });
 
