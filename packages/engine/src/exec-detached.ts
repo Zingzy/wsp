@@ -3,12 +3,14 @@
 // and starts in its own session with its streams and exit code on disk, then
 // short execs read the files from where the last read stopped until the exit
 // code is there or the deadline kills the session. A poll that fails (the
-// machine napping) is retried after a pause; the deadline bounds that too.
+// machine napping) is retried after a pause; the deadline bounds that too,
+// and a guest the backend calls unusable or a machine the provider no longer
+// has ends the run at once.
 
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, EXEC_DEADLINE_EXIT, shellQuote } from "@wsp/protocol";
-import { GuestUnusableError } from "./errors.js";
+import { GuestUnusableError, isMissing } from "./errors.js";
 import type { ExecResult, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
@@ -338,9 +340,8 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
     try {
       poll = parsePoll((await exec(pollCommand(base, out.offset, err.offset))).stdout);
     } catch (e) {
-      // A guest that can no longer run anything will not answer a later poll either: waiting out the deadline
-      // would end in a bare 124 with nothing about whose fault it was.
-      if (e instanceof GuestUnusableError) throw e;
+      // An unusable guest or a machine the provider no longer has answers no later poll; waiting ends in a bare 124.
+      if (e instanceof GuestUnusableError || isMissing(e)) throw e;
       poll = undefined;
     }
     if (poll === undefined) {
