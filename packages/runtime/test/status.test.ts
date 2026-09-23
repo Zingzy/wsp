@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { EventUnion, PLACES_TICKET_REFUSAL, THREAD_OPS, computerOffline, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
+import { EventUnion, PLACES_TICKET_REFUSAL, THREAD_OPS, computerOffline, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { roadFailed } from "@wsp/engine";
+import { roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -1192,6 +1192,143 @@ describe("status zombie at rest", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("a machine the provider answered it cannot reach", () => {
+  const LINE = machineUnreachableLine("Sandbox is not reachable");
+  const EXPIRES = 1_900_000_000_000;
+  const wordOf = (s: WorkspaceStatus): string => workspaceWord(workspaceState({ phase: s.phase, machineState: s.machineState, reach: s.reach.state }));
+
+  /** A running fork whose daemon answers over its route while the provider refuses every command on it. */
+  async function marked(exec: StatusRecord["exec"], over: Partial<Pick<StatusRecord, "phase" | "providerState">> = {}) {
+    const daemon = await httpStub(426);
+    openServers.push(daemon.server);
+    const fc = fakeClock();
+    const calls = { state: 0, exec: 0, mints: 0 };
+    /** Down, the mint fails the way a lookup on this computer does, which is a tick that learns nothing. */
+    const road = { down: false };
+    const record: StatusRecord = {
+      id: "ws_u",
+      name: "far",
+      machineId: "sbx_1",
+      kind: "cloud",
+      phase: "running",
+      golden: "snap_g",
+      project: { id: "pr_1a2b3c4d", name: "far", path: "/root/far", computer: "here" },
+      createdAt: new Date(fc.clock.now()).toISOString(),
+      size: { cpu: 2, memMb: 4096 },
+      rateUsdPerHour: 0.11,
+      generation: 1,
+      daemonReach: async () => {
+        calls.mints++;
+        if (road.down) throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN edge.example"), { code: "EAI_AGAIN" }) });
+        return { url: `http://127.0.0.1:${daemon.port}/?port=7681`, expiresAt: EXPIRES };
+      },
+      providerState: async () => {
+        calls.state++;
+        return "running";
+      },
+      exec: (cmd, o) => {
+        calls.exec++;
+        return exec(cmd, o);
+      },
+      unreached: LINE,
+      ...over,
+    };
+    const tracker = createStatusTracker({ records: async () => [record], store: memoryStore(), emit: () => {}, on: () => () => {}, clock: fc.clock, defaults: { zombieProbeTimeoutMs: 2_000 } });
+    const poll = async (opts?: StatusListOptions): Promise<WorkspaceStatus> => {
+      fc.advance(POLL_INTERVAL_MS);
+      return (await tracker.list(opts))[0]!;
+    };
+    return { record, fc, calls, road, poll };
+  }
+  const refused = async (): Promise<ExecResult> => {
+    throw new Error(LINE);
+  };
+
+  it("reads Unreachable on the first poll with the provider's sentence, asks the provider, and starts one exec probe", async () => {
+    const { calls, poll } = await marked(refused);
+    const status = await poll();
+    expect(status).toMatchObject({ machineState: "running", reach: { state: "unreachable" }, reason: LINE });
+    expect(wordOf(status)).toBe("Unreachable");
+    expect(calls.state).toBe(1);
+    expect(calls.exec).toBe(1);
+  });
+
+  it("keeps the route minted and probed as every running record's, so the app's preview keeps its address", async () => {
+    const { calls, poll } = await marked(refused);
+    const status = await poll();
+    expect(calls.mints).toBe(1);
+    expect(status.reach.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?port=7681$/);
+    expect(status.reach.expiresAt).toBe(EXPIRES);
+  });
+
+  it("keeps Unreachable and the sentence across a tick where this computer's own road fails", async () => {
+    const { road, poll } = await marked(refused);
+    expect((await poll()).reach.state).toBe("unreachable");
+    road.down = true;
+    const status = await poll();
+    expect(status).toMatchObject({ reach: { state: "unreachable", offline: true }, reason: LINE });
+    expect(wordOf(status)).toBe("Unreachable");
+  });
+
+  it("reads Unreachable with the sentence when this computer's own road is down from a reader's first read", async () => {
+    const { road, poll } = await marked(refused);
+    road.down = true;
+    for (const status of [await poll(), await poll({ zombieProbe: false, reader: "table" })]) {
+      expect(status).toMatchObject({ reach: { state: "unreachable", offline: true }, reason: LINE });
+      expect(wordOf(status)).toBe("Unreachable");
+    }
+  });
+
+  it("spends no exec on a listing that will not wait, and keeps the sentence and the route there, while the poll still probes", async () => {
+    const { calls, poll } = await marked(refused);
+    const table = await poll({ zombieProbe: false, reader: "table" });
+    expect(table).toMatchObject({ reach: { state: "unreachable", expiresAt: EXPIRES }, reason: LINE });
+    expect(table.reach.url).toContain("127.0.0.1");
+    expect(calls.exec).toBe(0);
+    expect((await poll()).reason).toBe(LINE);
+    expect(calls.exec).toBe(1);
+  });
+
+  it("holds one exec probe in flight however many ticks pass while the provider hangs", async () => {
+    const { calls, poll } = await marked(() => new Promise<never>(() => {}));
+    expect((await poll()).reach.state).toBe("unreachable");
+    expect((await poll()).reach.state).toBe("unreachable");
+    expect((await poll()).reason).toBe(LINE);
+    expect(calls.exec).toBe(1);
+  });
+
+  it("past the zombie window with the probe failing reads zombie, the sentence still its reason and the judge's line in the log", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { fc, poll } = await marked(refused);
+      expect((await poll()).reach.state).toBe("unreachable");
+      fc.advance(3 * 60_000);
+      const status = await poll();
+      expect(status).toMatchObject({ machineState: "running", reach: { state: "zombie" }, reason: LINE });
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([expect.stringMatching(/^zombie on sbx_1 \(workspace ws_u\): .*exec probe "echo ok" failed after \d+ ms/)]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reads what the probe says again once the mark is off", async () => {
+    const { record, poll } = await marked(async () => ({ exitCode: 0, stdout: "ok\n", stderr: "" }));
+    expect((await poll()).reason).toBe(LINE);
+    delete record.unreached;
+    const status = await poll();
+    expect(status.reach.state).toBe("reachable");
+    expect(status.reason).toBeUndefined();
+  });
+
+  it("a napping record with the mark reads napping and asks the machine nothing", async () => {
+    const { calls, poll } = await marked(refused, { phase: "napping", providerState: async () => "paused" });
+    const status = await poll();
+    expect(status.reach.state).toBe("napping");
+    expect(status.reason).toBeUndefined();
+    expect(calls.exec).toBe(0);
   });
 });
 

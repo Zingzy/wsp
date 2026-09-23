@@ -1,5 +1,5 @@
 import { moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
-import { MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { MachineUnreachableError, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -100,6 +100,10 @@ export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
 /** The longest one exec may ask the provider for: "timeoutMs must be at most 26000 for a dedicated sandbox" (400 on
  * 26001, measured 2026-09-23), so anything longer runs detached on the guest instead. */
 export const SOLARI_INLINE_MAX_MS = 26_000;
+
+/** The provider's answer to a command on a machine it has lost the road to while its state read still says running
+ * (seen 2026-09-23). Matched on the words alone: the status it rode on was never recorded. */
+const SANDBOX_UNREACHABLE = "Sandbox is not reachable";
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
 export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
@@ -348,11 +352,16 @@ class SolariMachine implements Machine {
     // bash -c, never -lc: login shells reset PATH and lose /root/.local/bin.
     // The exec environment carries PATH and nothing else (measured 2026-09-05): HOME and USER go ahead of
     // every command, SHELL stays unset so a pty reads it off passwd.
-    return this.backend.request<ExecResult>("POST", this.path("/exec"), {
-      cmd: "bash",
-      args: ["-c", `${EXEC_ENV}\n${cmd}`],
-      timeoutMs,
-    });
+    try {
+      return await this.backend.request<ExecResult>("POST", this.path("/exec"), {
+        cmd: "bash",
+        args: ["-c", `${EXEC_ENV}\n${cmd}`],
+        timeoutMs,
+      });
+    } catch (e) {
+      if (e instanceof Error && e.message === SANDBOX_UNREACHABLE) throw new MachineUnreachableError(this.id, e.message, (e as { status?: number }).status ?? 0);
+      throw e;
+    }
   }
 
   run(script: string, opts: RunOptions): Promise<ExecResult> {

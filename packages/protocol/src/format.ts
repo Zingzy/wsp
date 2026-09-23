@@ -1242,6 +1242,13 @@ export function guestUnusableLine(provider: string, machineId: string, detail: s
   return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
 }
 
+/** What a machine is called when the provider answers that it cannot reach it: the provider's own words, then the two
+ * roads open on a running machine. A wake of a running machine changes nothing and a rebuild is refused while the
+ * machine is only not answering, so neither is named; the machine's id is nothing a person acts on. */
+export function machineUnreachableLine(said: string): string {
+  return `the provider cannot reach the machine (${said}); pause and wake the workspace, or delete it`;
+}
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */

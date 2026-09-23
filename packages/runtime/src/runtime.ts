@@ -7,6 +7,7 @@ import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
   INLINE_EXEC_MS,
+  MachineUnreachableError,
   MoveUnansweredError,
   NotFirstLifeError,
   ResumeUnansweredError,
@@ -1646,8 +1647,8 @@ const goneLogLine = (workspaceId: string, words: string): string => `workspace $
 /** The host log's one line for the runs a connecting host ended on a machine because no row of its own held them. */
 const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): string =>
   `ended ${runs.length === 1 ? "1 harness run" : `${runs.length} harness runs`} on ${workspaceId} that no thread here holds: ${runs.join(", ")}`;
-/** The host log's one line for a harness store that would not give a title; the read window keeps it to one line
- * per session rather than one per refresh. */
+/** The host log's one line for a harness store that would not give a title, said once per session until a read
+ * answers. */
 const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
   `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
 /** The host log's one line for a thread its harness would not name; the thread keeps its opening turn's words and
@@ -3517,6 +3518,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * carry a line about the daemon happen exactly when the daemon is dead: claiming reachable there paints the row
    * as answering, and leaves the poll's own no-daemon looking like a repeat of the claim, which the bus drops. */
   const reachOf = (entry: LiveWorkspace): ReachState => {
+    if (unreachedOf(entry) !== undefined) return "unreachable";
     const seen = polledReach.get(entry.record.id);
     if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
     // The same reading the status poll makes: a machine wsp can ask at all, by a route or by its own answer.
@@ -3825,6 +3827,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const revivedAt = new Map<string, MachineMoment>();
   /** Every workspace whose last sync could not read its daemon's version, and when that read gave up. */
   const unreadAt = new Map<string, MachineMoment>();
+  /** Every workspace whose machine the provider last answered it cannot reach, with the sentence its row carries. */
+  const unreached = new Map<string, { machineId: string; line: string }>();
+  /** The mark on the entry's own machine; one a replaced machine left is dropped here. */
+  const unreachedOf = (entry: LiveWorkspace): string | undefined => {
+    const mark = unreached.get(entry.record.id);
+    if (mark === undefined) return undefined;
+    if (mark.machineId === entry.machine.id) return mark.line;
+    unreached.delete(entry.record.id);
+    return undefined;
+  };
   const daemonRevivals = new Map<string, Promise<void>>();
 
   /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
@@ -3838,7 +3850,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * no ptys to lose. One run per machine at a time. */
   const reviveDaemon = (entry: LiveWorkspace, reach: ReachState): void => {
     if (reach !== "no-daemon" || entry.record.phase !== "running") return;
-    if (!canDeployDaemon(entry)) return;
+    // A deploy rides the exec the provider is refusing, and its failure would flash over the row's own sentence.
+    if (!canDeployDaemon(entry) || unreachedOf(entry) !== undefined) return;
     const key = entry.machine.id;
     if (daemonRevivals.has(key)) return;
     const last = revivedAt.get(entry.record.id);
@@ -4029,6 +4042,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       },
     });
   };
+  /** The entry's machine with every exec and run read for the provider's word that it cannot reach it: that refusal
+   * marks the workspace and puts the sentence on the row now, and any answer takes the mark off for the next tick to
+   * say, since a push here would carry the marked tick's reach without its sentence. */
+  const watched = (entry: LiveWorkspace, machine: Machine): Machine => {
+    const heard = async (call: () => Promise<ExecResult>): Promise<ExecResult> => {
+      let res: ExecResult;
+      try {
+        res = await call();
+      } catch (e) {
+        if (e instanceof MachineUnreachableError && entry.machine.id === machine.id) {
+          const standing = unreached.get(entry.record.id)?.machineId === machine.id;
+          unreached.set(entry.record.id, { machineId: machine.id, line: e.message });
+          if (!standing && entry.record.phase === "running") await emitStatus(entry, "unreachable", e.message);
+        }
+        throw e;
+      }
+      if (unreached.get(entry.record.id)?.machineId === machine.id) unreached.delete(entry.record.id);
+      return res;
+    };
+    const exec = (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => heard(() => machine.exec(cmd, o));
+    const run = (script: string, o: RunOptions): Promise<ExecResult> => heard(() => machine.run(script, o));
+    return new Proxy(machine, {
+      get(target, prop) {
+        if (prop === "exec") return exec;
+        if (prop === "run") return run;
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+  };
   const observing = (b: MachineBackend): MachineBackend => ({ ...b, create: async spec => observed(await b.create(spec)), get: async id => observed(await b.get(id)) });
   /** Boots a golden fork for the record and writes back what the provider says it built.
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
@@ -4110,6 +4153,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
     const entry: LiveWorkspace = { record, machine, ws: undefined as unknown as Workspace, generation: (live.get(record.id)?.generation ?? -1) + 1 };
+    entry.machine = watched(entry, machine);
     const at = backendFor(record);
     /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
      * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
@@ -4129,7 +4173,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         wakeAttempts: at.lifecycle?.budgets.wakeAttempts ?? 0,
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
-            entry.machine = m;
+            entry.machine = watched(entry, m);
           }, override),
         ...(vaulted
           ? ({
@@ -4222,6 +4266,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     live.delete(id);
     revivedAt.delete(id);
     unreadAt.delete(id);
+    unreached.delete(id);
     polledReach.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
@@ -5720,8 +5765,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
-   * clients reload the index on every session event and each reload must not cost an exec. */
-  const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean }>();
+   * clients reload the index on every session event and each reload must not cost an exec. `failed` holds from a
+   * read that failed until one answers, so a store that fails every window is said once. */
+  const titleReads = new Map<string, { at: number; done: Promise<void>; live: boolean; failed: boolean }>();
   /** Asks the harness what it calls a row's session and keeps the answer on every row that shares it, so the title
    * a client folds a thread by follows a rename made inside the harness. `force` reads past the TTL: a turn has just
    * ended, which is when the harness writes its own title. Nothing happens while the machine cannot be asked, or
@@ -5731,7 +5777,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const sessionId = view.claudeSessionId;
     const entry = live.get(view.workspaceId);
     if (sessionId === undefined || entry === undefined) return Promise.resolve();
-    if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return Promise.resolve();
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || unreachedOf(entry) !== undefined || adapters[view.harness] === undefined) return Promise.resolve();
     const key = `${entry.machine.id}:${sessionId}`;
     const hit = titleReads.get(key);
     const now = clock.now();
@@ -5739,7 +5785,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The adapter is built after the window is checked, so a refresh inside it costs nothing at all.
     const read = adapterFor(entry, view.harness).adapter.sessionTitle;
     if (read === undefined) return Promise.resolve();
-    const pending: { at: number; done: Promise<void>; live: boolean } = { at: now, live: true, done: Promise.resolve() };
+    const pending: { at: number; done: Promise<void>; live: boolean; failed: boolean } = { at: now, live: true, done: Promise.resolve(), failed: hit?.failed ?? false };
     // The read is started inside a promise and never on this stack: an adapter that refuses the id throws where it
     // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
@@ -5753,6 +5799,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       })
       .then(
         async title => {
+          pending.failed = false;
           if (title === null) return;
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
@@ -5766,7 +5813,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           await persistSessions(entry.record.id);
         },
-        (e: unknown) => console.warn(noTitleLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
+        (e: unknown) => {
+          if (!pending.failed) console.warn(noTitleLogLine(sessionId, entry.record.id, providerSaid(e)));
+          pending.failed = true;
+        },
       );
     titleReads.set(key, pending);
     return pending.done;
@@ -8772,6 +8822,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
+        ...(unreachedOf(e) !== undefined ? { unreached: unreachedOf(e)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),

@@ -10,7 +10,7 @@
 // resets Solari's idle timer, so a poller that asked per tick kept every
 // workspace awake and billing forever.
 
-import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
+import { MachineUnreachableError, isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
 import { appendCostPoint, goneWords, monthStart, reachShown, spentSince, workspacePlaceId, type EventUnion, type MachineFacts, type PlaceSpend, type PlaceView, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
@@ -41,9 +41,10 @@ export function phaseLeavingGone(read: MachineState): "running" | "napping" | un
   return read === "running" ? "running" : read === "paused" ? "napping" : undefined;
 }
 
-/** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both. */
+/** The provider's answer as a row or a log line quotes it: its status and message when the call answered with both.
+ * The typed refusal's message is wsp's own sentence, so the words quoted are the provider's it carries. */
 export function providerSaid(e: unknown): string {
-  const message = e instanceof Error ? e.message : String(e);
+  const message = e instanceof MachineUnreachableError ? e.said : e instanceof Error ? e.message : String(e);
   const status = (e as { status?: unknown } | null)?.status;
   return typeof status === "number" ? `${status} ${message}` : message;
 }
@@ -192,6 +193,8 @@ export interface StatusRecord extends WorkspaceView {
    * lives on is not connected. The row says so and the provider is asked nothing, since the road to the provider
    * is that computer. Absent on every machine that can be asked. */
   away?: string;
+  /** The provider's sentence for a machine it answered that it cannot reach, standing until any command answers. */
+  unreached?: string;
 }
 
 export interface StatusTrackerOptions {
@@ -597,8 +600,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, ...view } = r;
+        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, unreached, ...view } = r;
         void away;
+        void unreached;
         void providerState;
         void metrics;
         void exec;
@@ -653,12 +657,24 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         }
         const memory = probesOf(r, opts?.reader ?? "app");
         const at = route === undefined ? {} : { url: route.url, expiresAt: route.expiresAt };
-        // Nothing was learnt about the machine: the row keeps its word, the run of probes under it is left as it was.
-        if (probed.offline === true) return done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true });
+        // Nothing was learnt about the machine: the row keeps its word, or the provider's sentence where one stands.
+        if (probed.offline === true) return { ...done(await machineState(r, reconcile, false), { state: r.unreached !== undefined ? "unreachable" : memory.shown, ...at, offline: true }), ...(r.unreached !== undefined ? { reason: r.unreached } : {}) };
         if (probed.fromDaemon) sawAwake(r.id);
         const shown = reachShown(memory.last, probed.state);
         memory.last = probed.state;
         memory.shown = shown;
+        // The provider's refusal is an answer, not a silence: the row turns at once, keeps its route, and one exec probe heals it.
+        if (r.unreached !== undefined) {
+          const s = suspectOf(r);
+          if (opts?.zombieProbe !== false) {
+            s.probe ??= probeExec(r).finally(() => {
+              s.probe = undefined;
+            });
+          }
+          const judged = await judge(r, { state: "unreachable", ...at }, opts);
+          memory.shown = judged.reach.state;
+          return { ...done(judged.state, judged.reach), ...(judged.state === "running" ? { reason: r.unreached } : {}) };
+        }
         // A route the reach itself depended on and could not get is a failed reach with no zombie window: the guest
         // was never dialled. Where the machine answered for its own daemon the route is only the app's road, and
         // its absence says nothing about the guest.
@@ -762,9 +778,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const pollTick = async (): Promise<void> => {
     const records = await o.records();
     const statuses = await statusesOf(records, { reconcile: "on-failure" });
-    // A record written while its poll was in flight pushed its own row since; the poll's older row would put a phase the record has left back on the screen.
-    const built = new Map(records.map(r => [r.id, r.generation]));
-    const now = new Map((await o.records()).map(r => [r.id, r.generation]));
+    // A record written, marked or moved to another machine while its poll was in flight pushed its own row since; the poll's older row would put back what the record has left.
+    const stamp = (r: StatusRecord): string => `${r.generation} ${r.machineId} ${r.unreached ?? ""}`;
+    const built = new Map(records.map(r => [r.id, stamp(r)]));
+    const now = new Map((await o.records()).map(r => [r.id, stamp(r)]));
     o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
     for (const status of statuses) {
       if (now.get(status.id) !== built.get(status.id)) continue;
