@@ -298,7 +298,7 @@ async function signIn(io: CliIO, opts: RelayCommandOpts, relayUrl: string, deps:
   const started = await startLink(deps, relayUrl, { kind: "client", name, fingerprint: key.fingerprint });
   io.log(`word        ${pairToken(started.code, key.fingerprint)}`);
   io.log(`code        ${started.code}`);
-  io.log(`open        ${relayUrl}${VERIFY_PAGE_PATH}`);
+  io.log(`open        ${started.verifyUrl}`);
   io.log(`On a computer already signed in: wsp login ${pairToken(started.code, key.fingerprint)}, which signs this computer's key for the hosts it can reach.`);
   io.log(`Or open that page, sign in with GitHub and type ${started.code} there, which signs this computer in to read the account and admits it to no host until a computer already in runs wsp login <id> for it.`);
   io.log(`The code stands for ${fmtDuration(LINK_WAIT_MS)} and is spent by the approval.`);
