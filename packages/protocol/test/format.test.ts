@@ -77,6 +77,7 @@ import {
   nameDeletingRefusal,
   nameTakenRefusal,
   recordRestoredLine,
+  execFailedLine,
   execFolderLine,
   folderRefusalLine,
   fmtBytes,
@@ -979,6 +980,12 @@ describe("guestUnusableLine", () => {
 describe("machineUnreachableLine", () => {
   it("quotes the provider's words and names the two roads open on a running machine, with no machine id", () => {
     expect(machineUnreachableLine("Sandbox is not reachable")).toBe("the provider cannot reach the machine (Sandbox is not reachable); pause and wake the workspace, or delete it");
+  });
+});
+
+describe("execFailedLine", () => {
+  it("quotes the provider's words, says the threads may still be running and puts waiting first, with no machine id", () => {
+    expect(execFailedLine("exec failed")).toBe("the provider cannot run commands on the machine (exec failed) while the machine and its threads may still be running; wait, or pause and wake the workspace, or delete it");
   });
 });
 

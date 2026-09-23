@@ -3274,7 +3274,7 @@ describe("runtime daemon reach", () => {
       const refusing = new Set<string>();
       const hanging = new Set<string>();
       backend.execImpl = (m, cmd) => {
-        if (refusing.has(m.id)) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502);
+        if (refusing.has(m.id)) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502, LINE);
         if (hanging.has(m.id)) return new Promise<never>(() => {});
         return tokenGuest(m, cmd);
       };

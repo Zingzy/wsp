@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { machineUnreachedLine } from "@wsp/protocol";
-import { classify, isNetworkError, MachineUnreached, shouldRetry, untilReached } from "../src/errors.js";
+import { execFailedLine, machineUnreachableLine, machineUnreachedLine } from "@wsp/protocol";
+import { classify, ExecFailedError, isNetworkError, MachineUnreachableError, MachineUnreached, shouldRetry, untilReached } from "../src/errors.js";
 
 /** The link rule's waits, each with the jitter it draws on top of its own base. */
 const expectBackoffs = (waits: readonly number[], bases: readonly number[]): void => {
@@ -30,6 +30,22 @@ describe("error policy", () => {
   it("maps 402/403/404 to permanent", () => {
     expect(classify(402, { code: "InsufficientCredit" }).kind).toBe("plan");
     expect(classify(404, {}).kind).toBe("missing");
+  });
+});
+
+describe("the provider's refusal of a running machine", () => {
+  it("is the base for an exec the provider cannot run, with that answer's own sentence", () => {
+    const e = new ExecFailedError("m1", "exec failed", 502);
+    expect(e).toBeInstanceOf(MachineUnreachableError);
+    expect(e.message).toBe(execFailedLine("exec failed"));
+    expect(e).toMatchObject({ name: "ExecFailedError", machineId: "m1", said: "exec failed", status: 502 });
+  });
+
+  it("keeps the sentence it was handed for the answer that it cannot reach the machine, and is no ExecFailedError", () => {
+    const e = new MachineUnreachableError("m1", "Sandbox is not reachable", 502, machineUnreachableLine("Sandbox is not reachable"));
+    expect(e.message).toBe(machineUnreachableLine("Sandbox is not reachable"));
+    expect(e).toMatchObject({ name: "MachineUnreachableError", machineId: "m1", said: "Sandbox is not reachable", status: 502 });
+    expect(e).not.toBeInstanceOf(ExecFailedError);
   });
 });
 

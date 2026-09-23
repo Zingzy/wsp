@@ -1,5 +1,5 @@
-import { moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
-import { MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { machineUnreachableLine, moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
+import { ExecFailedError, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -104,6 +104,9 @@ export const SOLARI_INLINE_MAX_MS = 26_000;
 /** The provider's answer to a command on a machine it has lost the road to while its state read still says running
  * (seen 2026-09-23). Matched on the words alone: the status it rode on was never recorded. */
 const SANDBOX_UNREACHABLE = "Sandbox is not reachable";
+
+/** The provider's 502 to a command on a machine its state read says running (seen 2026-09-23); status and words both recorded. */
+const EXEC_FAILED = "exec failed";
 
 /** The provider's 409 to a pause of a machine whose memory and disk together pass about 10 GB (measured 2026-09-23). */
 const NOT_PAUSABLE = "Not pausable";
@@ -362,7 +365,8 @@ class SolariMachine implements Machine {
         timeoutMs,
       });
     } catch (e) {
-      if (e instanceof Error && e.message === SANDBOX_UNREACHABLE) throw new MachineUnreachableError(this.id, e.message, (e as { status?: number }).status ?? 0);
+      if (e instanceof Error && e.message === SANDBOX_UNREACHABLE) throw new MachineUnreachableError(this.id, e.message, (e as { status?: number }).status ?? 0, machineUnreachableLine(e.message));
+      if ((e as { status?: unknown }).status === 502 && e instanceof Error && e.message === EXEC_FAILED) throw new ExecFailedError(this.id, e.message, 502);
       throw e;
     }
   }

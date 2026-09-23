@@ -11,7 +11,7 @@ import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
 import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import { MachineUnreachableError, type Machine } from "@wsp/engine";
-import { EMPTY_TITLE_LINE, foldThreads, keepsRename, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
+import { EMPTY_TITLE_LINE, foldThreads, keepsRename, machineUnreachableLine, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { machineExecStream } from "../src/machine-exec.js";
@@ -305,7 +305,7 @@ describe("a title read that fails", () => {
   const titleLines = (warn: { mock: { calls: unknown[][] } }): string[] => warn.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith("no title for session"));
 
   it("says once, with the provider's status, that a machine the provider cannot reach gave no title, and reads nothing more while the mark stands", async () => {
-    const { backend, reads } = failingBackend(() => new MachineUnreachableError("m1", "Sandbox is not reachable", 503));
+    const { backend, reads } = failingBackend(() => new MachineUnreachableError("m1", "Sandbox is not reachable", 503, machineUnreachableLine("Sandbox is not reachable")));
     const { clock, advance } = fakeClock();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

@@ -650,7 +650,7 @@ describe("machineExecStream", () => {
 
   it("a launch the provider refuses because it cannot reach the machine fails once, in the provider's sentence with no machine id", async () => {
     const { backend, machine } = await makeMachine();
-    const g = unreachedGuest(backend, 99, () => new MachineUnreachableError(machine.id, "Sandbox is not reachable", 502));
+    const g = unreachedGuest(backend, 99, () => new MachineUnreachableError(machine.id, "Sandbox is not reachable", 502, machineUnreachableLine("Sandbox is not reachable")));
     const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
     const thrown = await (async () => {
       try {
