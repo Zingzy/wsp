@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DISK_SYNC_CMD } from "@wsp/engine";
 import { addedProjectOn, addingProjectLine, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { MEMORY_KEPT_MARK, MEMORY_STANDS_MARK } from "../src/project-landing.js";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
@@ -338,6 +339,18 @@ describe("a project on a provider", () => {
     expect(specs(backend)[before]?.fromSnapshot).toBe(project.image?.snapshotId);
     // A copy forked from the project image holds the checkout already: nothing clones into it again.
     expect(backend.machines.flatMap(m => m.execLog).filter(cmd => cmd.includes("git clone")).length).toBe(1);
+  });
+
+  it("syncs the builder's disk before the provider is asked for the project's image", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder) });
+    answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package-lock.json\n", stderr: "" } : undefined));
+    const synced: number[] = [];
+    backend.beforeSnapshot = m => {
+      synced.push(m.execLog.filter(c => c === DISK_SYNC_CMD).length);
+    };
+    await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(synced).toEqual([1]);
   });
 
   it("the machine it was built from is stopped, and the person's own folder stays on this computer", async () => {
