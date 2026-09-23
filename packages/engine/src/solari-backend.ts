@@ -1,5 +1,5 @@
 import { moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
-import { MachineUnreachableError, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -104,6 +104,9 @@ export const SOLARI_INLINE_MAX_MS = 26_000;
 /** The provider's answer to a command on a machine it has lost the road to while its state read still says running
  * (seen 2026-09-23). Matched on the words alone: the status it rode on was never recorded. */
 const SANDBOX_UNREACHABLE = "Sandbox is not reachable";
+
+/** The provider's 409 to a pause of a machine whose memory and disk together pass about 10 GB (measured 2026-09-23). */
+const NOT_PAUSABLE = "Not pausable";
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
 export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
@@ -395,6 +398,7 @@ class SolariMachine implements Machine {
           await this.backend.request("POST", this.path("/pause"), {}, attempt === 1 ? left / 2 : left);
           return;
         } catch (e) {
+          if ((e as { status?: unknown }).status === 409 && e instanceof Error && e.message === NOT_PAUSABLE) throw new NapRefusedError(this.id, e.message);
           if (!isCapped(e) && !isNetworkError(e)) throw e;
           unanswered = e;
         }
