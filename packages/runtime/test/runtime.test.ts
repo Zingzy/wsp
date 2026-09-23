@@ -7,9 +7,9 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
+import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, ExecFailedError, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -3268,13 +3268,14 @@ describe("runtime daemon reach", () => {
     const TABLE = { reconcile: "on-failure", zombieProbe: false, reader: "table" } as const;
 
     /** A fork whose daemon answers over its route while the provider refuses every command on the machines in
-     * `refusing`, and answers none on those in `hanging`. */
-    async function refusedFork(o: { up?: () => boolean; recipe?: { setup: string; smoke: string; deployDaemon: (m: { id: string }) => Promise<void> } } = {}) {
+     * `refusing` with `refusal`, and answers none on those in `hanging`. */
+    async function refusedFork(o: { up?: () => boolean; recipe?: { setup: string; smoke: string; deployDaemon: (m: { id: string }) => Promise<void> }; refusal?: (machineId: string) => MachineUnreachableError } = {}) {
       const backend = stubBackend();
       const refusing = new Set<string>();
       const hanging = new Set<string>();
+      const refusal = o.refusal ?? (id => new MachineUnreachableError(id, "Sandbox is not reachable", 502, LINE));
       backend.execImpl = (m, cmd) => {
-        if (refusing.has(m.id)) throw new MachineUnreachableError(m.id, "Sandbox is not reachable", 502, LINE);
+        if (refusing.has(m.id)) throw refusal(m.id);
         if (hanging.has(m.id)) return new Promise<never>(() => {});
         return tokenGuest(m, cmd);
       };
@@ -3336,6 +3337,34 @@ describe("runtime daemon reach", () => {
         stop();
       }
       // The answer pushes nothing and the tick it healed under drops the row it built marked: the next tick speaks once.
+      expect(pushed.slice(before).map(st => `${st.reach.state} ${st.reason ?? "-"}`)).toEqual(["reachable -"]);
+      expect(probes(backend.machines[0]!)).toBe(1);
+    });
+
+    it("puts the second answer's sentence on the row when the provider cannot run commands on the machine, and the table reads the same", async () => {
+      const EXEC_LINE = execFailedLine("exec failed");
+      const { rt, ws, refusing, pushed } = await refusedFork({ refusal: id => new ExecFailedError(id, "exec failed", 502) });
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(EXEC_LINE);
+      expect(pushed.at(-1)).toMatchObject({ id: ws.id, machineState: "running", reach: { state: "unreachable" }, reason: EXEC_LINE });
+      const row = (await rt.status.list(TABLE))[0]!;
+      expect(row).toMatchObject({ id: ws.id, machineState: "running", reach: { state: "unreachable" }, reason: EXEC_LINE });
+      expect(row.reach.url).toContain("127.0.0.1");
+    });
+
+    it("heals the second answer at the next tick as it heals the first", async () => {
+      const { backend, rt, ws, refusing, pushed, poll, watch, probes } = await refusedFork({ refusal: id => new ExecFailedError(id, "exec failed", 502) });
+      refusing.add("m1");
+      await expect(rt.workspaces.exec(ws.id, "true")).rejects.toThrow(execFailedLine("exec failed"));
+      refusing.delete("m1");
+      const before = pushed.length;
+      const stop = await watch();
+      try {
+        expect(probes(backend.machines[0]!)).toBe(1);
+        await poll();
+      } finally {
+        stop();
+      }
       expect(pushed.slice(before).map(st => `${st.reach.state} ${st.reason ?? "-"}`)).toEqual(["reachable -"]);
       expect(probes(backend.machines[0]!)).toBe(1);
     });
