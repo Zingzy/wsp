@@ -80,6 +80,8 @@ export {
 /** A code stands a quarter of an hour on the relay, so nothing here waits longer than that for the approval. */
 const LINK_WAIT_MS = 15 * 60_000;
 const POLL_MS = 3_000;
+/** The relay's page a person types a code and signs computers out on, spelled here because no code is shared with it. */
+const VERIFY_PAGE_PATH = "/link/verify";
 
 export interface RelayDeps {
   fetch: typeof fetch;
@@ -280,7 +282,7 @@ export async function loginCommand(io: CliIO, opts: RelayCommandOpts, word: stri
   const row = (await relayClients(client, deps)).find(c => c.id === word);
   if (row === undefined) throw usageRefusal(`no computer with the id ${word} is signed in to ${client.relayUrl}.`, "Run wsp login on its own to read the ids on this account.");
   if (row.fingerprint === null || row.fingerprint === undefined) {
-    throw usageRefusal(`${row.name} signed in with no device key, so no host can admit it.`, `Sign it out with wsp logout ${row.id} and run wsp login there again.`);
+    throw usageRefusal(`${row.name} signed in with no device key, so no host can admit it.`, `Sign it out with wsp logout ${row.id}, or from ${client.relayUrl}${VERIFY_PAGE_PATH} in your browser, and run wsp login there again.`);
   }
   await relayCall(deps, `${client.relayUrl}/clients/${encodeURIComponent(row.id)}/admissions`, { method: "POST", token: client.token, body: signAdmission(pair, row.fingerprint, deps.now()) });
   io.log(`${row.name} is admitted to every host that trusts this computer's key; each one reads it on its next beat, within ${fmtDuration(HOST_BEAT_MS)}`);
@@ -296,7 +298,7 @@ async function signIn(io: CliIO, opts: RelayCommandOpts, relayUrl: string, deps:
   const started = await startLink(deps, relayUrl, { kind: "client", name, fingerprint: key.fingerprint });
   io.log(`word        ${pairToken(started.code, key.fingerprint)}`);
   io.log(`code        ${started.code}`);
-  io.log(`open        ${relayUrl}/link/verify`);
+  io.log(`open        ${relayUrl}${VERIFY_PAGE_PATH}`);
   io.log(`On a computer already signed in: wsp login ${pairToken(started.code, key.fingerprint)}, which signs this computer's key for the hosts it can reach.`);
   io.log(`Or open that page, sign in with GitHub and type ${started.code} there, which signs this computer in to read the account and admits it to no host until a computer already in runs wsp login <id> for it.`);
   io.log(`The code stands for ${fmtDuration(LINK_WAIT_MS)} and is spent by the approval.`);
