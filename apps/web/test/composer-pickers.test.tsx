@@ -364,7 +364,7 @@ describe("composer pickers", () => {
     expect(source()).toBe("codex table · app-server 0.153.0, 2026-09-07");
 
     fireEvent.click(tab("claude"));
-    await waitFor(() => expect(source()).toBe("claude table · --help 2.1.257, 2026-09-05"));
+    await waitFor(() => expect(source()).toBe("claude table · --help 2.1.280, 2026-09-23"));
   });
 
   it("the foot says a turn runs on the agent's own sign-in on this computer and costs this wsp nothing", async () => {

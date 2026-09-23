@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { THREAD_AGENTS } from "@wsp/catalog";
+import { parseCatalogProbe } from "@wsp/adapter-claude";
+import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
 import { HarnessCatalog, catalogSourceLine, effortsFor, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, OVER_SSH, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
 
@@ -36,13 +38,28 @@ describe("harness catalogs", () => {
   });
 
   it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
-    expect(harnessCatalog("claude")!.version).toBe("--help 2.1.257, 2026-09-05");
+    expect(harnessCatalog("claude")!.version).toBe("--help 2.1.280, 2026-09-23");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
     expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
     for (const id of ["gemini", "opencode", "pi", "hermes"]) {
       expect(harnessCatalog(id)!.version, id).toBeNull();
       expect(catalogSourceLine(harnessCatalog(id)!, THIS_COMPUTER)).toBe(`${id} table`);
     }
+  });
+
+  it("the claude row is the pinned binary's own handshake, so a bump of the pin fails here until a recording and the row move with it", () => {
+    const recording = new URL(`../../adapter-claude/test/fixtures/catalog-probe-${CLAUDE_CODE.version}.txt`, import.meta.url);
+    if (!existsSync(recording)) throw new Error(`no recorded handshake for ${CLAUDE_CODE.version}; record one with the probe command`);
+    const probe = parseCatalogProbe(readFileSync(recording, "utf8"))!;
+    expect(probe.version).toBe(CLAUDE_CODE.version);
+    const row = harnessCatalog("claude")!;
+    expect(row.version).toContain(` ${CLAUDE_CODE.version}, `);
+    const heard = catalogFromProbe(row, probe);
+    const models = (c: HarnessCatalog) => c.models.map(m => ({ value: m.value, isDefault: m.isDefault === true, efforts: m.efforts, contextWindows: m.contextWindows }));
+    expect(models(row)).toEqual(models(heard));
+    expect(row.efforts.map(o => o.value)).toEqual(heard.efforts.map(o => o.value));
+    expect(new Set(row.permissionModes.map(o => o.value))).toEqual(new Set(heard.permissionModes.map(o => o.value)));
+    expect(row.models.map(m => m.value)).toContain(row.smallModel);
   });
 
   it("Codex offers the models and reasoning efforts its app-server reports, and no context window", () => {
@@ -67,9 +84,11 @@ describe("harness catalogs", () => {
 
   it("Claude Code offers the models, effort levels, context windows and permission modes its CLI takes", () => {
     const claude = harnessCatalog("claude")!;
-    expect(claude.models.map(o => o.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
-    expect(claude.models.find(o => o.isDefault)?.value).toBe("claude-opus-5");
-    expect(claude.models.map(o => o.contextWindows)).toEqual([["200k", "1m"], ["200k", "1m"], []]);
+    expect(claude.models.map(o => o.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
+    expect(claude.models.find(o => o.isDefault)?.value).toBe("claude-opus-5-5");
+    expect(claude.models.map(o => o.contextWindows)).toEqual([["200k", "1m"], ["200k", "1m"], [], []]);
+    // Haiku answers no effort list, so it takes no --effort.
+    expect(claude.models.map(o => o.efforts?.length)).toEqual([5, 5, 5, 0]);
     expect(claude.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
     // The handshake names no default effort; the CLI documents high on every model that takes one.
     expect(claude.efforts.find(o => o.isDefault)?.value).toBe("high");
@@ -103,8 +122,8 @@ describe("the default effort of a pick", () => {
     const claude = harnessCatalog("claude")!;
     expect(markedDefault(effortsFor(claude, markedDefault(claude.models) ?? null))?.value).toBe("high");
     expect(markedDefault(effortsFor(claude, null))?.value).toBe("high");
-    // Every model this list carries is one a thread may be opened on, so each has the effort its turns run at.
-    for (const m of claude.models) expect(markedDefault(effortsFor(claude, m))?.value).toBe("high");
+    // Every model this list carries that takes an effort runs at high, and Haiku, which takes none, is given none.
+    expect(claude.models.map(m => markedDefault(effortsFor(claude, m))?.value)).toEqual(["high", "high", "high", undefined]);
     expect(modelOf(claude, "claude-fable-5-1")).toMatchObject({ label: "Fable 5.1", contextWindows: ["200k", "1m"] });
     // A model the binary routes to another provider names no efforts and no default of its own.
     expect(markedDefault(effortsFor(codex, { value: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5" }))?.value).toBe("low");
@@ -224,7 +243,7 @@ describe("startPicks", () => {
   /** The lists as a workspace answers with them, which is the only shape a start is ever checked against: the
    * mark is placed against that workspace's kind, and a fork wsp made runs every action without asking. */
   const claude = workspaceAccess(harnessCatalog("claude")!, "cloud");
-  const MODELS = "Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)";
+  const MODELS = "Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)";
   /** A catalog whose default model takes two of the five efforts and whose other model takes none. */
   const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
 
@@ -232,14 +251,14 @@ describe("startPicks", () => {
     // Claude names no default effort per model, so the catalog's own mark is what the pick runs at. The access is
     // filled in like the other two: an unnamed one used to reach the adapter as nothing, which it reads as bypass.
     // On this computer the same start runs bypass too, and the only kinds that ask are the computers a person owns.
-    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
+    expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "bypassPermissions" });
     expect(startPicks(claude, {}, false)).toEqual({});
     expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
     expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
     const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
     expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
     // On a computer the person owns the same start runs the mode its harness asks in, and nothing else changes.
-    expect(startPicks(workspaceAccess(harnessCatalog("claude")!, "ssh"), {}, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "default" });
+    expect(startPicks(workspaceAccess(harnessCatalog("claude")!, "ssh"), {}, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "default" });
   });
 
   it("listedPick keeps a remembered pick this list carries and drops one it does not, which is not a refusal", () => {
@@ -256,7 +275,7 @@ describe("startPicks", () => {
   });
 
   it("refuses a value the catalog does not list, naming the list in the composer's words", () => {
-    expect(() => startPicks(claude, { model: "claude-haiku-4-5" }, true)).toThrow(`model "claude-haiku-4-5" is not one claude takes; one of: ${MODELS}`);
+    expect(() => startPicks(claude, { model: "claude-opus-4-1" }, true)).toThrow(`model "claude-opus-4-1" is not one claude takes; one of: ${MODELS}`);
     expect(() => startPicks(claude, { effort: "ultra" }, false)).toThrow('effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)');
     expect(() => startPicks(claude, { permissionMode: "yolo" }, true)).toThrow(
       'access mode "yolo" is not one claude takes; one of: Default (default), Accept edits (acceptEdits), Plan (plan), Bypass (bypassPermissions), Auto (auto), Manual (manual), Don\'t ask (dontAsk)',
@@ -309,7 +328,7 @@ describe("catalogFromProbe", () => {
   const probe: HarnessCatalogProbe = {
     version: "2.1.257",
     models: [
-      { slug: "claude-opus-5", label: "Opus", description: "Opus 5 with 1M context", efforts: ["low", "high"], contextWindows: ["200k", "1m"], isDefault: true },
+      { slug: "claude-opus-5-5", label: "Opus", description: "Opus 5.5 with 1M context", efforts: ["low", "high"], contextWindows: ["200k", "1m"], isDefault: true },
       { slug: "claude-haiku-4-5-20251001", label: "Haiku", efforts: [], contextWindows: [], isDefault: false },
       { slug: "claude-next-6", label: "Next", efforts: ["low", "turbo"], contextWindows: [], isDefault: false },
     ],
@@ -322,8 +341,8 @@ describe("catalogFromProbe", () => {
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
     expect(catalog).toMatchObject({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" });
     expect(catalog.models).toEqual([
-      { value: "claude-opus-5", label: "Opus 5", description: "Opus 5 with 1M context", isDefault: true, efforts: ["low", "high"], contextWindows: ["200k", "1m"] },
-      { value: "claude-haiku-4-5-20251001", label: "Haiku", efforts: [], contextWindows: [] },
+      { value: "claude-opus-5-5", label: "Opus 5.5", description: "Opus 5.5 with 1M context", isDefault: true, efforts: ["low", "high"], contextWindows: ["200k", "1m"] },
+      { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", efforts: [], contextWindows: [] },
       { value: "claude-next-6", label: "Next", efforts: ["low", "turbo"], contextWindows: [] },
     ]);
     expect(catalog.efforts).toEqual([{ value: "low", label: "Low" }, { value: "high", label: "High", isDefault: true }, { value: "turbo", label: "Turbo" }]);

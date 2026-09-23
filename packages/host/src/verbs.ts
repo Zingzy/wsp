@@ -1690,6 +1690,8 @@ export function pickFlags(flags: Flags): Picks {
 /** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
  * reading a model they know their agent takes has to be told the list is not that agent's. */
 export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more";
+/** The same for a refusal that quotes no list, a model the table says takes no effort: "that list" would point at nothing. */
+export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent on that workspace described itself";
 
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
@@ -1706,7 +1708,8 @@ export async function checkedStart(client: HostClient, task: string, harness: st
     startPicks(table, picksOf(picks), true);
   } catch (e) {
     const said = e instanceof Error ? e.message : String(e);
-    throw usageRefusal(table?.source === "table" ? `${said}${BUILT_IN_LIST_CLAUSE}` : said, "Drop the flag, or give it a value the agent offers.");
+    const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
+    throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
   }
 }
 
@@ -3039,7 +3042,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "A project image of the workspace: its image version plus the project loaded on it as it stands now, ready for new with from. Only a running machine with a project imported, on a provider that copies a machine's disk, can be snapshotted, and which life the copy may come from is that provider's rule: a machine that was never resumed on the cloud, any life on a container fork. Anything else is refused in one line and nothing is taken.",
+      description: "A project image of the workspace: its image version plus the project loaded on it as its disk stands now, synced first so a file written just before is whole on the image, ready for new with from. Only a running machine with a project imported, on a provider that copies a machine's disk, can be snapshotted, and which life the copy may come from is that provider's rule: a machine that was never resumed on the cloud, any life on a container fork. Anything else, and a disk whose sync fails, is refused in one line and nothing is taken.",
       input: { workspace: WorkspaceIn },
       output: { projectGolden: ProjectGolden },
       call: async ({ workspace: ref }, deps) => asJson({ projectGolden: await snapshot(await deps.client(), ref) }),

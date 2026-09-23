@@ -90,7 +90,7 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp send <thread> [--model <slug>] [--effort <word>] [--image <path>] [--detach] "<message>"` | `send` (thread, message, model, effort, images, detach) | a message into an existing thread; it runs on that thread's own agent and at the access that thread runs at, which no message changes; follows the turn to the reply, or with `--detach` returns the moment the turn is started |
 | `wsp stop <thread>` | `stop` (thread) | ends the thread's running turn, as the app's stop button does; the machine stays up. A thread whose agents spawned threads of their own stops as one, and the line names each of those it ended |
 | `wsp exec <workspace> [--cwd <dir>] -- <command...>` | `exec` (workspace, argv, cwd) | runs the command on the machine, each word as given, in the folder named or the one a thread would start in, waking it first when it is paused; output lines, the exit code and the folder it ran in |
-| `wsp snapshot <workspace>` | `snapshot` (workspace) | a project image: the image plus the loaded project as it stands |
+| `wsp snapshot <workspace>` | `snapshot` (workspace) | a project image: the image plus the loaded project as its disk stands, synced first so a file written just before is whole on the image; a sync that fails takes nothing |
 | `wsp export <workspace> <folder> [--from <path>] [--replace] [--agents <ids>]` | `export` (workspace, folder, from, replace, agents) | the folder and the agent sessions keyed to it come home to this computer |
 | `wsp recipe scan [--project <folder>] [--json]` | `recipe_scan` (project) | reads this computer and prints every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands the agents ran, and the sign-ins, each with what to do about it and why |
 | `wsp recipe [--tick used\|installed\|default] [--set <id>=on\|off] [--signin <id>=copy\|machine\|later\|key\|skip\|token] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>] [--json]` | `recipe` (tick, set, signin, add, add_check, why, engine, project, out) | writes the recipe for a machine and prints it as a table: every catalog agent and tool with its tick, why, and its size, and the commands the agents ran that the catalog does not carry; `--set` takes a catalog id or the id the scan gives a package this computer already has; `why` on the tool says what the added rows are for; `--engine` marks the recipe so every workspace from its image gets the place's container engine, for a project whose compose file needs one |
@@ -168,7 +168,7 @@ The command line streams the reply to stderr as it arrives and prints it once: i
 
 ```
 wsp send 1a2b3c4d "Also cover the codex case in the test."
-wsp send 1a2b3c4d --model claude-opus-5 --effort high "Now the hard part."
+wsp send 1a2b3c4d --model claude-opus-5-5 --effort high "Now the hard part."
 ```
 
 A send is never refused for meeting a turn. Into a thread whose turn is not running the message starts a new turn (outcome `started`), on the model, effort and access named or the thread's own. Into a thread whose turn is running: when the agent can take input mid-turn (Claude Code does) the message joins the running turn (outcome `steered`) and arrives at that turn's next tool round, the way a person's message does, and the reply is that turn's, on that turn's picks; otherwise the message waits for the running turn to end and then runs (outcome `queued`). A reply the agent gave while a command it started was still running is not a reply yet: that turn is still running and the message steers it. Into a thread whose turn has replied and is waiting only on its agent process to exit, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the host says as `This thread replied, still working; the message runs as its next turn once that process exits`; the app's composer shows the same words, and `threads` reads the thread running until the agent process exits. Two sends keep the order they arrived in. The command line says which outcome on stderr. A person's message on the same thread lands in order with yours. Never start a second thread to hurry a running one.
@@ -222,7 +222,7 @@ Each word after `--` reaches the machine as one argument; a shell line goes thro
 ### new, fork, snapshot
 
 ```
-wsp snapshot dev                      # project image of dev: its image plus the imported project
+wsp snapshot dev                      # project image of dev: its image plus the imported project, its disk synced first
 wsp new dev-2 --from wsp              # a machine from that project image, every project it carried in place, no upload; the created line names them
 wsp image remove snap_1a2b3c4d        # deletes that project image at the provider and drops its record; refused while a workspace stands on it
 wsp fork dev --send "Run the gate."   # a sibling machine from dev's image version, first thread opened

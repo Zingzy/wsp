@@ -407,7 +407,7 @@ describe("the title the harness makes for a thread", () => {
     const handle = await rt.sessions.start(ws.id, { prompt: OPENING });
     // The question goes out at the start, with no reply to carry; the seed stands only while the harness thinks.
     await until(() => asked.length === 1);
-    expect(asked).toEqual([{ opening: OPENING, model: "claude-sonnet-5" }]);
+    expect(asked).toEqual([{ opening: OPENING, model: "claude-haiku-4-5-20251001" }]);
     expect(await titleOf(rt, ws.id)).toBe(OPENING);
 
     answer.open("Seed thread titles here");

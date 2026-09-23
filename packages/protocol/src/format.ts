@@ -2041,6 +2041,17 @@ export const initRowTimed = (row: Pick<InitRow, "id">): boolean => [...GOLDEN_ST
 /** A row's clock while it runs: whole seconds under a minute, then minutes and seconds. */
 export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.max(0, Math.floor(ms / 1_000))}s` : fmtDuration(ms));
 
+/** The snapshot stage's first line, while the guest's dirty pages are written to its disk ahead of the copy. */
+export const DISK_SYNC_LINE = "syncing the disk";
+
+/** The snapshot stage's line when the guest's counters read non-zero once the sync returned, in kB as /proc/meminfo
+ * counts them. The snapshot goes ahead; nothing waits on a writer. */
+export const diskUnsettledLine = (reading: { dirtyKb: number; writebackKb: number }): string =>
+  `synced, Dirty ${fmtBytes(reading.dirtyKb * KIB)} and Writeback ${fmtBytes(reading.writebackKb * KIB)} remain; a writer is still running`;
+
+/** A snapshot refused because the guest's sync did not succeed, with the machine's own answer. */
+export const diskSyncFailedLine = (answer: string): string => `the disk could not be synced (${answer}); nothing was snapshotted`;
+
 /** The snapshot stage's one line: what is being snapshotted in words a person can use, never the snapshot's name,
  * and the size when the builder's disk could be read. */
 export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;

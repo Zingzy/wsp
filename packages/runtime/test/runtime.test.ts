@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, ExecFailedError, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, DISK_SYNC_CMD, ExecFailedError, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -50,7 +50,7 @@ function guestCounting(answer: () => { exitCode: number; stdout: string; stderr:
   return { backend, askedAt };
 }
 const counted = (kb: number) => () => ({ exitCode: 0, stdout: `memkb ${kb}\n`, stderr: "" });
-const memoryReads = (m: StubMachine): number[] => m.execLog.flatMap((c, i) => (c.includes("/proc/meminfo") ? [i] : []));
+const memoryReads = (m: StubMachine): number[] => m.execLog.flatMap((c, i) => (c.includes("MemTotal") ? [i] : []));
 
 describe("runtime", () => {
   it("creates a workspace from a golden manifest and emits protocol events", async () => {
@@ -924,9 +924,9 @@ describe("runtime session history", () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
-    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
-    expect(handle.view()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
     // The CLI announces the model it resolved; that name replaces the request's on the view.
     m.start();
     expect((await rt.sessions.list(ws.id))[0]!.model).toBe("claude-sonnet-4-5");
@@ -959,7 +959,7 @@ describe("runtime session history", () => {
     // cwd rides every start now: a workspace is one project's copy and the thread opens in that project's folder.
     expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "cwd", "model", "effort", "permissionMode", "onEvent"]);
     const view = handle.view();
-    expect(view.model).toBe("claude-opus-5");
+    expect(view.model).toBe("claude-opus-5-5");
     expect(view.effort).toBe("high");
     // The access is named too: unnamed, it reached the adapter as nothing, which every adapter here reads as its
     // own skip-everything flag, so what the picker showed and what the CLI ran could differ.
@@ -996,7 +996,7 @@ describe("runtime session history", () => {
       // The wire's isDefault is the harness an unnamed start runs, whichever source answered.
       expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
       expect(claude.models.map(m => m.value)).toEqual(["claude-opus-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
-      expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
+      expect(claude.models[0]).toMatchObject({ label: "Opus", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
@@ -1161,7 +1161,7 @@ describe("runtime session history", () => {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(first).toMatchObject({ source: "table", version: CLAUDE_PIN });
-      expect(first.models.map(m => m.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
+      expect(first.models.map(m => m.value)).toEqual(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
       backend.execImpl = (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("claude --help") ? "garbage\n" : "", stderr: "" });
       await rt.harnesses.list(ws.id);
       expect(probes(backend)).toHaveLength(1);
@@ -1179,7 +1179,7 @@ describe("runtime session history", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter } });
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await expect(rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-4-1" })).rejects.toThrow(
-        'model "claude-opus-4-1" is not one claude takes; one of: Opus 5 (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku (claude-haiku-4-5-20251001)',
+        'model "claude-opus-4-1" is not one claude takes; one of: Opus (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)',
       );
       await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
       expect(m.lastStart()).toBeUndefined();
@@ -4724,6 +4724,42 @@ describe("runtime verified wake", () => {
     }
   });
 
+  it("syncs the machine's disk before the vault is read off it and the provider pauses it", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    const m = backend.machines[0]!;
+    const before = m.execLog.length;
+    await rt.workspaces.nap(ws.id);
+    const log = m.execLog.slice(before);
+    const synced = log.indexOf(DISK_SYNC_CMD);
+    expect(synced).toBeGreaterThan(-1);
+    expect(synced).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
+    expect(m.paused).toBe(true);
+  });
+
+  it.each([
+    ["an exec that throws", (): ExecResult => { throw new Error("socket hang up"); }, "socket hang up"],
+    ["a sync that exits 1", (): ExecResult => ({ exitCode: 1, stdout: "", stderr: "sync: Input/output error" }), "it exited 1 and said: sync: Input/output error"],
+  ])("%s is one warning naming the nap with the machine's own answer, and the vault is still stored and the machine still paused", async (_shape, answer, said) => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd === DISK_SYNC_CMD ? answer() : plain(m, cmd));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {} });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`disk sync before the nap of ${ws.id} failed: ${said}; napping anyway`]);
+      expect(await store.getBlob("vaults", ws.id)).toBeDefined();
+      expect(backend.machines[0]!.paused).toBe(true);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("a healthy wake stays on the same machine even though createdAt moved, imports nothing, and reports the daemon reachable", async () => {
     const { backend, untars } = guestBackend();
     try {
@@ -6056,6 +6092,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",
+      "snapshotting:syncing the disk",
       "snapshotting:snapshotting about 2.9 GB, usually under a minute",
       "smoke-forking:codex --version",
       "smoke-forking:1 agent answers: Codex",

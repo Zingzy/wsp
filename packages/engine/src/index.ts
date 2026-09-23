@@ -2,6 +2,7 @@ export * from "./errors.js";
 export * from "./machine.js";
 export * from "./key-check.js";
 export * from "./exec-detached.js";
+export * from "./disk-sync.js";
 export * from "./preview.js";
 export * from "./solari-backend.js";
 export * from "./box-backend.js";
