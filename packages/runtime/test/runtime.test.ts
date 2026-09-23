@@ -2109,6 +2109,38 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a host that comes back to a turn still running on an old daemon says in its log that the update waits for the turn, and deploys once it ends", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId, run } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      await new Promise(r => setTimeout(r, 100));
+      expect(deployed).toEqual([]);
+
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
   it("a turn cut on the way back takes its open prompt with it, so no settled thread is left reading as waiting on a person", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -2833,6 +2865,129 @@ describe("runtime daemon reach", () => {
     expect((await rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
     expect(warned.some(l => l.includes("not restarted") && l.includes("NPM_FAIL") && l.includes("m1"))).toBe(true);
     expect(pushed.every(st => st.daemonNote === undefined || !st.daemonNote.includes("NPM_FAIL"))).toBe(true);
+  });
+
+  /** A fork a host before this one made, whose daemon is the one on this port, and the host starting again over the
+   * same store on a fake clock with a deploy that brings the daemon to this wsp's version. */
+  async function restartOnto(daemon: Awaited<ReturnType<typeof helloingDaemon>>, deploys: boolean, served = false) {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const fc = fakeClock();
+    const ws = await createOn(createRuntime({ backend, store, adapters: {} }), { golden: "snap_g", name: "a" });
+    backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${daemon.port}/`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    if (served) backend.machines[0]!.daemonFrame = async () => ({ ok: true });
+    const deployed: string[] = [];
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (m: { id: string }) => {
+        deployed.push(m.id);
+        daemon.announce(DAEMON_VERSION);
+      },
+    };
+    const rt = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, clock: fc.clock, ...(deploys ? { goldenRecipe: recipe } : {}), daemonHelloTimeoutMs: 100, status: { costIntervalMs: 24 * 3_600_000, reconcileMinMs: 60_000 } });
+    /** One poll tick, waited out: the timer runs on the fake clock, the probe and the sync on real promises. */
+    const poll = async (): Promise<void> => {
+      const before = daemon.hits();
+      fc.advance(POLL_INTERVAL_MS);
+      await until(() => daemon.hits() > before);
+      await new Promise(r => setTimeout(r, 150));
+    };
+    return { rt, ws, fc, deployed, poll, unread: `daemon on m1 (workspace ${ws.id}): version not read within 0.1 s; asking again at the next reach probe` };
+  }
+
+  it("a sync whose version read answers nothing says so in the log, and asks again at the first probe past the revive window that finds the machine answering", async () => {
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1, true);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    const said = (): string[] => warned.filter(l => l.startsWith("daemon on"));
+    let stop = (): void => {};
+    try {
+      const { rt, ws, fc, deployed, poll, unread } = await restartOnto(daemon, true);
+      await rt.workspaces.list();
+      await until(() => said().length === 1);
+      expect(said()).toEqual([unread]);
+      expect([deployed, daemon.dials()]).toEqual([[], 1]);
+
+      // Probes inside the window find the machine answering and ask it nothing.
+      stop = rt.status.watch();
+      await poll();
+      await poll();
+      expect([deployed, daemon.dials(), said()]).toEqual([[], 1, [unread]]);
+
+      // Past it, the probe that finds the machine answering runs the sync again, and this time the hello lands.
+      daemon.release();
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+      await until(async () => (await rt.workspaces.get(ws.id)).daemonNote === undefined);
+
+      // The read that answered took the mark off: a later window asks nothing more.
+      const dialled = daemon.dials();
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await poll();
+      expect([deployed, daemon.dials(), said()]).toEqual([["m1"], dialled, [unread]]);
+    } finally {
+      stop();
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
+  it("a version read that answers nothing again says so again, one that answers current deploys nothing and asks no more, and a host with no deploy road or a workspace its computer serves neither dials nor warns", async () => {
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    const said = (): string[] => warned.filter(l => l.startsWith("daemon on"));
+    const stops: (() => void)[] = [];
+    const daemon = await helloingDaemon(DAEMON_VERSION, true);
+    const bare = await helloingDaemon(DAEMON_VERSION - 1, true);
+    const boxed = await helloingDaemon(DAEMON_VERSION - 1, true);
+    try {
+      const { rt, fc, deployed, poll, unread } = await restartOnto(daemon, true);
+      await rt.workspaces.list();
+      await until(() => said().length === 1);
+      stops.push(rt.status.watch());
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await until(() => said().length === 2);
+      expect([said(), daemon.dials()]).toEqual([[unread, unread], 2]);
+
+      daemon.release();
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await until(() => daemon.dials() === 3);
+      fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await poll();
+      await poll();
+      expect([deployed, daemon.dials(), said()]).toEqual([[], 3, [unread, unread]]);
+
+      // A host wired without the bundle has nothing to ask a version for.
+      warned.length = 0;
+      const without = await restartOnto(bare, false);
+      await without.rt.workspaces.list();
+      stops.push(without.rt.status.watch());
+      without.fc.advance(DAEMON_REVIVE_AGAIN_MS);
+      await without.poll();
+      await without.poll();
+      expect([bare.dials(), said()]).toEqual([0, []]);
+
+      // Nor is anything asked inside a workspace whose computer serves its daemon.
+      const box = await restartOnto(boxed, true, true);
+      await box.rt.workspaces.list();
+      stops.push(box.rt.status.watch());
+      box.fc.advance(DAEMON_REVIVE_AGAIN_MS + POLL_INTERVAL_MS);
+      await new Promise(r => setTimeout(r, 300));
+      expect([boxed.dials(), said(), box.deployed]).toEqual([0, [], []]);
+    } finally {
+      for (const stop of stops) stop();
+      warn.mockRestore();
+      await daemon.close();
+      await bare.close();
+      await boxed.close();
+    }
   });
 
   it("a machine replaced under the record starts its own attempt instead of inheriting the old machine's cooldown", async () => {
@@ -3673,13 +3828,21 @@ const TOKEN = "deadbeef".repeat(3);
 /** A daemon on a loopback port that answers every op ok and announces the version it is set to right after the auth
  * reply, as the real one does: the one way a client learns a daemon's version, and the only way to stand an old one
  * up here, since the daemon in this checkout only ever announces the current version. */
-async function helloingDaemon(version: number, holdHello = false): Promise<{ port: number; announce: (v: number) => void; release: () => void; close: () => Promise<void> }> {
+async function helloingDaemon(version: number, holdHello = false): Promise<{ port: number; announce: (v: number) => void; release: () => void; hits: () => number; dials: () => number; close: () => Promise<void> }> {
   let announced = version;
   let held = holdHello;
+  let hits = 0;
+  let dials = 0;
   const waiting: (() => void)[] = [];
-  const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-  await new Promise<void>(done => wss.once("listening", () => done()));
+  // A plain GET is the reach probe, answered as the daemon's own ws server answers it.
+  const server = createServer((_req, res) => {
+    hits++;
+    res.writeHead(426).end();
+  });
+  const wss = new WebSocketServer({ server });
+  await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
   wss.on("connection", socket => {
+    dials++;
     const hello = (): void => socket.send(JSON.stringify({ type: "daemon.hello", root: "/root", version: announced }));
     socket.on("message", raw => {
       const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
@@ -3690,13 +3853,20 @@ async function helloingDaemon(version: number, holdHello = false): Promise<{ por
     });
   });
   return {
-    port: (wss.address() as AddressInfo).port,
+    port: (server.address() as AddressInfo).port,
     announce: v => (announced = v),
     release: () => {
       held = false;
       for (const say of waiting.splice(0)) say();
     },
-    close: () => new Promise<void>(done => wss.close(() => done())),
+    hits: () => hits,
+    dials: () => dials,
+    close: () =>
+      new Promise<void>(done => {
+        for (const socket of wss.clients) socket.terminate();
+        server.closeAllConnections();
+        wss.close(() => server.close(() => done()));
+      }),
   };
 }
 

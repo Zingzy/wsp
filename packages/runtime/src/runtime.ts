@@ -3767,9 +3767,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const said = await lacksSaid(entry);
       if (said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
       await writeDaemonRoots(entry);
-      const version = await module.daemonVersion(entry);
-      if (version === null || version >= DAEMON_VERSION) return;
+      // A host that cannot deploy asks no version: a line would promise an ask that changes nothing, at every connect.
       if (!canDeployDaemon(entry)) return;
+      const version = await module.daemonVersion(entry);
+      if (version === null) {
+        unreadAt.set(entry.record.id, { machineId: key, at: clock.now() });
+        console.warn(`daemon on ${key} (workspace ${entry.record.id}): version not read within ${daemonHelloTimeoutMs / 1000} s; asking again at the next reach probe`);
+        return;
+      }
+      unreadAt.delete(entry.record.id);
+      if (version >= DAEMON_VERSION) return;
+      if (turnRuns(entry.record.id)) console.warn(`daemon on ${key} (workspace ${entry.record.id}): update waits for the running turn`);
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);
@@ -3799,10 +3807,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return work;
   };
 
-  /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was: a machine
-   * replaced under the record leaves nothing behind, since the entry is keyed by the workspace and holds the
-   * machine it was about. */
-  const revivedAt = new Map<string, { machineId: string; at: number }>();
+  /** Keyed by the workspace and holding the machine it was about, so a machine replaced under the record inherits nothing. */
+  type MachineMoment = { machineId: string; at: number };
+  /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was. */
+  const revivedAt = new Map<string, MachineMoment>();
+  /** Every workspace whose last sync could not read its daemon's version, and when that read gave up. */
+  const unreadAt = new Map<string, MachineMoment>();
   const daemonRevivals = new Map<string, Promise<void>>();
 
   /** A running machine whose daemon port answers nothing gets this runtime's daemon put back on it, on the same
@@ -3860,6 +3870,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * good, so that kind answers for itself here first. */
   const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
     if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
+    void syncDaemon(entry);
+  };
+
+  /** Nothing else runs the sync again before the next connect, and a hello that missed it leaves an old daemon serving. */
+  const readVersionAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
+    const unread = unreadAt.get(entry.record.id);
+    if (unread === undefined) return;
+    if (unread.machineId !== entry.machine.id) {
+      unreadAt.delete(entry.record.id);
+      return;
+    }
+    if (polled.phase !== "running" || polled.reach.state !== "reachable" || clock.now() - unread.at < DAEMON_REVIVE_AGAIN_MS) return;
     void syncDaemon(entry);
   };
 
@@ -4181,6 +4203,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     live.delete(id);
     revivedAt.delete(id);
+    unreadAt.delete(id);
     polledReach.delete(id);
     transcripts.delete(id);
     daemonNotes.delete(id);
@@ -8736,6 +8759,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else polledReach.delete(s.id);
         reviveDaemon(entry, s.reach.state);
         offerDaemonAgain(entry, s);
+        readVersionAgain(entry, s);
       }
     },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
