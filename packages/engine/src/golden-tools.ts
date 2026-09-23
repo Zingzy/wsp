@@ -53,14 +53,17 @@ export const FREE_KB_CMD = dfKbCmd(["free"]);
 export const USED_KB_CMD = dfKbCmd(["used"]);
 /** How a df that did not answer reads, for dfRead and for the rejected exec diskUse catches. */
 const dfFailed = (res: ExecResult): string => `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}`;
-/** The columns asked for off one df, in bytes, the last being the disk's own figure; a rejected exec throws. */
+/** The columns asked for off one df, in bytes; a full disk is free 0 and an empty one used 0, so only a size of zero
+ * is a reading no disk has; a rejected exec throws. */
 async function dfRead(machine: Machine, columns: readonly (keyof typeof DF_COLUMN)[]): Promise<{ bytes: number[] } | { reason: string }> {
   const res = await machine.exec(dfKbCmd(columns), { timeoutMs: INLINE_EXEC_MS });
   const printed = res.stdout.trim();
   const kb = printed.split(/\s+/).map(Number);
-  if (res.exitCode === 0 && kb.length === columns.length && kb.every(Number.isFinite) && kb.at(-1)! > 0) return { bytes: kb.map(n => n * 1024) };
+  const size = columns.indexOf("size");
   // The pipe exits as awk does, so a df that failed exits 0 having printed nothing.
-  return { reason: res.exitCode === 0 && printed !== "" ? `df answered ${printed.slice(0, 160)}` : dfFailed(res) };
+  const answered = res.exitCode === 0 && printed !== "";
+  if (answered && kb.length === columns.length && kb.every(n => Number.isFinite(n) && n >= 0) && (size === -1 || kb[size]! > 0)) return { bytes: kb.map(n => n * 1024) };
+  return { reason: answered ? `df answered ${printed.slice(0, 160)}` : dfFailed(res) };
 }
 export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
@@ -472,7 +475,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
       const after = await cleanupAtFloor(free.bytes);
       if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
-        const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup, df failed after`;
+        const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup and unknown after (${after.reason})`;
         floor = floorNote(words);
         landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
