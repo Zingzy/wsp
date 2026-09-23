@@ -5,7 +5,7 @@
 // ones, so what the door verifies is what a place would send.
 import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
 import { connect as netConnect } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import {
   NO_PLACE_INSTALLER,
@@ -2865,6 +2865,39 @@ describe("a fork on a computer you joined", () => {
     const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => (place = forks(c)));
     sockets.push(back.client.ws);
     await until(async () => place.ops.includes("machine.get"));
+  });
+
+  it("reads a running fork's machine again when its computer dials back in, and its daemon sync runs off that reading", async () => {
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(first.client.ws);
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    first.client.close();
+    await srv.close();
+    await runtime.close();
+    // A second host over the same store with that computer away: the fork is held by a stand-in, so nothing about
+    // its machine is read and no sync is started for it.
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      expect((await runtime.workspaces.get(made.id)).phase).toBe("running");
+      let place!: ForkingPlace;
+      const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => (place = forks(c)));
+      sockets.push(back.client.ws);
+      await until(async () => place.ops.includes("machine.get") && place.ops.includes("machine.state"));
+      await new Promise(r => setTimeout(r, 100));
+      // The record was read again and the sync the reading handed back ran on it: a workspace this computer serves
+      // the daemon for is asked for no version and given no deploy, and nothing is left saying otherwise.
+      expect((await runtime.workspaces.get(made.id)).phase).toBe("running");
+      expect(warned.filter(l => l.includes("were not read again") || l.startsWith("daemon on"))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("carries one port on this computer to one port on that one, for as long as the host runs", async () => {
