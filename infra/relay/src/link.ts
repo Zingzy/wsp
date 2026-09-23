@@ -32,6 +32,10 @@ type LinkKind = (typeof LINK_KINDS)[number];
 /** What the sign-in stamp carries: the page the person came from and goes back to, whose address holds no code. */
 const VERIFY_PAGE = "verify";
 
+/** The page a person types a code and signs computers out on, spelled once for every sentence and redirect that names it. */
+export const VERIFY_PAGE_PATH = "/link/verify";
+export const verifyPage = (ctx: Ctx): string => `${ctx.url.origin}${VERIFY_PAGE_PATH}`;
+
 /** Each stamp has its own purpose word, so no approve stamp signs a computer out and no sign-out stamp approves a code. */
 const SIGN_IN_STAMP = "sign-in";
 const APPROVE_STAMP = "approve";
@@ -88,7 +92,7 @@ export async function linkStart(ctx: Ctx): Promise<Response> {
   }
   return Response.json({
     code: row.code,
-    verifyUrl: `${ctx.url.origin}/link/verify`,
+    verifyUrl: verifyPage(ctx),
     pollToken,
     expiresAt: row.expires_at,
     pollAfterMs: POLL_AFTER_MS,
@@ -158,7 +162,7 @@ export async function linkCallback(ctx: Ctx): Promise<Response> {
     account = { ...account, login: user.login };
   }
   const session = await mintSession(ctx.env.RELAY_SIGNING_KEY, account.id, now);
-  const headers = new Headers({ location: "/link/verify" });
+  const headers = new Headers({ location: VERIFY_PAGE_PATH });
   headers.append("set-cookie", sessionCookie(session));
   // The nonce did its one job; it goes with the redirect that spends it.
   headers.append("set-cookie", nonceCookie("", 0));
@@ -177,7 +181,7 @@ async function keyHeldRefusal(ctx: Ctx, accountId: string, fingerprint: string |
   const held = await clientKeyed(ctx.env, accountId, fingerprint, standingSince(ctx));
   return held === undefined
     ? undefined
-    : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, or from ${ctx.url.origin}/link/verify in your browser, then run wsp login again`);
+    : refuse(409, `${held.name} is already signed in under that key; sign it out first with wsp logout ${held.id}, or from ${verifyPage(ctx)} in your browser, then run wsp login again`);
 }
 
 /** No form on the page carries a bearer, so a request with one is a program's and reads JSON on a page's road too. */
@@ -217,7 +221,7 @@ async function approveFromWsp(ctx: Ctx): Promise<Response> {
   const who = await clientFor(ctx);
   const body = await jsonBody(ctx);
   const code = typeof body["code"] === "string" ? body["code"].trim().toUpperCase() : "";
-  const admission = signedByBearer(who, admissionOf(body["admission"]));
+  const admission = signedByBearer(who, admissionOf(body["admission"]), verifyPage(ctx));
   const row = await linkByCode(ctx.env, code);
   if (row === undefined || isExpired(row, ctx.deps.now())) throw refuse(410, "that code is gone; run wsp login again there for a fresh one");
   if (row.state !== "pending") throw refuse(409, "that code was already approved");
