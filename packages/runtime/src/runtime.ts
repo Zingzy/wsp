@@ -402,8 +402,9 @@ const EVENT_RING_CAP = 5000;
 
 /** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
 export const CATALOG_TTL_MS = 5 * 60_000;
-/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. */
-const CATALOG_PROBE_TIMEOUT_MS = 30_000;
+/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. Under the
+ * provider's 26 s exec cap, so the probe is one call and not a detached run on every fork. */
+const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 
 /** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
  * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
@@ -414,8 +415,9 @@ const SESSION_TITLE_TIMEOUT_MS = 15_000;
  * machine, and an index at SESSION_INDEX_CAP must not cost one per row. */
 export const SESSION_TITLE_REFRESH_MAX = 20;
 /** How long the harness has to answer the one title question a thread costs. A claude-sonnet-5 answer measured 1.4 s
- * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. */
-export const TITLE_MAKE_TIMEOUT_MS = 30_000;
+ * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. Under the
+ * provider's 26 s exec cap, so the question is one call on every thread. */
+export const TITLE_MAKE_TIMEOUT_MS = 25_000;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
@@ -999,8 +1001,8 @@ const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 const PORT_PROBE_TIMEOUT_MS = 10_000;
 
 /** How long one read of a checkout's current branch may take. A git call on a checkout that is already there, so
- * the bound is for a machine that has gone quiet rather than for the work. */
-const BRANCH_READ_MS = 30_000;
+ * the bound is for a machine that has gone quiet rather than for the work; under the provider's 26 s exec cap. */
+const BRANCH_READ_MS = 25_000;
 
 /** How long a project's clone inside a fresh copy may take before the create gives up on it. A repo of the size
  * wsp is dogfooded on lands in seconds; the budget is for a cold cache on a small machine. */
@@ -5705,7 +5707,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
-      .then(answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)), () => known);
+      .then(
+        answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)),
+        (e: unknown) => {
+          // The lists a start is checked against are then wsp's own, which refuse a model the binary there takes.
+          console.warn(`${table.harness} on ${machine.id}: the probe of the agent failed (${e instanceof Error ? e.message : String(e)}); wsp's built-in list answers until the next probe`);
+          return known;
+        },
+      );
     catalogs.set(key, { at: now, catalog });
     return catalog.then(forMachine);
   };

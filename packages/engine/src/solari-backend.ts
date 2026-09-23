@@ -97,6 +97,10 @@ export const STATE_READ_MS = 30_000;
 /** The longest idleTimeoutMs the create API has taken from us: six hours, the golden builder's. */
 export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
 
+/** The longest one exec may ask the provider for: "timeoutMs must be at most 26000 for a dedicated sandbox" (400 on
+ * 26001, measured 2026-09-23), so anything longer runs detached on the guest instead. */
+export const SOLARI_INLINE_MAX_MS = 26_000;
+
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
 export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
   budgets: Object.freeze({
@@ -338,13 +342,16 @@ class SolariMachine implements Machine {
   }
 
   async exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
+    const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
+    // The detached road's own execs ask for the inline span, so they take the road below here and nothing recurses.
+    if (timeoutMs > SOLARI_INLINE_MAX_MS) return execDetached(this, cmd, { deadlineMs: timeoutMs });
     // bash -c, never -lc: login shells reset PATH and lose /root/.local/bin.
     // The exec environment carries PATH and nothing else (measured 2026-09-05): HOME and USER go ahead of
     // every command, SHELL stays unset so a pty reads it off passwd.
     return this.backend.request<ExecResult>("POST", this.path("/exec"), {
       cmd: "bash",
       args: ["-c", `${EXEC_ENV}\n${cmd}`],
-      timeoutMs: opts?.timeoutMs ?? INLINE_EXEC_MS,
+      timeoutMs,
     });
   }
 

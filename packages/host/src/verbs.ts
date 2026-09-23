@@ -1687,6 +1687,10 @@ export function pickFlags(flags: Flags): Picks {
   return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
 }
 
+/** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
+ * reading a model they know their agent takes has to be told the list is not that agent's. */
+export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more";
+
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
@@ -1701,7 +1705,8 @@ export async function checkedStart(client: HostClient, task: string, harness: st
   try {
     startPicks(table, picksOf(picks), true);
   } catch (e) {
-    throw usageRefusal(e instanceof Error ? e.message : String(e), "Drop the flag, or give it a value the agent offers.");
+    const said = e instanceof Error ? e.message : String(e);
+    throw usageRefusal(table?.source === "table" ? `${said}${BUILT_IN_LIST_CLAUSE}` : said, "Drop the flag, or give it a value the agent offers.");
   }
 }
 
