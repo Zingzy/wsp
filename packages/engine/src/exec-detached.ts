@@ -3,7 +3,9 @@
 // and starts in its own session with its streams and exit code on disk, then
 // short execs read the files from where the last read stopped until the exit
 // code is there or the deadline kills the session. A poll that fails (the
-// machine napping) is retried after a pause; the deadline bounds that too.
+// machine napping) is retried after a pause; the deadline bounds that too,
+// and a guest the backend calls unusable or a machine the provider no longer
+// has ends the run at once.
 
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";

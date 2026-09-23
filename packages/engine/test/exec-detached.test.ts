@@ -115,7 +115,10 @@ function guest(steps: Step[]) {
           step++;
           if (s.nap) throw Object.assign(new Error("Bad Gateway"), { kind: "transient", status: 502 });
           if (s.unusable) throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200);
-          if (s.gone !== undefined) throw (gone = s.gone);
+          if (s.gone !== undefined) {
+            gone = s.gone;
+            throw gone;
+          }
           if (s.out !== undefined) out = Buffer.concat([out, Buffer.from(s.out)]);
           if (s.err !== undefined) err = Buffer.concat([err, Buffer.from(s.err)]);
           if (s.exit !== undefined) exit = String(s.exit);
