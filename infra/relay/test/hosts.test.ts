@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { readToken } from "../src/tokens.js";
-import { cfOk, fakeAdmission, fingerprintFor, linkedVia, relayHarness, TEST_ZONE, type RelayHarness } from "./relay.js";
+import { VERIFY_PAGE_URL, cfOk, fakeAdmission, fingerprintFor, linkedVia, relayHarness, TEST_ZONE, type RelayHarness } from "./relay.js";
 
 const bearer = (token: string): Record<string, string> => ({ authorization: `Bearer ${token}` });
 
@@ -495,7 +495,17 @@ describe("the admissions a box reads off its heartbeat", () => {
     expect(keyless.status).toBe(400);
     const told = ((await keyless.json()) as { error: string }).error;
     expect(told).toContain("wsp logout");
+    expect(told).toContain(`or from ${VERIFY_PAGE_URL} in your browser`);
     expect(told).toContain("wsp login");
+    expect(await count(relay, "admissions")).toBe(2);
+
+    // Nor can a box admit a computer that holds none, whoever signs for it.
+    await relay.db.prepare("UPDATE clients SET fingerprint = NULL WHERE id = ?").bind(laptop.id).run();
+    const unkeyed = await relay.fetch(`/clients/${laptop.id}/admissions`, { method: "POST", headers: bearer(mac.token), body: JSON.stringify(fakeAdmission(laptop.fingerprint!, mac.fingerprint!)) });
+    expect(unkeyed.status).toBe(400);
+    const named = ((await unkeyed.json()) as { error: string }).error;
+    expect(named).toContain(`wsp logout ${laptop.id}, or from ${VERIFY_PAGE_URL} in your browser`);
+    expect(named).toContain("wsp login");
     expect(await count(relay, "admissions")).toBe(2);
   });
 

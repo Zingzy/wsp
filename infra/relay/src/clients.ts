@@ -11,7 +11,7 @@ import { admissionsByClient, clientOf, clientsOf, deleteClient, insertAdmission,
 import { clientFor, signedByBearer } from "./hosts.js";
 import { newId } from "./ids.js";
 import type { Ctx } from "./index.js";
-import { SIGN_OUT_STAMP, carriesBearer, signedIn, toSignIn } from "./link.js";
+import { SIGN_OUT_STAMP, VERIFY_PAGE_PATH, carriesBearer, signedIn, toSignIn, verifyPage } from "./link.js";
 import { refuse } from "./refusal.js";
 import { readStamp } from "./tokens.js";
 
@@ -60,11 +60,11 @@ export async function clientSignOut(ctx: Ctx): Promise<Response> {
   if (who === undefined) return toSignIn(ctx);
   const id = ctx.params["id"]!;
   const stamped = await readStamp(ctx.env.RELAY_SIGNING_KEY, SIGN_OUT_STAMP, new URLSearchParams(await bodyText(ctx)).get("stamp") ?? undefined, ctx.deps.now(), who.id);
-  if (stamped !== id) throw refuse(403, `that form did not come from this relay's page, or it is older than fifteen minutes; open ${ctx.url.origin}/link/verify again`);
+  if (stamped !== id) throw refuse(403, `that form did not come from this relay's page, or it is older than fifteen minutes; open ${verifyPage(ctx)} again`);
   const row = await clientOn(ctx, who.id);
   await deleteClient(ctx.env, row.id);
   // Back to the page's own address, so a reload reads the list rather than posting a spent stamp.
-  return new Response(null, { status: 303, headers: { location: "/link/verify" } });
+  return new Response(null, { status: 303, headers: { location: VERIFY_PAGE_PATH } });
 }
 
 /** An admission for a computer already on the account, which signed in on the page and was admitted by nobody, or
@@ -73,9 +73,9 @@ export async function clientSignOut(ctx: Ctx): Promise<Response> {
 export async function clientAdmit(ctx: Ctx): Promise<Response> {
   const who = await clientFor(ctx);
   const row = await clientOn(ctx, who.account);
-  const admission = signedByBearer(who, admissionOf(await jsonBody(ctx)));
+  const admission = signedByBearer(who, admissionOf(await jsonBody(ctx)), verifyPage(ctx));
   if (row.fingerprint === null) {
-    throw refuse(400, `${row.name} signed in with no device key, so no box can admit it; sign it out with wsp logout ${row.id} and sign it in again with wsp login there`);
+    throw refuse(400, `${row.name} signed in with no device key, so no box can admit it; sign it out with wsp logout ${row.id}, or from ${verifyPage(ctx)} in your browser, and sign it in again with wsp login there`);
   }
   if (admission.device !== row.fingerprint) throw refuse(400, `that admission is for ${admission.device}, and ${row.name} signed in as ${row.fingerprint}`);
   await insertAdmission(ctx.env, {

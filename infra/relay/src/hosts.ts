@@ -71,8 +71,8 @@ export async function clientFor(ctx: Ctx, read?: TokenClaims): Promise<SignedIn>
 /** An admission is signed with the bearer's own device key and no other: its signer has one legal value, the key
  * this computer signed in with, so no client token on the account can post bytes under another computer's name and
  * take the place of what that computer signed. */
-export function signedByBearer(who: SignedIn, admission: Admission): Admission {
-  if (who.fingerprint === null) throw refuse(400, "this computer signed in with no device key, so it can sign no admission; sign out with wsp logout and sign in again with wsp login");
+export function signedByBearer(who: SignedIn, admission: Admission, page: string): Admission {
+  if (who.fingerprint === null) throw refuse(400, `this computer signed in with no device key, so it can sign no admission; sign out with wsp logout, or from ${page} in your browser, and sign in again with wsp login`);
   if (admission.by !== who.fingerprint) throw refuse(400, `that admission is signed by ${admission.by}, and this computer signed in as ${who.fingerprint}`);
   return admission;
 }
