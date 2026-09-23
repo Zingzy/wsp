@@ -402,8 +402,9 @@ const EVENT_RING_CAP = 5000;
 
 /** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
 export const CATALOG_TTL_MS = 5 * 60_000;
-/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. */
-const CATALOG_PROBE_TIMEOUT_MS = 30_000;
+/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. Under the
+ * provider's 26 s exec cap, so the probe is one call and not a detached run on every fork. */
+const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 
 /** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
  * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
@@ -414,8 +415,9 @@ const SESSION_TITLE_TIMEOUT_MS = 15_000;
  * machine, and an index at SESSION_INDEX_CAP must not cost one per row. */
 export const SESSION_TITLE_REFRESH_MAX = 20;
 /** How long the harness has to answer the one title question a thread costs. A claude-sonnet-5 answer measured 1.4 s
- * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. */
-export const TITLE_MAKE_TIMEOUT_MS = 30_000;
+ * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. Under the
+ * provider's 26 s exec cap, so the question is one call on every thread. */
+export const TITLE_MAKE_TIMEOUT_MS = 25_000;
 
 function eventBus(): EventBus & { emit(event: EventUnion): void } {
   const listeners = new Map<string, Set<EventListener>>();
@@ -999,8 +1001,8 @@ const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 const PORT_PROBE_TIMEOUT_MS = 10_000;
 
 /** How long one read of a checkout's current branch may take. A git call on a checkout that is already there, so
- * the bound is for a machine that has gone quiet rather than for the work. */
-const BRANCH_READ_MS = 30_000;
+ * the bound is for a machine that has gone quiet rather than for the work; under the provider's 26 s exec cap. */
+const BRANCH_READ_MS = 25_000;
 
 /** How long a project's clone inside a fresh copy may take before the create gives up on it. A repo of the size
  * wsp is dogfooded on lands in seconds; the budget is for a cold cache on a small machine. */
@@ -2820,7 +2822,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await ready();
         for (const raw of await store.list(WORKSPACES)) {
           const stored = raw as WorkspaceRecord;
-          if (stored.place === e.placeId && isHeldAway(stored.id)) await hydrateWorkspace(raw);
+          if (stored.place !== e.placeId || !isHeldAway(stored.id)) continue;
+          // This road runs after ready, so every session row is already in and the sync can wait out a running turn.
+          const entry = await hydrateWorkspace(raw);
+          if (entry !== undefined) void syncDaemon(entry);
         }
       })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
     });
@@ -3785,8 +3790,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
       // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
       while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
+      // The last read before the deploy: a machine that napped under the wait is handed no exec on a paused sandbox.
+      if (entry.record.phase !== "running") {
+        await noteDaemon(entry, undefined);
+        return;
+      }
       try {
-        await workspaces.updateDaemon(entry.record.id);
+        // The update verb's door refuses a workspace still creating, which is when the create's sync runs.
+        await deployDaemonOn(entry, module.deployDaemon!);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
       } catch (e) {
@@ -3833,10 +3844,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const last = revivedAt.get(entry.record.id);
     if (last !== undefined && last.machineId === key && clock.now() - last.at < DAEMON_REVIVE_AGAIN_MS) return;
     revivedAt.set(entry.record.id, { machineId: key, at: clock.now() });
+    const deploy = moduleOf(entry.record.kind).deployDaemon!;
     const work = (async () => {
       await noteDaemon(entry, DAEMON_RESTARTING);
+      // The last read before the deploy: a machine that napped under the note is handed no exec on a paused sandbox.
+      if (entry.record.phase !== "running") {
+        await noteDaemon(entry, undefined);
+        return;
+      }
       try {
-        await workspaces.updateDaemon(entry.record.id);
+        await deployDaemonOn(entry, deploy);
         await writeDaemonRoots(entry);
         await noteDaemon(entry, undefined);
       } catch (e) {
@@ -4549,8 +4566,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** One stored workspace read into a live one: what the provider says about its machine decides the phase, and
    * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
-   * place dials in, since until then nothing could be asked about its machine. */
-  const hydrateWorkspace = async (raw: unknown): Promise<void> => {
+   * place dials in, since until then nothing could be asked about its machine. Answers the entry whose daemon wants
+   * syncing, since the sync waits out a running turn and only the caller knows when its session rows are in. */
+  const hydrateWorkspace = async (raw: unknown): Promise<LiveWorkspace | undefined> => {
     const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
     const kind: WorkspaceKind = stored.kind ?? "cloud";
     const rest = stored;
@@ -4633,10 +4651,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${String(atProvider)} at the provider; the record hydrates ${phase}`);
       await persist(record);
     }
-    if (phase === "running" && !absent) {
-      idle.touch(stored.id);
-      void syncDaemon(live.get(stored.id)!);
-    }
+    if (phase !== "running" || absent) return undefined;
+    idle.touch(stored.id);
+    return live.get(stored.id)!;
   };
 
   let hydrated: Promise<void> | undefined;
@@ -4662,7 +4679,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (project === raw) projectsHeld.set(project.id, project);
         else await rememberProject(project);
       }
-      for (const raw of await store.list(WORKSPACES)) await hydrateWorkspace(raw);
+      const toSync: LiveWorkspace[] = [];
+      for (const raw of await store.list(WORKSPACES)) {
+        const entry = await hydrateWorkspace(raw);
+        if (entry !== undefined) toSync.push(entry);
+      }
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
@@ -4730,6 +4751,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
+      for (const entry of toSync) void syncDaemon(entry);
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
       await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
@@ -5684,7 +5707,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
-      .then(answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)), () => known);
+      .then(
+        answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)),
+        (e: unknown) => {
+          // The lists a start is checked against are then wsp's own, which refuse a model the binary there takes.
+          console.warn(`${table.harness} on ${machine.id}: the probe of the agent failed (${e instanceof Error ? e.message : String(e)}); wsp's built-in list answers until the next probe`);
+          return known;
+        },
+      );
     catalogs.set(key, { at: now, catalog });
     return catalog.then(forMachine);
   };

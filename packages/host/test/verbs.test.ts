@@ -18,7 +18,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, BUILT_IN_LIST_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT, hostPlatform, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
@@ -2173,10 +2173,10 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const model = await run("run", "alpha", "--model", "claude-haiku-4-5", "review it");
     expect(model.code).toBe(3);
-    expect(model.io.errors).toEqual(['wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.']);
+    expect(model.io.errors).toEqual([`wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     const effort = await run("run", "alpha", "--effort", "ultra", "review it");
     expect(effort.code).toBe(3);
-    expect(effort.io.errors).toEqual(['wsp run: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max). Drop the flag, or give it a value the agent offers.']);
+    expect(effort.io.errors).toEqual([`wsp run: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
     expect(access.code).toBe(3);
     expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
@@ -2184,7 +2184,7 @@ describe("wsp verbs over the host", () => {
     const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "minimal");
     expect(other.code).toBe(3);
     expect(other.io.errors).toEqual([
-      'wsp fork: effort "minimal" is not one GPT-5.6-Sol takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max), Ultra (ultra). Drop the flag, or give it a value the agent offers.',
+      `wsp fork: effort "minimal" is not one GPT-5.6-Sol takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max), Ultra (ultra)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`,
     ]);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(claude.starts).toEqual([]);
@@ -2193,6 +2193,30 @@ describe("wsp verbs over the host", () => {
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5");
     expect(dangling.code).toBe(3);
     expect(dangling.io.errors).toEqual(['wsp fork: --model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.']);
+  });
+
+  it("a refusal off wsp's built-in list says so, and one off the machine's own answer does not", async () => {
+    await run("new", "alpha");
+    const described = { version: "0.153.0", models: [{ slug: "gpt-5.6-sol", label: "GPT-5.6-Sol", contextWindows: [], isDefault: true }], efforts: ["low", "high"], permissionModes: ["read-only"] };
+    backend.execImpl = (_m, cmd) => (cmd === PROBE_CMD ? { exitCode: 0, stdout: JSON.stringify(described), stderr: "" } : guestAnswer(cmd));
+    const [alpha] = await rt.workspaces.list();
+    // The claude here describes nothing, so the list its refusal quotes is wsp's own table; the codex describes
+    // itself, so its refusal quotes the machine's own answer.
+    const listed = await rt.harnesses.list(alpha!.id);
+    expect(listed.find(c => c.harness === "claude")!.source).toBe("table");
+    expect(listed.find(c => c.harness === "codex")!.source).toBe("harness");
+    const table = await run("run", "alpha", "--model", "claude-opus-5-5", "review it");
+    expect(table.code).toBe(3);
+    expect(table.io.errors[0]).toContain("that list is wsp's built-in one");
+    expect(table.io.errors[0]).toContain("the agent on its machine may take more");
+    expect(table.io.errors).toHaveLength(1);
+
+    const own = await run("run", "alpha", "--agent", "codex", "--model", "gpt-4", "review it");
+    expect(own.code).toBe(3);
+    // The machine's own agent named its models, so there is nothing to warn the person about.
+    expect(own.io.errors).toEqual(['wsp run: model "gpt-4" is not one codex takes; one of: GPT-5.6-Sol (gpt-5.6-sol). Drop the flag, or give it a value the agent offers.']);
+    expect(claude.starts).toEqual([]);
+    expect(codex.starts).toEqual([]);
   });
 
   it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {

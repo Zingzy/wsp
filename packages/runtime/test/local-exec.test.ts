@@ -85,6 +85,35 @@ describe("local exec stream", () => {
     expect(turnCutLine("idle", 130, 120)).toMatch(/with no output for 0m$/);
   });
 
+  it("reads an exit file that exists and is empty as a run still writing, and answers the code that lands in it", async () => {
+    // A group of this test's own, standing for the shell that is between the truncate of its exit file and the
+    // write of the code; its pid is one this test started and wrote down, never one found by name.
+    const shell = spawn("bash", ["-c", "sleep 300"], { detached: true, stdio: "ignore" });
+    shell.unref();
+    const pid = shell.pid!;
+    expect(pid).toBeGreaterThan(0);
+    try {
+      mkdirSync(runDir, { recursive: true, mode: 0o700 });
+      const base = join(runDir, "bbbbbbbbbbbb");
+      mkdirSync(`${base}.d`, { mode: 0o700 });
+      writeFileSync(`${base}.pid`, `${pid}\n`);
+      writeFileSync(`${base}.log`, "");
+      writeFileSync(`${base}.exit`, "");
+      const attached = await localExecStream({ root, runDir, pollMs: 10 }).attach!(base, { input: false });
+      expect(attached).not.toBe("gone");
+      const stream = attached as ExecStream;
+      // Longer than the reap's 200 ms group poll, so a poll that settled on the empty file would be seen here.
+      const waited = new Promise<string>(resolve => setTimeout(() => resolve("still writing"), 500));
+      expect(await Promise.race([stream.exited, waited])).toBe("still writing");
+      writeFileSync(`${base}.exit`, "7\n");
+      expect(await stream.exited).toBe(7);
+    } finally {
+      // The reap the settle runs takes the group where the run settled; a red run leaves it to this.
+      if (alive(pid)) process.kill(-pid, "SIGKILL");
+      await gone(pid);
+    }
+  }, 15_000);
+
   it("a child that prints nothing while the tree it started burns a core is not cut at the idle limit", async () => {
     const factory = localExecStream({ root, runDir, idleMs: 400, deadlineMs: 30_000, pollMs: 20, readWork: burningTree(Date.now) });
     const stream = factory("sleep 2; echo still working; sleep 20", { env: {} });

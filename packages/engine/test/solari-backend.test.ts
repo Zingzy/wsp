@@ -1,14 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { RESUME_UNANSWERED } from "@wsp/protocol";
 import { fetchCapMs, isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
-import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
+import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
-function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
+interface Reply {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}
+
+/** A route is a fixed reply, or one read off the request's own body where a road sends several calls to one path. */
+function fakeFetch(routes: Record<string, Reply | ((body: Record<string, unknown>) => Reply)>) {
   return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`;
-    const hit = routes[key] ?? { status: 404, body: { error: "no route " + key } };
+    const route = routes[key];
+    const hit = (typeof route === "function" ? route(JSON.parse(String(init?.body)) as Record<string, unknown>) : route) ?? { status: 404, body: { error: "no route " + key } };
     return new Response(JSON.stringify(hit.body), { status: hit.status, ...(hit.headers !== undefined ? { headers: hit.headers } : {}) });
   });
 }
@@ -177,6 +185,47 @@ describe("SolariBackend", () => {
     expect(body.args[1]).not.toContain("SHELL");
     expect(body.args[0]).toBe("-c");
   });
+  it("an exec asked for longer than the provider's cap runs detached, and every call it makes stays under the cap", async () => {
+    const asked: number[] = [];
+    let polls = 0;
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "POST /sandboxes/x/exec": body => {
+        const req = body as unknown as { args: string[]; timeoutMs: number };
+        asked.push(req.timeoutMs);
+        const cmd = req.args[1]!;
+        if (cmd.includes("echo WSP_LAUNCHED")) return { status: 200, body: { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" } };
+        if (cmd.includes("echo WSP_POLL")) {
+          // The first poll carries the output and no exit code yet; the second carries the code and nothing new.
+          const first = polls++ === 0;
+          const out = first ? Buffer.from("2.1.280\n").toString("base64") : "";
+          return { status: 200, body: { exitCode: 0, stdout: `WSP_POLL\n${first ? "" : "0"}\n${out}\n\nup\nWSP_POLL_END\n`, stderr: "" } };
+        }
+        return { status: 200, body: { exitCode: 0, stdout: "", stderr: "" } };
+      },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    const res = await m.exec("claude --version", { timeoutMs: 30_000 });
+    expect(res).toEqual({ exitCode: 0, stdout: "2.1.280\n", stderr: "" });
+    // The provider answers 400 to any of these above the cap, so the whole road has to stay under it.
+    expect(asked.filter(ms => ms > SOLARI_INLINE_MAX_MS)).toEqual([]);
+    expect(asked.length).toBeGreaterThan(1);
+    expect(SOLARI_INLINE_MAX_MS).toBe(26_000);
+  });
+
+  it("an exec at the cap is one call to the provider, with the timeout it asked for", async () => {
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } },
+      "POST /sandboxes/x/exec": { status: 200, body: { exitCode: 0, stdout: "here\n", stderr: "" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    expect(await m.exec("echo here", { timeoutMs: SOLARI_INLINE_MAX_MS })).toEqual({ exitCode: 0, stdout: "here\n", stderr: "" });
+    const bodies = f.mock.calls.slice(1).map(c => JSON.parse(String(c[1]?.body)) as { timeoutMs: number });
+    expect(bodies).toEqual([{ cmd: "bash", args: ["-c", `${EXEC_ENV}\necho here`], timeoutMs: SOLARI_INLINE_MAX_MS }]);
+  });
+
   it("passes the spec's envs through as the create body's envs, and sends none when the spec names none", async () => {
     const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "x", kind: "sandbox" } } });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
