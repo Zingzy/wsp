@@ -778,8 +778,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const pollTick = async (): Promise<void> => {
     const records = await o.records();
     const statuses = await statusesOf(records, { reconcile: "on-failure" });
-    // A record written or marked while its poll was in flight pushed its own row since; the poll's older row would put back what the record has left.
-    const stamp = (r: StatusRecord): string => `${r.generation} ${r.unreached ?? ""}`;
+    // A record written, marked or moved to another machine while its poll was in flight pushed its own row since; the poll's older row would put back what the record has left.
+    const stamp = (r: StatusRecord): string => `${r.generation} ${r.machineId} ${r.unreached ?? ""}`;
     const built = new Map(records.map(r => [r.id, stamp(r)]));
     const now = new Map((await o.records()).map(r => [r.id, stamp(r)]));
     o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
