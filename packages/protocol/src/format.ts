@@ -1249,6 +1249,11 @@ export function machineUnreachableLine(said: string): string {
   return `the provider cannot reach the machine (${said}); pause and wake the workspace, or delete it`;
 }
 
+/** A pause the provider refuses outright: its words, the cause measured on Solari (about 10 GB of memory and disk together), the road left. */
+export function napRefusedLine(said: string): string {
+  return `the provider does not pause this machine (${said}): its memory and disk together are over what it pauses; it runs until you delete it`;
+}
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */
