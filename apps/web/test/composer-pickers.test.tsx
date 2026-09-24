@@ -425,6 +425,9 @@ describe("composer pickers", () => {
     fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
     // GPT-5.6-Sol leads the tab and its app-server reports low for it.
     await waitFor(() => expect(picked("effort")).toBe("low"));
+    // GPT-5.5 is a generation behind, so it sits under the legacy fold.
+    expect(option("gpt-5.5")).toBeNull();
+    fireEvent.click(modelMenu()!.querySelector<HTMLElement>("[data-composer-legacy-fold]")!);
     fireEvent.click(option("gpt-5.5")!);
     await waitFor(() => expect(pickerValue("model")).toBe("gpt-5.5"));
     // The app-server reports medium for GPT-5.5, so that is what the button reads and the menu marks.

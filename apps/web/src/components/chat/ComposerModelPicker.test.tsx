@@ -107,6 +107,76 @@ describe("ComposerModelPicker", () => {
     useComposerFavouritesStore.setState({ keys: [] });
   });
 
+  const LEGACY: HarnessCatalog = {
+    ...CLAUDE,
+    legacyModels: [
+      { value: "claude-opus-4-6", label: "Opus 4.6", efforts: [], contextWindows: [] },
+      { value: "claude-sonnet-4-5", label: "Sonnet 4.5", efforts: [], contextWindows: [] },
+    ],
+  };
+  const shown = () => screen.queryAllByRole("option").map(o => o.dataset["composerOption"]);
+  const fold = () => document.querySelector<HTMLElement>("[data-composer-legacy-fold]");
+
+  it("keeps the older models under a closed Legacy models row at the end, open after one click", async () => {
+    useComposerFavouritesStore.setState({ keys: [] });
+    const picked: string[] = [];
+    render(<ComposerModelPicker catalogs={[LEGACY]} catalog={LEGACY} model={LEGACY.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={(_h, m) => picked.push(m)} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Opus 5" })));
+    expect(shown()).toEqual(["claude-opus-5", "claude-sonnet-5"]);
+    expect(fold()?.textContent).toBe("Legacy models");
+    expect(fold()?.getAttribute("aria-expanded")).toBe("false");
+    // The fold is the last row, and outside every listbox, which holds options alone.
+    expect(fold()?.nextElementSibling).toBeNull();
+    expect(fold()?.closest('[role="listbox"]')).toBeNull();
+    await act(async () => fireEvent.click(fold()!));
+    expect(fold()?.getAttribute("aria-expanded")).toBe("true");
+    expect(shown()).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-opus-4-6", "claude-sonnet-4-5"]);
+    expect(screen.getByRole("listbox", { name: "Legacy models" }).children).toHaveLength(2);
+    for (const box of screen.getAllByRole("listbox")) expect([...box.children].every(c => c.getAttribute("role") === "option")).toBe(true);
+    await act(async () => fireEvent.click(screen.getByRole("option", { name: /Opus 4\.6/ })));
+    expect(picked).toEqual(["claude-opus-4-6"]);
+  });
+
+  it("finds a legacy model by search and shows it without the fold", async () => {
+    render(<ComposerModelPicker catalogs={[LEGACY]} catalog={LEGACY} model={LEGACY.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Opus 5" })));
+    await act(async () => fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), { target: { value: "sonnet" } }));
+    expect(shown()).toEqual(["claude-sonnet-5", "claude-sonnet-4-5"]);
+    expect(fold()).toBeNull();
+    expect(listModels(LEGACY, [], "4.6", null).map(m => m.value)).toEqual(["claude-opus-4-6"]);
+  });
+
+  it("opens the fold by keyboard, and stands open when the composer already names a legacy model", async () => {
+    const picked: string[] = [];
+    render(<ComposerModelPicker catalogs={[LEGACY]} catalog={LEGACY} model={LEGACY.legacyModels![1]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={(_h, m) => picked.push(m)} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sonnet 4.5" })));
+    expect(fold()?.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("option", { name: /Sonnet 4\.5/ }).getAttribute("aria-selected")).toBe("true");
+    const menu = document.querySelector<HTMLElement>("[data-composer-model-menu]")!;
+    for (let i = 0; i < 2; i++) await act(async () => fireEvent.keyDown(menu, { key: "ArrowDown" }));
+    expect(fold()?.dataset["active"]).toBe("true");
+    await act(async () => fireEvent.keyDown(menu, { key: "Enter" }));
+    expect(fold()?.getAttribute("aria-expanded")).toBe("false");
+    expect(shown()).toEqual(["claude-opus-5", "claude-sonnet-5"]);
+    await act(async () => fireEvent.keyDown(menu, { key: "Enter" }));
+    await act(async () => fireEvent.keyDown(menu, { key: "ArrowDown" }));
+    await act(async () => fireEvent.keyDown(menu, { key: "Enter" }));
+    expect(picked).toEqual(["claude-opus-4-6"]);
+  });
+
+  it("stars a legacy model onto the favourites tab and to the top of the agent's own list", async () => {
+    useComposerFavouritesStore.setState({ keys: [] });
+    render(<ComposerModelPicker catalogs={[LEGACY]} catalog={LEGACY} model={LEGACY.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Opus 5" })));
+    await act(async () => fireEvent.click(fold()!));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Opus 4.6 to favourites" })));
+    expect(shown()).toEqual(["claude-opus-4-6", "claude-opus-5", "claude-sonnet-5", "claude-sonnet-4-5"]);
+    await act(async () => fireEvent.click(document.querySelector<HTMLElement>("[data-composer-favourites-tab]")!));
+    expect(shown()).toEqual(["claude-opus-4-6"]);
+    expect(fold()).toBeNull();
+    useComposerFavouritesStore.setState({ keys: [] });
+  });
+
   it("says each rail row's agent in text a person sees, not only in an attribute", async () => {
     render(<ComposerModelPicker catalogs={[CLAUDE, CODEX]} catalog={CLAUDE} model={FABLE} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
     await open();

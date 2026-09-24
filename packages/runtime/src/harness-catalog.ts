@@ -12,6 +12,7 @@
 // A list is empty where the CLI has no such flag or takes open values.
 import { CLAUDE_SCREEN_COMMANDS } from "@wsp/adapter-claude";
 import { CLAUDE_CODE } from "@wsp/catalog";
+import { everyModel } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessCatalogProbe, HarnessModel, HarnessOption } from "@wsp/protocol";
 
 /** What one row's table was read against: what was run on the row's own binary, the version it reported and the day it
@@ -80,6 +81,18 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
       { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
     ],
+    // The pinned binary's own model catalog, which harness-catalog.test.ts holds these to: each is run as named, with
+    // the levels, default and 1M suffix it lists. Opus 4.0 and 4.1 are run as the latest Opus and Sonnet 4.0 is retired.
+    legacyModels: [
+      { ...option("claude-opus-5", "Opus 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-8", "Opus 4.8"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-7", "Opus 4.7"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "xhigh", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-6", "Opus 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-5", "Opus 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
+      { ...option("claude-fable-5", "Fable 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: [] },
+      { ...option("claude-sonnet-4-6", "Sonnet 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
+    ],
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
     // default is the mode this CLI raises its own prompts in: with --permission-prompt-tool they reach the host over
@@ -112,6 +125,10 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" },
       { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "medium" },
       { ...option("gpt-5.6-luna", "GPT-5.6-Luna"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" },
+    ],
+    // A generation behind 5.6; model/list names every model the binary runs, these two among them.
+    legacyListed: true,
+    legacyModels: [
       { ...option("gpt-5.5", "GPT-5.5"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
       { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
@@ -175,24 +192,29 @@ export function harnessCatalog(harness: string): HarnessCatalog | undefined {
  * the question then runs on whatever that CLI runs without a model. */
 export function smallestModel(catalog: HarnessCatalog | undefined): string | undefined {
   if (catalog?.smallModel === undefined) return undefined;
-  return catalog.models.some(m => m.value === catalog.smallModel) ? catalog.smallModel : undefined;
+  return everyModel(catalog).some(m => m.value === catalog.smallModel) ? catalog.smallModel : undefined;
 }
 
 /** The binary's lists in the wire shape: its values and defaults win, the table lends labels and descriptions it knows.
+ * The table's legacy models are read against the answer as the row's legacyListed says.
  * A model whose efforts the binary did not name keeps none of its own, so every effort the catalog lists stays open to
  * it; each model carries the effort the binary reports for it, and the catalog's own mark is the one it reports for
  * the model it would run, else the table's mark, which effortsFor reads for a model that names none. */
 export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogProbe): HarnessCatalog {
   const known = (list: readonly HarnessOption[], value: string): HarnessOption | undefined => list.find(o => o.value === value);
-  const models: HarnessModel[] = probe.models.map(m => ({
+  const heard: HarnessModel[] = probe.models.map(m => ({
     value: m.slug,
-    label: known(table.models, m.slug)?.label ?? m.label,
+    label: known(everyModel(table), m.slug)?.label ?? m.label,
     ...(m.description !== undefined ? { description: m.description } : {}),
     ...(m.isDefault ? { isDefault: true } : {}),
     ...(m.efforts !== undefined ? { efforts: [...m.efforts] } : {}),
     ...(m.defaultEffort !== undefined ? { defaultEffort: m.defaultEffort } : {}),
     contextWindows: [...m.contextWindows],
   }));
+  const listsLegacy = table.legacyListed === true;
+  const folded = (m: HarnessModel): boolean => listsLegacy && m.isDefault !== true && table.legacyModels?.some(l => l.value === m.value) === true;
+  const models = heard.filter(m => !folded(m));
+  const legacyModels = table.legacyModels === undefined ? undefined : listsLegacy ? heard.filter(folded) : table.legacyModels.filter(l => !heard.some(m => m.value === l.value));
   // The binary named the effort its default model runs at, so its mark replaces the table's; where it named none the
   // table's own mark stands, and the picker shows a default either way.
   const defaultEffort = probe.models.find(m => m.isDefault)?.defaultEffort;
@@ -207,6 +229,7 @@ export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogPro
     source: "harness",
     version: probe.version,
     models,
+    ...(legacyModels !== undefined ? { legacyModels } : {}),
     efforts: probe.efforts.map(effort),
     permissionModes: probe.permissionModes.map(value => known(table.permissionModes, value) ?? option(value, value)),
   };

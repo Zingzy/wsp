@@ -131,6 +131,13 @@ describe("threadPicks", () => {
     expect(threadPicks({ running: false, model: null }, [opened])).toEqual({});
   });
 
+  it("a thread on a legacy model keeps it on a send, with no effort where that model takes none", () => {
+    const withLegacy: HarnessCatalog = { ...CLAUDE, legacyModels: [{ value: "claude-opus-4-6", label: "Opus 4.6", efforts: [], contextWindows: [] }] };
+    const thread = threadPicks({ running: false, model: "claude-opus-4-6" }, []);
+    expect(resolveModel(withLegacy, { picked: undefined, thread: thread.model })?.label).toBe("Opus 4.6");
+    expect(startOptionsFrom(withLegacy, {}, { ...thread, effort: "high" })).toEqual({ model: "claude-opus-4-6" });
+  });
+
   it("a thread model this list does not carry is shown but not sent, since sessions.start would refuse it", () => {
     const thread = threadPicks({ running: false, model: "claude-fable-5-1" }, []);
     expect(effectivePicks(CLAUDE, { picked: {}, thread }).model).toBe("claude-fable-5-1");

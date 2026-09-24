@@ -1060,6 +1060,12 @@ export const HarnessCatalog = z.object({
   source: HarnessCatalogSource,
   version: z.string().nullable(),
   models: z.array(HarnessModel),
+  /** Older models the CLI still runs by name, which the composer keeps under a fold at the end of the model menu; a
+   * start takes one as it takes a model above. Read models and these together through everyModel. Absent is none. */
+  legacyModels: z.array(HarnessModel).optional(),
+  /** Whether the binary's own answer names its legacy models too, as Codex's model/list does, so one a live answer
+   * leaves out is one it no longer runs; absent, the answer is the binary's current set and legacy models run by name. */
+  legacyListed: z.boolean().optional(),
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
@@ -1201,10 +1207,15 @@ export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null):
   return options.map(({ isDefault: _harness, ...rest }) => (rest.value === own ? { ...rest, isDefault: true } : rest));
 }
 
+/** Every model a start may name: the catalog's current ones, then its legacy ones. */
+export function everyModel(catalog: HarnessCatalog): HarnessModel[] {
+  return [...catalog.models, ...(catalog.legacyModels ?? [])];
+}
+
 /** The model a pick names, as the catalog knows it; a slug the catalog does not list still counts, named by itself. */
 export function modelOf(catalog: HarnessCatalog, value: string | undefined): HarnessModel | null {
   if (value === undefined) return null;
-  return catalog.models.find(m => m.value === value) ?? { value, label: value };
+  return everyModel(catalog).find(m => m.value === value) ?? { value, label: value };
 }
 
 /** None without a model: the window rides the model as a suffix, so there is nothing to offer it on. */
@@ -1233,14 +1244,15 @@ export function listedPick(options: ReadonlyArray<HarnessOption>, value: string 
 
 const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
 
-function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined): void {
-  if (value === undefined || options.some(o => o.value === value)) return;
-  const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}`;
+function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined, legacy: ReadonlyArray<HarnessOption> = []): void {
+  if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value)) return;
+  const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
+  const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
-  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model);
+  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
