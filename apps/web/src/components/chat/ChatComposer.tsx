@@ -56,6 +56,7 @@
 // model, its window and the effort, so a change mid-thread applies at the
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
+import { cn } from "../../lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
@@ -565,10 +566,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   return (
     <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
-      {/* The refusal slot stands at two lines whether or not it holds one, so nothing under it moves when a
-          sentence lands, and the sentence wraps: at the smallest window with the right panel open the slot is
-          narrower than the sentence, and a cut there drops the half that says what happens next. */}
-      <div className="mx-auto flex h-9 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-refusal>
+      {/* The refusal takes room only while it holds a sentence, which wraps to two lines at most: at the smallest
+          window with the right panel open a cut would drop the half that says what happens next. */}
+      <div className={cn("mx-auto flex w-full max-w-3xl items-center px-3", line !== null && "min-h-9 pb-1")} aria-live="polite" data-composer-refusal>
         {line !== null ? (
           <span role="status" className="min-w-0 text-pretty font-mono text-[11px] leading-[18px] text-muted-foreground line-clamp-2" title={line}>
             {line}
@@ -645,6 +645,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     className="flex min-w-0 flex-nowrap items-end justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
                   >
                     <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1 ps-3.5">
+                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
+                    </div>
+                    <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <Button
                         type="button"
                         size="icon-xs"
@@ -670,9 +673,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                           event.target.value = "";
                         }}
                       />
-                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
-                    </div>
-                    <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <ComposerPrimaryActions
                         compact={false}
                         pendingAction={null}

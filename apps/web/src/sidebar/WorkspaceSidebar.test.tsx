@@ -7,6 +7,7 @@ import { workspaceActions } from "../actions/workspaceActions.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
+import { THIS_COMPUTER_WORD } from "../settings/places.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
 
@@ -92,6 +93,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     landings: Object.fromEntries(projects.map(p => [p.id, landing])),
     selectedId: null,
     selectedThreadId: null,
+    projectHome: null,
     toast: null,
     preferences: { ...DEFAULT_PREFERENCES, labs: true },
   } as never);
@@ -103,8 +105,8 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
   return { create };
 }
 
-/** Every project row the sidebar drew, in order, with the count beside it once its row is shut. */
-const headers = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-row-id^=project\\:]")].map(row => row.textContent ?? "");
+/** Every project row the sidebar drew, in order, by its name with the count beside it once its row is shut. */
+const headers = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-row-id^=project\\:]")].map(row => `${row.querySelector("[data-project-name]")!.textContent}${row.querySelector("[data-project-count]")?.textContent ?? ""}`);
 const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
@@ -116,7 +118,7 @@ afterEach(() => {
 });
 
 describe("the sidebar under the four nouns", () => {
-  it("draws one row per project with its workspaces one step in under it, shuts on a click and carries the count while shut", async () => {
+  it("draws one row per project with its workspaces one step in under it, opens its home on a click, shuts on the next and carries the count while shut", async () => {
     mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_1")] });
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
     expect(headers()).toEqual(["spoo", "wsp"]);
@@ -124,12 +126,16 @@ describe("the sidebar under the four nouns", () => {
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_b", "project:pr_2"]);
     expect(depthOf("spoo")).toBe(0);
     expect(depthOf("pricing page")).toBe(1);
-    // A project row is one line, sentence case, no caps and no letter-spacing: a project is a noun, not a zone.
-    expect(rowOf("spoo").className).toContain("h-7");
+    // A project row is two lines, its computer over its name, sentence case, no caps and no letter-spacing.
+    expect(rowOf("spoo").className).toContain("h-13");
+    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe(THIS_COMPUTER_WORD);
     expect(rowOf("spoo").className).not.toMatch(/uppercase|tracking-/);
     expect(rowOf("spoo").querySelector("[data-project-name]")!.className).not.toMatch(/uppercase|tracking-/);
     // The count rides the row while its children are shut, so a shut project still says how much it holds.
-    fireEvent.click(screen.getByLabelText("spoo"));
+    fireEvent.click(rowOf("spoo"));
+    expect(useStore.getState().projectHome).toBe("pr_1");
+    expect(headers()[0]).toBe("spoo");
+    fireEvent.click(rowOf("spoo"));
     await waitFor(() => expect(headers()[0]).toBe("spoo2"));
     expect(rowIds()).toEqual(["project:pr_1", "project:pr_2"]);
   });
@@ -139,10 +145,11 @@ describe("the sidebar under the four nouns", () => {
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
     const leaf = screen.getByText(PROJECT_WORDS.noWorkspaces);
     expect(leaf.closest("li")!.parentElement!.previousElementSibling!.querySelector("[data-row-id='project:pr_2']")).not.toBeNull();
-    expect(leaf.className).toContain("h-7");
-    // A sentence with a period is read, not glanced at: the sans at the rows' size in the prose ink, never the mono.
+    expect(leaf.className).toContain("h-9");
+    expect(leaf.className).toContain("px-2");
+    // A sentence with a period is read, not glanced at: the sans in a quiet ink, never the mono.
     expect(leaf.className).toContain("text-[13px]");
-    expect(leaf.className).toContain("text-[var(--sidebar-prose)]");
+    expect(leaf.className).toContain("text-sidebar-foreground/45");
     expect(leaf.className).not.toContain("font-mono");
     const plus = [...document.querySelectorAll<HTMLElement>(`[data-k=new-workspace]`)].find(el => el.dataset["project"] === "pr_2")!;
     // The plus sits in the row's frame and reads at rest as nothing at every width: the hover and the keyboard focus lift it.
@@ -157,14 +164,14 @@ describe("the sidebar under the four nouns", () => {
     expect(dialog.querySelector<HTMLElement>("[data-segment=pr_1]")!.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("records another project from the foot of the switcher's menu, which opens the sheet, and from nowhere else at rest", async () => {
+  it("records another project from the foot of the switcher's menu, which opens the Add a project dialog, and from nowhere else at rest", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [] });
     await waitFor(() => expect(screen.getByText("spoo")).toBeDefined());
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
     fireEvent.click(await screen.findByText(PROJECT_WORDS.add));
-    const sheet = await screen.findByRole("dialog");
-    expect(sheet.querySelector("[data-k=title]")!.textContent).toBe(PROJECT_WORDS.add);
+    await waitFor(() => expect(document.querySelector("[data-k=add-project]")).not.toBeNull());
+    expect(screen.getByRole("dialog", { name: PROJECT_WORDS.add })).toBeDefined();
   });
 
   it("offers no Spaces row and no look action in a row's menu, whatever the preferences record says", async () => {

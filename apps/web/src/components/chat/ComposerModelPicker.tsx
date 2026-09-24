@@ -69,11 +69,10 @@ export function jumpLabel(index: number, platform: string): string | null {
   return isMacPlatform(platform) ? `⌘${index + 1}` : `Ctrl+${index + 1}`;
 }
 
-/** What the button says: the agent that will run the turn, then the model it will run on. The model stood there
- * alone until a person read the row and could find no agent named anywhere on it. With no model resolved the slot
- * names what the button picks rather than standing empty. */
+/** What the button says: the model the turn runs on, beside the agent's mark, which is the agent's name enough; the
+ * agent's name alone where no model is resolved yet. */
 export function agentAndModelLine(catalog: HarnessCatalog, model: HarnessModel | null): string {
-  return `${catalog.label} · ${model?.label ?? "Model"}`;
+  return model?.label ?? catalog.label;
 }
 
 /** The one line the composer answers a cross-harness pick on a started thread with. */

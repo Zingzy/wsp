@@ -2,7 +2,7 @@
 // The composer's row of pickers: the agent and its model, one quiet button for
 // the agent's defaults, and the folder. Base UI's menu and popover never settle
 // under jsdom, so both are stood in by a plain open/closed context.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessCatalog, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -65,8 +65,7 @@ vi.mock("../ui/popover", () => {
       </button>
     );
   };
-  const PopoverPopup = ({ children, initialFocus }: { children: ReactNode; initialFocus?: unknown }) =>
-    useContext(Ctx).open ? <div role="dialog" data-initial-focus={String(initialFocus)}>{children}</div> : null;
+  const PopoverPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="dialog">{children}</div> : null);
   return { Popover, PopoverTrigger, PopoverPopup };
 });
 
@@ -176,7 +175,7 @@ const model = () => document.querySelector<HTMLElement>('[data-composer-picker="
 afterEach(() => {
   cleanup();
   useComposerDraftStore.setState({ drafts: {} });
-  useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {}, railOffered: {} });
+  useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {} });
 });
 
@@ -234,42 +233,20 @@ describe("the agent a fresh thread opens on", () => {
     expect(model().dataset["harness"]).toBe("codex");
   });
 
-  it("is the catalog's first where the project remembers none, and the rail is opened once for the pick", () => {
+  it("is the catalog's first where the project remembers none, and the menu stays shut until the person opens it", () => {
     draw({ catalogs: [CLAUDE, CODEX], project: record() });
     expect(model().dataset["harness"]).toBe("claude");
-    const rail = screen.getByRole("dialog");
-    expect(within(rail).getByRole("tab", { selected: true }).getAttribute("data-composer-harness")).toBe("claude");
-    // The box under the rail is where the ask is typed, so the rail takes no focus of its own.
-    expect(rail.dataset["initialFocus"]).toBe("false");
-  });
-
-  it("leaves the rail shut where the project remembers an agent", () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("takes the offer back on the first keystroke, so the list never stands over the box", async () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-
-  it("is made once: emptying the box again leaves the rail shut", async () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    // And not on the next composer for this workspace either: the offer was made and is not made again.
-    cleanup();
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+  it("leaves the menu shut where the project remembers an agent", () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("stays open on the agent tab the person picks, so its models can be read", async () => {
     draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    fireEvent.click(model());
     const rail = screen.getByRole("dialog");
     fireEvent.click(within(rail).getByRole("tab", { name: "Codex" }));
     // The pick is a reason to read that agent's list, not to take the list away.

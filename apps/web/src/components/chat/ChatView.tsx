@@ -126,7 +126,7 @@ export function ChatView({
   }, [asked, hydrated, readingThread, threadId, threadKey, workspaceId]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+    <div className="flex h-full min-h-0 flex-col text-foreground">
       <div className="relative min-h-0 flex-1">
         {!thread.hydrated ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>

@@ -58,8 +58,9 @@ describe("ComposerModelPicker", () => {
     await open();
     const row = screen.getByRole("option", { name: /claude-fable-5-1/ });
     expect(row.getAttribute("aria-selected")).toBe("true");
-    expect(row.textContent).toContain(UNLISTED_MODEL_LINE);
-    expect(row.querySelector("[data-unlisted-model]")).not.toBeNull();
+    // The row is the name alone, muted; the menu draws no line under a model's name.
+    expect(row.textContent).not.toContain(UNLISTED_MODEL_LINE);
+    expect(row.querySelector("[data-unlisted-model] .text-muted-foreground")?.textContent).toBe("claude-fable-5-1");
     await act(async () => fireEvent.click(row));
     expect(picked).toEqual(["claude-fable-5-1"]);
   });
