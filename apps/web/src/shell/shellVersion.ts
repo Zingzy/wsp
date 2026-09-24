@@ -5,7 +5,7 @@
 // picker, the computer's fonts, a page photograph, the native menu) works or
 // fails by which half is behind, with nothing said. Read once on load and put
 // in the one place the app already puts a sentence a person may be waiting on.
-import { GET_THE_APP_WORD, shellVersionNotice } from "@wsp/protocol";
+import { GET_THE_APP_WORD, releaseAbove, shellVersionNotice, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect } from "react";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { bootPayload } from "../boot.js";
@@ -17,6 +17,14 @@ import { addNotice } from "../notices/store.js";
 export function shellVersions(): { app: string | undefined; host: string | undefined; inShell: boolean } {
   const bridge = desktopBridge();
   return { app: bridge?.version, host: bootPayload()?.version, inShell: bridge !== undefined };
+}
+
+/** The release this page's app or host is behind, or nothing: what About's Latest ink, its buttons, the settings
+ * sidebar's word and the update notice all read, so none of them can disagree. */
+export function releaseAhead(release: ReleaseView | null, versions: ReturnType<typeof shellVersions>): ReleaseLatest | undefined {
+  if (release === null) return undefined;
+  const running = [versions.host, versions.inShell ? versions.app : undefined].filter((version): version is string => version !== undefined);
+  return releaseAbove(release, ...running) ? release.latest : undefined;
 }
 
 /** Mounted once under the store: a shell of another release than the host that served this page is a notice,

@@ -1327,7 +1327,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // keeps the sentence where every other refusal of a dial is kept, and nothing attaches.
       await keep({ ...held, dialled: { at: new Date(clockNow()).toISOString(), answered: false, said: blocked } });
       cut(placeId, blocked);
-      emit({ type: "place.absent", placeId });
+      emit({ type: "place.absent", placeId, said: blocked });
       return { refusal: blocked };
     },
 
@@ -1594,9 +1594,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       let step: PlaceAddStep = "connect";
-      const stage: PlaceStaging = (which, state, note) => {
+      const stage = (which: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string): void => {
         step = which;
-        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
+        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
       const waiting: { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void } = {};
@@ -1633,7 +1633,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", `engine ${held.report.engine}`);
+        stage("join", "done", `engine ${held.report.engine}`, placeId);
         // What that computer forks with, read over the link it has just opened and before this answers: the row a
         // join prints carries where that computer keeps the logins its workspaces share, which is what the
         // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a

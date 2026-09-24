@@ -53,7 +53,9 @@
 // ?places=1 fills the places list with four computers, one of them
 // away with the longest name the spec draws; ?init=building puts the init job
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
-// served the page, so the one line the app says about it can be measured.
+// served the page, so the one line the app says about it can be measured; ?host=1 runs the host-event rules on a
+// prompt and a dead thread, so the notices they raise can be photographed.
+import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -61,6 +63,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
+import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice } from "../../src/notices/store.js";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { useBrowserTabs } from "../../src/browser/tabs";
@@ -643,9 +646,23 @@ if (params.get("oom") === "1") {
   getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
   getLive("ws_a").feedStatus("connecting");
 }
+/** The app's own host-event rules, so ?host=1 runs the road a prompt and a dead thread take and not a set toast:
+ * both land on a workspace not open, pushed from an effect after the rules' own, so they are listening. */
+function HostRule() {
+  useHostNotices();
+  useEffect(() => {
+    const events: ProtocolEvent[] = [
+      { type: "session.end", workspaceId: "ws_b", sessionId: "s2", turnId: "turn_s2", threadId: "s2", exitCode: 1, sawResult: false, seq: 900 },
+      { type: "session.permission", workspaceId: "ws_b", sessionId: "s_host", turnId: "turn_host", threadId: "thr_host", askId: "ask_host", toolName: "Bash", detail: "Check the version", input: '{"command":"wsp --version"}', options: permOptions, seq: 901 },
+    ];
+    for (const event of events) for (const fn of watching) fn(event);
+  }, []);
+  return null;
+}
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     {params.get("version") === "behind" ? <VersionRule /> : null}
+    {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>{shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );
