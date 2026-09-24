@@ -9,7 +9,7 @@
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { hiddenFolder, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
+import { foldersOutsideLine, hiddenFolder, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders } from "@wsp/runtime";
 import { under } from "./init-import.js";
 import { isRepoFolder } from "./project-bundle.js";
@@ -54,7 +54,7 @@ export function hostFolderRoots(paths: HostFolderPaths = {}): string[] {
 }
 
 function outside(dir: string, roots: readonly string[]): Error {
-  return new Error(`${dir} is outside the folders wsp browses on this computer: ${roots.join(", ")}`);
+  return new Error(foldersOutsideLine(dir, roots.join(", "), "this computer"));
 }
 
 /** Which folder a listing is for: absent gives the first root, and so does one inside the roots that is gone, which

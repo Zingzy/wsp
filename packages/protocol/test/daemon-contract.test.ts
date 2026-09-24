@@ -74,6 +74,7 @@ import {
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
+  HostFolderListing,
   HTTP_URL_MAX,
   NOT_ON_A_BRANCH,
   NO_REMOTE,
@@ -118,6 +119,7 @@ import {
   dialFailedLine,
   dialTimedOutLine,
   dialUnansweredLine,
+  foldersOutsideLine,
   guestNoDaemonLine,
   placeKeptForLinkLine,
   guestWspShim,
@@ -224,6 +226,7 @@ const words = (): Record<string, string> => ({
   noToken: DAEMON_NO_TOKEN,
   unknownOp: unknownOpLine("{op}"),
   portScopeRefusal: portScopeRefusal("{port}"),
+  foldersOutside: foldersOutsideLine("{dir}", "{roots}"),
   notOnThisRoad: NOT_ON_THIS_ROAD,
   notOnThisKind: NOT_ON_THIS_KIND,
   noImagesHere: NO_IMAGES_HERE,
@@ -486,6 +489,21 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
     samples: [{ pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "closed", host: "github.com" } }, {}],
   },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
+  HostFolderListing: {
+    schema: HostFolderListing,
+    samples: [
+      {
+        dir: "/home/maya",
+        roots: ["/home/maya", "/wsp/projects/p_1/checkout"],
+        folders: [
+          { path: "/home/maya/code", repo: true },
+          { path: "/home/maya/notes", repo: false },
+        ],
+        hidden: 3,
+      },
+      { dir: "/home/maya/notes", roots: ["/home/maya"], folders: [], hidden: 0 },
+    ],
+  },
   GuestCliMessage: { schema: GuestCliMessage, samples: [{ stream: "out", text: "rows\n" }, { stream: "err", text: "one line\n" }, { exit: 3 }] },
   CopyReport: {
     schema: CopyReport,

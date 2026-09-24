@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "fs.folders"
+  },
+  {
+    "id": 1,
+    "op": "fs.folders",
+    "dir": "/home/maya/code",
+    "hidden": true,
+    "projects": ["/wsp/projects/p_1/checkout"]
+  }
+]

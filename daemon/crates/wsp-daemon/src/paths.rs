@@ -84,7 +84,7 @@ fn lexical_resolve(base: &Path, requested: &str) -> PathBuf {
 }
 
 /// Both absolute and normalised, so a component-wise prefix is the whole question.
-fn is_inside(root: &Path, target: &Path) -> bool {
+pub(crate) fn is_inside(root: &Path, target: &Path) -> bool {
     target.strip_prefix(root).is_ok()
 }
 

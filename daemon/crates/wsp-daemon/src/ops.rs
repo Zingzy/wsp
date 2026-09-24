@@ -272,6 +272,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "exec"
             | "fs.list"
             | "fs.read"
+            | "fs.folders"
             | "git.status"
             | "git.diff"
             | "git.push"
@@ -667,6 +668,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
+        DaemonOp::FsFolders { dir, hidden, projects } => {
+            answer(id, fs::list_folders(PathBuf::from(&ctx.root), projects.unwrap_or_default(), dir, hidden == Some(true)).await)
+        }
         DaemonOp::GitStatus { cwd, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
@@ -948,6 +952,7 @@ mod tests {
             "git.push",
             "git.pr",
             "git.prState",
+            "fs.folders",
             "ports.watch",
             "manifest.get",
             "manifest.record",

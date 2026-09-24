@@ -134,6 +134,9 @@ export const DAEMON_NO_TOKEN = "daemon refuses to start without an auth token";
 export const unknownOpLine = (op: string): string => `unknown op: ${op}`;
 /** The refusal every op but tunnel ops on the scoped port and ping gets on a socket whose auth frame named a port. */
 export const portScopeRefusal = (port: number | string): string => `this socket is scoped to port ${port}: only tunnel ops on it and ping are allowed`;
+/** What a folder listing outside every root it browses is refused with, naming the roots it does browse. The
+ * daemon of a computer somebody owns says it of that computer; the host lists its own and says it of this one. */
+export const foldersOutsideLine = (dir: string, roots: string, on = "that computer"): string => `${dir} is outside the folders wsp browses on ${on}: ${roots}`;
 /** The one line the daemon prints on stdout once it is bound; whoever started it reads the port off this. */
 export const daemonListeningLine = (host: string, port: number | string): string => `wsp-daemon listening on ${host}:${port}`;
 

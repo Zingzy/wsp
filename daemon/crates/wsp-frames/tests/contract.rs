@@ -13,7 +13,7 @@ use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
-    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
+    HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
     MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
@@ -217,6 +217,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GuestCliMessage" => {
                     round_trip::<GuestCliMessage>(&sample, &at);
                 }
+                "HostFolderListing" => {
+                    round_trip::<HostFolderListing>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -231,6 +234,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "GitPushReply",
         "GuestCliMessage",
         "GuestOpenReply",
+        "HostFolderListing",
         "MachineAnswersReply",
         "MachineBackendReply",
         "MachineCapacityReply",
@@ -262,6 +266,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("noToken", words::NO_TOKEN_AT_START.to_owned());
     m.insert("unknownOp", words::unknown_op("{op}"));
     m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
+    m.insert("foldersOutside", words::folders_outside("{dir}", "{roots}"));
     m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
     m.insert("noImagesHere", words::NO_IMAGES_HERE.to_owned());

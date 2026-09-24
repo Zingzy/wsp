@@ -209,6 +209,23 @@ pub struct FsReadReply {
     pub truncated: bool,
 }
 
+/// One folder a folder picker lists, and whether git tracks it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostFolder {
+    pub path: String,
+    pub repo: bool,
+}
+
+/// One level of folders: the folder listed, the roots every level is browsed from, the folders directly inside it
+/// and how many were left out for being hidden.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostFolderListing {
+    pub dir: String,
+    pub roots: Vec<String>,
+    pub folders: Vec<HostFolder>,
+    pub hidden: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitBranch {
     pub oid: String,

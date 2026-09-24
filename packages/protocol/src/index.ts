@@ -3181,6 +3181,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
   /** Where the branch's pull request stands, read back through that same command line. */
   z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
+   * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
+   * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
+   * gone. A path outside the roots, a relative one, or one through a symlink that leaves them is refused with code
+   * outside-root. Folders only, one level, `repo` where the folder holds .git; the dot-named ones are counted and
+   * listed only when `hidden`. No file is read. */
+  z.object({ id: reqId, op: z.literal("fs.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), projects: z.array(z.string()).optional() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -5171,8 +5178,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
    * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
-   * otherwise only counted. */
-  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
+   * otherwise only counted. `on` is the id of the computer whose folders are listed, off places.list: absent or
+   * this computer's is this computer's; a computer you joined answers through its own daemon over its link, with
+   * its login's home and its projects' folders as the roots; a provider keeps no computer and is refused. */
+  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), on: z.string().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */

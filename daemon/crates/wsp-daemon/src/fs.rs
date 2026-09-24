@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use wsp_frames::{DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply};
+use wsp_frames::{words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, HostFolder, HostFolderListing};
 
 use crate::git::{run_git, Runs};
-use crate::paths::OpError;
+use crate::paths::{absolute, is_inside, OpError};
 
 /// Runs blocking work off the runtime thread and folds a lost worker into the op's failure.
 pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, OpError> + Send + 'static) -> Result<T, OpError> {
@@ -91,6 +91,84 @@ fn stat_entries(dir: &Path, names: Vec<(String, bool)>) -> Result<Vec<FsEntry>, 
             Ok(FsEntry { name, kind, size, mtime: epoch_ms(meta.modified()?) })
         })
         .collect()
+}
+
+/// One level of folders for the folder picker of a computer somebody owns, by the rule the host lists its own
+/// computer's with: only inside the roots, which are `home` and each project folder it does not hold, checked
+/// lexically before anything is read and by realpath after, so neither a typed path nor a link reaches the rest of
+/// the disk. Folders only, sorted by name, each marked when git tracks it; the dot-named ones are counted and listed
+/// only when `hidden`, which is the host's hidden rule on a computer that is not a Mac. No file is opened.
+pub(crate) async fn list_folders(
+    home: PathBuf,
+    projects: Vec<String>,
+    dir: Option<String>,
+    hidden: bool,
+) -> Result<HostFolderListing, OpError> {
+    blocking(move || {
+        let roots = folder_roots(&home, &projects);
+        let real_roots: Vec<PathBuf> = roots.iter().filter_map(|root| std::fs::canonicalize(root).ok()).collect();
+        let inside_real = |path: &Path| std::fs::canonicalize(path).is_ok_and(|real| real_roots.iter().any(|root| is_inside(root, &real)));
+        let listed = folder_to_list(dir.as_deref(), &roots, &inside_real)?;
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&listed)? {
+            let entry = entry?;
+            let path = listed.join(entry.file_name());
+            if path.is_dir() && (!entry.file_type()?.is_symlink() || inside_real(&path)) {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        names.sort();
+        let dotted = names.iter().filter(|name| name.starts_with('.')).count();
+        let folders = names
+            .iter()
+            .filter(|name| hidden || !name.starts_with('.'))
+            .map(|name| listed.join(name))
+            .map(|path| HostFolder { repo: path.join(".git").exists(), path: path.to_string_lossy().into_owned() })
+            .collect();
+        Ok(HostFolderListing {
+            dir: listed.to_string_lossy().into_owned(),
+            roots: roots.iter().map(|root| root.to_string_lossy().into_owned()).collect(),
+            folders,
+            hidden: dotted as u64,
+        })
+    })
+    .await
+}
+
+/// The home, then each project folder that is a folder here and that the home does not already hold.
+fn folder_roots(home: &Path, projects: &[String]) -> Vec<PathBuf> {
+    let home = absolute(home);
+    let mut roots = vec![home.clone()];
+    for project in projects.iter().map(|p| absolute(Path::new(p))) {
+        if !is_inside(&home, &project) && project.is_dir() && !roots.contains(&project) {
+            roots.push(project);
+        }
+    }
+    roots
+}
+
+/// Which folder a listing is for: none gives the home, and so does one inside the roots that is gone; anything
+/// outside them, relative or through a link that leaves them, is refused.
+fn folder_to_list(dir: Option<&str>, roots: &[PathBuf], inside_real: &dyn Fn(&Path) -> bool) -> Result<PathBuf, OpError> {
+    let Some(dir) = dir.filter(|dir| !dir.is_empty()) else { return Ok(roots[0].clone()) };
+    let outside = || {
+        let named = roots.iter().map(|root| root.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ");
+        OpError::coded(DaemonErrorCode::OutsideRoot, words::folders_outside(dir, named))
+    };
+    if !Path::new(dir).is_absolute() {
+        return Err(outside());
+    }
+    let asked = absolute(Path::new(dir));
+    if !roots.iter().any(|root| is_inside(root, &asked)) {
+        return Err(outside());
+    }
+    if !asked.is_dir() {
+        return Ok(roots[0].clone());
+    }
+    if !inside_real(&asked) {
+        return Err(outside());
+    }
+    Ok(asked)
 }
 
 /// Milliseconds since the epoch, rounded as node's Math.round(mtimeMs) rounds.
