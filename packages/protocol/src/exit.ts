@@ -39,10 +39,14 @@ export function verbFailure(e: unknown): VerbFailure {
   return { error: e instanceof Error ? e.message : String(e), class: cls, exit: EXIT_CODES[cls] };
 }
 
-/** A line refused before anything ran: a missing argument, a flag or a value nothing takes. Both halves are asked
- * for, what happened and then what to do about it, because a refusal that only names the fault leaves the person
- * to work the fix out for themselves; `refusalLine` is the one place they are joined. */
-export const usageRefusal = (happened: string, fix: string): Error => Object.assign(new Error(refusalLine(happened, fix)), { kind: "usage" });
+/** A refusal in both halves, what happened and then what to do about it, because one that only names the fault
+ * leaves the person to work the fix out for themselves. The message is `refusalLine`'s join, which a terminal
+ * prints; `fix` rides beside it so a client that draws the halves apart reads it rather than guessing at the text. */
+export const refusal = (happened: string, fix: string, kind?: string): Error & { fix: string; kind?: string } =>
+  Object.assign(new Error(refusalLine(happened, fix)), { fix }, kind !== undefined ? { kind } : {});
+
+/** A line refused before anything ran: a missing argument, a flag or a value nothing takes. */
+export const usageRefusal = (happened: string, fix: string): Error => refusal(happened, fix, "usage");
 
 /** No key, no sign-in, or a token the host refused. */
 export const authRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "auth" });

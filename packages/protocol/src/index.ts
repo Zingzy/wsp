@@ -5364,6 +5364,20 @@ export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: Works
  * cannot be missing from the reading that decides which of them a thread may send. */
 export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape.op.value);
 
+/** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
+ * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs"];
+
+/** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
+ * deep as a secret field goes, and the frame may be a stranger's. */
+export function requestSecrets(frame: unknown): string[] {
+  if (typeof frame !== "object" || frame === null) return [];
+  return SECRET_REQUEST_FIELDS.flatMap(field => {
+    const v = (frame as Record<string, unknown>)[field];
+    return typeof v === "string" ? [v] : typeof v === "object" && v !== null ? Object.values(v).filter((x): x is string => typeof x === "string") : [];
+  });
+}
+
 /** The ops a socket holding a thread's own token may send, and the whole of them: the door is shut and these are
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
  * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
@@ -5517,6 +5531,8 @@ export const RuntimeErrorResponse = z.object({
   ok: z.literal(false),
   error: z.string(),
   kind: z.string().optional(),
+  /** What to do about it, when the refusal was made with one; `error` already ends with it. */
+  fix: z.string().optional(),
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
