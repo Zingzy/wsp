@@ -56,7 +56,7 @@ export function StartDaemonButton({ absent, workspaceId }: { absent: AbsentCompu
         {busy ? STARTING_WORD : absent.start}
       </Button>
       {refusal !== null ? (
-        <p className="break-words text-xs text-muted-foreground" data-k="start-daemon-refused">
+        <p className="wrap-anywhere text-xs text-muted-foreground" data-k="start-daemon-refused">
           {refusal}
         </p>
       ) : null}

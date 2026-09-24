@@ -12,7 +12,7 @@ import "../../src/index.css";
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
 
-const REFUSED = "wsp-daemon at /Users/maya/Library/Application Support/wsp/bin/wsp-daemon exited at once: address 127.0.0.1:4640 already in use";
+const REFUSED = "wsp-daemon at /Users/maya/Library/wsp_daemon_release_builds_2026_09_24_x86_64_unknown_linux_musl_bin/wsp_daemon exited at once: address 127.0.0.1:4640 already in use";
 useStore.setState({
   api: {
     subscribe: () => () => {},

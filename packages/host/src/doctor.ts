@@ -947,10 +947,9 @@ export const joinedLine = (name: string, url: string): string => `${name} joined
 /** The engine's readers of a box's words bound them at this length. */
 const SAID_MAX = 300;
 
-export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => {
-  const line = `${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`;
-  return line.length <= SAID_MAX ? line : `${line.slice(0, SAID_MAX - 1)}…`;
-};
+export const cappedLine = (line: string): string => (line.length <= SAID_MAX ? line : `${line.slice(0, SAID_MAX - 1)}…`);
+
+export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => cappedLine(`${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`);
 
 /** A tool's closing line after the one that said why, which is not the box's reason. */
 const TOOL_TRAILER = /^tar: (Exiting with failure status due to previous errors|Error is not recoverable: exiting now)$/;

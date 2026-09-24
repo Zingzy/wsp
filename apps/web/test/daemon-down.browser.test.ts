@@ -38,7 +38,7 @@ describe.skipIf(renderSkipped !== undefined)("a refused daemon start laid out in
     const line = page!.locator("[data-k=start-daemon-refused]");
     await line.waitFor();
     expect(await line.textContent()).toBe(
-      "wsp-daemon at /Users/maya/Library/Application Support/wsp/bin/wsp-daemon exited at once: address 127.0.0.1:4640 already in use. Start again.",
+      "wsp-daemon at /Users/maya/Library/wsp_daemon_release_builds_2026_09_24_x86_64_unknown_linux_musl_bin/wsp_daemon exited at once: address 127.0.0.1:4640 already in use. Start again.",
     );
     const pane = (await page!.locator("[data-k=pane]").boundingBox())!;
     const button = (await page!.locator("[data-k=start-daemon]").boundingBox())!;

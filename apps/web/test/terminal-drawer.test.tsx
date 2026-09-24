@@ -94,6 +94,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   provideTerminals(WS, null);
+  clearNotices();
 });
 
 describe("WorkspaceTerminalDrawer", () => {
