@@ -16,7 +16,7 @@ import { Button } from "../ui/button.js";
 import { SegmentedControl } from "../ui/segmented-control.js";
 import { Skeleton } from "../ui/skeleton.js";
 import { Spinner } from "../ui/spinner.js";
-import { AGENTS_LIST_WORDS, AGENTS_SEGMENTS, pausedReport, refusedLines, segmentCounts, segmentRows, type AgentsSegment, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
+import { AGENTS_LIST_WORDS, AGENTS_SEGMENTS, editImageAct, heldReason, pausedReport, refusedLines, segmentCounts, segmentRows, type AgentsSegment, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
 import { ActButton, ChipRow, OpenLine } from "./ChipRow.js";
 
 export type AgentsShell = "page" | "panel";
@@ -43,8 +43,8 @@ const PAGE_ROWS = cn(CARD_SURFACE, "flex flex-col divide-y divide-border");
 
 function underAct(segment: AgentsSegment, ctx: RowsContext): RowAct | null {
   if (ctx.where === "provider" && segment !== "agents") return null;
-  if ((ctx.where === "fork" || ctx.where === "provider") && segment === "agents") return { id: "edit-image", label: AGENTS_LIST_WORDS.editImage, ...(ctx.editImage === undefined ? {} : { run: ctx.editImage }) };
-  const hold = ctx.heldWhy ?? (ctx.where === "box-task" && ctx.computer !== undefined ? AGENTS_LIST_WORDS.onPage(ctx.computer) : undefined);
+  if ((ctx.where === "fork" || ctx.where === "provider") && segment === "agents") return editImageAct(ctx);
+  const hold = heldReason(ctx);
   return { id: `under-${segment}`, label: AGENTS_LIST_WORDS.under[segment], ...(hold === undefined ? {} : { hover: hold }) };
 }
 
@@ -70,6 +70,7 @@ export function AgentsList({ shell, report, reading, error = null, on, ctx, onRe
           label: (
             <span className="flex items-center gap-1.5">
               {AGENTS_LIST_WORDS.segments[value]}
+              {counts === null ? null : " "}
               {counts === null ? null : (
                 <span data-segment-count className={FACT}>
                   {counts[value]}
@@ -111,7 +112,8 @@ export function AgentsList({ shell, report, reading, error = null, on, ctx, onRe
         {AGENTS_LIST_WORDS.empty[segment](on)}
       </p>
     ) : (
-      rows.map(row => <ChipRow key={row.id} row={row} dim={reading} />)
+      // A report read before the computer went quiet, or before the task paused, stands dimmed: it is not current.
+      rows.map(row => <ChipRow key={row.id} row={row} dim={reading || held !== null} />)
     );
 
   return (

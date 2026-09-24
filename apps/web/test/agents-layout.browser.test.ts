@@ -65,7 +65,8 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
 
   const open = async (query: string, viewport = { width: 900, height: 4200 }): Promise<Page> => {
     await page?.close();
-    page = await browser!.newPage({ viewport });
+    // The system's side matches the one the query names, since a settings screen follows the system's.
+    page = await browser!.newPage({ viewport, colorScheme: query.includes("theme=light") ? "light" : "dark" });
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto(`${base}?${query}`);
     return page;
@@ -211,6 +212,8 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-${theme}.png`) });
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
       await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
+      // The settings screens follow the system's side, so the shot is only of the theme it names once asserted.
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
       const pageRows = await page!.locator("[data-settings-card='agents'] [data-row-box]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
       for (const h of pageRows) expect(h).toBe(96);
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-page-${theme}.png`), fullPage: true });

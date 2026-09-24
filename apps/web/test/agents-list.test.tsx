@@ -39,7 +39,8 @@ describe("the Agents segment", () => {
   it("heads the list with the three segments and their counts, and draws one row per agent on the PATH", () => {
     draw();
     expect(screen.getByRole("region", { name: AGENTS_LIST_WORDS.section }).tagName).toBe("SECTION");
-    expect(screen.getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents3", "Skills3", "Servers6"]);
+    expect(screen.getAllByRole("radio").map(r => r.textContent)).toEqual(["Agents 3", "Skills 3", "Servers 6"]);
+    expect(screen.getByRole("radio", { name: "Agents 3" })).toBeTruthy();
     expect(titles()).toEqual(["Claude Code", "Codex", "OpenCode"]);
   });
 
@@ -69,6 +70,8 @@ describe("the Agents segment", () => {
     const t = trigger("agent-claude");
     expect(t.tagName).toBe("BUTTON");
     expect(t.getAttribute("aria-expanded")).toBe("false");
+    // Names no region while none is mounted.
+    expect(t.hasAttribute("aria-controls")).toBe(false);
     expect(region("agent-claude")).toBeNull();
     expect(t.querySelector("button")).toBeNull();
     expect(t.contains(slotButton("agent-claude"))).toBe(false);
@@ -99,6 +102,15 @@ describe("the Agents segment", () => {
     fireEvent.click(trigger("agent-codex"));
     expect(acts("agent-codex")).toEqual(["Sign in", "Remove"]);
     expect(rowEl("agent-codex").querySelector("[data-act-hover=remove]")?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.own);
+  });
+
+  it("gives a chip a hover only where it says more than the chip: a cut path, the agents behind a count", () => {
+    draw();
+    for (const chip of rowEl("agent-claude").querySelectorAll("[data-chip]")) expect(chip.hasAttribute("title")).toBe(false);
+    segment("Skills");
+    const [folder, agents] = rowEl("skill-user-frontend-design").querySelectorAll("[data-chip]");
+    expect(folder!.getAttribute("title")).toBe("~/.agents/skills/frontend-design");
+    expect(agents!.getAttribute("title")).toBe("Claude Code, Codex, OpenCode");
   });
 
   it("puts Install an agent under the card", () => {
@@ -192,6 +204,15 @@ describe("the lines under the rows", () => {
     expect(document.querySelector("[data-agents-rows] [data-open-line]")).toBeNull();
   });
 
+  it("draws a line with no reader in the same muted mono as a reason, never as a title", () => {
+    draw();
+    const bare = [...document.querySelectorAll<HTMLElement>("[data-agents-refused] [data-open-line]")].find(l => l.querySelector("[data-open-value]") === null)!;
+    const label = bare.querySelector<HTMLElement>("[data-open-label]")!;
+    expect(label.textContent).toBe("~/.hermes/config.yaml is over 1 MB and was not read");
+    expect(label.className).toContain("font-mono");
+    expect(label.className).toContain("text-muted-foreground");
+  });
+
   it("draws no such card where nothing was refused", () => {
     draw({ report: { ...AGENTS_REPORT, refused: [] } });
     expect(document.querySelector("[data-agents-refused]")).toBeNull();
@@ -250,6 +271,8 @@ describe("the list's states", () => {
 
   it("holds every act and the refresh glyph with the page's away word over the last report", () => {
     draw({ ctx: { where: "box", heldWhy: "no answer" } });
+    // A report kept from before the computer went quiet never reads as current.
+    for (const row of rows()) expect(row.className).toContain("opacity-50");
     expect(screen.getByRole("button", { name: "Read again" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Read again" }).parentElement?.getAttribute("title")).toBe("no answer");
     expect(rowEl("agent-claude").querySelector("[data-act-hover=update]")?.getAttribute("title")).toBe("no answer");

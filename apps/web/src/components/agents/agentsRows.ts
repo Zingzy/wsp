@@ -54,6 +54,7 @@ export const AGENTS_LIST_WORDS = {
   shim: "runs through a shim wsp does not touch",
   onPage: (computer: string): string => `on ${computer}'s page`,
   startsOnce: "starts the server once",
+  noReader: "This wsp reads no agents report yet.",
   empty: {
     agents: (on: string): string => `No agents found on ${on}.`,
     skills: (on: string): string => `No skills on ${on} yet.`,
@@ -126,21 +127,25 @@ export interface RowsContext {
 const signInWord = (row: AgentRow): string | undefined =>
   row.signIn === "signed-in" ? AGENTS_LIST_WORDS.signedIn : row.signIn === "vault-key" ? AGENTS_LIST_WORDS.yourKey : row.signIn === "unknown" ? AGENTS_LIST_WORDS.notChecked : undefined;
 
-const newer = (row: AgentRow): boolean => row.version !== undefined && row.latest !== undefined && compareVersions(row.latest, row.version) > 0;
+/** The newer version its vendor publishes, where one is newer than what stands there. */
+const newerThan = (row: AgentRow): string | undefined => (row.version !== undefined && row.latest !== undefined && compareVersions(row.latest, row.version) > 0 ? row.latest : undefined);
 
-/** Every act held with one reason where the row cannot take any: the computer is away, the task is paused, or the
- * acts are another page's. */
+/** Why no act on the list can be taken: the computer is away, the task is paused, or the acts are another page's. */
+export const heldReason = (ctx: RowsContext): string | undefined => ctx.heldWhy ?? (ctx.where === "box-task" && ctx.computer !== undefined ? AGENTS_LIST_WORDS.onPage(ctx.computer) : undefined);
+
 const holdAll = (acts: RowAct[], ctx: RowsContext): RowAct[] => {
-  const why = ctx.heldWhy ?? (ctx.where === "box-task" && ctx.computer !== undefined ? AGENTS_LIST_WORDS.onPage(ctx.computer) : undefined);
+  const why = heldReason(ctx);
   return why === undefined ? acts : acts.map(({ run: _run, ...act }) => ({ ...act, hover: why }));
 };
 
 const onImage = (ctx: RowsContext): boolean => ctx.where === "fork" || ctx.where === "provider";
 
-const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", label: AGENTS_LIST_WORDS.editImage, ...(ctx.editImage === undefined ? {} : { run: ctx.editImage }) });
+/** The one act a copy of the image offers: editing the image every copy is made from. */
+export const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", label: AGENTS_LIST_WORDS.editImage, ...(ctx.editImage === undefined ? {} : { run: ctx.editImage }) });
 
 export function agentRowData(row: AgentRow, report: Pick<AgentsReport, "servers">, ctx: RowsContext): AgentsRowData {
   const word = signInWord(row);
+  const latest = newerThan(row);
   const ownHover = row.road === "own" ? AGENTS_LIST_WORDS.own : row.road === "shim" ? AGENTS_LIST_WORDS.shim : undefined;
   const toolsFile = report.servers.find(s => s.agent === row.id && s.name === MCP_SERVER_NAME)?.file;
   const chips: RowChip[] = [
@@ -161,13 +166,13 @@ export function agentRowData(row: AgentRow, report: Pick<AgentsReport, "servers"
         [
           { id: "sign-in", label: AGENTS_LIST_WORDS.signIn },
           ...(row.wspTools ? [] : [{ id: "add-tools", label: AGENTS_LIST_WORDS.addTools }]),
-          ...(newer(row) ? [{ id: "update", label: AGENTS_LIST_WORDS.update, hover: ownHover ?? row.latest! }] : []),
+          ...(latest === undefined ? [] : [{ id: "update", label: AGENTS_LIST_WORDS.update, hover: ownHover ?? latest }]),
           { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true, ...own },
         ],
         ctx,
       );
   // The slot's one button: Sign in where no sign-in stands, else Update where a newer version exists.
-  const button = onImage(ctx) ? undefined : row.signIn === "none" ? acts.find(a => a.id === "sign-in") : newer(row) ? acts.find(a => a.id === "update") : undefined;
+  const button = onImage(ctx) ? undefined : row.signIn === "none" ? acts.find(a => a.id === "sign-in") : latest !== undefined ? acts.find(a => a.id === "update") : undefined;
   return {
     id: `agent-${row.id}`,
     segment: "agents",
@@ -182,7 +187,7 @@ export function agentRowData(row: AgentRow, report: Pick<AgentsReport, "servers"
 }
 
 /** The folder a skill really lives in: the one that is no link, else the first. */
-const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0]!).path;
+const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0])?.path ?? "";
 
 export function skillRowData(row: SkillRow, ctx: RowsContext): AgentsRowData {
   const agents = [...new Set(row.paths.flatMap(p => (p.agent === undefined ? [] : [p.agent])))];

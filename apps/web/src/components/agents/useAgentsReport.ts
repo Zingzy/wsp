@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AgentsReport, AgentsTarget } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
+import { AGENTS_LIST_WORDS } from "./agentsRows.js";
 
 const lastReports = new Map<string, AgentsReport>();
 
@@ -28,6 +29,7 @@ export function useAgentsReport(target: AgentsTarget | null): ReportState & { re
   const [state, setState] = useState<ReportState>(() => idle(key));
   const [asked, setAsked] = useState(0);
   const shown = state.key === key ? state : idle(key);
+  const readable = api?.agentsRead !== undefined;
 
   useEffect(() => {
     if (key === null || api?.agentsRead === undefined) return;
@@ -48,5 +50,6 @@ export function useAgentsReport(target: AgentsTarget | null): ReportState & { re
   }, [api, key, asked]);
 
   const refresh = useCallback(() => setAsked(n => n + 1), []);
-  return { ...shown, refresh };
+  // A client with no such read says so once, rather than standing the bars of a read that never comes.
+  return { ...shown, ...(key !== null && api !== null && !readable && shown.report === null ? { error: AGENTS_LIST_WORDS.noReader } : {}), refresh };
 }

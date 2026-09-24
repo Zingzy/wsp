@@ -36,7 +36,7 @@ function RowChipView({ chip }: { chip: RowChip }) {
       data-chip
       {...(chip.pageOnly === true ? { "data-page-only": "" } : {})}
       className={cn(CHIP, chip.grows === true ? "min-w-0 shrink" : "shrink-0", chip.capped === true && "max-w-[50%] @max-2xl:max-w-none", chip.pageOnly === true && "@max-2xl:hidden")}
-      title={chip.hover ?? chip.text}
+      {...(chip.hover !== undefined ? { title: chip.hover } : chip.grows === true ? { title: chip.text } : {})}
     >
       <Icon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
       <span className="truncate">{chip.text}</span>
@@ -73,9 +73,9 @@ export function ActButton({ act, className }: { act: RowAct; className?: string 
 export function OpenLine({ line, fact = false, className }: { line: OpenLineData; /** The value is a state, in the muted mono. */ fact?: boolean; className?: string }) {
   return (
     <div data-open-line={line.id} className={cn("flex h-11 items-center gap-4 @max-2xl:h-14 @max-2xl:flex-col @max-2xl:items-stretch @max-2xl:justify-center @max-2xl:gap-0", className)}>
-      <span className="flex min-w-0 flex-1 items-center gap-2 text-sm leading-5 text-foreground @max-2xl:flex-none">
+      <span className={cn("flex min-w-0 flex-1 items-center gap-2 @max-2xl:flex-none", fact && line.value === undefined ? FACT : "text-sm leading-5 text-foreground")}>
         {line.agent === undefined ? null : <HarnessMark harness={line.agent} label={line.label} className="size-3.5" />}
-        <span data-open-label className={cn("truncate", line.value === undefined && "@max-2xl:line-clamp-2 @max-2xl:whitespace-normal")} title={line.label}>
+        <span data-open-label className={cn("truncate", fact && line.value === undefined && FACT, line.value === undefined && "@max-2xl:line-clamp-2 @max-2xl:whitespace-normal")} title={line.label}>
           {line.label}
         </span>
       </span>
@@ -100,7 +100,7 @@ export function ChipRow({ row, dim = false }: { row: AgentsRowData; dim?: boolea
           type="button"
           data-row-trigger
           aria-expanded={open}
-          aria-controls={regionId}
+          {...(open ? { "aria-controls": regionId } : {})}
           onClick={() => setOpen(o => !o)}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-5 text-left outline-none before:absolute before:inset-0 before:-z-10 before:transition-colors before:duration-150 hover:before:bg-accent focus-visible:before:ring-2 focus-visible:before:ring-ring focus-visible:before:ring-inset"
         >
