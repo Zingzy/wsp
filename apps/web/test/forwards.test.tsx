@@ -12,6 +12,7 @@ import { ForwardsList } from "../src/sidebar/ForwardsList.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 const iso = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
@@ -62,7 +63,8 @@ const fwd = (workspaceId: string, port: number, startedAt = THREE_MIN_AGO, name 
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, forwards: [], toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, forwards: [], selectedId: null, sessions: {}, ready: false });
+  clearNotices();
 });
 
 afterEach(() => {
@@ -94,7 +96,7 @@ describe("forwards in the store", () => {
     const { api } = fakeApi([WS_A], [], { listFails: "no host holds forwards" });
     await act(async () => useStore.getState().bind(api));
     await waitFor(() => expect(useStore.getState().forwards).toEqual([]));
-    expect(useStore.getState().toast).toBe("forward list unavailable: no host holds forwards");
+    expect(lastNotice()).toBe("Forwards not read: no host holds forwards");
   });
 
   it("stopForward asks the host; a refusal is a toast naming the port", async () => {
@@ -102,10 +104,10 @@ describe("forwards in the store", () => {
     await act(async () => useStore.getState().bind(api));
     await useStore.getState().stopForward("ws_a", 8123);
     expect(stops).toEqual([["ws_a", 8123]]);
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
     setRefusal("nothing is forwarding localhost:8123 for that workspace");
     await useStore.getState().stopForward("ws_a", 8123);
-    expect(useStore.getState().toast).toBe("localhost:8123: nothing is forwarding localhost:8123 for that workspace");
+    expect(lastNotice()).toBe("localhost:8123: nothing is forwarding localhost:8123 for that workspace");
   });
 });
 

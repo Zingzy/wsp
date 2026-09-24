@@ -8,12 +8,14 @@
 // the only home a second copy cannot grow beside.
 
 import { z } from "zod";
+import { AgentSignInState, AgentsTarget } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
+import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
 import { isLocalWorkspace } from "./workspace-state.js";
@@ -2054,6 +2056,9 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
+/** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is. */
+export type BundleOutcome = { ok: true } | { ok: false; error: string };
+
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
@@ -2074,6 +2079,8 @@ export interface DesktopBridge {
   /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
    * a shell from before the bridge carried it, which is older than any page that reads this. */
   readonly version?: string;
+  /** The words over Get on this shell's platform, from the shell's own bundle row; absent where none is built. */
+  readonly bundleHover?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
@@ -2113,6 +2120,12 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
+  /** Downloads this release's bundle for this computer from the repo's release and keeps it only where its sha256
+   * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself. */
+  getBundle(ask: { version: string }): Promise<BundleOutcome>;
+  /** Opens the bundle the last getBundle kept and quits the app, so the new one is never swapped in under a
+   * running host. */
+  quitAndOpen(): Promise<BundleOutcome>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -2563,7 +2576,7 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join", "provision"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "reach", "wsp", "service", "join", "provision"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
@@ -2571,6 +2584,7 @@ export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
   "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
+  reach: "checking it can reach this computer",
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2583,6 +2597,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
  * check would otherwise say the wait it was in rather than the state it reached. */
 export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
   "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
+  reach: { word: "checking it can reach this Mac", done: "reaches this Mac" },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
   service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
   join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
@@ -2593,6 +2608,10 @@ export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done")
   const said = PLACE_ADD_SHEET_WORDS[step];
   return (state === "done" ? said?.done : undefined) ?? said?.word ?? PLACE_ADD_WORDS[step];
 }
+
+/** The kind a places.add refusal carries when the ssh login itself did not stand or the word typed names no login:
+ * the one case where checking the user, the address or the key is the fix. */
+export const PLACE_LOGIN_REFUSED_KIND = "login";
 
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
@@ -2605,6 +2624,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** On a recipe job's done step, how many of its rows failed: the job is done once every row has an outcome. */
+  failed: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -2745,12 +2766,6 @@ export const PlaceProvision = z.object({
 });
 export type PlaceProvision = z.infer<typeof PlaceProvision>;
 
-/** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
- * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
- * out by the host from the computer's report and the vault, since the computer knows no catalog. */
-export const AgentSignInState = z.enum(["signed-in", "vault-key", "none"]);
-export type AgentSignInState = z.infer<typeof AgentSignInState>;
-
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2889,7 +2904,8 @@ export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" 
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
 export const PlacePresentEvent = z.object({ type: z.literal("place.present"), placeId: z.string(), from: z.string() });
-export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string() });
+/** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
+export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
 /** The four as one type, so the host's door and the app's fold read one shape. */
 export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
@@ -2948,6 +2964,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
+  ReleaseChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
   InitNeedsYouEvent.extend(sequenced),
   PlaceStageEvent.extend(sequenced),
@@ -3857,6 +3874,7 @@ const DAEMON_CONTENTS = [
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
   "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
+  "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4060,7 +4078,10 @@ const DAEMON_CONTENTS = [
  * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
  * Version 72 drops a copied folder's worktree records before the copy's checkout, so a copy of a repo whose base
  * branch one of its own worktrees holds lands on that branch.
- * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box. */
+ * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box.
+ * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
+ * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
+ * removed beside that project, and refuses to remove a path that is not a copy of the project it names. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5001,7 +5022,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Answers `{ hosts: SshHostSuggestion[] }`: the ssh config's hosts first, then known_hosts, less the computers
    * already added over ssh. Only a socket holding the host's own token may ask. */
   z.object({ id: reqId, op: z.literal("places.sshHosts") }),
-  /** Puts the agent on a Linux computer over ssh and joins it: the host logs in as the person's own ssh would,
+  /** Puts the agent on a Linux computer over ssh and joins it, `address` naming it as user@host or as an alias
+   * from the person's ssh config, which is dialled through that block: the host logs in as the person's own ssh would,
    * installs node and wsp there, starts the agent under that login's own service manager and waits for it to dial
    * back. Answers `{ addId, place: PlaceView }` once it has dialled; the steps ride place.stage events carrying the
    * same addId. */
@@ -5070,10 +5092,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * workspaces, else naming the places that do. The one gate a create runs, read ahead so the refusal comes in one
    * sentence before any stage is streamed. */
   z.object({ id: reqId, op: z.literal("workspaces.landing"), project: z.string() }),
-  /** Records a machine the person already has, reached over ssh at `address` (user@host), with the port and key
-   * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
-   * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
-   * The name defaults to what the address calls the machine. Replies with { workspace }. */
+  /** Every workspace this caller may drive. Replies with { workspaces }. */
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
    * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a
@@ -5289,6 +5308,17 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { report: AgentsReport }: the agents, skills and MCP servers standing on one computer or workspace,
+   * read as the login the computer was added with and never as root. Nothing is started: no server is spawned and no
+   * login file is read, only whether one is there. A napping workspace is not woken; it answers the last report read
+   * while it ran, marked stale, or refuses where there is none. A cloud account's row is refused, since nothing stands
+   * there between forks. */
+  z.object({ id: reqId, op: z.literal("agents.read"), target: AgentsTarget }),
+  /** Replies with { answer: ServerToolsAnswer }: one MCP server of one agent's config there, started once as that
+   * login with its own command and variables, or asked once over its address, for its tools and its sign-in. Only on
+   * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
+   * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
+  z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
@@ -5331,6 +5361,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("preferences.get") }),
   /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
+  /** Replies with { release: ReleaseView }: the newest release as this host last read it, asking nobody. */
+  z.object({ id: reqId, op: z.literal("release.get") }),
+  /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
+   * changed view is pushed to every socket as release.changed. */
+  z.object({ id: reqId, op: z.literal("release.check") }),
+  /** Replies { ok } and then restarts this host on the files it was installed from, by the road it came up on;
+   * refused where that road would not bring it back. The socket closes on the host's stopping code. */
+  z.object({ id: reqId, op: z.literal("host.restart") }),
   /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
    * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
    * none of them, and refused naming the project when that source is already recorded on that computer. */
@@ -5409,6 +5447,20 @@ export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: Works
 /** Every op this host answers, read off the table itself rather than written out beside it, so an op added later
  * cannot be missing from the reading that decides which of them a thread may send. */
 export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape.op.value);
+
+/** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
+ * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs"];
+
+/** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
+ * deep as a secret field goes, and the frame may be a stranger's. */
+export function requestSecrets(frame: unknown): string[] {
+  if (typeof frame !== "object" || frame === null) return [];
+  return SECRET_REQUEST_FIELDS.flatMap(field => {
+    const v = (frame as Record<string, unknown>)[field];
+    return typeof v === "string" ? [v] : typeof v === "object" && v !== null ? Object.values(v).filter((x): x is string => typeof x === "string") : [];
+  });
+}
 
 /** The ops a socket holding a thread's own token may send, and the whole of them: the door is shut and these are
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
@@ -5517,6 +5569,8 @@ export const DEVICE_OPS: readonly string[] = [
   "forwards.stop",
   "preferences.get",
   "preferences.set",
+  "release.get",
+  "release.check",
   "host.terminalConfig",
   "init.get",
 ];
@@ -5561,6 +5615,8 @@ export const RuntimeErrorResponse = z.object({
   ok: z.literal(false),
   error: z.string(),
   kind: z.string().optional(),
+  /** What to do about it, when the refusal was made with one; `error` already ends with it. */
+  fix: z.string().optional(),
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
@@ -5732,7 +5788,8 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -5789,7 +5846,8 @@ export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notI
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
+export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -13,6 +13,7 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
+  PLACE_LOGIN_REFUSED_KIND,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
   placeRefusalTranscript,
@@ -60,6 +61,7 @@ import {
   HERE_PLACE_ID,
   noSuchPlaceRefusal,
   providerFoldersRefusal,
+  providerAgentsRefusal,
   type HostFolderListing,
   type GoldenStageEvent,
   type PlaceProvision,
@@ -77,6 +79,7 @@ import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprin
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
+import { NO_AGENTS_READER, type AgentsOn, type AgentsReader } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -121,7 +124,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -129,6 +132,7 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     store,
     adapters: {},
     ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
+    ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
@@ -423,6 +427,8 @@ describe("a computer joining", () => {
     sockets.push(joined.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
+    const absences: Record<string, unknown>[] = [];
+    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
     const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
     expect(again.proved).toMatchObject({ ok: false });
@@ -437,6 +443,8 @@ describe("a computer joining", () => {
     const row = (await placesOf()).find(p => p.id === joined.placeId)!;
     expect(row.dialled).toMatchObject({ answered: false, said: placeCannotBootLine("old-macbook", BLOCKED) });
     expect(row.takesForks).toBe(true);
+    // The absence carries the same sentence, so a client says why rather than that the box stopped answering.
+    expect(absences).toContainEqual(expect.objectContaining({ placeId: joined.placeId, said: placeCannotBootLine("old-macbook", BLOCKED) }));
   });
 
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
@@ -1475,6 +1483,29 @@ describe("dialling a computer that stopped answering", () => {
     expect(Object.keys(road).sort()).toEqual(["from", "ssh"]);
   });
 
+  it("marks the step an install stopped in with the installer's one sentence and hands back that sentence alone", async () => {
+    const hostKey = newPlaceKeyPair();
+    const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (_req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          stage("wsp", "done", "x86_64");
+          stage("service", "running");
+          throw new Error(sentence);
+        },
+      },
+    });
+    const stages: PlaceStageEvent[] = [];
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@178.156.161.168", hostUrls: DOOR }, Date.now())).rejects.toThrow(new Error(sentence));
+    expect(stages.filter(s => s.state === "failed").map(s => [s.step, s.note])).toEqual([["service", sentence]]);
+  });
+
   it("hands back ssh's own sentence when the login is refused, and keeps it on the row", async () => {
     const hostKey = newPlaceKeyPair();
     let box: WsClient | undefined;
@@ -1617,6 +1648,8 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
     // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
     expect(stages.at(-1)?.note).toBe("engine none");
+    // The computer is held by the time its join is done, so that step names the row a reader acts on.
+    expect(stages.at(-1)?.placeId).toBe(added.place.id);
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -1667,8 +1700,44 @@ describe("putting the agent on a computer over ssh", () => {
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
-    // An install that never reached a join leaves its code unspent, and the person's next add mints another.
-    expect(await runtime.devices.spend(minted, 1)).toBe(true);
+    // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
+    expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
+  });
+
+  it("draws a failure on the step that was under way, not on a step that only said what it had done", async () => {
+    const stages: PlaceStageEvent[] = [];
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          stage("host-key", "done", "ssh-ed25519 SHA256:abc");
+          throw new Error("root@spoo runs zsh as root's shell");
+        },
+      },
+    });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("zsh");
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect running", "host-key done", "connect failed"]);
+  });
+
+  it("answers a refused login over the wire with the kind the app reads its login fix off, and any other refusal without it", async () => {
+    let refuse: Error = new PlaceLoginRefusedError("maya@box: Permission denied (publickey).");
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(refuse) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4420, addresses: DOOR }) } });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await c.request("places.add", { address: "maya@box" })).toMatchObject({ ok: false, error: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND });
+    refuse = new Error("root@spoo runs zsh as root's shell");
+    expect(await c.request("places.add", { address: "root@spoo" })).not.toHaveProperty("kind");
+    c.close();
   });
 
   it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {
@@ -3610,6 +3679,18 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(provision.filter(s => s.state === "done").map(s => s.placeId)).toEqual([placeId]);
   });
 
+  it("counts the rows that failed on the job's last step and on no other", async () => {
+    const failing = provisioner({ rows: [...ROWS, { id: "agents/uv", label: "uv", outcome: "failed", note: "exit 2" }, { id: "agents/go", label: "Go", outcome: "failed" }], hold: true });
+    const stages: PlaceStageEvent[] = [];
+    const { placeId } = await joined({ provision: failing.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    failing.release();
+    await until(async () => stages.some(s => s.step === "provision" && s.state === "done"));
+    const done = stages.find(s => s.step === "provision" && s.state === "done")!;
+    expect(done.failed).toBe(2);
+    expect(stages.filter(s => s.state !== "done").every(s => s.failed === undefined)).toBe(true);
+  });
+
   it("says nothing about the image while the job runs, and reads the image again once the job ends", async () => {
     const p = provisioner({ hold: true });
     const store = memoryStore();
@@ -3962,5 +4043,113 @@ describe("the folders of a computer you own", () => {
     const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     expect(await ticketed.request("host.folders", { on: placeId })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+  });
+});
+
+describe("the agents on a computer you own", () => {
+  const READ = { home: "/home/maya", user: "maya", agents: [], skills: [], servers: [], refused: [] };
+
+  /** A reader that keeps where it was asked to read and runs one line there, as the host's readers do. */
+  const reading = (asked: AgentsOn[], said: string[]): AgentsReader => ({
+    read: async on => {
+      asked.push(on);
+      if (on.kind !== "here") said.push((await on.machine.exec("id -un")).stdout);
+      return READ;
+    },
+    tools: async (on, ask) => {
+      asked.push(on);
+      // The bytes a run hands its command ride the frame's stdin to the computer, which is the road a server's
+      // variables take there.
+      const out = on.kind === "here" ? "" : (await on.machine.exec("cat", { stdin: Buffer.from("A=1") })).stdout;
+      return { auth: "open", tools: [{ name: `${ask.key} ${ask.agent} ${ask.name} ${ask.refresh === true} ${out}` }], readAt: "2026-09-24T12:00:00.000Z" };
+    },
+  });
+
+  it("are read over that computer's link with the login, sign-ins and versions its report carries, and answered stamped", async () => {
+    const asked: AgentsOn[] = [];
+    const said: string[] = [];
+    const { hostKey } = await serving({ agentsReader: reading(asked, said), vault: {} });
+    const lines: string[] = [];
+    const sent = report("srv", { daemonVersion: DAEMON_VERSION, agents: ["claude"], agentVersions: { claude: "2.1.281 (Claude Code)" }, logins: [] });
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: sent,
+      answers: c =>
+        c.onFrame(raw => {
+          const frame = raw as unknown as Record<string, unknown>;
+          if (frame["op"] !== "exec") return;
+          lines.push(String(frame["cmd"]));
+          c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "maya", stderr: "", truncated: false });
+        }),
+    });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const answered = await c.request("agents.read", { target: { placeId } });
+    expect(answered.ok, String(answered["error"])).toBe(true);
+    expect(answered["report"]).toMatchObject({ ...READ, target: { placeId } });
+    expect(typeof (answered["report"] as { readAt: unknown }).readAt).toBe("string");
+    expect(asked).toEqual([{ kind: "box", machine: expect.anything(), login: { HOME: "/home/maya", PATH: "/usr/bin" }, signIns: { claude: "none" }, versions: { claude: "2.1.281 (Claude Code)" } }]);
+    expect(lines).toEqual(["id -un"]);
+    expect(said).toEqual(["maya"]);
+    expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);
+    expect(asked.at(-1)).toEqual({ kind: "here" });
+  });
+
+  it("hand one server's tools ask to the reader over that computer's link, its stdin riding the frame, and refuse it on a ticket", async () => {
+    const asked: AgentsOn[] = [];
+    const { hostKey } = await serving({ agentsReader: reading(asked, []), vault: {} });
+    const frames: Record<string, unknown>[] = [];
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c =>
+        c.onFrame(raw => {
+          const frame = raw as unknown as Record<string, unknown>;
+          if (frame["op"] !== "exec") return;
+          frames.push(frame);
+          c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: Buffer.from(String(frame["stdin"] ?? ""), "base64").toString(), stderr: "", truncated: false });
+        }),
+    });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const answered = await c.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable", refresh: true });
+    expect(answered.ok, String(answered["error"])).toBe(true);
+    expect(answered["answer"]).toEqual({ auth: "open", tools: [{ name: `${JSON.stringify({ placeId })} claude airtable true A=1` }], readAt: "2026-09-24T12:00:00.000Z" });
+    expect(asked).toEqual([expect.objectContaining({ kind: "box" })]);
+    expect(frames.map(f => f["cmd"])).toEqual(["cat"]);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    expect(await ticketed.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    expect(asked).toHaveLength(1);
+  });
+
+  it("are refused on a cloud account, on a place nobody holds, on a socket let in on a ticket, and on a runtime with no reader", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 }, agentsReader: reading([], []) });
+    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const rows = await runtime!.places!.list(Date.now());
+    const provider = rows.find(p => p.kind !== "computer")!;
+    expect(await c.request("agents.read", { target: { placeId: provider.id } })).toMatchObject({ ok: false, error: providerAgentsRefusal(provider.name), kind: "usage" });
+    expect(await c.request("agents.read", { target: { placeId: "pl_nobody" } })).toMatchObject({ ok: false, error: noSuchPlaceRefusal("pl_nobody", rows.map(p => p.name)), kind: "usage" });
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    expect(await ticketed.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    for (const ws of sockets.splice(0)) ws.close();
+    await srv!.close();
+    srv = undefined;
+    await runtime!.close();
+    runtime = undefined;
+    await serving();
+    const bare = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(bare.ws);
+    expect(await bare.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: NO_AGENTS_READER });
   });
 });

@@ -9,6 +9,7 @@ import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
+import { noticeFailure } from "../../notices/store.js";
 import { useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
@@ -105,7 +106,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     if (item.disabled || item.kind !== "action") return;
     if (!item.keepOpen) close();
     void item.run().catch((error: unknown) => {
-      useStore.setState({ toast: `${String(item.title)}: ${error instanceof Error ? error.message : String(error)}` });
+      noticeFailure(error, said => `${String(item.title)}: ${said}`);
     });
   };
 

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, outcomeWord, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, outcomeWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -161,24 +161,7 @@ describe("the one word the slot beside a row's name carries", () => {
   });
 });
 
-describe("which rows the Computers table draws", () => {
-  const setup = (keys: Record<string, boolean>): { keys: Record<string, boolean> } => ({ keys });
-
-  it("draws every computer and a cloud only once its key is held or a workspace stands on it", () => {
-    const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
-    const rows = (keys: Record<string, boolean>, counts: Record<string, number> = {}): string[] =>
-      computerRows([here, hetzner, ascii, solari], setup(keys), counts).map(place => place.id);
-    // A fresh state: this computer and the ones joined to it, and no cloud at all. A table that listed an account
-    // nobody had bought, with an hourly rate beside it, read as a bill.
-    expect(rows({})).toEqual(["here", "p_1"]);
-    expect(rows({ solari: true })).toEqual(["here", "p_1", "solari"]);
-    expect(rows({ box: true, solari: true })).toEqual(["here", "p_1", "box", "solari"]);
-    // A cloud a workspace stands on is drawn whatever the keys say, so a machine is never orphaned off the table.
-    expect(rows({}, { solari: 1 })).toEqual(["here", "p_1", "solari"]);
-    // A host that says nothing about its keys is read as holding none.
-    expect(computerRows([here, ascii], null, {}).map(place => place.id)).toEqual(["here"]);
-  });
-
+describe("the word for a row's kind", () => {
   it("names a cloud row cloud where a row's kind is read in a sentence, and a computer of the person's own by what it is", () => {
     expect(PLACE_KIND_WORDS.provider).toBe("cloud");
     expect(PLACE_KIND_WORDS.computer).toBe(JOINED_COMPUTER);
@@ -194,57 +177,6 @@ describe("which rows the Computers table draws", () => {
     expect(copiesWord({ ...hetzner, takesForks: false }, false)).toBe("copies nothing");
   });
 
-  it("reads the recipe on a computer into the agents there and the files and servers beside them", () => {
-    const provision: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: "2026-09-12T11:00:00.000Z",
-      startedAt: "2026-09-12T11:00:00.000Z",
-      rows: [
-        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
-        { id: "agents/codex", label: "Codex", outcome: "present" },
-        { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
-        { id: "agents/files/skills", label: "code-review", outcome: "installed", kind: "file" },
-        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "the config never landed" },
-      ],
-    };
-    const place: PlaceView = { ...hetzner, name: "spoo", agents: ["claude", "codex", "cursor"], provision };
-    expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "installed" },
-      { id: "codex", name: "Codex", state: "already there" },
-      // An agent the job carried no row for is what the computer said it found, and no more.
-      { id: "cursor", name: "cursor", state: "found" },
-    ]);
-    // The tool rows are counted in the row's own state slot, not listed here; the person's own files and the
-    // servers written into their agents' configs are.
-    expect(recipeLines(place)).toEqual([
-      { id: "agents/files/skills", kind: "file", label: "code-review", state: "installed" },
-      { id: "agents/mcp/linear", kind: "server", label: "linear", state: "set aside: the config never landed" },
-    ]);
-    expect(recipeLines(hetzner)).toEqual([]);
-  });
-
-  it("says each agent's version and whether a sign-in stands there, and keeps the recipe's word only where its row failed", () => {
-    const place: PlaceView = {
-      ...hetzner,
-      name: "spoo",
-      agents: ["claude", "codex"],
-      agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" },
-      signIns: { claude: "vault-key", codex: "none" },
-    };
-    expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", signedIn: true },
-      { id: "codex", name: "Codex", state: "0.153.0 · not signed in" },
-    ]);
-    // A sign-in on the computer itself reads as one, and a recipe row that installed the agent adds nothing the
-    // line does not already say.
-    const signedIn: PlaceView = { ...place, signIns: { claude: "vault-key", codex: "signed-in" }, provision: { state: "done", addId: "a_1", recipeAt: "t", startedAt: "t", rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } };
-    expect(placeAgentLines(signedIn)[1]).toMatchObject({ state: "0.153.0 · signed in", signedIn: true });
-    // A row that failed is the one recipe outcome worth the slot: the agent may be older than the run meant it to be.
-    const failed: PlaceView = { ...place, provision: { state: "done", addId: "a_1", recipeAt: "t", startedAt: "t", rows: [{ id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" }] } };
-    expect(placeAgentLines(failed)[1]!.state).toBe("0.153.0 · not signed in · failed: npm exited 1");
-  });
-
   it("shows a present row's own note, which is where a tool answered from outside the directories its road links into", () => {
     const note = "node answers from /usr/bin/node, outside where its own installer puts it (/usr/local/bin)";
     expect(outcomeWord({ id: "tools/brew/node", label: "node", outcome: "present", note })).toBe(`already there: ${note}`);
@@ -252,24 +184,6 @@ describe("which rows the Computers table draws", () => {
     // already says it installed, so the landing's "already on the machine" never reaches a line here.
     expect(outcomeWord({ id: "tools/brew/gh", label: "gh", outcome: "present" })).toBe("already there");
     expect(outcomeWord({ id: "tools/brew/gh", label: "gh", outcome: "installed", note: "already on the machine" })).toBe("installed");
-  });
-
-  it("reads the agents on this computer off the one reading of which agents are here", () => {
-    expect(
-      hereAgentLines({
-        agents: [
-          { id: "claude", name: "Claude Code", configured: true, takesTools: true },
-          { id: "codex", name: "Codex", configured: false, takesTools: true },
-          { id: "cursor", name: "Cursor", configured: false, takesTools: false },
-        ],
-      }),
-    ).toEqual([
-      { id: "claude", name: "Claude Code", state: "wsp tools added", takesTools: true },
-      // The one row that carries an action: nothing stands in the state slot until the tools are there.
-      { id: "codex", name: "Codex", state: "", takesTools: true },
-      { id: "cursor", name: "Cursor", state: "no wsp tools yet", takesTools: false },
-    ]);
-    expect(hereAgentLines(null)).toEqual([]);
   });
 
   it("reads the recipe's word in the state slot after the computer's silence and before the daemon behind", () => {

@@ -25,6 +25,7 @@ import { useSignInStore } from "../src/shell/signInStore.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices } from "./notice-text.js";
 
 const view = (id: string, name: string): WorkspaceView => ({
   id,
@@ -61,7 +62,8 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, sessions: {}, ready: false, gaps: 0 });
+  clearNotices();
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 

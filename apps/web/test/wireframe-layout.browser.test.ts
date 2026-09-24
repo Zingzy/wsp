@@ -29,7 +29,7 @@
 // defaults, the region right of the sidebar whole with the panel back on the
 // chord, and the one-field sheet's geometry over Computers. A computer's page
 // is photographed to its foot at both widths, in a window tall enough to hold
-// it, since its acts are under six agent rows. Vite serves test/wireframe to Playwright's
+// it, since its acts are under its agent rows. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -490,9 +490,9 @@ const SETTINGS_SCREENS = [
   ["settings-restore", "[data-k=restore-defaults]"],
   ["settings-light-picked", "[data-settings-at=appearance]"],
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
-  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-k=agent]"],
-  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=recipe-row]"],
-  ["settings-this-mac", "[data-settings-at='computer:here'] [data-k=agent]"],
+  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-agents-row]"],
+  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-agents-refused]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-agents-row]"],
   ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=image-copy]"],
   ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
   ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=seeded]"],
@@ -691,6 +691,36 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
     }
   }, 300_000);
+
+  it("About while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
+    for (const theme of THEMES) {
+      await open("settings-about-behind", theme, "[data-settings-at=about] [data-k=latest-version]");
+      const get = page!.locator("[data-k=get-release]");
+      await page!.waitForFunction(() => document.querySelector<HTMLElement>("[data-k=get-release]")?.title !== "");
+      expect(await get.textContent()).toBe("Get 0.3.0");
+      expect((await read()).cutWords, `words cut at settings-about-behind ${theme}`).toEqual([]);
+      await shot(`settings-about-behind-1280-${theme}`);
+      await get.click();
+      await page!.waitForSelector("[data-k=get-release]:disabled");
+      expect(await get.textContent()).toBe("Downloading");
+      expect((await read()).cutWords, `words cut at settings-about-downloading ${theme}`).toEqual([]);
+      await shot(`settings-about-downloading-1280-${theme}`);
+      await page!.evaluate(() => (window as unknown as { finishBundle: () => void }).finishBundle());
+      await page!.waitForSelector("[data-k=get-release]:not(:disabled)");
+      expect(await get.textContent()).toBe("Quit and open");
+      expect((await read()).cutWords, `words cut at settings-about-kept ${theme}`).toEqual([]);
+      await shot(`settings-about-kept-1280-${theme}`);
+    }
+  }, 120_000);
+
+  it("About with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
+    for (const theme of THEMES) {
+      await open("settings-about-restart", theme, "[data-settings-at=about] [data-k=restart-host]");
+      expect(await page!.locator("[data-settings-card=about] button").allTextContents()).toEqual(["Restart host", "Releases"]);
+      expect((await read()).cutWords, `words cut at settings-about-restart ${theme}`).toEqual([]);
+      await shot(`settings-about-restart-1280-${theme}`);
+    }
+  }, 120_000);
 
   it("photographs a computer's page to its foot at both widths, so its skills, its workspaces and its two acts are read", async () => {
     for (const theme of THEMES) {

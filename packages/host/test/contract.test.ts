@@ -29,6 +29,15 @@ import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
+import { agentsReader } from "../src/agents-reader.js";
+import { nodeHost, type Host } from "@wsp/collect";
+
+/** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
+function fixtureHost(at: AgentHome): Host {
+  const live = nodeHost();
+  return { ...live, home: at.home, exec: { ...live.exec, run: (cmd, args, o) => live.exec.run(cmd, args, { ...o, env: { PATH: `${at.bin}:/usr/bin:/bin`, HOME: at.home, ...o?.env } }) } };
+}
 
 /** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
@@ -125,6 +134,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
+    const agents = agentHome(join(dir, "agents"));
     rt = createRuntime({
       backend,
       store,
@@ -143,7 +153,9 @@ describe("the agent contract on the command line and the tool door", () => {
         // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.
         closed: new Promise(() => {}),
       }),
-      placeLinks: placeWiring(statePath, {}),
+      placeLinks: placeWiring(statePath),
+      // What stands on this computer, read off a home six harnesses left and the agents on its own PATH.
+      agentsReader: agentsReader({ vault: () => ({}), here: () => fixtureHost(agents) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
@@ -226,6 +238,11 @@ describe("the agent contract on the command line and the tool door", () => {
     mkdirSync(join(dir, "user", "code"), { recursive: true });
     await last("folders", "folders");
     await last("terminal config", "terminal", "config");
+    await last("agents", "agents");
+    await last("skills", "skills", "--on", HERE_PLACE_ID);
+    await last("servers", "servers");
+    // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
+    expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
     expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });
     // A second project, recorded and dropped, so the verb that takes one out is run under --json too.
     await rt.projects.add({ source: "https://github.com/dev/spare.git", on: "default" });
@@ -314,6 +331,22 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(parsed.success, `wsp ${verb.name} --json ends with ${JSON.stringify(value)}\n${parsed.success ? "" : parsed.error.message}`).toBe(true);
     }
     expect([...covered.keys()].sort()).toEqual(served.map(v => v.name).sort());
+  });
+
+  it("the lists of what stands on a computer refuse a workspace and a computer together, and a computer nobody holds, as usage", async () => {
+    await run("new", "alpha");
+    const both = await run("agents", "alpha", "--on", HERE_PLACE_ID, "--json");
+    expect(both.code).toBe(EXIT_CODES.usage);
+    expect(failure(both.io).error).toContain("give the workspace or --on <computer>, not both");
+    const nobody = await run("skills", "--on", "nowhere", "--json");
+    expect(nobody.code).toBe(EXIT_CODES.usage);
+    expect(failure(nobody.io).error).toContain("nowhere");
+    const two = await run("servers", "alpha", "beta");
+    expect(two.code).toBe(EXIT_CODES.usage);
+    const prose = await run("servers");
+    expect(prose.code).toBe(0);
+    expect(prose.io.lines.join("\n")).toMatch(/airtable\s+Claude Code\s+stdio npx airtable-mcp-server\s+~\/\.claude\.json\s+open/);
+    expect(prose.io.lines.join("\n")).not.toContain("SECRET");
   });
 
   it("a usage refusal exits 3: the parser's, a verb's own before anything is dialled, and a confirmation nobody is there to give; under --json the one stderr line is the failure object", async () => {

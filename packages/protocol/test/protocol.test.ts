@@ -881,8 +881,8 @@ describe("runtime wire types", () => {
       "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
       "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
-      "image.export", "host.folders", "project.seed.plan", "project.plan", "project.import", "project.export",
-      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove",
+      "image.export", "host.folders", "agents.read", "servers.tools", "project.seed.plan", "project.plan", "project.import", "project.export",
+      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
@@ -890,7 +890,8 @@ describe("runtime wire types", () => {
     }
     // Every op the host serves is on one side or the other, so an op added later is placed on purpose.
     for (const op of wire.RUNTIME_OPS) expect(wire.DEVICE_OPS.includes(op) || held.includes(op), op).toBe(true);
-    for (const op of ["status.list", "workspaces.create"]) expect(wire.DEVICE_OPS).toContain(op);
+    // The newest release is read by every window the person has, their phone's included; a restart is not a phone's.
+    for (const op of ["status.list", "workspaces.create", "release.get", "release.check"]) expect(wire.DEVICE_OPS).toContain(op);
     expect(wire.deviceHeldRefusal("workspaces.exec")).toBe("workspaces.exec is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on");
   });
 
@@ -1782,6 +1783,48 @@ describe("packageOf", () => {
     expect(wire.toolRowPrefix("npm")).toBe("tools/npm/");
     expect(wire.BREW_ID_PREFIX).toBe(wire.toolRowPrefix("brew"));
     expect(wire.toolRowId("uv", "ruff").startsWith(wire.toolRowPrefix("uv"))).toBe(true);
+  });
+});
+
+describe("the newest release as the host read it", () => {
+  it("is asked for and checked with no arguments, and rides one event every socket folds", () => {
+    for (const op of ["release.get", "release.check"]) expect(wire.RuntimeRequest.parse({ id: "r1", op })).toEqual({ id: "r1", op });
+    for (const op of ["release.get", "release.check"]) expect(wire.THREAD_OPS).not.toContain(op);
+    const release = {
+      state: "read",
+      latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" },
+      checkedAt: "2026-09-24T11:00:00.000Z",
+      triedAt: "2026-09-24T11:00:00.000Z",
+      shape: "service",
+    };
+    expect(wire.ReleaseView.parse(release)).toEqual(release);
+    expect(wire.EventUnion.parse({ type: "release.changed", release, seq: 3 })).toEqual({ type: "release.changed", release, seq: 3 });
+    // Off carries no reading, so nothing drawn off it can offer a download the person turned checks off for.
+    expect(wire.ReleaseView.parse({ state: "off", shape: "app" })).toEqual({ state: "off", shape: "app" });
+    expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
+    // The line that moves this host onto the release rides beside it, read on the road the host was installed by.
+    const behind = { ...release, update: "npm i -g @zingzy/wsp@0.3.0" };
+    expect(wire.ReleaseView.parse(behind)).toEqual(behind);
+    // The restart road's own refusal rides as the words the page shows; absent, a restart brings the host back.
+    const refused = { ...release, restartRefusal: wire.UP_RESTART_LINE };
+    expect(wire.ReleaseView.parse(refused)).toEqual(refused);
+    expect(wire.HOST_NO_RESTART_LINE).toBe("This host cannot restart itself.");
+  });
+
+  it("restarts the host with no arguments, an op no thread and no paired computer sends", () => {
+    expect(wire.RuntimeRequest.parse({ id: "r1", op: "host.restart" })).toEqual({ id: "r1", op: "host.restart" });
+    expect(wire.THREAD_OPS).not.toContain("host.restart");
+    expect(wire.DEVICE_OPS).not.toContain("host.restart");
+  });
+
+  it("reads the release as ahead only when it is above a version that runs", () => {
+    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" }, shape: "app" });
+    expect(wire.releaseAbove(view, "0.2.0")).toBe(true);
+    expect(wire.releaseAbove(view, "0.3.0", "0.2.0")).toBe(true);
+    expect(wire.releaseAbove(view, "0.3.0")).toBe(false);
+    // A host built ahead of the newest release, a prerelease or a checkout's, reads level.
+    expect(wire.releaseAbove(view, "0.4.0-rc.1")).toBe(false);
+    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking", shape: "app" }), "0.2.0")).toBe(false);
   });
 });
 

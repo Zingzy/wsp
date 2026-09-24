@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
 import { selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
+import { clearNotices } from "./notice-text.js";
 
 const KEY = "wsp:right-panel-state:v1";
 const WS = "ws_panel_store";
@@ -29,6 +30,19 @@ async function hydrate(surfaces: unknown[], activeSurfaceId: string | null = nul
 }
 
 describe("rightPanelStore hydrate", () => {
+  it("keeps a stored Agents surface, and keeps it active", async () => {
+    await hydrate([{ id: "diff", kind: "diff" }, { id: "agents", kind: "agents" }], "agents");
+    const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
+    expect(state.surfaces).toEqual([{ id: "diff", kind: "diff" }, { id: "agents", kind: "agents" }]);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byWorkspaceId, WS)).toBe("agents");
+  });
+
+  it("opens Agents as one surface however often it is asked for", () => {
+    useRightPanelStore.getState().open(WS, "agents");
+    useRightPanelStore.getState().open(WS, "agents");
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([{ id: "agents", kind: "agents" }]);
+  });
+
   it("a stored value with a bad shape at the current version hydrates to a usable state", async () => {
     window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: { [WS]: { isOpen: true, activeSurfaceId: "diff" } } }, version: 1 }));
     await useRightPanelStore.persist.rehydrate();
@@ -87,7 +101,8 @@ describe("rightPanelStore hydrate", () => {
   });
 
   it("the tab strip renders after hydrating a surface of a kind this build no longer has", async () => {
-    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
     await hydrate([{ id: "file:x", kind: "file" }, { id: "diff", kind: "diff" }], "diff");
     const Panel = () => {
       const state = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, WS));

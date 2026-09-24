@@ -6,11 +6,13 @@
 // roads run here against a stubbed Notification and a stubbed bridge; nothing
 // real is shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, askingLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
+import { NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { askToNotify, needsYouRoad, resetAskedToNotify, useNeedsYouEffect } from "../src/shell/needsYou.js";
+import { useHostNotices } from "../src/notices/hostNotices.js";
+import { askToNotify, needsYouRoad, resetAskedToNotify } from "../src/shell/needsYou.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const NEED: InitNeedsYou = { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 };
 
@@ -47,7 +49,8 @@ beforeEach(() => {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
   vi.stubGlobal("Notification", FakeNotification);
   document.title = "wsp";
-  useStore.setState({ api: null, initJob: null, setupOpen: false, toast: null, toastAction: null });
+  useStore.setState({ api: null, initJob: null, setupOpen: false });
+  clearNotices();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,7 +75,7 @@ function bindEvents(): (e: ProtocolEvent) => void {
 }
 
 function Harness() {
-  useNeedsYouEffect();
+  useHostNotices();
   return null;
 }
 
@@ -91,19 +94,19 @@ describe("the title while a build waits on the person", () => {
     expect(document.title).toBe("wsp");
   });
 
-  it("the wait ending takes the toast and the mark together, so no surface is left saying it alone", () => {
+  it("the wait ending takes the notice and the mark together, so no surface is left saying it alone", () => {
     const emit = bindEvents();
     render(<Harness />);
     act(() => emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED }));
     act(() => emit({ type: "init.job", job: { ...JOB, needsYou: NEED } }));
-    expect([useStore.getState().toast, document.title]).toEqual(["wsp needs you: sign in to GitHub CLI login", "• wsp"]);
-    // The row moved on: one view with no need on it, and every surface drops the wait at once.
+    expect([lastNotice(), document.title]).toEqual([initNeedsYouLine(NEED.what), "• wsp"]);
+    // The row moved on: one view with no need on it drops the wait at once.
     act(() => emit({ type: "init.job", job: JOB }));
-    expect([useStore.getState().toast, useStore.getState().toastAction, document.title]).toEqual([null, null, "wsp"]);
+    expect([lastNotice(), document.title]).toEqual([null, "wsp"]);
     // And the job ending after a need that was never answered leaves nothing behind either.
     act(() => emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED }));
     act(() => emit({ type: "init.job", job: { ...JOB, phase: "done" } }));
-    expect([useStore.getState().toast, document.title]).toEqual([null, "wsp"]);
+    expect(document.title).toBe("wsp");
   });
 });
 

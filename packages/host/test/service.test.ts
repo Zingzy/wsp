@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { EXIT_CODES, LABS_ENV, LOOPBACK } from "@wsp/protocol";
+import { EXIT_CODES, LABS_ENV, LOOPBACK, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, hostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
@@ -212,6 +212,10 @@ describe("one module per service manager", () => {
     expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [LABS_ENV]: "1" });
     expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
     expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("a service installed from a shell that turned the release check off keeps it off", () => {
+    expect(serviceEnv({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" })).toEqual({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" });
   });
 
   it("a manager writes every variable of the plan into the unit it hands over", () => {
@@ -477,6 +481,9 @@ describe("installing, stopping and reading a service", () => {
       `state       ${at.statePath}`,
       "service     none; wsp up --service installs a fake service",
     ]);
+    // The newest release rides last, read off the file the host keeps, whether or not a host is serving.
+    expect(statusLines(at.statePath, undefined, "none; wsp up --service installs a fake service", now, "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it").at(-1)).toBe("latest      0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it");
+    expect(statusLines(at.statePath, { lock, answering: true }, "fake service x, loaded", now, "off").at(-1)).toBe("latest      off");
   });
 });
 
@@ -760,7 +767,8 @@ describe("wsp up --service, wsp down and wsp status", () => {
     const fake = svc();
     const before: string[] = [];
     expect(await statusCommand(quietIO(before), opts, fake.deps)).toBe(1);
-    expect(before).toEqual(["host        not running", `state       ${statePath}`, "service     none; wsp up --service installs a fake service"]);
+    // The suite runs with update checks off, which the last row says.
+    expect(before).toEqual(["host        not running", `state       ${statePath}`, "service     none; wsp up --service installs a fake service", "latest      off"]);
 
     expect(await upServiceCommand(quietIO(), opts, fake.deps)).toBe(0);
     const after: string[] = [];
@@ -812,6 +820,21 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // exit code its class owns rather than a row saying the host is down.
     const refused = svc({ dial: () => Promise.reject(Object.assign(new Error("the host box refused this computer's token"), { kind: "auth" })) });
     await expect(statusCommand(quietIO(), aimed, refused.deps)).rejects.toThrow("refused this computer's token");
+  });
+
+  it("wsp status reads the newest release off the file the host keeps beside the state, asking nobody", async () => {
+    vi.stubEnv(UPDATE_CHECK_ENV, "");
+    const lines: string[] = [];
+    expect(await statusCommand(quietIO(lines), opts, svc().deps)).toBe(1);
+    expect(lines.some(line => line.startsWith("latest"))).toBe(false);
+    writeFileSync(join(home, ".wsp", "release.json"), JSON.stringify({ latest: { version: "9.9.9", tag: "v9.9.9", url: "https://github.com/Zingzy/wsp/releases/tag/v9.9.9", publishedAt: "2026-09-24T00:00:00Z" } }));
+    const read: string[] = [];
+    expect(await statusCommand(quietIO(read), opts, svc().deps)).toBe(1);
+    expect(read.at(-1)).toMatch(/^latest {6}9\.9\.9; this is \S+, .+ gets it$/);
+    vi.stubEnv(UPDATE_CHECK_ENV, "0");
+    const off: string[] = [];
+    expect(await statusCommand(quietIO(off), opts, svc().deps)).toBe(1);
+    expect(off.at(-1)).toBe("latest      off");
   });
 
   it("a bare wsp status answers for this computer even where a default alias would send every verb to a box", async () => {

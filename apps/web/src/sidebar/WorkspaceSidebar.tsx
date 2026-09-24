@@ -19,7 +19,7 @@
 // The surface itself is the shell's sidebar-glass: nothing here paints a
 // background.
 import { openProjectSettings } from "../settings/openAt.js";
-import { ChevronDownIcon, PlusIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, PlusIcon, SquarePenIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, hereWord, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { ProjectGlyph } from "../projects/look.js";
@@ -30,19 +30,18 @@ import { actionById, resolveActions, type ResolvedAction } from "../actions/regi
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
-import { CLOSE_TOAST_LABEL, useToastLife } from "./toastLife.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
-import { Button } from "../components/ui/button.js";
 import { SidebarContent, SidebarGroupAction, SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
-import { catalogIn, useLaunches, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { addNotice } from "../notices/store.js";
+import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
@@ -157,17 +156,13 @@ export function WorkspaceSidebar() {
   const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
-  const toast = useStore(s => s.toast);
-  const clearToast = useStore(s => s.clearToast);
-  useToastLife(toast, clearToast);
-  // Keyed by the words it was set with, so a toast said since it took the slot never shows another sentence's action.
-  const toastAction = useStore(s => (s.toastAction !== null && s.toastAction.for === s.toast ? s.toastAction : null));
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   // Until the first list lands an empty group is unknown rather than empty, and the design spec gives this group no
   // waiting state of its own, so it holds nothing at all.
   const ready = useReady();
   const projectsRead = useProjectsRead();
+  const projectsRefused = useProjectsRefused();
   const createWorkspace = useStore(s => s.createWorkspace);
   const removeProject = useStore(s => s.removeProject);
   // Where a workspace can go: the same list Settings draws, so a row and that table never name a computer twice.
@@ -283,7 +278,7 @@ export function WorkspaceSidebar() {
       await api.rebuild(project.id);
     } catch (e) {
       setRebuilding(({ [project.id]: _dropped, ...rest }) => rest);
-      useStore.setState({ toast: rebuildRefusedLine(project.displayName) });
+      addNotice({ kind: "error", text: rebuildRefusedLine(project.displayName), where: project.displayName });
     }
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
@@ -650,7 +645,7 @@ export function WorkspaceSidebar() {
   /** The creations whose project this host has not answered for: they belong to no row yet, so they wait under
    * the projects rather than not being drawn at all. */
   const homeless = creations.filter(creation => !groups.some(group => group.project.id === creation.project));
-  const empty = ready && projectsRead && groups.length === 0 && creations.length === 0;
+  const empty = ready && projectsRead && projectsRefused === null && groups.length === 0 && creations.length === 0;
 
   return (
     <>
@@ -660,6 +655,13 @@ export function WorkspaceSidebar() {
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col gap-1 px-[var(--sidebar-content-inset)] pt-1">
             {picked === null ? groups.map(projectItem) : projectChildren(picked, 0, false)}
             {homeless.map(creation => creationItem(creation, 0, false))}
+            {projectsRefused !== null ? (
+              <li>
+                <p data-k="projects-refused" className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
+                  {PROJECT_WORDS.notRead(projectsRefused.said)}
+                </p>
+              </li>
+            ) : null}
             {empty ? (
               <li>
                 <SidebarMenuButton size="sm" data-k="new-project" className={ONE_LINE_ROW_CLASS} onClick={requestAddProject}>
@@ -672,44 +674,6 @@ export function WorkspaceSidebar() {
           <ForwardsList />
         </SidebarContent>
         <SidebarChromeFooter>
-          {toast ? (
-            <div
-              role="status"
-              aria-label={toast}
-              onClick={clearToast}
-              className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
-            >
-              <span className="min-w-0 flex-1">{toast}</span>
-              {toastAction !== null ? (
-                <Button
-                  data-toast-action
-                  size="xs"
-                  variant="outline"
-                  className="shrink-0 font-mono"
-                  onClick={event => {
-                    event.stopPropagation();
-                    toastAction.run();
-                    clearToast();
-                  }}
-                >
-                  {toastAction.word}
-                </Button>
-              ) : null}
-              <Button
-                data-toast-close
-                size="icon-xs"
-                variant="ghost-muted"
-                aria-label={CLOSE_TOAST_LABEL}
-                className="shrink-0"
-                onClick={event => {
-                  event.stopPropagation();
-                  clearToast();
-                }}
-              >
-                <XIcon />
-              </Button>
-            </div>
-          ) : null}
           <SettingsRow />
           <HostFoot />
         </SidebarChromeFooter>

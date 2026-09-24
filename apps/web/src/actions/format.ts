@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, kindWords, threadForgetRefusal, threadStateWord, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRename, onDeleteOf, threadForgetRefusal, threadStateWord, type HarnessCatalog, type ProjectCopy, type SessionRenameOutcome, type WorkspaceKind, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -129,7 +129,7 @@ export const NO_WORKSPACE_FORK = "Running a copy of a task is not in the runtime
 
 /** What Delete takes, on the menu row's hover: the machine half in the kind's own words, which is the half a
  * person cannot undo. The dialog says the same half and the record and the threads with it. */
-export const DELETE_HINT = (kind: WorkspaceKind): string => `Its ${kindWords(kind).onDelete.asked}`;
+export const DELETE_HINT = (kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">): string => `Its ${onDeleteOf(kind, copy).asked}`;
 export const CLIENT_CANNOT_DELETE = "This client cannot delete tasks";
 
 /** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in

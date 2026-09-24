@@ -34,6 +34,7 @@ export const PROJECT_WORDS = {
   settings: "Project settings",
   remove: "Remove project",
   noWorkspaces: "No tasks yet.",
+  notRead: (said: string) => `Projects not read: ${said}`,
 } as const;
 
 /** The project switcher at the head of the sidebar: the pick that shows every project, and its menu's search. */

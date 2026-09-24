@@ -52,6 +52,9 @@
 //   settings-account      the one Account row, not signed in
 //   settings-keybindings  the chords, in a desktop shell
 //   settings-about        the two halves of the release, in a desktop shell
+//   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
+//                         shell holds the bundle's download until the test lets it go
+//   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer the Add a computer sheet over Computers
@@ -61,13 +64,20 @@
 //   bring-back-absent    the same on a workspace whose computer is not
 //                        answering, which says what that computer says
 //   bring-back-roadless  the same on a wsp whose host carries no such request
+//   agents-widths    the Agents, Skills and Servers list off one report at the
+//                    page's card width, the switch's edge and a phone's page
+//                    (696, 675, 358) and in the panel at 380 and its 360 floor
+//   panel-agents     the task on the box selected, its panel open on Agents
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
 import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
+import { AgentsList, type AgentsShell } from "../../src/components/agents/AgentsList";
+import { useServerTools } from "../../src/components/agents/useServerTools";
 import { SettingsPage } from "../../src/settings/SettingsPage";
+import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -283,6 +293,8 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-account": { kind: "group", group: "account" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
   "settings-about": { kind: "group", group: "about" },
+  "settings-about-behind": { kind: "group", group: "about" },
+  "settings-about-restart": { kind: "group", group: "about" },
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
@@ -377,6 +389,8 @@ const api = {
   spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
   image: async () => (settings ? { image: IMAGE, copies: IMAGE_COPIES, projects: [] } : { image: null, copies: [], projects: [] }),
   hostTerminalConfig: async () => ({ files: [] }),
+  agentsRead: async () => AGENTS_REPORT,
+  serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},
@@ -391,6 +405,7 @@ const api = {
   addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
     onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
     onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+    onStage({ step: "reach", word: placeAddSheetWord("reach", "done"), state: "done" });
     onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
     return new Promise<never>(() => {});
   },
@@ -402,9 +417,18 @@ const api = {
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
 }
-if (screen === "settings-keybindings" || screen === "settings-about") {
+if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
   window.wsp = { version: "0.2.0" };
   (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.2.0" };
+}
+if (screen === "settings-about-behind") {
+  const held = window as unknown as { finishBundle?: () => void };
+  window.wsp = {
+    ...window.wsp,
+    hosts: async () => ({ here: hereWord(true), current: null, hosts: [] }),
+    getBundle: () => new Promise(resolve => (held.finishBundle = () => resolve({ ok: true }))),
+    quitAndOpen: async () => ({ ok: true }),
+  };
 }
 
 // The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
@@ -421,12 +445,18 @@ useStore.setState({
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer",
+  release:
+    screen === "settings-about-behind"
+      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
+      : screen === "settings-about-restart"
+        ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
+        : null,
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},
   sessions: drawsSidebar ? HELD_SESSIONS : {},
   // The screen about Settings over a workspace's panel has that workspace selected; every other opens on none.
-  selectedId: screen === "settings-over-panel" ? "ws_copy" : null,
+  selectedId: screen === "settings-over-panel" ? "ws_copy" : screen === "panel-agents" ? "ws_box" : null,
   selectedThreadId: null,
 } as never);
 useStore.getState().bind(api);
@@ -435,7 +465,31 @@ useStore.getState().bind(api);
 // is shut before the first paint, except on the one screen about the panel coming back after Settings.
 const shutPanel = { isOpen: false, activeSurfaceId: null, surfaces: [] };
 const openPanel = { isOpen: true, activeSurfaceId: "browser:new", surfaces: [{ id: "browser:new" as const, kind: "preview" as const, resourceId: null }] };
-useRightPanelStore.setState({ byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : shutPanel])) });
+const agentsPanel = { isOpen: true, activeSurfaceId: "agents", surfaces: [{ id: "agents" as const, kind: "agents" as const }] };
+useRightPanelStore.setState({
+  byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : screen === "panel-agents" && id === "ws_box" ? agentsPanel : shutPanel])),
+});
+
+/** The widths the Agents list is measured at: the page's card, the switch's edge, a phone's page, the panel and its floor. */
+const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
+  { shell: "page", width: 696 },
+  { shell: "page", width: 675 },
+  { shell: "page", width: 358 },
+  { shell: "panel", width: 380 },
+  { shell: "panel", width: 360 },
+];
+function AgentsWidths() {
+  const tools = useServerTools(AGENTS_REPORT.target);
+  return (
+    <div className="flex flex-col gap-10 bg-background p-4">
+      {AGENTS_WIDTHS.map(w => (
+        <div key={w.width} data-agents-width={w.width} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
+          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box", ...(tools === undefined ? {} : { tools }) }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
@@ -480,7 +534,9 @@ function Centre() {
 
 createRoot(document.getElementById("root")!).render(
   <>
-    {firstRunScreens.includes(screen) ? (
+    {screen === "agents-widths" ? (
+      <AgentsWidths />
+    ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">
         <FirstRun />
       </div>

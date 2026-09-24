@@ -6,7 +6,7 @@
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, and the diff, the
- * workspace's own readings and its processes are singleton surfaces.
+ * workspace's own readings, its processes and the agents are singleton surfaces.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here belongs to the machine, not to one conversation on it.
@@ -15,7 +15,7 @@ import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "machine", "processes"] as const;
+export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "machine", "processes", "agents"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -31,7 +31,8 @@ export type RightPanelSurface =
     }
   | { id: "diff"; kind: "diff" }
   | { id: "machine"; kind: "machine" }
-  | { id: "processes"; kind: "processes" };
+  | { id: "processes"; kind: "processes" }
+  | { id: "agents"; kind: "agents" };
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
 const RIGHT_PANEL_STORAGE_VERSION = 1;
@@ -90,6 +91,7 @@ const SINGLETONS: { [K in SingletonKind]: Extract<RightPanelSurface, { kind: K }
   diff: { id: "diff", kind: "diff" },
   machine: { id: "machine", kind: "machine" },
   processes: { id: "processes", kind: "processes" },
+  agents: { id: "agents", kind: "agents" },
 };
 const singletonSurface = (kind: SingletonKind): RightPanelSurface => SINGLETONS[kind];
 
@@ -159,6 +161,7 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
     case "diff":
     case "machine":
     case "processes":
+    case "agents":
       return singletonSurface(kind);
     case "preview": {
       const resourceId = surface["resourceId"];

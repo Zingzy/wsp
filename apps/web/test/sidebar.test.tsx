@@ -12,7 +12,6 @@ import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { CLOSE_TOAST_LABEL, TOAST_MS } from "../src/sidebar/toastLife.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
@@ -22,6 +21,7 @@ import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/wor
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -135,7 +135,8 @@ const HERE_PROJECT: ProjectView = { id: "pr_2", name: "wsp", computer: "here", s
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], projects: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], projects: [], placesRefused: null, projectsRefused: null, api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  clearNotices();
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -655,67 +656,28 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("before threads").getAttribute("data-active")).toBe("false");
   });
 
-  it("a thread's end addressed to me shows as the store toast; one addressed to a thread shows nothing here", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
-    const line = "thread c452d1e8 finished (completed, 8m 12s, $1.94): all green";
-    useStore.getState().applyEvent({ type: "session.notify", workspaceId: "ws_a", sessionId: "s1", turnId: "t1", threadId: "thr_child", notify: "thr_parent", text: line });
-    expect(useStore.getState().toast).toBeNull();
-    useStore.getState().applyEvent({ type: "session.notify", workspaceId: "ws_a", sessionId: "s1", turnId: "t1", threadId: "thr_child", notify: "me", text: line });
-    expect(useStore.getState().toast).toBe(line);
-    expect(await screen.findByRole("status", { name: line })).toBeDefined();
-  });
-
-  it("an empty fleet says so; a store toast shows and can be dismissed", async () => {
+  it("an empty fleet says so; a refused status read is a notice, never a line in the sidebar", async () => {
     const api = fakeApi([], []);
     api.watchStatuses = vi.fn(async () => { throw new Error("runtime unreachable"); });
     useStore.getState().bind(api);
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     await waitFor(() => expect(screen.getByText(/No tasks yet/)).toBeDefined());
-    const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
-    fireEvent.click(toast);
-    expect(useStore.getState().toast).toBeNull();
-    // A toast with no action of its own carries no button, so nothing to press appears beside a plain sentence.
-    expect(toast.querySelector("[data-toast-action]")).toBeNull();
+    await waitFor(() => expect(lastNotice()).toBe("Live status is not coming from the host: runtime unreachable"));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("carries a close of its own and leaves after a few seconds, so nothing a person did not ask for follows them across pages", async () => {
+  it("a refused project list says so where New project would stand", async () => {
     const api = fakeApi([], []);
+    api.projectsList = async () => { throw new RequestError("projects.json is not valid JSON"); };
     useStore.getState().bind(api);
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    act(() => useStore.setState({ toast: "runtime unreachable" }));
-    const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
-    // The whole box was the target before, which is nothing a person can see; the glyph says what it does.
-    fireEvent.click(within(toast).getByRole("button", { name: CLOSE_TOAST_LABEL }));
-    expect(useStore.getState().toast).toBeNull();
-
-    // And one nobody closes goes on its own: one sat in a corner for four minutes, another for a whole session.
-    act(() => useStore.setState({ toast: "runtime unreachable" }));
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    await waitFor(() => expect(useStore.getState().toast).toBeNull(), { timeout: TOAST_MS + 2_000 });
-  });
-
-  it("a build that needs the person says so in the toast once, with an Open that opens the setup sheet; a later toast takes the slot and its action goes with it", async () => {
-    const api = fakeApi([], []);
-    useStore.getState().bind(api);
-    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    await waitFor(() => expect(screen.getByText(/No tasks yet/)).toBeDefined());
-    act(() => useStore.getState().applyEvent({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } }));
-    const toast = await screen.findByRole("status", { name: "wsp needs you: sign in to GitHub CLI login" });
-    expect(toast.textContent).toContain("wsp needs you: sign in to GitHub CLI login");
-    expect(useStore.getState().setupOpen).toBe(false);
-    expect(toast.querySelector<HTMLElement>("[data-toast-action]")!.textContent).toBe("Open");
-
-    // A toast said from anywhere else takes the slot, and the Open the need's sentence had does not come with it.
-    act(() => useStore.setState({ toast: "runtime unreachable" }));
-    const plain = await screen.findByRole("status", { name: "runtime unreachable" });
-    expect(plain.querySelector("[data-toast-action]")).toBeNull();
-
-    // The need again, and its Open opens the sheet and clears the sentence it belonged to.
-    act(() => useStore.getState().applyEvent({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to Claude Code login", since: 1_760_000_001_000 } }));
-    const again = await screen.findByRole("status", { name: "wsp needs you: sign in to Claude Code login" });
-    fireEvent.click(again.querySelector<HTMLElement>("[data-toast-action]")!);
-    expect(useStore.getState().setupOpen).toBe(true);
-    expect(useStore.getState().toast).toBeNull();
+    const line = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-k='projects-refused']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(line.textContent).toBe("Projects not read: projects.json is not valid JSON");
+    expect(document.querySelector("[data-k='new-project']")).toBeNull();
   });
 });
 

@@ -13,6 +13,7 @@ import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs } from "../components/RightPanelTabs.js";
 import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { ProcessesSurface } from "../components/procs/ProcessesSurface.js";
+import { AgentsSurface } from "../components/agents/AgentsSurface.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
 import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
@@ -79,12 +80,15 @@ export function RightPanel({
       onAddDiff={() => open(workspaceId, "diff")}
       onAddMachine={() => open(workspaceId, "machine")}
       onAddProcesses={() => open(workspaceId, "processes")}
+      onAddAgents={() => open(workspaceId, "agents")}
       browserAvailable={here || workspace?.phase === "running"}
       terminalAvailable={here || (workspace?.phase === "running" && absent === null)}
       diffAvailable={workspace?.phase === "running"}
       machineAvailable={here || workspace !== null}
       // The Processes pane carries the start button itself where this host can put the daemon back.
       processesAvailable={here || (workspace?.phase === "running" && (absent === null || absent.start !== undefined))}
+      // A paused task answers its last report and is never woken for it.
+      agentsAvailable={workspace !== null}
       // A panel terminal cannot open at all without a pty, so its tab keeps the computer's own sentence as the
       // reason it is held, and the drawer under the chat is where that sentence carries the button.
       {...(here ? { unavailableReasons: { diff: NO_PROJECT_HERE } } : absent === null ? {} : { unavailableReasons: { terminal: absent.sentence, processes: absent.sentence } })}
@@ -97,6 +101,8 @@ export function RightPanel({
         <MachineSurface workspaceId={workspaceId} />
       ) : active?.kind === "processes" ? (
         <ProcessesSurface workspaceId={workspaceId} />
+      ) : active?.kind === "agents" ? (
+        <AgentsSurface workspaceId={workspaceId} />
       ) : active?.kind === "diff" ? (
         <DiffWorkerPoolProvider theme={theme}>
           <DiffSurface workspaceId={workspaceId} theme={theme} />

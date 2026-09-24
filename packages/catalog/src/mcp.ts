@@ -7,6 +7,7 @@
 // nothing here reads or writes a file.
 import type { McpServerSpec } from "@wsp/protocol";
 import { readJsonc, type Jsonc } from "./jsonc.js";
+import type { McpCheck } from "./mcp-check.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
@@ -19,6 +20,8 @@ export interface McpServer {
   transport: McpTransport;
   /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var); names only. */
   envRefs: string[];
+  /** The file keeps the definition and switches it off: OpenCode's `enabled: false`, Codex's `enabled = false`. */
+  disabled?: true;
 }
 
 export interface Placed {
@@ -123,11 +126,15 @@ export interface McpConfig {
   format: McpFormat;
   /** `~/`-relative, each one of the entry's configPaths; the first that exists is the config. */
   files: readonly string[];
+  /** The same agent's servers inside a project, project-relative; the first that exists is the project's. */
+  projectFiles?: readonly string[];
   /** The scopes the file covers, shown on the wizard's group heading; every agent's docs also give a project scope
    * this file does not hold. */
   scope: string;
   /** Where an http server's sign-in lives when the agent keeps it beside its own login, for the row; absent, nothing is said. */
   httpAuth?: string;
+  /** How the harness answers for one server's sign-in; absent where no harness's words were measured. */
+  check?: McpCheck;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -377,13 +384,14 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
   projects: false,
   server: (name, raw, scope) => {
     if (!isObject(raw)) return undefined;
+    const off = raw.enabled === false ? { disabled: true as const } : {};
     if (raw.type === "remote") {
       const url = str(raw.url);
-      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
+      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [], ...off };
     }
     const [command, ...args] = strs(raw.command);
     if (command === undefined) return undefined;
-    return { name, scope, transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [] };
+    return { name, scope, transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [], ...off };
   },
   entry: s => ({ type: "local", command: [s.command, ...s.args], enabled: true }),
 });
@@ -463,6 +471,7 @@ function tomlValue(raw: string): unknown {
 
 interface CodexTable {
   values: Record<string, unknown>;
+  disabled?: true;
   env: Record<string, string>;
   headers: Record<string, string>;
   envHeaders: Record<string, string>;
@@ -487,6 +496,7 @@ function readCodex(text: string): McpServer[] {
     const key = line.slice(0, eq).trim().replace(/^"(.*)"$/, "$1");
     let value = line.slice(eq + 1).trim();
     while (tomlOpenArray(value) && i + 1 < lines.length) value += uncommentToml(lines[++i]!).trim();
+    if (current.sub === undefined && key === "enabled" && value === "false") tables.get(current.name)!.disabled = true;
     const parsed = tomlValue(value);
     if (parsed === undefined) continue;
     const table = tables.get(current.name)!;
@@ -503,10 +513,11 @@ function readCodex(text: string): McpServer[] {
     const url = str(t.values.url);
     const bearer = str(t.values.bearer_token_env_var);
     const envRefs = [...(bearer !== undefined ? [bearer] : []), ...Object.values({ ...dict(t.values.env_http_headers), ...t.envHeaders })];
+    const off = t.disabled === true ? { disabled: true as const } : {};
     if (command !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs });
+      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs, ...off });
     } else if (url !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs });
+      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs, ...off });
     }
   }
   return out;

@@ -8,10 +8,9 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, agentOfRow, agentSignInWord, agentVersionWord, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { agentName } from "@wsp/catalog";
-import { AGENTS_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
-import { CLOUD_NAMES, keyHeld } from "./providers.js";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
+import { CLOUD_NAMES } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
  * its hostname; a provider carries the name its own row in the provider table gives it, since the host words it by
@@ -192,13 +191,6 @@ export const PROJECT_PICK_WORDS = {
 } as const;
 
 
-/** Which rows the Computers table draws: this computer and every computer joined to it, always, and a cloud
- * account only once this host holds its key or a workspace stands on it. A fresh state is this computer's row
- * alone, with no cloud row and no hourly rate on any screen: a table that listed what a person had not bought
- * read as a bill. */
-export function computerRows(places: readonly PlaceView[], setup: Pick<InitSetup, "keys"> | null, counts: Record<string, number>): PlaceView[] {
-  return places.filter(place => !isProviderPlace(place) || keyHeld(place.name, setup) || (counts[place.id] ?? 0) > 0);
-}
 
 /** How a workspace's copy of a project is made on this computer, as that computer last reported it: the
  * protocol's own word (snapshot, reflink, plain), and the sentence for a computer that makes no copy at all.
@@ -207,62 +199,6 @@ export function computerRows(places: readonly PlaceView[], setup: Pick<InitSetup
 export function copiesWord(place: PlaceView, here: boolean): string {
   if (place.copies !== undefined) return place.copies;
   return !here && place.takesForks === false ? WHERE_WORDS.copiesNothing : "";
-}
-
-/** One agent on a computer's page: the agent by its catalog name, the word for what it is there, and why a Sign
- * in beside it is held. */
-export interface AgentLine {
-  id: string;
-  name: string;
-  state: string;
-  /** Whether a sign-in already stands for this agent there: its own login on that computer, or the variable this
-   * wsp's vault holds for it. The Sign in button is not drawn where one does. */
-  signedIn?: boolean;
-  /** Whether the wsp tools can be handed to this agent, for the one action this computer's own rows carry. */
-  takesTools?: boolean;
-}
-
-/** The agents on the computer the app runs on, off the one reading every surface makes of which agents are here:
- * each with the word for whether its own config names the wsp tools. The whole of what the Agents section said
- * before it moved under this computer's row. */
-export function hereAgentLines(setup: Pick<InitSetup, "agents"> | null): AgentLine[] {
-  return (setup?.agents ?? []).map(agent => ({
-    id: agent.id,
-    name: agent.name,
-    state: agent.configured ? AGENTS_WORDS.added : agent.takesTools ? "" : AGENTS_WORDS.noTools,
-    takesTools: agent.takesTools,
-  }));
-}
-
-/** The agents a joined computer reported, named through the catalog: the version each answered with and the word
- * for its sign-in, which are the two facts a person asks first, and the recipe's outcome only where that row
- * failed, since a row that installed or was already there says nothing this line does not. A computer whose daemon
- * reports neither reads as it did before: the recipe's word, or the bare word found. Why the sign-in beside each
- * is held is the page's to say, in the one clause every held row on it reads. */
-export function placeAgentLines(place: PlaceView): AgentLine[] {
-  return (place.agents ?? []).map(id => {
-    const signIn = place.signIns?.[id];
-    const row = place.provision?.rows.find(r => agentOfRow(r) === id);
-    const version = place.agentVersions?.[id];
-    const said = [version === undefined ? undefined : agentVersionWord(version), signIn === undefined ? undefined : agentSignInWord(signIn), row?.outcome === "failed" ? outcomeWord(row) : undefined].filter(
-      (word): word is string => word !== undefined && word !== "",
-    );
-    return {
-      id,
-      name: agentName(id),
-      state: said.length === 0 ? (outcomeWord(row) ?? AGENTS_WORDS.found) : said.join(" · "),
-      ...(signIn === undefined || signIn === "none" ? {} : { signedIn: true }),
-    };
-  });
-}
-
-/** What the recipe put on a computer beside its agents: the person's own files in their agents' homes there and
- * the MCP servers written into those configs, each by the label the job carried and the word for what it came to.
- * Empty on a computer no job has run on. */
-export function recipeLines(place: PlaceView): { id: string; kind: PlaceProvisionKind; label: string; state: string }[] {
-  return (place.provision?.rows ?? [])
-    .filter(row => row.kind === "file" || row.kind === "server")
-    .map(row => ({ id: row.id, kind: row.kind!, label: row.label, state: outcomeWord(row) ?? "" }));
 }
 
 /** The word for what one row of the recipe came to, or nothing for a row no job carried. A present row's note is

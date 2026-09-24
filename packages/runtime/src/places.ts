@@ -52,6 +52,7 @@ import {
   type DaemonResponse,
   type MachineSizeOffer,
   type PlaceAddStep,
+  PLACE_LOGIN_REFUSED_KIND,
   type PlaceStageEvent,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
@@ -150,8 +151,9 @@ export interface HerePlace {
 export interface PlaceWiring {
   /** The host's own ed25519 pair, made once beside the state file by the host and never written by the runtime. */
   hostKey: PlaceKeyPair;
-  /** The one word for a provider the host is set up for, as a place; nothing when it forks nowhere. */
-  provider(): { id: string; rateUsdPerHour: number } | undefined;
+  /** The one word for a provider the host is set up for, as a place; nothing, or no reader at all, when it forks
+   * nowhere. */
+  provider?(): { id: string; rateUsdPerHour: number } | undefined;
   here(): HerePlace;
   /** What this computer calls itself, which is what a joining computer shows its person from then on. */
   hostName(): string;
@@ -279,7 +281,7 @@ export interface PlaceInstalled {
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
-export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
+export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
@@ -475,7 +477,9 @@ export const placeSweptOverLinkLine = (name: string, at: string, said?: string):
 /** The refusal the login itself got, as against anything the computer at the end of it said: ssh would not take
  * the login, so nothing ran there at all. The roads that log in throw this one for that case alone, and the lines
  * a person reads about them turn on it. */
-export class PlaceLoginRefusedError extends Error {}
+export class PlaceLoginRefusedError extends Error {
+  readonly kind = PLACE_LOGIN_REFUSED_KIND;
+}
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -595,11 +599,18 @@ export function signInsOf(
       words[id] = "signed-in";
       continue;
     }
-    const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
-    const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
-    words[id] = token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
+    words[id] = vaultSignIn(id, vault);
   }
   return words;
+}
+
+/** The word for an agent whose own login is not on the computer: this host's vault holds the token or the key it
+ * reads, which every turn there is handed, or nothing stands for it. The one reading every sign-in word falls to. */
+export function vaultSignIn(agentId: string, vault: Readonly<Record<string, string>>): AgentSignInState {
+  const signIn = CATALOG_AGENTS.find(a => a.id === agentId)?.signIn;
+  const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
+  const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
+  return token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
 }
 
 /** How long between writes of a linked place's last seen. */
@@ -708,14 +719,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The provider this host forks on when nobody names a place: the place a record with no place word stands on.
    * The wiring is what says whether this host forks on a provider at all; a runtime served with no wiring of its
    * own has a one-row table standing for its backend, which is no place a person names. */
-  const wiredProvider = (): string | undefined => wiring.provider()?.id;
+  const wiredProvider = (): string | undefined => wiring.provider?.()?.id;
   /** Every provider a fork can land at, in the table's own order, the wired one among them. A host wired to one
-   * cloud that holds the key for another can fork at either, so both are rows a person names. */
+   * cloud that holds the key for another can fork at either, so both are rows a person names; a host wired to
+   * nowhere still lists every other provider it holds a key for. */
   const providerIds = (): readonly string[] => {
     const wired = wiredProvider();
-    if (wired === undefined) return [];
-    const table = opts.providers?.().list() ?? [];
-    return table.includes(wired) ? table : [wired];
+    const table = opts.providers?.();
+    const listed = table?.list() ?? [];
+    if (wired === undefined) return listed.filter(id => id !== table?.wired);
+    return listed.includes(wired) ? listed : [wired];
   };
   /** The backend of a provider row, or nothing when the word names no provider this host holds a key for. */
   const providerBackend = (placeId: string): MachineBackend | undefined => opts.providers?.().backend(placeId);
@@ -723,7 +736,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * added by saving a key carries its price with no second table. */
   const providerRate = (placeId: string): number | undefined => {
     const at = placeId === wiredProvider() ? undefined : providerBackend(placeId);
-    if (at === undefined) return placeId === wiredProvider() ? wiring.provider()?.rateUsdPerHour : undefined;
+    if (at === undefined) return placeId === wiredProvider() ? wiring.provider?.()?.rateUsdPerHour : undefined;
     return at.pricing.rateUsdPerHour(at.pricing.defaultSize);
   };
   /** The sizes one provider offers, each at that provider's own rate, read off the backend the host built for it.
@@ -907,8 +920,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** One step of the recipe job on the stream whoever asked for it is watching. The computer rides every one of
    * them: this job is on a computer this host already holds, so a reader that acts on the job's end rather than
    * printing it reads the row off the event and not off the stream's own id. */
-  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string): void => {
-    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}) });
+  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string, failed?: number): void => {
+    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}), ...(failed !== undefined ? { failed } : {}) });
   };
 
   /** The job's own log and outcome on the computer itself, so a person at its shell reads what happened without
@@ -974,7 +987,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const { at: _under, ...rest } = held;
       push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
       await writing;
-      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "));
+      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "), rows.filter(r => r.outcome === "failed").length);
     } catch (e) {
       const said = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
       const { at: _under, ...rest } = held;
@@ -1317,7 +1330,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // keeps the sentence where every other refusal of a dial is kept, and nothing attaches.
       await keep({ ...held, dialled: { at: new Date(clockNow()).toISOString(), answered: false, said: blocked } });
       cut(placeId, blocked);
-      emit({ type: "place.absent", placeId });
+      emit({ type: "place.absent", placeId, said: blocked });
       return { refusal: blocked };
     },
 
@@ -1584,9 +1597,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       let step: PlaceAddStep = "connect";
-      const stage: PlaceStaging = (which, state, note) => {
-        step = which;
-        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
+      const stage: PlaceStaging = (which, state, note, placeId) => {
+        if (state === "running") step = which;
+        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
       const waiting: { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void } = {};
@@ -1623,7 +1636,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", `engine ${held.report.engine}`);
+        stage("join", "done", `engine ${held.report.engine}`, placeId);
         // What that computer forks with, read over the link it has just opened and before this answers: the row a
         // join prints carries where that computer keeps the logins its workspaces share, which is what the
         // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a
@@ -1642,6 +1655,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
         stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
+        // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
+        await devices.spend(code, at).catch(() => false);
         throw e;
       } finally {
         awaiting.delete(code);

@@ -10,7 +10,9 @@ import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
+import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
 import { RELEASE_PINS } from "./release-pins.js";
+import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { CLAUDE_CODE, CLAUDE_CONFIG_DIR, CLAUDE_INSTALL, DOCKER_INSTALL, FD_INSTALL, HERMES, HERMES_INSTALL, LOCAL_BIN, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
@@ -96,9 +98,11 @@ export interface AgentEntry extends EntryBase {
   /** How the agent's settings name the hook scripts it runs, so a copy carries each script or takes the hook out;
    * absent when the catalog knows no hooks for it, and its settings copy as they are. */
   hooks?: HookCarry;
-  /** The directory on this computer the agent loads its global skills from, `~/`-relative, one folder per skill with
-   * a SKILL.md inside; the wsp skill goes there with the MCP server. */
-  skills: string;
+  /** The folders the agent loads skills from, its own first. Measured on 2026-09-24 against the version each entry
+   * names beside them, off the folders the harness reads and what it wrote there. */
+  skillRoots: SkillRoots;
+  /** Skills its plugins bring, read-only; absent where the agent has no plugins. */
+  pluginSkills?: PluginSkills;
   /** The files in a project this agent reads standing instructions from, project-relative; the MCP install keeps its
    * own marked section in each of them. */
   projectDocs: readonly string[];
@@ -181,14 +185,16 @@ export const CATALOG: readonly CatalogEntry[] = [
     projectKeyEnv: "CLAUDE_CODE_PROJECT_DIR_NAME",
     name: "Claude Code",
     context: CLAUDE_CONTEXT,
-    skills: "~/.claude/skills",
+    // 2.1.281: ~/.claude/skills alone, links into the shared folder among them; plugins under their own folders.
+    skillRoots: { user: [{ dir: "~/.claude/skills", lands: "link" }], project: [{ dir: ".claude/skills", lands: "link" }] },
+    pluginSkills: CLAUDE_PLUGIN_SKILLS,
     projectDocs: [AGENTS_MD, "CLAUDE.md"],
     // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
     firstMove: `/wsp ${SET_UP_WSP}`,
     installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login" },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK },
     hooks: CLAUDE_HOOKS,
     configPaths: [
       CLAUDE_SETTINGS_FILE, "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
@@ -210,12 +216,13 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".codex",
     name: "Codex",
     context: CODEX_CONTEXT,
-    skills: "~/.codex/skills",
+    // 0.155.1: CODEX_HOME's skills, where it writes copies, and the shared folder.
+    skillRoots: { user: [{ dir: "~/.codex/skills", lands: "copy" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
     installRoad: { road: "npm", package: "@openai/codex", version: "0.153.0" },
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], scope: "user scope" },
+    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope" },
     hooks: CODEX_HOOKS,
     configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
@@ -232,12 +239,13 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".gemini",
     name: "Gemini CLI",
     context: GEMINI_CONTEXT,
-    skills: "~/.gemini/skills",
+    // Its docs as of 0.58.0 (no Gemini on the Mac measured); copies found there.
+    skillRoots: { user: [{ dir: "~/.gemini/skills", lands: "copy" }], project: [{ dir: ".gemini/skills", lands: "copy" }] },
     installRoad: { road: "npm", package: "@google/gemini-cli", version: "0.58.0" },
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
     // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], scope: "user scope" },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope" },
     configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
     projectState: [
       { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
@@ -253,11 +261,15 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".local/share/opencode",
     name: "OpenCode",
     context: OPENCODE_CONTEXT,
-    skills: "~/.config/opencode/skills",
+    // 1.18.18: its own folder, where it holds copies, then Claude Code's and the shared folder, which it loads too.
+    skillRoots: {
+      user: [{ dir: "~/.config/opencode/skills", lands: "copy" }, { dir: "~/.claude/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }],
+      project: [{ dir: ".opencode/skills", lands: "copy" }, { dir: ".claude/skills", lands: "link" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }],
+    },
     installRoad: { road: "npm", package: "opencode-ai", version: "1.18.27" },
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
-    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], scope: "user scope" },
+    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], projectFiles: ["opencode.json", "opencode.jsonc"], scope: "user scope" },
     configPaths: [
       "~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc", "~/.config/opencode/AGENTS.md", "~/.config/opencode/package.json",
       "~/.config/opencode/agents", "~/.config/opencode/commands", "~/.config/opencode/plugins", "~/.config/opencode/skills", "~/.config/opencode/themes",
@@ -274,7 +286,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".pi/agent",
     name: "Pi",
     context: PI_CONTEXT,
-    skills: "~/.pi/agent/skills",
+    // 0.84.1: its own folder, links into the shared folder there, and the shared folder.
+    skillRoots: { user: [{ dir: "~/.pi/agent/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: ".pi/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
     installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
     node: 22,
     signIn: SIGN_IN_ROWS.pi,
@@ -294,7 +307,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".hermes",
     name: "Hermes Agent",
     context: HERMES_CONTEXT,
-    skills: "~/.hermes/skills",
+    // 0.20.0: one folder, skills under a category folder or straight in it, links into the shared folder among them.
+    skillRoots: { user: [{ dir: "~/.hermes/skills", lands: "link" }], project: [] },
     installRoad: { road: "script", script: HERMES_INSTALL, version: HERMES.tag },
     signIn: SIGN_IN_ROWS.hermes,
     configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],

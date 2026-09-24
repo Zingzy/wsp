@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { CLOUD_SETUP_WORDS, fmtPx, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -52,6 +52,8 @@ export const GROUP_BLURBS = {
 export const WHERE_WORDS = {
   icon: "Icon",
   iconDescription: "How this computer shows in the sidebar and here.",
+  /** A place list the host refused, said where the list would stand. */
+  notRead: (said: string) => `Computers not read: ${said}`,
   /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
   copies: "Copies",
   copiesDescription: "How a task's copy of a project is made there.",
@@ -61,9 +63,6 @@ export const WHERE_WORDS = {
   portsDescription: "What a task there has for a network.",
   workspaceThere: "A task there",
   connection: "Connection",
-  agents: "Agents",
-  recipe: "Skills and MCP servers",
-  recipeNone: "None from the recipe yet.",
   workspaces: "Tasks",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
@@ -81,8 +80,6 @@ export const WHERE_WORDS = {
   cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
-  /** Why a row's action is held: the command line has the road and the app does not. */
-  notFromApp: "not from the app yet",
   system: "System",
   systemHover: "What it reported last.",
   size: "Size",
@@ -107,6 +104,7 @@ export const WHERE_WORDS = {
    * whole sentence, because it stands after one in the pane's slot and a clause opening in lower case after a
    * full stop reads as a line that broke. */
   cannotDial: "This wsp cannot dial a computer from here.",
+  cannotSaveKey: "This wsp cannot save a key from here.",
 } as const;
 
 /** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
@@ -155,7 +153,7 @@ export const ADD_COMPUTER_WORDS = {
   newCode: "New code",
   noMint: "this wsp cannot make a join line from the app yet",
   login: "ssh login",
-  loginPlaceholder: "root@host",
+  loginPlaceholder: "root@host or an ssh alias",
   add: "Add",
   adds: "adds",
   loginFirst: "type the login first",
@@ -268,24 +266,23 @@ export const ABOUT_WORDS = {
   hostHover: "The wsp that serves this page.",
   unknown: "unknown",
   releases: "Releases",
-} as const;
-
-/** The agents on a computer's own page: one row per agent, the word for what stands there, the sign-in that has
- * no road from here, and the line for a computer that reported none. */
-export const AGENTS_WORDS = {
-  title: "Agents",
-  /** An agent a joined computer reported on itself before any recipe ran there. */
-  found: "found",
-  signIn: "Sign in",
-  /** An agent whose own config already names the wsp tools. */
-  added: "wsp tools added",
-  notAdded: "wsp tools not added",
-  add: "Add the wsp tools",
-  /** An agent wsp cannot hand the tools to at launch: its state, and no action beside it. The picker on the init
-   * screens says the same of the same agent, so the word has one home. */
-  noTools: CLOUD_SETUP_WORDS.choice.noTools,
-  /** The line under a computer that reported no agent at all, whichever computer it is. */
-  noneOn: (computer: string): string => `No agents found on ${computer}.`,
+  latest: "Latest",
+  readWhen: (ms: number): string => (ms < 60_000 ? "just now" : `${offlineFor(ms)} ago`),
+  readHover: (when: string): string => `Read from the releases page ${when}.`,
+  missedHover: (when: string, at: string): string => `Read ${when}; the releases page was not reached ${at}.`,
+  unreachedHover: (at: string): string => `The releases page was not reached ${at}.`,
+  offHover: "Update checks are off on the host: WSP_UPDATE_CHECK is 0.",
+  computersBehind: "Computers behind",
+  behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
+  get: (version: string): string => `Get ${version}`,
+  downloading: "Downloading",
+  quitAndOpen: "Quit and open",
+  restartHost: "Restart host",
+  restartHover: "Drops open terminal panes, localhost forwards and any sign-in in progress; running turns continue.",
+  restartRuns: "Restart host runs them.",
+  restartThere: "A restart on the computer it runs on runs them.",
+  hostUpdateHover: (line: string, version: string): string => `The wsp that serves this page. ${line} gets ${version}.`,
+  hostInstalledHover: (installed: string, then: string): string => `The wsp that serves this page. Its files carry ${installed} now. ${then}`,
 } as const;
 
 /** What one row of the recipe on a computer came to, in the words the terminal's own lines say it in. The note a

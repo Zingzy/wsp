@@ -15,6 +15,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
+import { Notices } from "../notices/Notice.js";
 import { useSelectedWorkspaceId, useSettingsOpen, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
@@ -112,6 +113,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="ml-auto mr-px">{layoutControls}</div>
               )}
             </WorkspacePageHeader>
+            <div className="relative h-0">
+              <Notices />
+            </div>
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
           </div>
           {rightPanelOpen ? (

@@ -272,6 +272,16 @@ describe("makeApi wrappers", () => {
     await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toThrow("workspace is napping");
   });
 
+  it("a rejected op keeps the fix and the kind the runtime sent apart from its sentence, and a bare frame says the host gave no reason", async () => {
+    const { api } = await connect();
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: false, error: "spoo names no user. Type user@spoo.", kind: "invalid", fix: "Type user@spoo." });
+    await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toMatchObject({ name: "RequestError", message: "spoo names no user. Type user@spoo.", kind: "invalid", fix: "Type user@spoo." });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: false, error: "workspace is napping" });
+    await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toMatchObject({ fix: undefined, kind: undefined });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: false });
+    await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toThrow("The host answered with no reason. Try again.");
+  });
+
   it("addComputerOverSsh sends places.add with a stream of its own, reads the stages that ride it in the runtime's words, and answers the computer", async () => {
     const { api, sock, lastSent } = await connect();
     const stages: InstallStage[] = [];

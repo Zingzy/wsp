@@ -25,7 +25,9 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { stackedThreadToast, toastManager } from "../ui/toast";
+import { addNotice, noticeFailure } from "../../notices/store";
+import { failureOf } from "../../protocol/failure";
+import { RefusalSlot } from "../../settings/sheetParts";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
@@ -45,17 +47,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const [pathRefusal, setPathRefusal] = useState<{ said: string; fix?: string } | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "plan",
-    onError: (error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
-        }),
-      );
-    },
+    onError: (error) => noticeFailure(error, (said) => `Plan not copied: ${said}`),
   });
   const savePathInputId = useId();
   const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
@@ -78,29 +73,22 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "No folder to save into",
-          description: "This thread has no folder to save the plan into.",
-        }),
-      );
+      addNotice({ kind: "error", text: "This thread has no folder to save the plan into." });
       return;
     }
     setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
+    setPathRefusal(null);
     setIsSaveDialogOpen(true);
   };
 
   const handleSaveToWorkspace = () => {
     const relativePath = savePath.trim();
+    setPathRefusal(null);
     if (!workspaceRoot || !onSavePlan) {
       return;
     }
     if (!relativePath) {
-      toastManager.add({
-        type: "warning",
-        title: "Enter a folder",
-      });
+      setPathRefusal({ said: "Type a path to save the plan to." });
       return;
     }
 
@@ -110,20 +98,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         await onSavePlan({ path: relativePath, contents: saveContents });
         setIsSavingToWorkspace(false);
         setIsSaveDialogOpen(false);
-        toastManager.add({
-          type: "success",
-          title: "Plan saved to task",
-          description: relativePath,
-        });
       } catch (error) {
         setIsSavingToWorkspace(false);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not save plan",
-            description: error instanceof Error ? error.message : "An error occurred while saving.",
-          }),
-        );
+        const { said, fix } = failureOf(error);
+        setPathRefusal({ said: `Plan not saved: ${said}`, fix });
       }
     })();
   };
@@ -211,12 +189,16 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                 <Input
                   id={savePathInputId}
                   value={savePath}
-                  onChange={(event) => setSavePath(event.target.value)}
+                  onChange={(event) => {
+                    setSavePath(event.target.value);
+                    setPathRefusal(null);
+                  }}
                   placeholder={downloadFilename}
                   spellCheck={false}
                   disabled={isSavingToWorkspace}
                 />
               </label>
+              <RefusalSlot k="plan-path-refusal" {...pathRefusal} />
             </DialogPanel>
             <DialogFooter>
               <Button

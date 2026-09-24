@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import { Activity, Cpu, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
+import { Activity, Bot, Cpu, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -49,18 +49,20 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddMachine: () => void;
   onAddProcesses: () => void;
+  onAddAgents: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
   machineAvailable: boolean;
   processesAvailable: boolean;
+  agentsAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes";
+type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes" | "agents";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
@@ -69,6 +71,7 @@ const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   diff: "Review changes once the task is running.",
   machine: "Available when a task is selected.",
   processes: "Available while the task is running.",
+  agents: "Available when a task is selected.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -167,11 +170,13 @@ function surfaceActions(
     | "onAddDiff"
     | "onAddMachine"
     | "onAddProcesses"
+    | "onAddAgents"
     | "browserAvailable"
     | "terminalAvailable"
     | "diffAvailable"
     | "machineAvailable"
     | "processesAvailable"
+    | "agentsAvailable"
     | "unavailableReasons"
   >,
 ): readonly SurfaceAction[] {
@@ -226,6 +231,16 @@ function surfaceActions(
       available: props.processesAvailable,
       disabledReason: reason("processes"),
       onClick: props.onAddProcesses,
+    },
+    {
+      key: "agents",
+      label: "Agents",
+      description: "Agents, skills and servers on this task.",
+      icon: Bot,
+      shortcut: "A",
+      available: props.agentsAvailable,
+      disabledReason: reason("agents"),
+      onClick: props.onAddAgents,
     },
   ];
 }
@@ -409,6 +424,8 @@ function surfaceTitle(
       return "Machine";
     case "processes":
       return "Processes";
+    case "agents":
+      return "Agents";
     case "terminal":
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
     case "preview": {
@@ -434,6 +451,8 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <Cpu className="size-3 shrink-0" />;
     case "processes":
       return <Activity className="size-3 shrink-0" />;
+    case "agents":
+      return <Bot className="size-3 shrink-0" />;
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
   }

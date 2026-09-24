@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { authority, fmtDuration, LABS_ENV, shellQuote } from "@wsp/protocol";
+import { authority, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -129,9 +129,10 @@ const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
   const home = homeNamed(env["WSP_HOME"]);
   // Every variable the installing shell holds that the service would be without: the provider ones, since a host
-  // that picks its provider out of an environment naming none forks nothing, and labs, since a service installed
-  // from a shell holding it would come up without the rows that shell was using. One list, copied by one rule.
-  const carried = [LABS_ENV, ...providerEnvNames()];
+  // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
+  // from a shell holding it would come up without the rows that shell was using, and the release check's switch,
+  // which that shell turned off. One list, copied by one rule.
+  const carried = [LABS_ENV, UPDATE_CHECK_ENV, ...providerEnvNames()];
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),
@@ -571,9 +572,11 @@ export interface HostReading {
 
 /** What wsp status prints: whether a host serves this state file and where, then what keeps it there. Every row is
  * label and value, so a person reads the same columns wsp up prints when it starts. A host that took the lock and
- * answers nothing is a crash loop rewriting that lock, and the row says which of the two it is. */
-export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now()): string[] {
-  if (host === undefined) return ["host        not running", stateLine(statePath), `service     ${service}`];
+ * answers nothing is a crash loop rewriting that lock, and the row says which of the two it is. The newest release
+ * rides last, off the file the host keeps, where any ask was ever kept. */
+export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now(), latest?: string): string[] {
+  const release = latest === undefined ? [] : [`latest      ${latest}`];
+  if (host === undefined) return ["host        not running", stateLine(statePath), `service     ${service}`, ...release];
   const { lock } = host;
   const publicAt = publicHostname(statePath);
   const up = `pid ${lock.pid}, up ${fmtDuration(now - Date.parse(lock.startedAt))}`;
@@ -581,5 +584,6 @@ export function statusLines(statePath: string, host: HostReading | undefined, se
     host.answering ? `host        running (${up})` : `host        not answering on port ${lock.port} (${up})`,
     ...addressLines(statePath, lock, publicAt),
     `service     ${service}`,
+    ...release,
   ];
 }

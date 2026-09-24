@@ -2,12 +2,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -25,6 +26,7 @@ import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { NO_PROVIDER } from "./providers.js";
+import type { ReleaseWatch } from "./release.js";
 import { describeStorage, noProviderStorageLine } from "./storage.js";
 import { VERSION } from "./version.js";
 
@@ -53,7 +55,7 @@ export interface HostOptions {
   workspaceEnvs?: (golden: GoldenVersion) => Record<string, string>;
   probeTimeoutMs?: number;
   /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails;
-   * also one per sign-in page opened and per port forwarded, refused or closed. */
+   * also one per sign-in page opened, per port forwarded, refused or closed, and per frame the runtime refused. */
   log?: (line: string) => void;
   /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
   openUrl?: UrlOpener;
@@ -82,6 +84,11 @@ export interface HostOptions {
    * key it trusts to sign an admission and the listing its heartbeat reads back. Without it device.auth is
    * refused, which is what a host on no account answers. */
   admitted?: AdmittedDevices;
+  /** The reading of the newest release this host serves as release.get and release.check; started once the host
+   * serves and stopped with it. Absent, both ops are refused. */
+  release?: ReleaseWatch;
+  /** How this host restarts itself for host.restart; absent, the op is refused. */
+  restart?: RestartDoor;
 }
 
 /** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
@@ -188,10 +195,11 @@ function throughConnector(req: IncomingMessage): boolean {
  * computer this host runs on, dialling the loopback the guest tool server and the guest command line dial once the
  * guest door has read which workspace the token was minted for. A token scoped to a thread is minted into one turn
  * and comes back by that road alone, so one arriving by any other is a copy carried out of a machine and names
- * nobody here. The one home of that rule: the socket door and the JSON routes both read this, so neither can stay
- * open while the other closes. */
-function ownRoad(req: IncomingMessage): boolean {
-  return !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
+ * nobody here. A request on the door's listener is never that road whatever its peer, since a reverse forward
+ * into the door lands from the loopback too. The one home of that rule: the socket door and the JSON routes both
+ * read this, so neither can stay open while the other closes. */
+function ownRoad(req: IncomingMessage, door: WeakSet<Socket>): boolean {
+  return !door.has(req.socket) && !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
 }
 
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
@@ -462,7 +470,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
     // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
     if (scope === undefined) return { caller: "paired" };
-    return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
+    return ownRoad(req, doorSockets) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -554,6 +562,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
+  // Held per socket rather than read off the port, so a socket the door let in stays the door's after it closes.
+  const doorSockets = new WeakSet<Socket>();
+  doorServer.on("connection", socket => doorSockets.add(socket));
   let doorAt: number | undefined;
   let doorOpening: Promise<DoorAt> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
@@ -631,7 +642,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       host: address,
       attach: [server, doorServer],
       originAllowed: originAllows,
-      ownRoad,
+      ownRoad: req => ownRoad(req, doorSockets),
       door: { open: openDoor },
       devices: rt.devices,
       authToken,
@@ -648,6 +659,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
+      log,
+      ...(opts.release !== undefined ? { release: opts.release } : {}),
+      ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
     });
   } catch (e) {
     await relay.close();
@@ -698,6 +712,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     }
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
+  opts.release?.start();
 
   // A door that cannot bind is a computer that cannot dial in, not a host that will not serve: the person reads
   // who holds the port and everything else on this computer goes on working.
@@ -726,6 +741,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     importProject,
     close: async () => {
       clearInterval(reapTimer);
+      opts.release?.close();
       await relay.close();
       // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
       // what sends a waiting client the stopping code instead of cutting the socket under it.

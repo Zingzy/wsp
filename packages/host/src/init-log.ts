@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { redacted } from "@wsp/protocol";
 import type { GoldenExec } from "@wsp/runtime";
 
 export const KEPT_RUNS = 5;
@@ -34,9 +35,7 @@ export function runLogPath(statePath: string): string {
 }
 
 export function redact(text: string, hidden: readonly string[] = []): string {
-  let out = text.replace(SECRET_ASSIGN, "$1=<redacted>");
-  for (const h of hidden) if (h !== "") out = out.split(h).join("<redacted>");
-  return out;
+  return redacted(text.replace(SECRET_ASSIGN, "$1=<redacted>"), hidden);
 }
 
 /** The first and last lines of a block with a count of what sits between; an empty block is no lines. */

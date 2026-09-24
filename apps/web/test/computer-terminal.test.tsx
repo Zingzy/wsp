@@ -24,6 +24,7 @@ import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { clearNotices } from "./notice-text.js";
 
 vi.mock("../src/components/ui/popover.js", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -69,7 +70,8 @@ afterAll(() => restoreLayout());
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0, settingsOpen: false });
+  clearNotices();
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
@@ -109,8 +111,8 @@ describe("the right panel chord with no workspace", () => {
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
-    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
-    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "BUTTON", "BUTTON"]);
+    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff", "machine", "processes", "agents"]);
+    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "BUTTON", "BUTTON", "DIV"]);
     screen.getByText("Pick a project to review its changes.");
 
     act(() => runShellCommand("rightPanel.toggle", target(null), []));

@@ -53,7 +53,7 @@ export function sourceKind(word: string): "computer" | "git" | "github" | "gitla
 
 /** The forms `wsp add` takes, which is what a word matching none of them is refused with. */
 export const ADD_FORMS_LINE =
-  "wsp add takes user@host for a computer of yours, a folder on this computer for a project here, or a repo with --on <computer> for a project there: its url, owner/repo on github, or gitlab.com/owner/repo";
+  "wsp add takes user@host or an ssh alias for a computer of yours, a folder on this computer for a project here, or a repo with --on <computer> for a project there: its url, owner/repo on github, or gitlab.com/owner/repo";
 
 /** The one word a source is written as, whichever kind it is: the folder's path, the repo's url, or the
  * `owner/repo` a host's own command line takes. Read by every line that says where a project's code comes from,

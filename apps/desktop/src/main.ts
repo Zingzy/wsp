@@ -7,6 +7,8 @@ import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
+import { bundleShell, type BundleShell } from "./get-bundle.js";
+import { appRestartRoad } from "./restart-road.js";
 import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
@@ -141,6 +143,24 @@ ipcMain.on("drop:allowed", event => {
   event.returnValue = may(event, "drop:allowed");
 });
 
+// A download the app then opens, so the app's own host's page alone may ask; built once the Downloads path is readable.
+let bundleRoad: BundleShell | undefined;
+const bundles = (): BundleShell =>
+  (bundleRoad ??= bundleShell({
+    platform: process.platform,
+    dir: app.getPath("downloads"),
+    env: process.env,
+    userAgent: `wsp/${app.getVersion()}`,
+    fetch,
+    open: file => shell.openPath(file),
+    reveal: file => shell.showItemInFolder(file),
+    quit: () => app.quit(),
+    running: app.getVersion(),
+    packaged: app.isPackaged,
+  }));
+answer("bundle:get", (_event, ask) => bundles().get(ask));
+answer("bundle:open", () => bundles().open());
+
 // The device token of a host somewhere else is the shell's to hold: the page asks for it over the bridge and it never
 // rides in the page the host served.
 answer("hosts:token", () => switcher?.token());
@@ -233,6 +253,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       openUrl: url => shell.openExternal(url).then(() => true, () => false),
       // The wsp tools the cloud setup writes into an agent's config run the shim, as the first launch's install does.
       running: { ...runningWsp(), shim: shimPath(wspHome()) },
+      restart: appRestartRoad(app),
     });
   } else {
     session = located.session;

@@ -8,13 +8,13 @@
 import { BookOpenIcon, CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
-import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, PLACE_INSTALL, PLACE_LOGIN_REFUSED_KIND, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import type { Api, InstallStage } from "../protocol/client.js";
+import { RequestError, type Api, type InstallStage } from "../protocol/client.js";
 import { ADD_COMPUTER_WORDS, ADD_ROADS, type AddRoad } from "./format.js";
 import { ComputerRow } from "./computers.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -203,7 +203,7 @@ interface SshRun {
   user: string;
   host: string;
   port: string;
-  refusal: string | null;
+  refusal: { said: string; fix?: string } | null;
   stages: InstallStage[] | null;
   installed: PlaceView | null;
 }
@@ -217,7 +217,7 @@ function SshRoad({ now }: { now: () => number }) {
   const setUser = (user: string): void => setRun({ user });
   const setHost = (host: string): void => setRun({ host });
   const setPort = (port: string): void => setRun({ port });
-  const setRefusal = (refusal: string | null): void => setRun({ refusal });
+  const setRefusal = (refusal: SshRun["refusal"]): void => setRun({ refusal });
   const setInstalled = (installed: PlaceView | null): void => setRun({ installed });
   const setStages = (next: InstallStage[] | null | ((held: InstallStage[] | null) => InstallStage[] | null)): void =>
     setRun(run => ({ stages: typeof next === "function" ? next(run.stages) : next }));
@@ -236,7 +236,8 @@ function SshRoad({ now }: { now: () => number }) {
     const n = Number.parseInt(login.port, 10);
     api.addComputerOverSsh({ address, ...(Number.isFinite(n) && n !== 22 ? { port: n } : {}) }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage])).then(setInstalled, (e: unknown) => {
       setStages(null);
-      setRefusal(errorText(e));
+      const loginRefused = e instanceof RequestError && e.kind === PLACE_LOGIN_REFUSED_KIND;
+      setRefusal({ said: errorText(e), ...(loginRefused ? { fix: MINE.refusedFix } : {}) });
     });
   };
   if (installed !== null) {
@@ -278,7 +279,7 @@ function SshRoad({ now }: { now: () => number }) {
           <Input data-k="ssh-port" nativeInput inputMode="numeric" autoComplete="off" disabled={running} value={port} placeholder="22" onChange={e => setPort(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={enter} className={INPUT} />
         </Field>
       </div>
-      {refusal !== null || held !== undefined ? <RefusalSlot k="ssh-refusal" {...(refusal === null ? { waiting: held } : { said: refusal, fix: MINE.refusedFix })} /> : null}
+      {refusal !== null || held !== undefined ? <RefusalSlot k="ssh-refusal" {...(refusal === null ? { waiting: held } : refusal)} /> : null}
       <div className="flex flex-col gap-3">
         <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-[0.12em]">{MINE.whatHappens}</span>
         <Steps lines={planLines(stages ?? [])} />

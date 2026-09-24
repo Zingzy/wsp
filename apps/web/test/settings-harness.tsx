@@ -7,11 +7,13 @@ import { act, render, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { DEFAULT_PREFERENCES, applyPreferencesPatch, type EventUnion, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
+import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { FIRST_PAGE, NO_READS, useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
+import { forgetAgentsReports } from "../src/components/agents/useAgentsReport.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
 
 /** A fake api that answers the reads the pages make, records the patches the picks write, and pushes events. */
@@ -51,9 +53,11 @@ export const settle = async (): Promise<void> => {
 /** Every store back to a first window: nothing remembered, Settings shut, the record at its defaults. */
 export function resetSettings(): void {
   window.localStorage.clear();
+  forgetAgentsReports();
   useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0 });
   useRightPanelStore.setState({ byWorkspaceId: {} });
-  useStore.setState({ api: null, conn: "live", places: [], projects: [], landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, setupOpen: false, settingsOpen: false, selectedId: null, selectedThreadId: null, ready: true, projectsRead: true, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+  useNotices.getState().clear();
+  useStore.setState({ api: null, conn: "live", places: [], projects: [], placesRefused: null, projectsRefused: null, landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, setupOpen: false, settingsOpen: false, selectedId: null, selectedThreadId: null, ready: true, projectsRead: true, release: null, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 }
 
 /** Mounts the shell with Settings open on a page, the store already holding what the case named. */

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export { ASSETS_DIR, ASSET_KINDS, REQUIRE_DAEMON_ENV, assetDir, assetProof, packedAsset, stageAsset, stageAssetOrSkip, stagedAsset, workspaceAsset, type AssetKind } from "./assets.js";
 export { stateWriterHere, VERSION } from "./version.js";
+export { RELEASE_BODY_MAX_BYTES, RELEASE_TIMEOUT_MS, cappedText, releaseAssetUrl, releaseTagUrl } from "./release.js";
+export { type RestartingHost, type RestartRoad } from "./restart.js";
 export {
   startHost,
   type HostOptions,
@@ -38,7 +40,7 @@ export { type ProviderEnv } from "./providers.js";
 export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, thisComputersPath, type InstallReport, type RunningWsp } from "./mcp-install.js";
-export { dialAddress, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
+export { dialAddress, hostLogPath, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { accountAim, accountHosts, accountRecords, aimedAlias, aimedHost, aliasFrom, defaultHost, hostRoadWord, isUrl, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, writeHost, type AccountAim, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";

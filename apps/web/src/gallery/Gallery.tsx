@@ -185,12 +185,6 @@ import {
   TableRow,
 } from "../components/ui/table.js";
 import { Textarea } from "../components/ui/textarea.js";
-import {
-  AnchoredToastProvider,
-  stackedThreadToast,
-  toastManager,
-  ToastProvider,
-} from "../components/ui/toast.js";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group.js";
 import { Toggle } from "../components/ui/toggle.js";
 import {
@@ -576,35 +570,6 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </TooltipTrigger>
           <TooltipPopup>Opens the task panel</TooltipPopup>
         </Tooltip>
-        <Button
-          size="sm"
-          onClick={() =>
-            toastManager.add({
-              type: "success",
-              title: "Preview token refreshed",
-              description: "valid for 60 min",
-            })
-          }
-        >
-          Toast
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Wake failed",
-                description:
-                  "The backend returned 502 after the cross-host restore.",
-                actionProps: { children: "Retry", onClick: noop },
-              }),
-            )
-          }
-        >
-          Stacked toast
-        </Button>
       </div>
     ),
   },
@@ -820,34 +785,30 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
 /** Every copied primitive with sample props, so the kit is proven in this build. */
 export function Gallery() {
   return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        <main className="bg-background text-foreground min-h-svh p-6">
-          <header className="mb-6 flex items-baseline gap-3">
-            <h1 className="text-base font-medium">ui kit gallery</h1>
-            <span className="text-muted-foreground font-mono text-xs">
-              {GALLERY_SECTIONS.length} sections
-            </span>
-          </header>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {GALLERY_SECTIONS.map(({ id, render }) => (
-              <section
-                key={id}
-                aria-labelledby={`gallery-${id}`}
-                className="bg-card min-w-0 rounded-lg border p-4"
-              >
-                <h2
-                  id={`gallery-${id}`}
-                  className="text-muted-foreground mb-3 font-mono text-xs"
-                >
-                  {id}
-                </h2>
-                {render()}
-              </section>
-            ))}
-          </div>
-        </main>
-      </AnchoredToastProvider>
-    </ToastProvider>
+    <main className="bg-background text-foreground min-h-svh p-6">
+      <header className="mb-6 flex items-baseline gap-3">
+        <h1 className="text-base font-medium">ui kit gallery</h1>
+        <span className="text-muted-foreground font-mono text-xs">
+          {GALLERY_SECTIONS.length} sections
+        </span>
+      </header>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {GALLERY_SECTIONS.map(({ id, render }) => (
+          <section
+            key={id}
+            aria-labelledby={`gallery-${id}`}
+            className="bg-card min-w-0 rounded-lg border p-4"
+          >
+            <h2
+              id={`gallery-${id}`}
+              className="text-muted-foreground mb-3 font-mono text-xs"
+            >
+              {id}
+            </h2>
+            {render()}
+          </section>
+        ))}
+      </div>
+    </main>
   );
 }

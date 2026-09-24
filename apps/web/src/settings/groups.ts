@@ -9,7 +9,7 @@
 import { FolderIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
-import { aboutCards } from "./about.js";
+import { aboutCards, aboutMeta } from "./about.js";
 import { accountCards } from "./account.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
@@ -36,6 +36,8 @@ export interface SettingsGroup {
   /** The pages under this group in the sidebar, where the group lists nouns that each have a page of their own.
    * The sidebar reads this and nothing else, so a group that gains pages is one entry here and its page module. */
   readonly sub?: (ctx: SettingsContext) => { at: SettingsAt; name: string }[];
+  /** One mono word at the right edge of the group's sidebar row, where the group has a state worth a glance. */
+  readonly meta?: (ctx: SettingsContext) => string | undefined;
 }
 
 const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
@@ -46,7 +48,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
   account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },
   keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, cards: keybindingsCards },
-  about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards },
+  about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards, meta: aboutMeta },
 };
 
 export const SETTINGS_GROUPS: ReadonlyArray<SettingsGroup> = SETTINGS_GROUP_IDS.map(id => ({ id, ...TABLE[id] }));

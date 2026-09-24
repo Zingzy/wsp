@@ -1427,6 +1427,23 @@ export function refusalLine(happened: string, fix: string): string {
   return `${said}${/[.!?:]$/.test(said) ? "" : "."} ${fix}`;
 }
 
+/** Text with every hidden value blanked wherever it appears, as written and trimmed: a door that trims what it read
+ * before echoing it would otherwise slip the padded value past. Longest first, so a value that is another's prefix
+ * leaves no tail; a value under four characters once trimmed is no key, token or code and would blank the sentence
+ * letter by letter. The one rule every log that must not hold a secret reads. */
+export function redacted(text: string, hidden: readonly string[]): string {
+  const values = [...new Set(hidden.flatMap(h => (h.trim().length < 4 ? [] : [h, h.trim()])))].sort((a, b) => b.length - a.length);
+  let out = text;
+  for (const v of values) out = out.split(v).join("<redacted>");
+  return out;
+}
+
+/** A schema's issues on one line, each as its path and its message, for a log or a refusal that names what was wrong
+ * rather than dumping the issue list. */
+export function issuesLine(issues: readonly { path: readonly (string | number)[]; message: string }[]): string {
+  return issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ");
+}
+
 /** The command's name, said once. A line refused inside a verb is printed behind the verb's name, so a sentence
  * that opens with that same name would say it twice; the prefix is the one home for it, and the sentence may open
  * with it or not without either of them knowing about the other. */
@@ -2219,9 +2236,6 @@ export const NEEDS_YOU = "wsp needs you";
 
 /** The one line the toast and a system notification say for a need. */
 export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
-
-/** Whether a sentence standing in the toast is a need's, so a need ending takes its own line away and no other. */
-export const isNeedsYouLine = (line: string): boolean => line.startsWith(`${NEEDS_YOU}: `);
 
 /** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
 export const NEEDS_YOU_MARK = "• ";
