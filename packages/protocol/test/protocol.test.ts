@@ -890,7 +890,8 @@ describe("runtime wire types", () => {
     }
     // Every op the host serves is on one side or the other, so an op added later is placed on purpose.
     for (const op of wire.RUNTIME_OPS) expect(wire.DEVICE_OPS.includes(op) || held.includes(op), op).toBe(true);
-    for (const op of ["status.list", "workspaces.create"]) expect(wire.DEVICE_OPS).toContain(op);
+    // The newest release is read by every window the person has, their phone's included; a restart is not a phone's.
+    for (const op of ["status.list", "workspaces.create", "release.get", "release.check"]) expect(wire.DEVICE_OPS).toContain(op);
     expect(wire.deviceHeldRefusal("workspaces.exec")).toBe("workspaces.exec is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on");
   });
 
@@ -1782,6 +1783,36 @@ describe("packageOf", () => {
     expect(wire.toolRowPrefix("npm")).toBe("tools/npm/");
     expect(wire.BREW_ID_PREFIX).toBe(wire.toolRowPrefix("brew"));
     expect(wire.toolRowId("uv", "ruff").startsWith(wire.toolRowPrefix("uv"))).toBe(true);
+  });
+});
+
+describe("the newest release as the host read it", () => {
+  it("is asked for and checked with no arguments, and rides one event every socket folds", () => {
+    for (const op of ["release.get", "release.check"]) expect(wire.RuntimeRequest.parse({ id: "r1", op })).toEqual({ id: "r1", op });
+    for (const op of ["release.get", "release.check"]) expect(wire.THREAD_OPS).not.toContain(op);
+    const release = {
+      state: "read",
+      latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" },
+      checkedAt: "2026-09-24T11:00:00.000Z",
+      triedAt: "2026-09-24T11:00:00.000Z",
+      shape: "service",
+      restartReturns: false,
+    };
+    expect(wire.ReleaseView.parse(release)).toEqual(release);
+    expect(wire.EventUnion.parse({ type: "release.changed", release, seq: 3 })).toEqual({ type: "release.changed", release, seq: 3 });
+    // Off carries no reading, so nothing drawn off it can offer a download the person turned checks off for.
+    expect(wire.ReleaseView.parse({ state: "off", shape: "app", restartReturns: false })).toEqual({ state: "off", shape: "app", restartReturns: false });
+    expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
+  });
+
+  it("reads the release as ahead only when it is above a version that runs", () => {
+    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" }, shape: "app", restartReturns: false });
+    expect(wire.releaseAbove(view, "0.2.0")).toBe(true);
+    expect(wire.releaseAbove(view, "0.3.0", "0.2.0")).toBe(true);
+    expect(wire.releaseAbove(view, "0.3.0")).toBe(false);
+    // A host built ahead of the newest release, a prerelease or a checkout's, reads level.
+    expect(wire.releaseAbove(view, "0.4.0-rc.1")).toBe(false);
+    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking", shape: "app", restartReturns: false }), "0.2.0")).toBe(false);
   });
 });
 

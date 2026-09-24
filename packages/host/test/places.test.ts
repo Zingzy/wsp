@@ -11,7 +11,7 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
@@ -163,7 +163,7 @@ interface FakeHost {
   frames: Record<string, unknown>[];
 }
 
-async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
+async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[]; unreadable?: boolean } = {}): Promise<FakeHost> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
   const other = generateKeyPairSync("ed25519");
@@ -181,6 +181,10 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
         if (opts.refuse !== undefined) {
           ws.send(JSON.stringify({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" }));
           ws.close(4401, "unauthorized");
+          return;
+        }
+        if (opts.unreadable === true) {
+          ws.send(JSON.stringify({ id: frame["id"], ok: true }));
           return;
         }
         const placeId = "p_ab12cd34ab12cd34";
@@ -685,6 +689,15 @@ describe("a computer joining a wsp", () => {
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
     expect(existsSync(join(home, ".config", "systemd", "user"))).toBe(false);
+  });
+
+  it("says a join answer it cannot read on one line, since the add reads the box's last line as its sentence", async () => {
+    const home = tmp("join-unreadable");
+    const host = await fakeHost({ unreadable: true });
+    const said = await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run)).catch((e: unknown) => (e as Error).message);
+    expect(String(said)).toContain(`${host.url} answered the join with something this computer cannot read: `);
+    expect(String(said)).not.toContain("\n");
+    expect(String(said)).toContain("placeId");
   });
 
   it("joins the host whose key the line named, as it did before", async () => {
@@ -1505,7 +1518,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(PlaceReport.safeParse({ ...placeReport({ name: "box", home: tmp("one-reader-home") }), dialed: "http://192.168.1.20:4400" }).success).toBe(true);
   });
 
-  it("names the commands it was running when a deploy will not come up, so nobody reproduces them by hand first", async () => {
+  it("throws one sentence when a deploy will not come up and leaves the commands it was running to the host's log", async () => {
     const root = tmp("deploy-said");
     const machine = {
       id: "ssh://maya@box:22",
@@ -1513,14 +1526,23 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       putBytes: async () => {},
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
       facts: async () => ({ os: "Ubuntu 24.04.4 LTS" }),
-      run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : { exitCode: 1, stdout: `${WSP_READY_LINE}\n`, stderr: "zod: report.docker required" }),
+      run: async (script: string) =>
+        script.includes("PREFLIGHT_OK")
+          ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" }
+          : { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: "the host at http://192.168.1.20:4400 did not answer in 20s\n" },
     };
     const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY };
     const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
-    const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
-    // The box's own last words, and then the join it was running, spelled as it ran there.
-    expect(said).toContain("report.docker required");
-    expect(said).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((...said: unknown[]) => void warned.push(said.map(String).join(" ")));
+    try {
+      const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
+      expect(said).toBe("box took wsp but could not connect back: the host at http://192.168.1.20:4400 did not answer in 20s");
+      // The join it was running, spelled as it ran there, is for whoever reads the host's log.
+      expect(warned.join("\n")).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("answers the login it used and the key file it was given, so a later dial of that box takes the same road", async () => {

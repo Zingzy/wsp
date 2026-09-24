@@ -15,6 +15,7 @@ import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
+import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
 import { isLocalWorkspace } from "./workspace-state.js";
@@ -2933,6 +2934,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
+  ReleaseChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
   InitNeedsYouEvent.extend(sequenced),
   PlaceStageEvent.extend(sequenced),
@@ -5279,6 +5281,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("preferences.get") }),
   /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
+  /** Replies with { release: ReleaseView }: the newest release as this host last read it, asking nobody. */
+  z.object({ id: reqId, op: z.literal("release.get") }),
+  /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
+   * changed view is pushed to every socket as release.changed. */
+  z.object({ id: reqId, op: z.literal("release.check") }),
   /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
    * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
    * none of them, and refused naming the project when that source is already recorded on that computer. */
@@ -5357,6 +5364,20 @@ export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: Works
 /** Every op this host answers, read off the table itself rather than written out beside it, so an op added later
  * cannot be missing from the reading that decides which of them a thread may send. */
 export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape.op.value);
+
+/** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
+ * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs"];
+
+/** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
+ * deep as a secret field goes, and the frame may be a stranger's. */
+export function requestSecrets(frame: unknown): string[] {
+  if (typeof frame !== "object" || frame === null) return [];
+  return SECRET_REQUEST_FIELDS.flatMap(field => {
+    const v = (frame as Record<string, unknown>)[field];
+    return typeof v === "string" ? [v] : typeof v === "object" && v !== null ? Object.values(v).filter((x): x is string => typeof x === "string") : [];
+  });
+}
 
 /** The ops a socket holding a thread's own token may send, and the whole of them: the door is shut and these are
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
@@ -5465,6 +5486,8 @@ export const DEVICE_OPS: readonly string[] = [
   "forwards.stop",
   "preferences.get",
   "preferences.set",
+  "release.get",
+  "release.check",
   "host.terminalConfig",
   "init.get",
 ];
@@ -5509,6 +5532,8 @@ export const RuntimeErrorResponse = z.object({
   ok: z.literal(false),
   error: z.string(),
   kind: z.string().optional(),
+  /** What to do about it, when the refusal was made with one; `error` already ends with it. */
+  fix: z.string().optional(),
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
@@ -5738,7 +5763,8 @@ export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notI
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
+export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

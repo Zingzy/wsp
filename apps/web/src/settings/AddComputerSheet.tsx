@@ -48,7 +48,7 @@ function planLines(stages: readonly InstallStage[]): RoadLine[] {
 export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose: () => void; now?: () => number }) {
   const api = useStore(s => s.api);
   const [login, setLogin] = useState("");
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
   const [stages, setStages] = useState<InstallStage[] | null>(null);
   /** The computer the installer handed back, which is what this road finishes on. */
   const [installed, setInstalled] = useState<PlaceView | null>(null);
@@ -56,15 +56,20 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
     if (login.trim() === "" || api?.addComputerOverSsh === undefined) return;
     setRefusal(null);
     setStages([]);
+    // Once the login stood, a refusal is the box's own sentence and the login fix would point the wrong way.
+    let loggedIn = false;
     api
       // A stage sent again for the same step is that line moving on, so the list is keyed by the step rather than
       // by its words, which a step changes when it is done.
-      .addComputerOverSsh({ address: login.trim() }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage]))
+      .addComputerOverSsh({ address: login.trim() }, stage => {
+        if (stage.step === "connect" && stage.state === "done") loggedIn = true;
+        setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage]);
+      })
       .then(
         place => setInstalled(place),
         (e: unknown) => {
           setStages(null);
-          setRefusal(errorText(e));
+          setRefusal({ said: errorText(e), ...(loggedIn ? {} : { fix: MINE.refusedFix }) });
         },
       );
   };
@@ -122,7 +127,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
                   className={cn(LONE_FIELD, "min-w-0")}
                 />
               </div>
-              <RefusalSlot k="ssh-refusal" {...(refusal === null ? (held === undefined ? {} : { waiting: held }) : { said: refusal, fix: MINE.refusedFix })} />
+              <RefusalSlot k="ssh-refusal" {...(refusal === null ? (held === undefined ? {} : { waiting: held }) : refusal)} />
             </>
           )}
           {/* The plan and the run are one list in one place, so Add fills the lines in under the hand rather than
