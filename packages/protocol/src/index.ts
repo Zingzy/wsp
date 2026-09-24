@@ -8,6 +8,7 @@
 // the only home a second copy cannot grow beside.
 
 import { z } from "zod";
+import { AgentSignInState, AgentsTarget } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
@@ -2736,12 +2737,6 @@ export const PlaceProvision = z.object({
 });
 export type PlaceProvision = z.infer<typeof PlaceProvision>;
 
-/** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
- * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
- * out by the host from the computer's report and the vault, since the computer knows no catalog. */
-export const AgentSignInState = z.enum(["signed-in", "vault-key", "none"]);
-export type AgentSignInState = z.infer<typeof AgentSignInState>;
-
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -5238,6 +5233,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { report: AgentsReport }: the agents, skills and MCP servers standing on one computer or workspace,
+   * read as the login the computer was added with and never as root. Nothing is started: no server is spawned and no
+   * login file is read, only whether one is there. A napping workspace is not woken; it answers the last report read
+   * while it ran, marked stale, or refuses where there is none. A cloud account's row is refused, since nothing stands
+   * there between forks. */
+  z.object({ id: reqId, op: z.literal("agents.read"), target: AgentsTarget }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
@@ -5705,6 +5706,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

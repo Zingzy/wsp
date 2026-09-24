@@ -116,10 +116,10 @@ describe("what wsp says when it will not run a line", () => {
       expect(io.errors[0], line).toContain("Unknown option");
       expect(io.errors[0], line).toContain("usage: wsp ");
     }
-    // --on came back on wsp folders, so on another verb it is that verb's stray flag rather than an unknown one.
+    // --on is read by the lists of a computer, so on another verb it is that verb's stray flag rather than an unknown one.
     const on = await run("new", "x", "--on", "here");
     expect(on.code).toBe(EXIT_CODES.usage);
-    expect(on.io.errors[0]).toContain("--on belongs to wsp folders; wsp new does not read it");
+    expect(on.io.errors[0]).toContain("--on belongs to wsp agents, wsp skills, wsp servers and wsp folders; wsp new does not read it");
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {
