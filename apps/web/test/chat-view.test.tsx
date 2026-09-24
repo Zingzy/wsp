@@ -129,7 +129,7 @@ describe("ChatView", () => {
     expect(screen.getByText("add a health route")).toBeDefined();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("completed");
+    expect(footer.textContent).toContain("Worked for");
     expect(footer.textContent).toContain("Worked for 900ms");
     // Every spend figure a person reads is in cents, whatever its size: a tenth of one reads $0.00, not $0.0010.
     expect(footer.textContent).toContain("$0.00");
@@ -876,10 +876,9 @@ describe("the threads a thread opened", () => {
       expect(found.textContent).toContain("in threads it opened");
       return found;
     });
-    expect(footer.textContent).toBe("completed·Worked for 2m 58s·$1.14 this turn·$2.30 in threads it opened");
-    // The line carries facts and a state word, so it reads at the ladder's 11 px mono, as the rows above it do.
-    expect(footer.className).toContain("font-mono");
-    expect(footer.className).toContain("text-[11px]");
+    expect(footer.textContent).toBe("·Worked for 2m 58s·$1.14 this turn·$2.30 in threads it opened");
+    // The facts sit on the reply's row beside its time, in the time's own type.
+    expect(footer.className).toContain("text-xs");
     // A narrow window breaks the line between facts, never inside one.
     expect(footer.className).toContain("flex-wrap");
     for (const part of footer.querySelectorAll("span")) {
@@ -918,7 +917,7 @@ describe("the threads a thread opened", () => {
     await setup(api);
     await screen.findByText("Three workspaces are up.");
     const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toBe("completed·Worked for 2m 58s·$1.14");
+    expect(footer.textContent).toBe("·Worked for 2m 58s·$1.14");
     expect(footer.textContent).not.toContain("in threads it opened");
     expect(footer.textContent).not.toContain("this turn");
   });
