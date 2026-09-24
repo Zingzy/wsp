@@ -180,9 +180,9 @@ describe("the steps of an install on a computer over ssh", () => {
     expect(placeAddSheetWord("connect", "done")).toBe(PLACE_ADD_WORDS.connect);
     expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
     expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
-    expect(placeAddSheetWord("join", "running")).toBe("waiting for it to connect to this Mac");
+    expect(placeAddSheetWord("join", "running")).toBe("waiting for it to connect to this computer");
     // A line under a check reading as the wait it was in is the wrong word for a step that is over.
-    expect(placeAddSheetWord("join", "done")).toBe("connected to this Mac");
+    expect(placeAddSheetWord("join", "done")).toBe("connected to this computer");
     // What one line of the sheet's list holds at 12 px mono beside a check: a longer word is cut from the right.
     for (const step of PlaceAddStep.options) for (const state of ["running", "done"] as const) expect(placeAddSheetWord(step, state).length).toBeLessThanOrEqual(51);
   });
@@ -201,8 +201,8 @@ describe("the steps of an install on a computer over ssh", () => {
   it("checks the box can reach this host as a step of its own, after the login and before anything of wsp's lands", () => {
     expect(PlaceAddStep.options.slice(0, 4)).toEqual(["connect", "host-key", "reach", "wsp"]);
     expect(PLACE_ADD_WORDS.reach).toBe("checking it can reach this computer");
-    expect(placeAddSheetWord("reach", "running")).toBe("checking it can reach this Mac");
-    expect(placeAddSheetWord("reach", "done")).toBe("reaches this Mac");
+    expect(placeAddSheetWord("reach", "running")).toBe("checking it can reach this computer");
+    expect(placeAddSheetWord("reach", "done")).toBe("reaches this computer");
   });
 });
 
