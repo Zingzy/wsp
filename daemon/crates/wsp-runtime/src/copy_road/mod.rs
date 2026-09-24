@@ -5,6 +5,7 @@
 //! they can be taken rather than being picked off a filesystem's name, and the reason a road was passed over rides
 //! the report, since a person who asked for a directory clone and got a worktree is owed the sentence.
 
+pub mod aside;
 pub mod rules;
 pub mod worktree;
 

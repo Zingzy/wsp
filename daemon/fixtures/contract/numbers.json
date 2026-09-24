@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 71,
+  "daemonVersion": 72,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,

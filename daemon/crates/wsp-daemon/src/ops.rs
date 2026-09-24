@@ -392,7 +392,7 @@ fn pid_in_range(pid: std::num::NonZeroU32) -> Result<u32, OpError> {
 /// The real path a request names, inside the daemon's root or a folder the roots file names as of this op.
 async fn locate(ctx: &Ctx, requested: &str) -> Result<PathBuf, OpError> {
     let root = PathBuf::from(&ctx.root);
-    let roots_path = ctx.options.roots_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DAEMON_ROOTS_PATH));
+    let roots_path = ctx.roots_path();
     let requested = requested.to_owned();
     fs::blocking(move || paths::resolve_inside(&paths::roots_now(&root, &roots_path)?, &requested)).await
 }
