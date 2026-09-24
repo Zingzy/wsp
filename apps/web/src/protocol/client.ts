@@ -90,7 +90,7 @@ export interface ProtocolClientOptions {
 export type ConnStatus = "connecting" | "live" | "reconnecting" | "closed";
 
 /** What a refusal that came with no sentence reads as. */
-const NO_REASON = "The host answered with no reason. Try again.";
+export const NO_REASON = "The host answered with no reason. Try again.";
 
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {

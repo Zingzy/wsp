@@ -26,4 +26,8 @@ describe("failureOf", () => {
     expect(failureOf(new Error("boom"))).toEqual({ said: "boom", fix: undefined, kind: undefined, disconnected: false });
     expect(failureOf("a string")).toEqual({ said: "a string", fix: undefined, kind: undefined, disconnected: false });
   });
+
+  it("reads a rejection with no reason as the host's no-reason sentence", () => {
+    for (const e of [undefined, null]) expect(failureOf(e)).toEqual({ said: "The host answered with no reason. Try again.", fix: undefined, kind: undefined, disconnected: false });
+  });
 });

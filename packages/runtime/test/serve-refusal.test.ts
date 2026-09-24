@@ -20,10 +20,12 @@ const rt = () => createRuntime({ backend: stubBackend(), store: memoryStore(), a
 const KEY = "sk-ant-x-fake-refusal-key";
 const ROW = "sk-ant-x-fake-row-login";
 
-/** An init door whose key step refuses, echoing the key back the way a provider's own answer sometimes does. */
+/** An init door whose key step refuses, echoing the key back the way a provider's own answer sometimes does. A key
+ * with padding is echoed trimmed, since the real door trims what it reads before anything else touches it. */
 function refusingDoor(): InitDoor {
   return {
     keys: async ({ key }: { key?: string }) => {
+      if (key !== undefined && key !== key.trim()) throw refusal(`Box refused ${key.trim()}`, "Check it and paste it again.", "auth");
       throw refusal(`Box refused ${key ?? "that key"}\nits answer was 401`, "Check it and paste it again.", "auth");
     },
     on: () => () => {},
@@ -72,6 +74,44 @@ describe("a refused frame", () => {
     await stranger.closed();
     expect(lines).toEqual([expect.stringMatching(/^refused auth kind=auth: /)]);
     expect(lines[0]).not.toContain("wrong-token-sk-ant-x");
+  });
+
+  it("cuts the message half at 400 characters and says it was cut, however long the request made it", async () => {
+    const { client, lines } = await serving();
+    await client.request("workspaces.get", { workspaceId: "w".repeat(3_000_000) });
+    expect(lines).toHaveLength(1);
+    const [prefix, ...rest] = lines[0]!.split(": ");
+    expect(prefix).toMatch(/^refused workspaces\.get kind=\S+$/);
+    const message = rest.join(": ");
+    expect(message).toMatch(/ \(cut \d+ characters\)$/);
+    expect(message.replace(/ \(cut \d+ characters\)$/, "")).toHaveLength(400);
+    client.close();
+  });
+
+  it("logs a frame the schema refused as its issues on one line, while the wire keeps its own sentence", async () => {
+    const { client, lines } = await serving();
+    const got = await client.request("init.keys", { provider: 42 });
+    expect(got).toMatchObject({ ok: false });
+    expect(lines).toEqual(["refused init.keys kind=none: provider: Expected string, received number"]);
+    client.close();
+  });
+
+  it("never logs a padded key, when the refusal repeats the key trimmed", async () => {
+    const { client, lines } = await serving();
+    await client.request("init.keys", { provider: "box", key: `  ${KEY}\n` });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain(KEY);
+    expect(lines[0]).toContain("<redacted>");
+    client.close();
+  });
+
+  it("writes an op the protocol does not declare as frame, so a key sent as the op never names the line", async () => {
+    const { client, lines } = await serving();
+    await client.request(KEY);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^refused frame kind=none: /);
+    expect(lines[0]).not.toContain(KEY);
+    client.close();
   });
 
   it("a deeply nested secret field is refused and logged like any other frame, and the socket keeps answering", async () => {
