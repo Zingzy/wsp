@@ -51,9 +51,10 @@ export const SELECTED_ROW_GLYPH_CLASS = "max-md:peer-data-[active=true]/menu-but
  * half the 14 px mark), no gap between rows, so the rail segments read as one line. */
 export const CHILD_LIST_CLASS = "ml-4 flex min-w-0 flex-col";
 /** One item of a child list: the rail down its left edge for its whole height, a tick into its row's first line,
- * and the rail stopping at that tick on the last item, which is the elbow. Its row starts 1 px in, past the rail. */
+ * and the rail stopping at that tick on the last item, which is the elbow. Its row starts past the elbow, so a
+ * lifted or hovered row never paints over it. */
 export const RAIL_ITEM_CLASS =
-  "relative pl-px before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[18px] after:absolute after:top-[18px] after:left-0 after:h-px after:w-1.5 after:bg-[var(--sidebar-rail)]";
+  "relative pl-2.5 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[18px] after:absolute after:top-[18px] after:left-0 after:h-px after:w-2 after:bg-[var(--sidebar-rail)]";
 
 /** The sidebar footer's own row: 36 px, muted, the whole width, the rows' own pitch. Every row in the foot wears it, so the foot
  * reads as one column whether the row is a button or a line with a link at its edge. */

@@ -148,7 +148,9 @@ interface SteerAttempt {
   readonly error: string | null;
 }
 
-export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
+/** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
+ * makes one. */
+export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => void }) {
   const api = useStore(s => s.api);
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
@@ -222,8 +224,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // rather than about a machine to wait for; a window on another computer whose wsp has gone quiet says which
   // computer is asleep rather than that wsp is not running, nothing there being broken.
   const heldForAnswer = blocked === "unreachable";
+  // A home's composer has no workspace to be blocked by: its send is what makes one.
   const unavailable =
-    blocked === null || wakesFirst
+    onStart !== undefined || blocked === null || wakesFirst
       ? null
       : heldForAnswer
         ? composerHeldLine(computer)
@@ -432,6 +435,10 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       return;
     }
     setDraft(workspaceId, EMPTY_DRAFT);
+    if (onStart !== undefined) {
+      onStart(prompt);
+      return;
+    }
     if (!busy) {
       start(prompt, () => {
         const current = useComposerDraftStore.getState().drafts[workspaceId];
@@ -446,7 +453,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, harnessCatalog, held, images, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
+  }, [busy, draft, enqueue, harnessCatalog, held, images, onStart, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];

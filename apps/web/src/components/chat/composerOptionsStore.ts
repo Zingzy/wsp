@@ -44,7 +44,7 @@ interface ComposerOptionsState {
    * thread B, and A's button is back on its own model, which is where a thread that ran belongs anyway. */
   pickedOn: Record<string, PickThreads>;
   pick: (workspaceId: string, key: ComposerPickKey, value: string, thread?: string) => void;
-  }
+}
 
 function normalizeThreads(persisted: unknown): Record<string, PickThreads> {
   const raw = persisted && typeof persisted === "object" ? (persisted as { pickedOn?: unknown }).pickedOn : undefined;
