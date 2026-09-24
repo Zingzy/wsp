@@ -870,6 +870,17 @@ describe("which road wsp doctor takes", () => {
     expect(await doctor(host.rt, io, { computer: { id: "solari", kind: "provider", name: "solari", default: false } })).toBe(1);
     expect(io.errors.join("\n")).toContain("the fork road ran, and nothing named its row");
   });
+
+  it("opens every road with the newest release, the one that bills included", async () => {
+    const latest = "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it";
+    const bare = captured();
+    expect(await doctor(fakeHost([]).rt, bare, { latest, vault: () => ({}) })).toBe(0);
+    expect(bare.lines[0]).toBe(`latest release ${latest}`);
+    expect(bare.lines.filter(l => l.startsWith("latest release"))).toHaveLength(1);
+    const cloud = captured();
+    expect(await doctor(fakeHost([]).rt, cloud, { latest, computer: { id: "solari", kind: "provider", name: "solari", default: false } })).toBe(1);
+    expect(cloud.lines[0]).toBe(`latest release ${latest}`);
+  });
 });
 
 
@@ -1772,14 +1783,6 @@ describe("the doctor's local road", () => {
     expect(out).not.toContain("latest release");
     // The doctor left nothing behind: the state has no more workspaces than it started with.
     expect(await rt.workspaces.list()).toEqual([]);
-    await rt.close();
-  });
-
-  it("opens with the newest release as the command line read it, before anything is made", async () => {
-    const { rt } = localRuntime({ claude: scripted() });
-    const io = record();
-    expect(await localDoctor(rt, io, { latest: "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it" })).toBe(0);
-    expect(io.lines[1]).toBe("latest release 0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it");
     await rt.close();
   });
 

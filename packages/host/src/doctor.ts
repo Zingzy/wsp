@@ -1342,7 +1342,7 @@ export const localPrompt = (word: string): string => `Reply with exactly this wo
  * through the harness whose binary answered here, and its reply is read. It proves the half of wsp a person with no
  * provider key has: the local backend, the turn's child process, the adapter, the transcript. A workspace this run
  * made is forgotten at the end; the one this host already holds is left where it is. */
-export async function localDoctor(rt: Runtime, io: CliIO, opts: Pick<DoctorOptions, "hereDaemon" | "latest"> = {}): Promise<number> {
+export async function localDoctor(rt: Runtime, io: CliIO, opts: Pick<DoctorOptions, "hereDaemon"> = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
   let made: string | undefined;
@@ -1350,7 +1350,6 @@ export async function localDoctor(rt: Runtime, io: CliIO, opts: Pick<DoctorOptio
   let madeFolder: string | undefined;
   try {
     io.log(`doctor: proving a thread on ${THIS_COMPUTER}, with no machine and nothing billing`);
-    if (opts.latest !== undefined) io.log(`latest release ${opts.latest}`);
     // Before anything else: the daemon staged beside this wsp is what a copy here runs, and one that is behind is
     // the reading a person came for whether or not the rest of the run stands.
     for (const line of await hereDaemonLines(opts.hereDaemon)) io.log(line);
@@ -1700,6 +1699,7 @@ export async function doctorOverHost(client: DoctorClient, io: CliIO, places: re
  * somebody joined takes neither: its link is held by the host it dials, so that host runs its road and the line
  * prints what it says. */
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  if (opts.latest !== undefined) io.log(`latest release ${opts.latest}`);
   // This computer's own row takes the local road, and so does a line that named nothing: a workspace here is a
   // copy of a folder on this computer, so the proof forks no machine and bills nothing.
   return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);
