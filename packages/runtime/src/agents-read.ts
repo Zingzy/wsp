@@ -44,7 +44,7 @@ export interface AgentsReadOptions<Caller> {
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
-export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): { read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport> } {
+export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): { read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport>; forget(workspaceId: string): void } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
   const stamped = (target: AgentsTarget, read: AgentsRead): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
@@ -77,5 +77,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): { read(target
       last.set(target.workspaceId, report);
       return report;
     },
+    /** A removed workspace's last report goes with it. */
+    forget: workspaceId => void last.delete(workspaceId),
   };
 }

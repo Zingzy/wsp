@@ -11,8 +11,8 @@ usage: wsp <verb> ...
 
   wsp init                        set this computer up: your tools and sign-ins,
                                   copied so a workspace starts ready
-  wsp add <user@host|folder|url>  a computer of yours over ssh; or a project: a
-                                  folder here, or a repo a computer clones
+  wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
+                                  or a project: a folder here or a repo cloned
                                   with --on <computer>
   wsp computers                   your computers: this one, each box you added,
                                   each cloud account
@@ -303,16 +303,17 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
 
 ```text
 usage: wsp add
-       [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|…
+       [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|<provider>|<compute…
        [--on <computer>] [--name <name>] [--base <branch>] [--yes]
        [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember]
        [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]
-  a computer of yours over ssh, or a project: a folder on this computer, which
-  every workspace of it is a copy of, or a repo a computer clones with --on
-  <computer>; <provider> takes a provider's key, nothing prints the join line
-  another computer types, a computer with --update puts this wsp's daemon on one
-  already in, and a computer with --sign-in signs that agent in there once,
-  outside every workspace on it
+  a computer of yours over ssh by user@host or by an alias from your ssh config,
+  or a project: a folder on this computer, which every workspace of it is a copy
+  of, or a repo a computer clones with --on <computer>; <provider> takes a
+  provider's key, nothing prints the join line another computer types, a
+  computer with --update puts this wsp's daemon on one already in, and a
+  computer with --sign-in signs that agent in there once, outside every
+  workspace on it
 
   --state         the state file: this word first, else WSP_HOME's state.json,
                   else ./.wsp/state.json when the current directory is a

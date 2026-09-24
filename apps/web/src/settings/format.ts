@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { CLOUD_SETUP_WORDS, fmtPx, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -66,9 +66,6 @@ export const WHERE_WORDS = {
   portsDescription: "What a workspace there has for a network.",
   workspaceThere: "A workspace there",
   connection: "Connection",
-  agents: "Agents",
-  recipe: "Skills and MCP servers",
-  recipeNone: "None from the recipe yet.",
   workspaces: "Workspaces",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
@@ -86,8 +83,6 @@ export const WHERE_WORDS = {
   cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
-  /** Why a row's action is held: the command line has the road and the app does not. */
-  notFromApp: "not from the app yet",
   system: "System",
   systemHover: "What it reported last.",
   size: "Size",
@@ -119,7 +114,7 @@ export const WHERE_WORDS = {
  * joined screen says. One road, so no word here names one. */
 export const ADD_COMPUTER_WORDS = {
   login: "ssh login",
-  loginPlaceholder: "root@host",
+  loginPlaceholder: "root@host or an ssh alias",
   add: "Add",
   adds: "adds",
   loginFirst: "type the login first",
@@ -241,24 +236,6 @@ export const ABOUT_WORDS = {
   computersBehind: "Computers behind",
   behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
   get: (version: string): string => `Get ${version}`,
-} as const;
-
-/** The agents on a computer's own page: one row per agent, the word for what stands there, the sign-in that has
- * no road from here, and the line for a computer that reported none. */
-export const AGENTS_WORDS = {
-  title: "Agents",
-  /** An agent a joined computer reported on itself before any recipe ran there. */
-  found: "found",
-  signIn: "Sign in",
-  /** An agent whose own config already names the wsp tools. */
-  added: "wsp tools added",
-  notAdded: "wsp tools not added",
-  add: "Add the wsp tools",
-  /** An agent wsp cannot hand the tools to at launch: its state, and no action beside it. The picker on the init
-   * screens says the same of the same agent, so the word has one home. */
-  noTools: CLOUD_SETUP_WORDS.choice.noTools,
-  /** The line under a computer that reported no agent at all, whichever computer it is. */
-  noneOn: (computer: string): string => `No agents found on ${computer}.`,
 } as const;
 
 /** What one row of the recipe on a computer came to, in the words the terminal's own lines say it in. The note a

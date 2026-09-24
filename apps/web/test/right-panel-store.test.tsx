@@ -29,6 +29,19 @@ async function hydrate(surfaces: unknown[], activeSurfaceId: string | null = nul
 }
 
 describe("rightPanelStore hydrate", () => {
+  it("keeps a stored Agents surface, and keeps it active", async () => {
+    await hydrate([{ id: "diff", kind: "diff" }, { id: "agents", kind: "agents" }], "agents");
+    const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
+    expect(state.surfaces).toEqual([{ id: "diff", kind: "diff" }, { id: "agents", kind: "agents" }]);
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byWorkspaceId, WS)).toBe("agents");
+  });
+
+  it("opens Agents as one surface however often it is asked for", () => {
+    useRightPanelStore.getState().open(WS, "agents");
+    useRightPanelStore.getState().open(WS, "agents");
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([{ id: "agents", kind: "agents" }]);
+  });
+
   it("a stored value with a bad shape at the current version hydrates to a usable state", async () => {
     window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: { [WS]: { isOpen: true, activeSurfaceId: "diff" } } }, version: 1 }));
     await useRightPanelStore.persist.rehydrate();

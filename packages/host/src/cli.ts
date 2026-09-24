@@ -122,8 +122,8 @@ usage: wsp <verb> ...
 
   wsp init                        set this computer up: your tools and sign-ins,
                                   copied so a workspace starts ready
-  wsp add <user@host|folder|url>  a computer of yours over ssh; or a project: a
-                                  folder here, or a repo a computer clones
+  wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
+                                  or a project: a folder here or a repo cloned
                                   with --on <computer>
   wsp computers                   your computers: this one, each box you added,
                                   each cloud account
@@ -2055,9 +2055,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      "wsp add [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
+      "wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
     about:
-      "a computer of yours over ssh, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
+      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",

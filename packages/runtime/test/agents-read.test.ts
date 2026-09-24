@@ -36,4 +36,13 @@ describe("the agents in a workspace", () => {
     await here.api.read({ workspaceId: "ws_3" });
     expect(here.asked).toEqual([{ kind: "here", project: "/root/landing" }]);
   });
+
+  it("forgets a workspace's last report once the workspace is removed, so nothing holds it for the host's life", async () => {
+    const phase = { now: "running" as WorkspacePhase };
+    const { api } = reads(phase);
+    await api.read({ workspaceId: "ws_4" });
+    api.forget("ws_4");
+    phase.now = "napping";
+    await expect(api.read({ workspaceId: "ws_4" })).rejects.toThrow(nappingAgentsRefusal("landing"));
+  });
 });
