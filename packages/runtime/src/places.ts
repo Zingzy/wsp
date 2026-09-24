@@ -138,6 +138,7 @@ export type { PlaceEvent };
  * the host runs on is on it. The host answers, since its own name and shape are its own to read. */
 export interface HerePlace {
   name: string;
+  label?: string;
   os?: string;
   shape?: WorkspaceSize;
   engine?: "none" | "docker" | "podman";
@@ -1731,6 +1732,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           id: HERE_PLACE_ID,
           kind: "computer" as const,
           name: here.name,
+          ...(here.label !== undefined ? { label: here.label } : {}),
           default: marked === HERE_PLACE_ID,
           ...(here.os !== undefined ? { os: here.os } : {}),
           ...(here.shape !== undefined ? { shape: here.shape } : {}),

@@ -5,9 +5,10 @@
 // workspace starts from as rows, and the one act on it. Remove is refused
 // while a workspace stands on the project, in the runtime's own sentence,
 // and otherwise asks first and lands the runtime's answer as the toast.
+import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectSource, type ProjectView } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
@@ -147,8 +148,20 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
     { kind: "row", id: "branch", title: PROJECTS_WORDS.branch, description: PROJECTS_WORDS.branchDescription, word: project.base ?? project.defaultBranch, attrs: { "data-k": "branch" } },
     ...(project.lastAgent === undefined ? [] : [{ kind: "row" as const, id: "last-agent", title: PROJECTS_WORDS.lastAgent, description: PROJECTS_WORDS.lastAgentDescription, word: agentName(project.lastAgent), attrs: { "data-k": "last-agent" } }]),
   ];
+  const look = ctx.preferences.projectLook[project.id];
+  const icon = look?.icon ?? "folder";
+  const hue = look?.hue ?? "neutral";
+  const setLook = (next: ProjectLook): void => ctx.setPreferences({ projectLook: { [project.id]: next } });
   const cards: SettingsCardData[] = [
-    { id: "facts", items: facts },
+    { id: "facts", head: PROJECTS_WORDS.about, items: facts },
+    {
+      id: "look",
+      head: PROJECTS_WORDS.look,
+      items: [
+        { kind: "row", id: "icon", title: PROJECTS_WORDS.icon, description: PROJECTS_WORDS.iconDescription, control: <IconSelect icon={icon} hue={hue} onChange={next => setLook({ icon: next, hue })} /> },
+        { kind: "row", id: "hue", title: PROJECTS_WORDS.hue, description: PROJECTS_WORDS.hueDescription, control: <HueSelect hue={hue} onChange={next => setLook({ icon, hue: next })} /> },
+      ],
+    },
     { id: "starts", head: PROJECTS_WORDS.newWorkspaces, items: starts },
     {
       id: "acts",

@@ -43,14 +43,8 @@ interface ComposerOptionsState {
    * slot per pick per workspace is the whole of it: pick on thread A, leave without sending, pick the same key on
    * thread B, and A's button is back on its own model, which is where a thread that ran belongs anyway. */
   pickedOn: Record<string, PickThreads>;
-  /** Workspaces whose agent rail the composer has already opened by itself. Shown open once means once: a rail
-   * keyed on the conditions alone came back whenever the box was emptied. Not kept in storage: it is about this
-   * window, and a new one has not shown the person anything. */
-  railOffered: Record<string, true>;
   pick: (workspaceId: string, key: ComposerPickKey, value: string, thread?: string) => void;
-  /** Takes the one offer for this workspace; false where it was taken already. */
-  takeRailOffer: (workspaceId: string) => boolean;
-}
+  }
 
 function normalizeThreads(persisted: unknown): Record<string, PickThreads> {
   const raw = persisted && typeof persisted === "object" ? (persisted as { pickedOn?: unknown }).pickedOn : undefined;
@@ -90,12 +84,6 @@ export const useComposerOptionsStore = create<ComposerOptionsState>()(
     (set, get) => ({
       byWorkspaceId: {},
       pickedOn: {},
-      railOffered: {},
-      takeRailOffer: workspaceId => {
-        if (get().railOffered[workspaceId] === true) return false;
-        set(s => ({ railOffered: { ...s.railOffered, [workspaceId]: true } }));
-        return true;
-      },
       pick: (workspaceId, key, value, thread) =>
         set(s => {
           const current = s.byWorkspaceId[workspaceId] ?? NONE;

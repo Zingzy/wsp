@@ -30,7 +30,7 @@ export function SegmentedControl<T extends string>({
         const found = segments.find(segment => segment.value === next);
         if (found !== undefined) onChange(found.value);
       }}
-      className={cn("inline-flex h-7 items-stretch rounded-md border border-border p-px", className)}
+      className={cn("inline-flex h-8 items-stretch gap-px rounded-lg border border-border p-0.5", className)}
       data-slot="segmented-control"
       {...props}
     >
@@ -39,7 +39,7 @@ export function SegmentedControl<T extends string>({
           key={segment.value}
           value={segment.value}
           data-segment={segment.value}
-          className="cursor-pointer rounded-[5px] px-2.5 text-xs text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground"
+          className="inline-flex cursor-pointer items-center justify-center rounded-md px-3 text-xs leading-none text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground"
         >
           {segment.label}
         </RadioPrimitive.Root>

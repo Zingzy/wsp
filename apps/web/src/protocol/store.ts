@@ -134,6 +134,8 @@ interface State {
   /** Whether the Connect a provider sheet stands open over the Settings page. */
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
+  /** The project whose home stands in the centre while no workspace is picked: where its next task is typed. */
+  projectHome: string | null;
   /** The thread of the selected workspace the centre is on, which the page's address names too; null until a pick
    * or the centre's own view has settled on one, where the workspace's latest thread shows. */
   selectedThreadId: string | null;
@@ -161,6 +163,8 @@ interface State {
   /** Also leaves the settings page: every road to a workspace lands on its thread. The pick goes into the page's
    * address, which is where the next load reads it back from. */
   select(id: string | null, threadId?: string | null): void;
+  /** Opens a project's home in the centre, where a task typed and sent becomes a workspace of its own. */
+  openProjectHome(projectId: string): void;
   /** Opens the screen the workspace's next thread is written on, with an address of its own, and asks the chat for
    * that workspace to clear itself: the palette, the shortcut, the row's action and the files pane take this road. */
   newThread(workspaceId: string): void;
@@ -450,6 +454,7 @@ export const useStore = create<State>((set, get) => {
     placesRead: false,
     addComputerOpen: false,
     selectedId: null,
+    projectHome: null,
     selectedThreadId: null,
     freshThread: false,
     creations: [],
@@ -484,11 +489,15 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) {
-      set({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false });
+      set({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false, projectHome: null });
       writeAddress(id === null || get().creations.some(c => c.key === id) ? null : { workspaceId: id, ...(threadId === null ? {} : { threadId }) });
     },
+    openProjectHome(projectId) {
+      set({ selectedId: null, selectedThreadId: null, freshThread: false, settingsOpen: false, projectHome: projectId });
+      writeAddress(null);
+    },
     newThread(workspaceId) {
-      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false });
+      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false, projectHome: null });
       writeAddress({ workspaceId, fresh: true });
       requestNewThread({ workspaceId });
     },
@@ -540,6 +549,7 @@ export const useStore = create<State>((set, get) => {
       // The event carries the same record; taking it here too means the caller's next read holds it whichever
       // arrived first, and the create that follows a first run has a project to be made of.
       set(s => ({ projects: [...s.projects.filter(p => p.id !== project.id), project] }));
+      get().openProjectHome(project.id);
       return project;
     },
     async bringBack(workspaceId) {
@@ -577,10 +587,12 @@ export const useStore = create<State>((set, get) => {
       await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
     dismissCreation(key) {
-      set(s => ({
-        creations: s.creations.filter(c => c.key !== key),
-        selectedId: s.selectedId === key ? firstRow(s) : s.selectedId,
-      }));
+      set(s => {
+        const project = s.creations.find(c => c.key === key)?.project;
+        // The next row is one of the same project's, never the sidebar's first, which may be another project's.
+        const sibling = project === undefined ? undefined : sidebarWorkspaceOrder(s).find(id => s.workspaces.find(w => w.id === id)?.project.id === project);
+        return { creations: s.creations.filter(c => c.key !== key), selectedId: s.selectedId === key ? (sibling ?? null) : s.selectedId };
+      });
     },
     async refresh() {
       const api = get().api;

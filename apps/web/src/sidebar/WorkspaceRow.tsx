@@ -35,9 +35,9 @@ import { RowNameInput } from "./RowNameInput.js";
 import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SELECTED_ROW_GLYPH_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { holdsStateWord, metaSentences, stateSlotWord, workspaceMetaLine, workspaceMetaTitle } from "./workspaceRows.js";
 
-/** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
-const GLYPH_CLASS = cn(HOVER_GLYPH_CLASS, "peer-data-[size=lg]/menu-button:top-1 right-2");
-const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
+/** The glyphs sit on line one of a two-line row, centred on it, the inner one a slot in from the edge one. */
+const GLYPH_CLASS = cn(HOVER_GLYPH_CLASS, "peer-data-[size=lg]/menu-button:top-4");
+const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7.5");
 /** The slot holds the longest state word there is, so a word arriving or leaving never moves the name beside it:
  * Unreachable measures 72.9 px in the row's mono at 11 px, and at 44 px the slot took the 16 px it needed off the
  * name, which moved under a person reading it. The word yields to the glyphs on hover and focus, and to the

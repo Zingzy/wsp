@@ -82,10 +82,6 @@ export interface ComposerPicks {
   /** The pinned thread's latest own row, which an access pick between turns is put to through the access verb; null
    * on a thread that has not run, and on one whose rows fell off the runtime's cap. */
   readonly latestRow: SessionView | null;
-  /** Nothing here says which agent to run: no turn has run in this workspace, nobody picked, the project
-   * remembers none, more than one agent answers and nothing is typed yet. Read as one offer per workspace and
-   * never again, since the list stands over the box the ask is typed in. */
-  readonly offerAgents: boolean;
 }
 
 /** The agent the project's last thread ran, where the agents here carry it: what a fresh thread opens on, so a
@@ -101,18 +97,6 @@ export function rememberedAgent(project: Pick<ProjectView, "lastAgent"> | undefi
  * is not given back by the pick itself, which is the person reading that agent's models. The store holds the mark,
  * so the offer does not come back when the composer is remounted by a switch of threads, nor when the box is
  * emptied again. */
-function useRailOffer(workspaceId: string, conditions: boolean, typing: boolean): boolean {
-  const take = useComposerOptionsStore(s => s.takeRailOffer);
-  const [offering, setOffering] = useState(false);
-  useEffect(() => {
-    if (conditions && take(workspaceId)) setOffering(true);
-  }, [conditions, take, workspaceId]);
-  useEffect(() => {
-    if (typing) setOffering(false);
-  }, [typing]);
-  return offering;
-}
-
 /** The record for the workspace's own project, which is where its remembered agent is written. */
 function useProjectRecord(workspaceId: string): ProjectView | undefined {
   const ref = useProject(workspaceId);
@@ -141,14 +125,7 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
-  // Only where the record itself says the project has run nothing: a host whose projects list has not arrived
-  // knows no better, and opening the rail over a workspace whose last agent is about to land would be a guess.
-  // More than one agent, since one leaves nothing to pick. The draft is read as one flag, so the store wakes this
-  // only as the box goes from empty to typed in.
-  const typing = useComposerDraftStore(s => (s.drafts[workspaceId]?.prompt ?? "") !== "");
-  const nothingSaysWhich = project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
-  const offerAgents = useRailOffer(workspaceId, !typing && nothingSaysWhich, typing);
-  return { harness, catalog, model, picks, startOptions, pinned, latestRow, offerAgents };
+  return { harness, catalog, model, picks, startOptions, pinned, latestRow };
 }
 
 /** Asks the workspace's machine for its catalogs once it runs; the table shows until then and stays when it does not answer. */
@@ -392,7 +369,7 @@ export function ComposerOptionPickers({
   const project = useProject(workspaceId);
   const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useWhereWord(workspaceId);
-  const { catalog, model, picks, pinned, offerAgents } = useComposerPicks(workspaceId, thread);
+  const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
   const contextWindows = contextWindowsFor(catalog, model);
@@ -404,7 +381,6 @@ export function ComposerOptionPickers({
         model={model}
         pinned={pinned}
         where={where}
-        offerAgents={offerAgents}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);

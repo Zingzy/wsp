@@ -7,16 +7,19 @@
 // stands in for that project's row: its plus on hover is New workspace and a
 // right-click opens the project's menu. On a wsp with no project the head is
 // held, since there is nothing to pick.
-import { CheckIcon, ChevronDownIcon, FolderIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, FolderIcon, PlusIcon, SearchIcon, Settings2Icon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, normalizeSearchText } from "../lib/utils.js";
+import { ProjectGlyph } from "../projects/look.js";
+import { openProjectSettings } from "../settings/openAt.js";
 import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS } from "./rowGrammar.js";
 import type { ProjectRef } from "./threadTree.js";
 import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "./words.js";
 import { projectComputerWord } from "./workspaceRows.js";
+
 
 /** One row of the menu: a project, or the pick that shows them all, whose id is null. */
 interface Option {
@@ -25,7 +28,7 @@ interface Option {
   readonly computer: string | null;
 }
 
-const MENU_ROW_CLASS = "flex h-7 w-full cursor-pointer items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-[13px] text-foreground outline-none";
+const MENU_ROW_CLASS = "group/option flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-left text-sm text-foreground outline-none";
 /** The id of one menu row, which the field names as its active descendant while the keys are on it. */
 const optionId = (id: string | null): string => `project-switcher-option-${id ?? "all"}`;
 const ADD_ROW_ID = "project-switcher-option-add";
@@ -133,7 +136,7 @@ export function ProjectSwitcher({
           className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS)}
           onKeyDown={onHeadKeyDown}
         >
-          <FolderIcon className="size-3.5" />
+          {pick === null ? <FolderIcon className="size-4" /> : <ProjectGlyph projectId={pick.id} />}
           <span data-switcher-name className="min-w-0 flex-1 truncate">
             {pick?.name ?? SWITCHER_WORDS.all}
           </span>
@@ -144,7 +147,7 @@ export function ProjectSwitcher({
           )}
           {/* The room the plus takes on hover, kept at rest so nothing moves. */}
           {pick === null ? null : <span aria-hidden data-switcher-plus-room className="w-5 shrink-0" />}
-          <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", open && "rotate-180")} />
+          <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 transition-transform duration-150", open && "rotate-180")} />
         </PopoverTrigger>
         {pick === null ? null : (
           <Tooltip>
@@ -153,7 +156,7 @@ export function ProjectSwitcher({
                 <SidebarMenuAction
                   showOnHover
                   // The room's own place: the row's 8 px inset, the 14 px chevron and the 8 px gap before it.
-                  className={cn(HOVER_GLYPH_CLASS, "right-[30px]")}
+                  className={cn(HOVER_GLYPH_CLASS, "right-7.5")}
                   data-k="new-workspace"
                   data-project={pick.id}
                   aria-label={NEW_WORKSPACE}
@@ -176,7 +179,7 @@ export function ProjectSwitcher({
       >
         <div data-project-switcher-menu className="flex flex-col" onKeyDown={onMenuKeyDown}>
           <label className="flex h-8 items-center gap-2 border-b border-border px-3">
-            <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <input
               value={query}
               onChange={event => {
@@ -203,10 +206,25 @@ export function ProjectSwitcher({
                 onClick={() => choose(option)}
                 className={cn(MENU_ROW_CLASS, index === active && "bg-accent text-accent-foreground")}
               >
-                <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                {option.id === null ? <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden /> : <ProjectGlyph projectId={option.id} />}
                 <span className="min-w-0 flex-1 truncate">{option.name}</span>
                 {option.computer === null ? null : <span className={cn(ROW_META_CLASS, "shrink-0")}>{option.computer}</span>}
-                {(pick?.id ?? null) === option.id ? <CheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+                {(pick?.id ?? null) === option.id ? <CheckIcon aria-hidden className="size-4 shrink-0" /> : null}
+                {option.id === null ? null : (
+                  <button
+                    type="button"
+                    data-k="project-settings"
+                    aria-label={SWITCHER_WORDS.settingsOf(option.name)}
+                    onClick={event => {
+                      event.stopPropagation();
+                      setOpen(false);
+                      openProjectSettings(option.id!);
+                    }}
+                    className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-background/60 hover:text-foreground"
+                  >
+                    <Settings2Icon className="size-4" aria-hidden />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -220,7 +238,7 @@ export function ProjectSwitcher({
               onClick={add}
               className={cn(MENU_ROW_CLASS, active === last && "bg-accent text-accent-foreground")}
             >
-              <PlusIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <PlusIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{PROJECT_WORDS.add}</span>
             </button>
           </div>

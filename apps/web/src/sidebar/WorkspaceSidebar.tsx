@@ -18,9 +18,12 @@
 // right-click menu, comes from the project, workspace and thread registries.
 // The surface itself is the shell's sidebar-glass: nothing here paints a
 // background.
-import { ChevronDownIcon, FolderIcon, PlusIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { openProjectSettings } from "../settings/openAt.js";
+import { ChevronDownIcon, PlusIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { ProjectGlyph } from "../projects/look.js";
+import { THIS_COMPUTER_WORD, placeName } from "../settings/places.js";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, CREATION_FAILED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -41,10 +44,10 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { cn } from "../lib/utils.js";
 import { catalogIn, useLaunches, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
-import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestFirstRunFocus, type ProjectTripRequest } from "../shell/shellRequests.js";
+import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
-import { AddProjectSheet } from "./AddProjectSheet.js";
+import { AddProjectDialog } from "./AddProjectDialog.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { CHILD_LIST_CLASS, GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, ROW_SENTENCE_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
@@ -175,6 +178,8 @@ export function WorkspaceSidebar() {
   const places = useStore(s => s.places);
   // What a workspace is made of. Named apart from the sidebar's own `projects`, which are its workspace rows.
   const recorded = useStore(s => s.projects);
+  const projectHome = useStore(s => s.projectHome);
+  const openProjectHome = useStore(s => s.openProjectHome);
   const landings = useStore(s => s.landings);
   const loadLanding = useStore(s => s.loadLanding);
   const selectedId = useSelectedId();
@@ -290,6 +295,7 @@ export function WorkspaceSidebar() {
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
   const projectVerbs: ProjectVerbs = {
     newWorkspace: project => openDialog(project),
+    openSettings: openProjectSettings,
     ...(api?.projectsRemove === undefined ? {} : { removeProject: (project: string) => void removeProject(project) }),
   };
   /** One project's actions, as its row and the head standing in for its row both offer them. */
@@ -305,6 +311,15 @@ export function WorkspaceSidebar() {
     });
   };
 
+  /** The project's home in the centre, with its workspaces shown under its row. */
+  const openHome = (id: string): void => {
+    openProjectHome(id);
+    setShutProjects(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
   const toggleProject = (id: string): void => {
     setShutProjects(prev => {
       const next = new Set(prev);
@@ -475,7 +490,7 @@ export function WorkspaceSidebar() {
         {made.map(creation => creationItem(creation, depth, rail))}
         {group.workspaces.length === 0 && made.length === 0 ? (
           <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
-            <p data-k="no-workspaces" data-depth={depth} className={cn(ROW_SENTENCE_CLASS, "flex h-7 items-center px-2")}>
+            <p data-k="no-workspaces" data-depth={depth} className="flex h-9 items-center pr-2 pl-3 text-[13px] text-sidebar-foreground/45">
               {PROJECT_WORDS.noWorkspaces}
             </p>
           </li>
@@ -486,35 +501,46 @@ export function WorkspaceSidebar() {
 
   /** One project under "All projects": its row, with the count of what it hides while shut and the plus that
    * starts another piece of work on it on hover, then its workspaces one step in. */
+  /** The computer a project lives on, by the name its person gave it. */
+  const deviceOf = (group: ProjectGroup): string => projectComputerWord(group.project, named) ?? (places[0] === undefined ? THIS_COMPUTER_WORD : placeName(places[0], true));
   const projectItem = (group: ProjectGroup) => {
     const { id, name } = group.project;
     const shut = shutProjects.has(id);
     const actions = projectActionsOf(group);
-    const computer = projectComputerWord(group.project, named);
+    const device = deviceOf(group);
     const count = group.workspaces.length + creations.filter(creation => creation.project === id).length;
-    const slotWords = [...(computer === null ? [] : [computer]), ...(shut ? [String(count)] : [])];
     return (
-      <li key={id} data-project={id}>
+      <li key={id} data-project={id} className="mt-2 first:mt-0">
         <RowFrame onContextMenu={event => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") })}>
           <SidebarMenuButton
             size="sm"
             data-sidebar-row
             data-row-id={projectRowK(id)}
             data-depth={0}
+            data-lines={2}
             aria-expanded={!shut}
-            aria-label={[name, ...slotWords].join(", ")}
-            className={cn(ONE_LINE_ROW_CLASS, GLYPH_ROW_CLASS)}
-            onClick={() => toggleProject(id)}
+            aria-label={[name, device, ...(shut ? [String(count)] : [])].join(", ")}
+            className={cn(TWO_LINE_ROW_CLASS, GLYPH_ROW_CLASS, "items-center")}
+            isActive={projectHome === id}
+            onClick={() => (projectHome === id ? toggleProject(id) : openHome(id))}
           >
-            <FolderIcon className="size-3.5" />
-            <span data-project-name className="min-w-0 flex-1 truncate">
-              {name}
-            </span>
-            {/* The one right slot, ending where every other row's does: the computer's name where it is not this one
-                and the count while the row is shut, both yielding to the plus on hover and focus. */}
-            <span data-project-slot className={cn(ROW_META_CLASS, "flex min-w-5 shrink-0 items-center justify-end gap-2 transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0")}>
-              {computer === null ? null : <span data-project-computer>{computer}</span>}
-              {shut ? <span data-project-count>{count}</span> : null}
+            {/* One block: the glyph centred on the two lines, the computer the project lives on small and quiet
+                right over its name, which is the row's subject in the full ink. */}
+            <ProjectGlyph projectId={id} />
+            <span className="flex min-w-0 flex-1 flex-col justify-center">
+              <span data-project-computer className="truncate text-[11px] leading-[14px] text-sidebar-foreground/45">
+                {device}
+              </span>
+              <span className="flex min-w-0 items-center gap-2.5 leading-5">
+                <span data-project-name className="min-w-0 flex-1 truncate font-medium text-sidebar-foreground">
+                  {name}
+                </span>
+                {shut ? (
+                  <span data-project-count className={cn(ROW_META_CLASS, "shrink-0 transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0")}>
+                    {count}
+                  </span>
+                ) : null}
+              </span>
             </span>
           </SidebarMenuButton>
           <Tooltip>
@@ -522,7 +548,7 @@ export function WorkspaceSidebar() {
               render={
                 <SidebarMenuAction
                   showOnHover
-                  className={cn(HOVER_GLYPH_CLASS, "right-2 disabled:pointer-events-none disabled:opacity-50")}
+                  className={cn(HOVER_GLYPH_CLASS, "disabled:pointer-events-none disabled:opacity-50")}
                   data-k="new-workspace"
                   data-project={id}
                   aria-label={NEW_WORKSPACE}
@@ -581,7 +607,7 @@ export function WorkspaceSidebar() {
       <TooltipTrigger
         render={
           <SidebarGroupAction
-            className="top-1 text-sidebar-muted-foreground transition-colors duration-150 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-sidebar-muted-foreground"
+            className="text-sidebar-muted-foreground transition-colors duration-150 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-sidebar-muted-foreground"
             aria-label="New thread"
             aria-disabled={selectedWorkspace === null || undefined}
             onClick={() => {
@@ -639,8 +665,8 @@ export function WorkspaceSidebar() {
             {homeless.map(creation => creationItem(creation, 0, false))}
             {empty ? (
               <li>
-                <SidebarMenuButton size="sm" data-k="new-project" className={ONE_LINE_ROW_CLASS} onClick={requestFirstRunFocus}>
-                  <PlusIcon className="size-3.5" />
+                <SidebarMenuButton size="sm" data-k="new-project" className={ONE_LINE_ROW_CLASS} onClick={requestAddProject}>
+                  <PlusIcon className="size-4" />
                   <span>{PROJECT_WORDS.new}</span>
                 </SidebarMenuButton>
               </li>
@@ -702,7 +728,7 @@ export function WorkspaceSidebar() {
           onCancel={() => setDialog(null)}
         />
       ) : null}
-      {addProject !== null ? <AddProjectSheet key={addProject} onClose={() => setAddProject(null)} /> : null}
+      {addProject !== null ? <AddProjectDialog key={addProject} onClose={() => setAddProject(null)} /> : null}
       {trip !== null && tripTarget !== undefined ? <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} /> : null}
       {forgetTarget !== undefined ? (
         <ForgetWorkspaceDialog
@@ -736,7 +762,7 @@ function ThreadGroupRow({ rowId, label, count, open, depth, onToggle }: { rowId:
           </span>
         )}
         <span aria-hidden className="min-w-0 flex-1" />
-        <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
+        <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
       </SidebarMenuButton>
     </li>
   );
@@ -751,8 +777,8 @@ function CreationRow({ creation, depth, active, onSelect }: { creation: Creation
   return (
     <SidebarMenuButton size="lg" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={creation.key} data-depth={depth} data-lines={2} className={TWO_LINE_ROW_CLASS} onClick={onSelect}>
       {/* The lead centres on the first line, as a one-line row's lead does. */}
-      <span aria-hidden className={cn(ROW_LEAD_CLASS, "mt-[7px]")}>
-        {failed ? null : <Spinner className="size-3.5" />}
+      <span aria-hidden className={cn(ROW_LEAD_CLASS, "h-8")}>
+        {failed ? null : <Spinner className="size-4" />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className={TWO_LINE_FIRST_CLASS}>

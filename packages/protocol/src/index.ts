@@ -1835,6 +1835,16 @@ export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
 
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
  * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
+/** The glyphs a project can wear in the sidebar and the switcher; the app maps each word to its drawing. */
+export const ProjectIcon = z.enum(["folder", "code", "terminal", "globe", "rocket", "box", "database", "server", "cpu", "zap", "flame", "leaf", "star", "heart", "book", "music", "camera", "gamepad", "shield", "wrench"]);
+export type ProjectIcon = z.infer<typeof ProjectIcon>;
+/** The hues a project's glyph can take; the app maps each word to a colour of its own theme. */
+export const ProjectHue = z.enum(["neutral", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"]);
+export type ProjectHue = z.infer<typeof ProjectHue>;
+/** How one project is drawn: its glyph and its hue, each the default where absent. */
+export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
+export type ProjectLook = z.infer<typeof ProjectLook>;
+
 export const Preferences = z.object({
   theme: ThemePreference,
   sidebarMode: SidebarMode,
@@ -1851,6 +1861,8 @@ export const Preferences = z.object({
   /** The workspace a thread was last started on anywhere: where a new thread asked for from nowhere goes. Absent
    * until the first start. */
   target: PreferencesTarget.optional(),
+  /** How each project is drawn, by project id; kept here so every screen that opens this wsp draws it the same. */
+  projectLook: z.record(z.string(), ProjectLook),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1870,12 +1882,13 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     sidebarWidth: z.number().int().positive().nullable().optional(),
     terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
     access: z.record(z.string(), z.string().nullable()).optional(),
+    projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1902,6 +1915,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
     access: perWorkspace(current.access, patch.access),
+    projectLook: perWorkspace(current.projectLook, patch.projectLook),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -2719,6 +2733,9 @@ export const PlaceView = z.object({
   id: z.string(),
   kind: PlaceKind,
   name: z.string(),
+  /** The name the person gave this computer, a Mac's own "zingzy's MacBook Pro", drawn where the machine name is
+   * not; absent where the computer keeps none. */
+  label: z.string().optional(),
   default: z.boolean(),
   /** A computer: what it reported last. */
   os: z.string().optional(),
