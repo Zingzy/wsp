@@ -735,6 +735,32 @@ describe("the Add a computer sheet", () => {
     expect((document.querySelector("#add-computer-login") as HTMLInputElement).value).toBe("root@65.21.4.12");
   });
 
+  it("says a box that took wsp and did not connect back in the box's one sentence, with no ssh login fix and no script", async () => {
+    let report: ((stage: InstallStage) => void) | undefined;
+    let refuse: ((e: Error) => void) | undefined;
+    await openSheet({
+      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
+        new Promise<PlaceView>((_ok, no) => {
+          report = onStage;
+          refuse = no;
+        }),
+    } as unknown as Partial<Api>);
+    fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@178.156.161.168" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
+    await act(async () => {
+      report?.({ step: "connect", word: "connected", state: "done", fact: "Ubuntu 24.04" });
+      report?.({ step: "wsp", word: "wsp installed", state: "done" });
+      report?.({ step: "service", word: "starting its agent", state: "running" });
+      refuse?.(new Error(sentence));
+      await Promise.resolve();
+    });
+    const slot = document.querySelector("[data-k='ssh-refusal']")?.textContent ?? "";
+    // The login stood and the bytes landed, so a fix about the user, the address or a key would send them the wrong way.
+    expect(slot).toBe(sentence);
+    expect(slot).not.toContain('case "$(uname -m)"');
+  });
+
   it("says Close on the button beside Add in both states and keeps every part it had once Add is pressed", async () => {
     let report: ((stage: InstallStage) => void) | undefined;
     await openSheet({ addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);

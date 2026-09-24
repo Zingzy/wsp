@@ -350,12 +350,16 @@ export function sshIdentity(hostKey: string, user: string): string {
  * person can act on in a slot two lines high. */
 const WROTE_KNOWN_HOSTS = /^Warning: Permanently added .* to the list of known hosts\.?$/;
 
-/** The client's own words with its debug log and its note about known_hosts taken out: what a person can act on
- * when a dial fails. */
-function clientWords(text: string): string {
+/** What ssh says when a LocalForward in the person's own config cannot bind here, which every run through that
+ * block prints before the command's own output and which is about this computer's ports, not the box. */
+const LOCAL_FORWARD_NOISE = /^(bind \[.*\]:\d+: .*|channel_setup_fwd_listener_tcpip: cannot listen to port: \d+|Could not request local forwarding\.)$/;
+
+/** The client's own words with its debug log, its note about known_hosts and its local forward warnings taken
+ * out: what a person can act on when a dial or a command over it fails. */
+export function clientWords(text: string): string {
   return text
     .split("\n")
-    .filter(line => !/^debug\d+:/.test(line) && !WROTE_KNOWN_HOSTS.test(line))
+    .filter(line => !/^debug\d+:/.test(line) && !WROTE_KNOWN_HOSTS.test(line) && !LOCAL_FORWARD_NOISE.test(line))
     .join("\n")
     .trim();
 }
