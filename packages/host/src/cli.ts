@@ -94,6 +94,7 @@ import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnor
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { agentsReader } from "./agents-reader.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
@@ -769,6 +770,8 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
+    // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
+    agentsReader: agentsReader({ vault: () => vaultNow(statePath) }),
     // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),
