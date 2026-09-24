@@ -7,7 +7,7 @@ import { askingLine, initNeedsYouLine, type InitJob, type PlaceView, type Releas
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABSENT_NOTICE_MS, HOST_NOTICE_WORDS, useHostNotices } from "../src/notices/hostNotices.js";
+import { ABSENT_NOTICE_MS, HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
 import { useNotices, type Notice } from "../src/notices/store.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
@@ -35,6 +35,7 @@ const notices = (): Notice[] => useNotices.getState().notices;
 const texts = (): string[] => notices().map(n => n.text);
 
 let emit: (e: ProtocolEvent) => void;
+let mounted: ReturnType<typeof render>;
 
 function Harness() {
   useHostNotices();
@@ -65,7 +66,7 @@ beforeEach(async () => {
   useSettingsStore.getState().go({ kind: "group", group: "appearance" });
   act(() => useNotices.getState().clear());
   emit = e => act(() => listeners.forEach(fn => fn(e)));
-  render(<Harness />);
+  mounted = render(<Harness />);
 });
 
 afterEach(() => {
@@ -76,6 +77,12 @@ afterEach(() => {
 });
 
 const openThread = (): void => act(() => useStore.setState({ selectedId: "ws_1", selectedThreadId: "thr_1", settingsOpen: false }));
+const remount = (): void => {
+  mounted.unmount();
+  act(() => useNotices.getState().clear());
+  mounted = render(<Harness />);
+};
+const releaseView = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://example.test/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app", restartReturns: true });
 const openComputers = (): void => {
   act(() => {
     useStore.setState({ settingsOpen: true });
@@ -107,6 +114,14 @@ describe("a computer's install and its link", () => {
       ["done", HOST_NOTICE_WORDS.joined("spoo"), "spoo"],
     ]);
     // The Open lands on that computer's own page.
+    act(() => notices()[0]!.action!.run());
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
+  });
+
+  it("a recipe that finished with rows failed is an error saying how many, with an Open onto that computer", () => {
+    emit({ type: "place.stage", addId: "a_1", placeId: "pl_box", step: "provision", state: "done", note: "spoo: 1 installed: git;   x node: exit 1;   x uv: exit 2", failed: 2 });
+    expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([["error", HOST_NOTICE_WORDS.rowsFailed("spoo", 2), "spoo"]]);
+    expect(texts()[0]).toBe("spoo: 2 rows of the recipe failed");
     act(() => notices()[0]!.action!.run());
     expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
   });
@@ -168,6 +183,14 @@ describe("a computer's install and its link", () => {
     expect(notices()).toEqual([]);
   });
 
+  it("a computer removed while it was away leaves no timer behind", () => {
+    vi.useFakeTimers();
+    emit({ type: "place.absent", placeId: "pl_box" });
+    expect(vi.getTimerCount()).toBe(1);
+    emit({ type: "place.removed", placeId: "pl_box" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("a computer removed while it was away is never said", () => {
     vi.useFakeTimers();
     emit({ type: "place.absent", placeId: "pl_box" });
@@ -214,6 +237,18 @@ describe("a thread's end, its prompts and its line to me", () => {
     act(() => useStore.setState({ selectedId: "ws_1", selectedThreadId: "thr_other" }));
     emit(ENDED);
     expect(notices()).toHaveLength(1);
+  });
+
+  it("an end naming no thread is off screen while another thread of its workspace is open, and on screen as the latest one", () => {
+    const { threadId: _t, ...unthreaded } = ENDED;
+    const { threadId: _r, ...bare } = ROW;
+    act(() => useStore.setState({ sessions: { ws_1: [{ ...ROW, id: "s0", threadId: "thr_other" }, bare] }, selectedId: "ws_1", selectedThreadId: "thr_other" }));
+    emit(unthreaded);
+    expect(notices()).toHaveLength(1);
+    act(() => useNotices.getState().clear());
+    act(() => useStore.setState({ selectedThreadId: null }));
+    emit(unthreaded);
+    expect(notices()).toEqual([]);
   });
 
   it("a prompt on a thread not open waits under its key until the prompt closes", () => {
@@ -304,6 +339,54 @@ describe("a workspace gone and a newer release", () => {
     act(() => useStore.setState({ selectedId: "ws_1" }));
     emit({ type: "workspace.gone", workspaceId: "ws_1", machineId: "m1", reason: "the provider no longer knows m1" });
     expect(notices()).toEqual([]);
+  });
+
+  it("a thread the runtime ended because its machine went is one notice, the machine's", () => {
+    emit({ ...ENDED, exitCode: null, reason: "the provider no longer knows m1" });
+    emit({ type: "workspace.gone", workspaceId: "ws_1", machineId: "m1", reason: "the provider no longer knows m1" });
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.gone("api", "the provider no longer knows m1")]);
+  });
+
+  it("a version said once is not said again by the next page, a newer one is, and About showing counts as said", () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.2.0")]);
+    remount();
+    expect(notices()).toEqual([]);
+    act(() => useStore.setState({ release: releaseView("0.3.0") }));
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.3.0")]);
+
+    act(() => {
+      useStore.setState({ settingsOpen: true });
+      useSettingsStore.getState().go({ kind: "group", group: "about" });
+    });
+    act(() => useStore.setState({ release: releaseView("0.4.0") }));
+    act(() => useStore.setState({ settingsOpen: false }));
+    remount();
+    expect(notices()).toEqual([]);
+  });
+
+  it("a stored value that is no version, or a storage that throws, still says the release", () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
+    mounted.unmount();
+    window.localStorage.setItem(RELEASE_SAID_KEY, "<script>0.2.0");
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    mounted = render(<Harness />);
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.2.0")]);
+
+    mounted.unmount();
+    act(() => useNotices.getState().clear());
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    act(() => useStore.setState({ release: releaseView("0.5.0") }));
+    mounted = render(<Harness />);
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.5.0")]);
+    get.mockRestore();
+    set.mockRestore();
   });
 
   it("a release above the running host is one note per version, with Get onto its page", () => {

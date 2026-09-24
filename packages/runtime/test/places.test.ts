@@ -3564,6 +3564,18 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(provision.filter(s => s.state === "done").map(s => s.placeId)).toEqual([placeId]);
   });
 
+  it("counts the rows that failed on the job's last step and on no other", async () => {
+    const failing = provisioner({ rows: [...ROWS, { id: "agents/uv", label: "uv", outcome: "failed", note: "exit 2" }, { id: "agents/go", label: "Go", outcome: "failed" }], hold: true });
+    const stages: PlaceStageEvent[] = [];
+    const { placeId } = await joined({ provision: failing.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    failing.release();
+    await until(async () => stages.some(s => s.step === "provision" && s.state === "done"));
+    const done = stages.find(s => s.step === "provision" && s.state === "done")!;
+    expect(done.failed).toBe(2);
+    expect(stages.filter(s => s.state !== "done").every(s => s.failed === undefined)).toBe(true);
+  });
+
   it("says nothing about the image while the job runs, and reads the image again once the job ends", async () => {
     const p = provisioner({ hold: true });
     const store = memoryStore();

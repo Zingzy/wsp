@@ -2597,6 +2597,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** On a recipe job's done step, how many of its rows failed: the job is done once every row has an outcome. */
+  failed: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 

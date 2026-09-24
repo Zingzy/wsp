@@ -9,7 +9,7 @@
 import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type InitNeedsYou, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
-import { useProtocolEvents, useStore } from "../protocol/store.js";
+import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
 import { placeName } from "../settings/places.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
@@ -19,12 +19,19 @@ import { addNotice, useNotices, type NoticeAction } from "./store.js";
 /** How long a computer stays quiet before it is said: a box that relinks inside this was a blip, not news. */
 export const ABSENT_NOTICE_MS = 30_000;
 
+/** Where this page's storage keeps the last release version the update notice has said, so a reload says it no more. */
+export const RELEASE_SAID_KEY = "wsp:release-said";
+const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+/** A turn whose session.end never arrived (a socket gap) is not held past this many later turns. */
+const RESULTS_HELD = 64;
+
 export const HOST_NOTICE_WORDS = {
   open: "Open",
   notAdded: (said: string): string => `Computer not added: ${said}`,
   joined: (name: string): string => `${name} joined`,
   notSetUp: (name: string, said: string): string => `${name} not set up: ${said}`,
   setUp: (name: string): string => `${name} is set up`,
+  rowsFailed: (name: string, failed: number): string => `${name}: ${failed === 1 ? "1 row" : `${failed} rows`} of the recipe failed`,
   away: (name: string): string => `${name} stopped answering`,
   aThread: "A thread",
   threadStopped: (title: string, said: string | undefined): string => `${title} stopped before it replied${said === undefined ? "" : `: ${said}`}`,
@@ -45,13 +52,11 @@ function threadTitle(workspaceId: string, threadId: string | undefined): string 
   return threads.find(t => t.id === threadId)?.title ?? HOST_NOTICE_WORDS.aThread;
 }
 
-function threadOnScreen(workspaceId: string, threadId: string | undefined): boolean {
+function threadOnScreen(e: { workspaceId: string; sessionId: string; threadId?: string | undefined }): boolean {
   const s = useStore.getState();
-  if (s.settingsOpen || s.freshThread || s.selectedId !== workspaceId) return false;
-  const latest = s.sessions[workspaceId]?.at(-1);
-  // With no thread picked the centre reads the workspace's latest one.
-  const shown = s.selectedThreadId ?? (latest === undefined ? undefined : threadKeyOf(latest));
-  return threadId === undefined || shown === undefined || shown === threadId;
+  if (s.settingsOpen || s.freshThread || s.selectedId !== e.workspaceId) return false;
+  const shown = threadRows(s.sessions[e.workspaceId] ?? [], e.workspaceId, s.selectedThreadId ?? e.workspaceId).at(-1);
+  return shown === undefined ? s.selectedThreadId === null || s.selectedThreadId === e.threadId : threadKeyOf(shown) === (e.threadId ?? e.sessionId);
 }
 
 const workspaceOnScreen = (workspaceId: string): boolean => !useStore.getState().settingsOpen && useStore.getState().selectedId === workspaceId;
@@ -96,8 +101,8 @@ interface Held {
   absences: Map<string, Absence>;
   /** The jobs whose end has been said. */
   jobsEnded: Set<string>;
-  /** The release versions said. */
-  released: Set<string>;
+  /** The last release version said, read from this page's storage on mount. */
+  released: string | undefined;
   /** Each running turn's result, by turn id, from its session.done until the session.end that always follows it. */
   results: Map<string, TurnResult>;
 }
@@ -126,10 +131,24 @@ function endAsks(workspaceId: string, threadId: string | undefined): void {
   for (const key of new Set(notices.notices.map(n => n.key).filter((k): k is string => k?.startsWith(prefix) === true))) notices.end(key);
 }
 
+function releaseSaid(): string | undefined {
+  try {
+    const stored = window.localStorage.getItem(RELEASE_SAID_KEY);
+    return stored !== null && VERSION_SHAPE.test(stored) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function sayRelease(held: Held, release: ReleaseView | null): void {
   const ahead = releaseAhead(release, shellVersions());
-  if (ahead === undefined || held.released.has(ahead.version)) return;
-  held.released.add(ahead.version);
+  if (ahead === undefined || held.released === ahead.version) return;
+  held.released = ahead.version;
+  try {
+    window.localStorage.setItem(RELEASE_SAID_KEY, ahead.version);
+  } catch {
+    // A storage that refuses only means the next page says it again.
+  }
   if (aboutOnScreen()) return;
   addNotice({ kind: "note", text: HOST_NOTICE_WORDS.released(ahead.version), action: { word: GET_THE_APP_WORD, run: () => void window.open(ahead.url, "_blank", "noopener,noreferrer") } });
 }
@@ -150,6 +169,10 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
       return;
     }
     if (name === undefined) return;
+    if (e.failed !== undefined && e.failed > 0) {
+      addNotice({ kind: "error", text: HOST_NOTICE_WORDS.rowsFailed(name, e.failed), ...where, action: openComputer(e.placeId) });
+      return;
+    }
     addNotice({ kind: "done", text: e.step === "join" ? HOST_NOTICE_WORDS.joined(name) : HOST_NOTICE_WORDS.setUp(name), ...where, action: openComputer(e.placeId) });
   },
   "place.absent": (e, held) => {
@@ -166,8 +189,11 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     held.absences.set(e.placeId, absence);
   },
   "place.present": (e, held) => forgetAbsence(held, e.placeId),
+  "place.removed": (e, held) => forgetAbsence(held, e.placeId),
   "session.done": (e, held) => {
-    if (e.turnId !== undefined) held.results.set(e.turnId, e.result);
+    if (e.turnId === undefined) return;
+    held.results.set(e.turnId, e.result);
+    if (held.results.size > RESULTS_HELD) held.results.delete(held.results.keys().next().value!);
   },
   "session.end": (e, held) => {
     endAsks(e.workspaceId, e.threadId);
@@ -175,7 +201,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     if (e.turnId !== undefined) held.results.delete(e.turnId);
     // A reason means the runtime ended it (a pause, a delete, the machine gone, which is its own notice), and an
     // interrupted turn is one somebody stopped: neither is a failure to say.
-    if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e.workspaceId, e.threadId)) return;
+    if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e)) return;
     const where = workspaceNamed(e.workspaceId);
     const said = result?.error ?? (e.exitCode === null ? undefined : `exit ${e.exitCode}`);
     addNotice({ kind: "error", text: HOST_NOTICE_WORDS.threadStopped(threadTitle(e.workspaceId, e.threadId), said), ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
@@ -183,13 +209,13 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   "session.permission": (e, held) => {
     const { workspaceId, threadId } = e;
     sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), { what: askingLine(e), since: Date.now() });
-    if (threadOnScreen(workspaceId, threadId)) return;
+    if (threadOnScreen(e)) return;
     const where = workspaceNamed(workspaceId);
     addNotice({ kind: "waiting", key: askKey(workspaceId, threadId, e.askId), text: askingLine(e), ...(where === undefined ? {} : { where }), action: openThread(workspaceId, threadId) });
   },
   "session.permission.closed": e => useNotices.getState().end(askKey(e.workspaceId, e.threadId, e.askId)),
   "session.notify": e => {
-    if (e.notify !== NOTIFY_ME || threadOnScreen(e.workspaceId, e.threadId)) return;
+    if (e.notify !== NOTIFY_ME || threadOnScreen(e)) return;
     const where = workspaceNamed(e.workspaceId);
     addNotice({ kind: "note", text: e.text, ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
   },
@@ -226,7 +252,7 @@ export function useHostNotices(): void {
   // A build waiting on a sign-in and a thread stopped on a permission prompt are the same fact to a person looking
   // somewhere else, so the window's own title carries the mark for either.
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
-  const held = useRef<Held>({ road: null, opens: () => useStore.getState().openSetup(), need: undefined, absences: new Map(), jobsEnded: new Set(), released: new Set(), results: new Map() });
+  const held = useRef<Held>({ road: null, opens: () => useStore.getState().openSetup(), need: undefined, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad(() => h.opens());
@@ -243,6 +269,7 @@ export function useHostNotices(): void {
   }, [needed]);
   useEffect(() => {
     const h = held.current;
+    h.released = releaseSaid();
     sayRelease(h, useStore.getState().release);
     return useStore.subscribe((s, prev) => {
       if (s.release !== prev.release) sayRelease(h, s.release);

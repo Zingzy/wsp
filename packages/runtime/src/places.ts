@@ -280,7 +280,7 @@ export interface PlaceInstalled {
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
-export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
+export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
@@ -917,8 +917,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** One step of the recipe job on the stream whoever asked for it is watching. The computer rides every one of
    * them: this job is on a computer this host already holds, so a reader that acts on the job's end rather than
    * printing it reads the row off the event and not off the stream's own id. */
-  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string): void => {
-    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}) });
+  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string, failed?: number): void => {
+    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}), ...(failed !== undefined ? { failed } : {}) });
   };
 
   /** The job's own log and outcome on the computer itself, so a person at its shell reads what happened without
@@ -984,7 +984,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const { at: _under, ...rest } = held;
       push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
       await writing;
-      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "));
+      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "), rows.filter(r => r.outcome === "failed").length);
     } catch (e) {
       const said = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
       const { at: _under, ...rest } = held;
@@ -1594,7 +1594,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       let step: PlaceAddStep = "connect";
-      const stage = (which: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string): void => {
+      const stage: PlaceStaging = (which, state, note, placeId) => {
         step = which;
         opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
       };

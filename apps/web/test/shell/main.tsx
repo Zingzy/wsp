@@ -513,7 +513,7 @@ if (params.get("version") === "behind") {
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(shown !== null ? { selectedId: shown } : {}) });
-if (toast !== null) addNotice({ kind: "error", text: toast, where: "spoo" });
+if (toast !== null) addNotice({ kind: "error", text: toast, where: params.get("where") ?? "spoo" });
 // ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.

@@ -1179,12 +1179,15 @@ export function useLatestSession(id: string | null): SessionView | null {
  * with no turn yet. */
 export function useThreadSessions(workspaceId: string | null, threadKey: string): ReadonlyArray<SessionView> {
   const sessions = useStore(s => (workspaceId !== null ? s.sessions[workspaceId] : undefined) ?? NO_SESSIONS);
-  return useMemo(() => {
-    const own = sessions.filter(row => threadKeyOf(row) === threadKey);
-    if (own.length > 0 || threadKey !== workspaceId) return own;
-    const latest = sessions.at(-1);
-    return latest === undefined ? NO_SESSIONS : [latest];
-  }, [sessions, threadKey, workspaceId]);
+  return useMemo(() => threadRows(sessions, workspaceId, threadKey), [sessions, threadKey, workspaceId]);
+}
+
+/** The rule under useThreadSessions, for a reader outside React that has to agree with what the centre draws. */
+export function threadRows(sessions: ReadonlyArray<SessionView>, workspaceId: string | null, threadKey: string): ReadonlyArray<SessionView> {
+  const own = sessions.filter(row => threadKeyOf(row) === threadKey);
+  if (own.length > 0 || threadKey !== workspaceId) return own;
+  const latest = sessions.at(-1);
+  return latest === undefined ? NO_SESSIONS : [latest];
 }
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */
