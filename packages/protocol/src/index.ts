@@ -3822,6 +3822,7 @@ const DAEMON_CONTENTS = [
   "311811170de5296b4e25d8b3bc6e46035a9c5fc13f6430d8ae9314be8d9815f9",
   "4202fe729182d82873c035271bb091be1fce798422a5349d9430e773567246a9",
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
+  "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4022,7 +4023,9 @@ const DAEMON_CONTENTS = [
  * Version 69 keeps the fence's connection to the engine open until the engine answers, so a forwarded request is
  * never cancelled into a bodiless 499, and lets a workspace on a box with a refusing input chain dial its own box.
  * Version 70 counts a workspace's sessions and connections at its socket and measures a frame before parsing it, so
- * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle. */
+ * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
+ * Version 72 drops a copied folder's worktree records before the copy's checkout, so a copy of a repo whose base
+ * branch one of its own worktrees holds lands on that branch. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
