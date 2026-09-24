@@ -1789,7 +1789,7 @@ describe("packageOf", () => {
 describe("the newest release as the host read it", () => {
   it("is asked for and checked with no arguments, and rides one event every socket folds", () => {
     for (const op of ["release.get", "release.check"]) expect(wire.RuntimeRequest.parse({ id: "r1", op })).toEqual({ id: "r1", op });
-    expect(wire.THREAD_OPS).not.toContain("release.check");
+    for (const op of ["release.get", "release.check"]) expect(wire.THREAD_OPS).not.toContain(op);
     const release = {
       state: "read",
       latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" },

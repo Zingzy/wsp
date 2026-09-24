@@ -10,7 +10,7 @@ import { z } from "zod";
 import { writeOwn } from "@wsp/own-file";
 import { RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
 import type { ReleaseDoor } from "@wsp/runtime";
-import { REPO, RELEASE_TAG } from "../../wspx/scripts/bundles.mjs";
+import { RELEASES, REPO, RELEASE_TAG } from "../../wspx/scripts/bundles.mjs";
 import { keyIn, savedEnv } from "./env-keys.js";
 
 export const RELEASE_API = "https://api.github.com";
@@ -19,6 +19,8 @@ export const RELEASE_EVERY_MS = 6 * 60 * 60_000;
 /** Unauthenticated, GitHub allows 60 asks an hour per address and a 304 counts (measured 2026-09-24). */
 export const RELEASE_FLOOR_MS = 10 * 60_000;
 export const RELEASE_TIMEOUT_MS = 5_000;
+/** Eight times GitHub's own body limit with every asset row beside it; the timeout bounds time, not size. */
+export const RELEASE_BODY_MAX_BYTES = 1024 * 1024;
 const RELEASE_FILE = "release.json";
 
 export const releaseUrl = (env: Readonly<Record<string, string | undefined>>): string =>
@@ -26,14 +28,34 @@ export const releaseUrl = (env: Readonly<Record<string, string | undefined>>): s
 
 export const releaseFileFor = (statePath: string): string => join(dirname(statePath), RELEASE_FILE);
 
-const Answer = z.object({ tag_name: z.string(), html_url: z.string(), published_at: z.string(), draft: z.boolean().optional(), prerelease: z.boolean().optional() });
+const Answer = z.object({ tag_name: z.string(), published_at: z.string(), draft: z.boolean().optional(), prerelease: z.boolean().optional() });
 
-/** GitHub's answer as a release, refused where it is a draft, a prerelease or a tag the release workflow never cuts. */
+/** GitHub's answer as a release, refused where it is a draft, a prerelease or a tag the release workflow never cuts.
+ * The page is named off the repo and the tag, never off the answer, so a link drawn from it reaches the repo alone. */
 export function parseRelease(body: unknown): ReleaseLatest {
   const answer = Answer.parse(body);
   const version = RELEASE_TAG.exec(answer.tag_name)?.[1];
   if (answer.draft === true || answer.prerelease === true || version === undefined) throw new Error(`not a published release: ${answer.tag_name}`);
-  return { version, tag: answer.tag_name, url: answer.html_url, publishedAt: answer.published_at };
+  return { version, tag: answer.tag_name, url: `${RELEASES}/tag/${answer.tag_name}`, publishedAt: answer.published_at };
+}
+
+/** The body as text, the stream cancelled once it passes the cap. */
+async function cappedText(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (reader === undefined) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      throw new Error(`the answer is over ${max} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 const Kept = z.object({ latest: ReleaseLatest.optional(), checkedAt: z.string().optional(), triedAt: z.string().optional(), etag: z.string().optional() });
@@ -57,6 +79,8 @@ export interface ReleaseWatchOptions {
   env?: Readonly<Record<string, string | undefined>>;
   fetch?: typeof fetch;
   now?: () => number;
+  /** Where a timer's check that failed is said, since nothing awaits it. */
+  log?: (line: string) => void;
 }
 
 export interface ReleaseWatch extends ReleaseDoor {
@@ -119,7 +143,7 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
       if (res.status === 304 && kept.latest !== undefined) kept = { ...kept, checkedAt: at, triedAt: at };
       else if (res.ok) {
         const etag = res.headers.get("etag");
-        kept = { latest: parseRelease(await res.json()), checkedAt: at, triedAt: at, ...(etag !== null ? { etag } : {}) };
+        kept = { latest: parseRelease(JSON.parse(await cappedText(res, RELEASE_BODY_MAX_BYTES))), checkedAt: at, triedAt: at, ...(etag !== null ? { etag } : {}) };
       } else throw new Error(`GitHub answered ${res.status}`);
       answered = "read";
     } catch {
@@ -137,12 +161,12 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
     }
   };
 
-  const check = (): Promise<ReleaseView> => {
+  const check = async (): Promise<ReleaseView> => {
     if (asking !== undefined) return asking;
     const before = JSON.stringify(view());
     installed = readInstalled(installed);
     const since = kept.triedAt === undefined ? undefined : now() - Date.parse(kept.triedAt);
-    if (off() || (since !== undefined && since >= 0 && since < RELEASE_FLOOR_MS)) return Promise.resolve(told(before, view()));
+    if (off() || (since !== undefined && since >= 0 && since < RELEASE_FLOOR_MS)) return told(before, view());
     asking = ask()
       .then(() => told(before, view()))
       .finally(() => (asking = undefined));
@@ -157,9 +181,10 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
       return () => void listeners.delete(fn);
     },
     start: () => {
+      const timed = (): void => void check().catch((e: unknown) => opts.log?.(`release: the check failed (${e instanceof Error ? e.message : String(e)})`));
       first ??= setTimeout(() => {
-        void check();
-        every = setInterval(() => void check(), RELEASE_EVERY_MS);
+        timed();
+        every = setInterval(timed, RELEASE_EVERY_MS);
       }, RELEASE_FIRST_MS);
     },
     close: () => {

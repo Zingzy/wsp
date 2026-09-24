@@ -1388,7 +1388,7 @@ async function hostFor(
       // The row this host forks on, so a host wired to none asks its account nothing at all.
       provider: wiredProviderId(opts.providerEnv),
       admitted,
-      release: releaseWatch({ statePath: opts.statePath, shape: started ?? "app", running: VERSION, installed: installedVersion }),
+      release: releaseWatch({ statePath: opts.statePath, shape: started ?? "app", running: VERSION, installed: installedVersion, log: line => io.log(line) }),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

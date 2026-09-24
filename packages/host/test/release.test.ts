@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELEASE_API_ENV, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
-import { RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, parseRelease, releaseFileFor, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
+import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, parseRelease, releaseFileFor, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const ETAG = 'W/"405c3ada"';
@@ -52,6 +52,14 @@ function watchOn(statePath: string, over: Partial<ReleaseWatchOptions> & Pick<Re
 describe("the release GitHub names latest", () => {
   it("reads today's real answer as the version, its tag, its page and when it was published", () => {
     expect(parseRelease(ANSWER)).toEqual({ version: "0.2.0", tag: "v0.2.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.2.0", publishedAt: "2026-09-10T16:06:44Z" });
+  });
+
+  it("names the release page off the repo and the tag, whatever page the answer names", () => {
+    for (const html_url of ["javascript:alert(1)", "https://evil.example/x"]) {
+      expect(parseRelease({ ...ANSWER, html_url }).url).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
+    }
+    const { html_url: _dropped, ...bare } = ANSWER;
+    expect(parseRelease(bare).url).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
   });
 
   it("takes nothing that is not a published release tag", () => {
@@ -210,6 +218,40 @@ describe("the host's reading of the newest release", () => {
     const github = fakeGithub([ok()]);
     await watchOn(statePath, { fetch: github.fetch }).watch.check();
     expect(github.asked).toHaveLength(1);
+  });
+
+  it("reads an answer past a megabyte as unreached and keeps what it had", async () => {
+    const huge = JSON.stringify({ ...ANSWER, body: "x".repeat(RELEASE_BODY_MAX_BYTES) });
+    const github = fakeGithub([ok(), new Response(huge, { status: 200, headers: { etag: 'W/"other"' } })]);
+    const { watch, tick } = watchOn(stateIn(), { fetch: github.fetch });
+    const read = await watch.check();
+    tick(RELEASE_FLOOR_MS + 1);
+    const over = await watch.check();
+    expect(over.state).toBe("unreached");
+    expect(over.latest).toEqual(read.latest);
+  });
+
+  it("a check never throws where it is called, even when the .env beside the state cannot be read", async () => {
+    const statePath = stateIn();
+    mkdirSync(join(statePath, "..", ".env"));
+    const { watch } = watchOn(statePath, { fetch: fakeGithub([ok()]).fetch });
+    let called: Promise<unknown> | undefined;
+    expect(() => {
+      called = watch.check();
+    }).not.toThrow();
+    await expect(called).rejects.toThrow(/EISDIR/);
+  });
+
+  it("a timer's check that fails is said in the log and never leaves a rejection nobody holds", async () => {
+    vi.useFakeTimers();
+    const statePath = stateIn();
+    mkdirSync(join(statePath, "..", ".env"));
+    const lines: string[] = [];
+    const watch = releaseWatch({ statePath, shape: "app", running: "0.2.0", installed: () => "0.2.0", env: {}, fetch: fakeGithub([]).fetch, log: line => lines.push(line) });
+    watch.start();
+    await vi.advanceTimersByTimeAsync(RELEASE_FIRST_MS);
+    watch.close();
+    expect(lines).toEqual([expect.stringMatching(/^release: the check failed \(EISDIR/)]);
   });
 
   it("gives up on an ask after five seconds and keeps what it had", async () => {
