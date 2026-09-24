@@ -21,9 +21,9 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, PlusIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, hereWord, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { ProjectGlyph } from "../projects/look.js";
-import { THIS_COMPUTER_WORD, placeName } from "../settings/places.js";
+import { placeName } from "../settings/places.js";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, CREATION_FAILED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -499,7 +499,7 @@ export function WorkspaceSidebar() {
   /** One project under "All projects": its row, with the count of what it hides while shut and the plus that
    * starts another piece of work on it on hover, then its workspaces one step in. */
   /** The computer a project lives on, by the name its person gave it. */
-  const deviceOf = (group: ProjectGroup): string => projectComputerWord(group.project, named) ?? (places[0] === undefined ? THIS_COMPUTER_WORD : placeName(places[0], true));
+  const deviceOf = (group: ProjectGroup): string => projectComputerWord(group.project, named) ?? (places[0] === undefined ? hereWord(true) : placeName(places[0], true));
   const projectItem = (group: ProjectGroup) => {
     const { id, name } = group.project;
     const shut = shutProjects.has(id);
