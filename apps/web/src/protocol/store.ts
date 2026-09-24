@@ -5,7 +5,7 @@ import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
-import { readAddress, writeAddress } from "./address.js";
+import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -454,7 +454,7 @@ export const useStore = create<State>((set, get) => {
     placesRead: false,
     addComputerOpen: false,
     selectedId: null,
-    projectHome: null,
+    projectHome: readProjectHome(),
     selectedThreadId: null,
     freshThread: false,
     creations: [],
@@ -494,7 +494,7 @@ export const useStore = create<State>((set, get) => {
     },
     openProjectHome(projectId) {
       set({ selectedId: null, selectedThreadId: null, freshThread: false, settingsOpen: false, projectHome: projectId });
-      writeAddress(null);
+      writeProjectHome(projectId);
     },
     newThread(workspaceId) {
       set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false, projectHome: null });
@@ -604,7 +604,8 @@ export const useStore = create<State>((set, get) => {
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
-      const selectedId = s.selectedId ?? addressed(address, workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions });
+      // A project's home stands in the centre with nothing picked on purpose; a refresh fills the gap only when no home does.
+      const selectedId = s.selectedId ?? (s.projectHome !== null ? null : (addressed(address, workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions })));
       const open = openThreadOf(address, selectedId, s.selectedThreadId, rows);
       set({
         workspaces,
