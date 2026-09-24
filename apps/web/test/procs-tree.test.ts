@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { ProcEntry } from "@wsp/protocol";
-import { compactBytes } from "../src/components/machine/format.js";
+import { compactBytes } from "@wsp/protocol";
 import { procLabel, procTable, type ProcThread } from "../src/components/procs/tree.js";
 
 const proc = (pid: number, ppid: number, comm: string, extra: Partial<ProcEntry> = {}): ProcEntry => ({

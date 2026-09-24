@@ -17,6 +17,20 @@ const GIB = MIB * 1024;
 
 /** Bytes as a person reads them, in binary units: whole under a gigabyte, since a tenth of a megabyte is noise at that
  * scale, and GB with one decimal unless whole. */
+const COMPACT_UNITS = ["", "K", "M", "G", "T"];
+
+/** rss as a process table column with a three-digit budget fmtBytes does not fit, so its own rule: 900, 12K, 1.5M, 123M, 2.3G. */
+export function compactBytes(n: number): string {
+  let v = Math.max(0, n);
+  let i = 0;
+  while (v >= 1000 && i < COMPACT_UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const text = i === 0 ? String(Math.round(v)) : v < 10 ? v.toFixed(1) : String(Math.round(v));
+  return `${text}${COMPACT_UNITS[i]}`;
+}
+
 export function fmtBytes(n: number): string {
   if (n < KIB) return `${n} B`;
   if (n < MIB) return `${Math.round(n / KIB)} KB`;

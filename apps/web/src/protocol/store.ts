@@ -1156,4 +1156,3 @@ export function useProjectsRead(): boolean { return useStore(s => s.projectsRead
 export function useFirstRun(): boolean {
   return useStore(s => s.ready && s.projectsRead && s.projects.length === 0 && s.workspaces.length === 0);
 }
-export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }

@@ -33,7 +33,7 @@ export const PROJECT_WORDS = {
   new: "New project",
   settings: "Project settings",
   remove: "Remove project",
-  noWorkspaces: "No workspaces yet.",
+  noWorkspaces: "No tasks yet.",
 } as const;
 
 /** The project switcher at the head of the sidebar: the pick that shows every project, and its menu's search. */

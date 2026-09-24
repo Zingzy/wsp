@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, GROUP_BLURBS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useThemeEffect } from "../src/settings/theme.js";
@@ -257,13 +257,13 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ theme: "light" }, { theme: "dark" }]);
   });
 
-  it("is the page's name over the theme picker alone, with no sentence under either", async () => {
+  it("is the page's head over the theme picker alone, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
-    expect(head.querySelector("p")).toBeNull();
+    expect(head.querySelector("p")!.textContent).toBe(GROUP_BLURBS.appearance);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();

@@ -15,7 +15,8 @@ import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
 import { StartDaemonButton } from "../DaemonDown.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";
-import { clockLabel, compactBytes } from "../machine/format.js";
+import { clockLabel } from "../../lib/timestampFormat.js";
+import { compactBytes } from "@wsp/protocol";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { terminalLabels } from "../WorkspaceTerminalDrawer.js";
 import { IDLE, offered, press, settle, type KillState } from "./kill.js";
@@ -65,7 +66,8 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   const table = useMemo(() => procTable(snapshot?.procs ?? [], sort, filter, own ? threads : NO_THREADS), [snapshot, sort, filter, own, threads]);
   const sectioned = own && table.threads.length > 0;
   const showRest = !sectioned || restOpen;
-  const stale = absent?.away ?? staleWord(workspace?.phase ?? "running", procs.reach === "live");
+  // This computer never reads unreachable: its panes say pending until the first frame.
+  const stale = workspace === null ? null : (absent?.away ?? staleWord(workspace.phase, procs.reach === "live"));
 
   // A process that went away takes its selection with it.
   useEffect(() => {
@@ -287,7 +289,10 @@ function Kill({ workspaceId, pid, disabled }: { workspaceId: string; pid: number
       setError(null);
       getProcs(workspaceId)
         .kill(pid, next.send)
-        .catch(e => setError(errorText(e)));
+        .catch(e => {
+          setState({ step: "idle" });
+          setError(errorText(e));
+        });
     }
   };
 
@@ -302,7 +307,7 @@ function Kill({ workspaceId, pid, disabled }: { workspaceId: string; pid: number
           data-signal={offer.signal}
           className={cn(
             "h-5 cursor-pointer rounded-sm border px-1.5 disabled:cursor-default disabled:opacity-50",
-            offer.confirm ? "border-destructive/50 text-destructive-foreground hover:bg-destructive/10" : "border-border text-muted-foreground hover:text-foreground",
+            offer.confirm ? "border-transparent bg-destructive text-white hover:bg-destructive/90" : "border-border text-muted-foreground transition-colors duration-150 hover:border-destructive/50 hover:text-destructive-foreground",
           )}
         >
           {offer.confirm ? `confirm ${offer.signal}` : SIGNAL_WORD[offer.signal]}
