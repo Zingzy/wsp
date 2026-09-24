@@ -167,6 +167,12 @@ describe("the Computers list", () => {
     expect(document.body.textContent?.match(/this month/g)?.length).toBe(1);
   });
 
+  it("draws a cloud row the host lists even with no key held and no workspace on it, as a stand-in serving that cloud is", async () => {
+    useStore.setState({ places: [here, solari], workspaces: [] });
+    await mountComputers(computersApi({}, setupOf({ keys: {} })).api);
+    expect(listIds()).toEqual(["here", "solari"]);
+  });
+
   it("draws a cloud row as soon as its key is saved, with no reload: the places, the landings and the setup are read again", async () => {
     let keys: Record<string, boolean> = { box: false, solari: false };
     let places: PlaceView[] = [here];

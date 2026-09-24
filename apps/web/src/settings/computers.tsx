@@ -8,7 +8,8 @@
 // not reported is left out rather than stood in for.
 //
 // The list draws every row the host's places list carries: the host lists a
-// cloud only once it holds that cloud's key, so nothing here filters again.
+// cloud only once it holds that cloud's key or a stand-in serves in its place,
+// so nothing here filters again.
 import { useState } from "react";
 import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";

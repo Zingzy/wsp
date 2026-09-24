@@ -390,7 +390,6 @@ export const useStore = create<State>((set, get) => {
     if (s.toast !== null && isNeedsYouLine(s.toast) && s.toast !== line) set({ toast: null, toastAction: null });
   };
 
-  // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const readPlaces = (api: Api): void => {
     // An answer either way settles it, and a host whose wire carries no place list settles it at once: nothing
     // waits on a reply that is never coming.
@@ -400,6 +399,7 @@ export const useStore = create<State>((set, get) => {
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
     set({ landings: {} });
   };
+  // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
     void get().refresh().catch(() => {});
     void api
