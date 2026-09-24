@@ -1076,7 +1076,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
     --error-foreground: var(--color-red-400);
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: --alpha(var(--color-white) / 6%);
+    /* Mixed into the ground rather than laid over it, so an edge over the window's material reads as a line. */
+    --border: color-mix(in srgb, var(--color-white) 10%, var(--background));
     --input: --alpha(var(--color-white) / 8%);
     --info-foreground: var(--color-blue-400);
     --success-foreground: var(--color-emerald-400);
@@ -1136,7 +1137,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --accent-foreground: var(--color-zinc-900);
   --muted: var(--color-zinc-50);
   --muted-foreground: var(--color-zinc-500);
-  --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--color-zinc-800);
@@ -1166,8 +1166,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --accent-foreground: #f7f9ff;
     --muted: #0a0a0a;
     --muted-foreground: #a3a3a3;
-    /* The rails and the sidebar's edge at the structural tier, under the 10 percent edge every menu carries. */
-    --border: rgb(255 255 255 / 6%);
     --input: rgb(255 255 255 / 18%);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
