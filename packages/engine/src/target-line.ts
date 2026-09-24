@@ -58,21 +58,29 @@ export function asLogin(t: TargetLogin, line: string): string {
   return t.runAs === undefined ? inner : `runuser -u ${shellQuote(t.runAs)} -- bash -c ${shellQuote(inner)}`;
 }
 
-/** Puts bytes at `dest` as that login: the bytes land in a staging file by the machine's own road, which may run as
- * root, then one line as the login writes them where they go, so the file is the login's and a file already there
- * keeps its mode. `unpack` takes the bytes as a gzipped tarball unpacked into the folder `dest`. The staging file
- * goes whatever happened. */
+/** Puts bytes at `dest` as that login: the bytes land by the machine's own road, which may run as root, in a
+ * folder made private before a byte lands and handed to the login where the road is root, then one line as the
+ * login writes them where they go, so the file is the login's and a file already there keeps its mode. `unpack`
+ * takes the bytes as a gzipped tarball unpacked into the folder `dest`. The folder goes whatever happened. */
 export async function landAsLogin(machine: Machine, t: TargetLogin, dest: string, bytes: Uint8Array, o: { unpack?: boolean; timeoutMs?: number } = {}): Promise<void> {
-  const staging = `/tmp/wsp-land-${randomBytes(6).toString("hex")}`;
+  const dir = `/tmp/wsp-land-${randomBytes(6).toString("hex")}`;
+  const folder = shellQuote(dir);
+  const staging = `${dir}/bytes`;
   const at = shellQuote(staging);
+  const bound = o.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {};
   try {
-    await landBytes(machine, staging, bytes, o.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {});
-    if (t.runAs !== undefined) await machine.exec(`chmod 0644 ${at}`);
+    const made = await machine.exec(`mkdir -m 0700 ${folder}`);
+    if (made.exitCode !== 0) throw new Error(`no private folder to stage ${dest} in: ${(made.stderr || made.stdout).trim().split("\n")[0] ?? `exit ${made.exitCode}`}`);
+    if (t.runAs !== undefined) {
+      const handed = await machine.exec(`chown -R ${shellQuote(t.runAs)} ${folder}`);
+      if (handed.exitCode !== 0) throw new Error(`the staging folder for ${dest} could not be handed to ${t.runAs}: ${(handed.stderr || handed.stdout).trim().split("\n")[0] ?? `exit ${handed.exitCode}`}`);
+    }
+    await landBytes(machine, staging, bytes, bound);
     const to = shellQuote(dest);
     const put = o.unpack === true ? `mkdir -p ${to} && tar -xzf ${at} -C ${to}` : `mkdir -p ${shellQuote(posix.dirname(dest))} && cat ${at} > ${to}`;
-    const res = await machine.exec(asLogin(t, put), o.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {});
+    const res = await machine.exec(asLogin(t, put), bound);
     if (res.exitCode !== 0) throw new Error(`${dest} was not written as ${t.user}: ${(res.stderr || res.stdout).trim().split("\n")[0] ?? `exit ${res.exitCode}`}`);
   } finally {
-    await machine.exec(`rm -f ${at}`).catch(() => undefined);
+    await machine.exec(`rm -rf ${folder}`).catch(() => undefined);
   }
 }

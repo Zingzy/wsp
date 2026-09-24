@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { noHomeRefusal, noRunuserRefusal } from "@wsp/protocol";
 import { symlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
@@ -112,25 +112,29 @@ describe("bytes landed as the login", () => {
   };
   const login: TargetLogin = { platform: "linux", home: "/home/ada", user: "ada", runAs: "ada" };
 
-  it("stages the bytes, writes them as the login where they go, and takes the staging file away", async () => {
+  it("stages the bytes in a folder only the login can open, writes them as the login where they go, and takes the folder away", async () => {
     const { machine, ran, landed } = machineOf();
     await landAsLogin(machine, login, "/home/ada/.codex/config.toml", Buffer.from("x"));
     expect(landed).toHaveLength(1);
     const staging = landed[0]!;
-    expect(staging.startsWith("/tmp/wsp-land-")).toBe(true);
-    expect(ran[0]).toBe(`chmod 0644 '${staging}'`);
-    expect(ran[1]!.startsWith("runuser -u 'ada' -- bash -c ")).toBe(true);
-    expect(ran[1]).toContain("/home/ada/.codex/config.toml");
-    expect(ran.at(-1)).toBe(`rm -f '${staging}'`);
+    const folder = staging.slice(0, staging.lastIndexOf("/"));
+    expect(folder.startsWith("/tmp/wsp-land-")).toBe(true);
+    // The folder is made private before a byte lands, and handed to the login rather than opened to everyone.
+    expect(ran[0]).toBe(`mkdir -m 0700 '${folder}'`);
+    expect(ran[1]).toBe(`chown -R 'ada' '${folder}'`);
+    expect(ran.join("\n")).not.toMatch(/chmod 0?6?44|chmod [ago]*\+r/);
+    expect(ran[2]!.startsWith("runuser -u 'ada' -- bash -c ")).toBe(true);
+    expect(ran[2]).toContain("/home/ada/.codex/config.toml");
+    expect(ran.at(-1)).toBe(`rm -rf '${folder}'`);
   });
 
-  it("unpacks a folder as the login, and a write the login is refused still takes the staging file away", async () => {
+  it("unpacks a folder as the login, and a write the login is refused still takes the staging folder away", async () => {
     const { machine, ran } = machineOf();
     await landAsLogin(machine, login, "/home/ada/.agents/skills/pdf", Buffer.from("tgz"), { unpack: true });
-    expect(ran[1]).toContain("tar -xzf");
+    expect(ran[2]).toContain("tar -xzf");
     const refused = machineOf("runuser");
     await expect(landAsLogin(refused.machine, login, "/home/ada/.claude.json", Buffer.from("{}"))).rejects.toThrow(/was not written as ada: Permission denied/);
-    expect(refused.ran.at(-1)).toMatch(/^rm -f '\/tmp\/wsp-land-/);
+    expect(refused.ran.at(-1)).toMatch(/^rm -rf '\/tmp\/wsp-land-/);
   });
 
   it("writes a real file through the line it builds, keeping the mode a file there already had", async () => {
@@ -140,6 +144,7 @@ describe("bytes landed as the login", () => {
     mkdirSync(join(root, "home"));
     writeFileSync(dest, "{}");
     chmodSync(dest, 0o600);
+    const modes: number[] = [];
     const run = (cmd: string): ExecResult => {
       try {
         return { exitCode: 0, stdout: execFileSync("/bin/bash", ["-c", cmd], { encoding: "utf8" }), stderr: "" };
@@ -151,10 +156,15 @@ describe("bytes landed as the login", () => {
       id: "here",
       kind: "sandbox",
       exec: async (cmd: string) => run(cmd),
-      putBytes: async (path: string, bytes: Uint8Array) => writeFileSync(path, bytes),
+      putBytes: async (path: string, bytes: Uint8Array) => {
+        modes.push(statSync(dirname(path)).mode & 0o777);
+        writeFileSync(path, bytes);
+      },
     } as unknown as Machine;
     await landAsLogin(machine, { platform: "darwin", home: join(root, "home"), user: "ada" }, dest, Buffer.from('{"mcpServers":{}}'));
     expect(readFileSync(dest, "utf8")).toBe('{"mcpServers":{}}');
+    // The bytes landed where nobody but the folder's owner could read them, and nothing of them is left in /tmp.
+    expect(modes).toEqual([0o700]);
     expect(execFileSync("/bin/bash", ["-c", `ls -l '${dest}'`], { encoding: "utf8" }).startsWith("-rw-------")).toBe(true);
   });
 });
