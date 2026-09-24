@@ -57,6 +57,10 @@ import {
   NO_IMAGES_HERE,
   probePath,
   twoPlacesRefusal,
+  HERE_PLACE_ID,
+  noSuchPlaceRefusal,
+  providerFoldersRefusal,
+  type HostFolderListing,
   type GoldenStageEvent,
   type PlaceProvision,
   type PlaceProvisionRow,
@@ -66,7 +70,7 @@ import {
   type TurnResult,
 } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
-import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type HostFolders, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
@@ -117,7 +121,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string> } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -129,7 +133,7 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
-  srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+  srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }) });
   return { hostKey, store };
 }
 
@@ -2052,6 +2056,10 @@ const SEALED = {
   versions: [{ version: 1, snapshotId: "snap_g", templateId: "tpl_g", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-16T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }],
 };
 
+/** What a computer says about itself that keeps the project checkouts it holds on a disk of its own, and no image,
+ * so the work of an add there runs in a copy of its own directories. */
+const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
+
 function forks(
   client: WsClient,
   capacity: {
@@ -3811,10 +3819,6 @@ describe("the recipe this host holds, put on a computer you own", () => {
 });
 
 describe("a project on a computer you joined", () => {
-  /** What such a computer says about itself: it keeps the project checkouts it holds on a disk of its own, and no
-   * image, so the work of an add there runs in a copy of its own directories. */
-  const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
-
   /** Every command that computer was asked to run on itself rather than in a workspace on it. */
   const onItself = (client: WsClient): string[] => {
     const ran: string[] = [];
@@ -3868,5 +3872,95 @@ describe("a project on a computer you joined", () => {
     // Nothing was forked there and nothing was recorded here: the refusal comes before either.
     expect(place.created).toEqual([]);
     expect(await runtime!.projects.list()).toEqual([]);
+  });
+});
+
+describe("the folders of a computer you own", () => {
+  const LISTING: HostFolderListing = { dir: "/home/maya", roots: ["/home/maya", "/wsp/projects/p_1/checkout"], folders: [{ path: "/home/maya/code", repo: true }], hidden: 2 };
+
+  /** That computer's daemon answering the folders frame, keeping every one it was asked. */
+  const listsFolders = (asked: Record<string, unknown>[], answer: Record<string, unknown> = { ok: true, ...LISTING }) => (c: WsClient) =>
+    c.onFrame(raw => {
+      const frame = raw as unknown as Record<string, unknown>;
+      if (frame["op"] !== "fs.folders") return;
+      asked.push(frame);
+      c.say({ id: frame["id"], ...answer });
+    });
+
+  async function mine(): Promise<WsClient> {
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    return c;
+  }
+
+  it("are read by that computer's daemon over its link, told the folder of every project recorded there, and answered as it listed them", async () => {
+    const { hostKey } = await serving();
+    const asked: Record<string, unknown>[] = [];
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c => {
+        forks(c, undefined, undefined, HOLDS_PROJECTS);
+        listsFolders(asked)(c);
+      },
+    });
+    sockets.push(client.ws);
+    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
+    const c = await mine();
+    const listed = await c.request("host.folders", { on: placeId, dir: "/home/maya", hidden: true });
+    expect(listed.ok, String(listed["error"])).toBe(true);
+    expect(listed["listing"]).toEqual(LISTING);
+    // The repos listing is that computer's too, over the same frame.
+    expect((await c.request("host.folders", { on: placeId, repos: true })).ok).toBe(true);
+    expect(asked).toEqual([
+      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout] },
+      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.checkout] },
+    ]);
+  });
+
+  it("carry that daemon's own refusal, and a daemon too old to list folders is named behind rather than asked", async () => {
+    const { hostKey } = await serving();
+    const refusal = "/etc is outside the folders wsp browses on that computer: /home/maya";
+    const asked: Record<string, unknown>[] = [];
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: listsFolders(asked, { ok: false, code: "outside-root", error: refusal }) });
+    sockets.push(client.ws);
+    const c = await mine();
+    expect(await c.request("host.folders", { on: placeId, dir: "/etc" })).toMatchObject({ ok: false, error: refusal });
+    const old = report("old-box", { daemonVersion: DAEMON_VERSION - 1 });
+    const behind = await join(hostKey, { code: await code(), name: "old-box", report: old, answers: listsFolders(asked) });
+    sockets.push(behind.client.ws);
+    expect(await c.request("host.folders", { on: behind.placeId })).toMatchObject({ ok: false, error: placeBehindLine("old-box", placeDaemonBehind(old)!) });
+    expect(asked.map(f => f["dir"])).toEqual(["/etc"]);
+  });
+
+  it("are refused on a provider in one sentence saying what to do instead, on a place nobody holds by the places there are, and on a computer that is not connected by its absent sentence", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    const c = await mine();
+    const rows = await runtime!.places!.list(Date.now());
+    const provider = rows.find(p => p.kind !== "computer")!;
+    expect(await c.request("host.folders", { on: provider.id })).toMatchObject({ ok: false, error: providerFoldersRefusal(provider.name), kind: "usage" });
+    expect(await c.request("host.folders", { on: "pl_nobody" })).toMatchObject({ ok: false, error: noSuchPlaceRefusal("pl_nobody", rows.map(p => p.name)), kind: "usage" });
+    client.close();
+    await until(async () => (await runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
+    expect(await c.request("host.folders", { on: placeId })).toMatchObject({ ok: false, error: absentComputer("srv", null).sentence });
+  });
+
+  it("are this computer's own when the ask names this computer or none, and a computer of yours is the host's own road alone", async () => {
+    const seen: { dir?: string; hidden?: boolean; wide?: boolean }[] = [];
+    const here: HostFolderListing = { dir: "/Users/dev", roots: ["/Users/dev"], folders: [], hidden: 0 };
+    const { hostKey } = await serving({ folders: { list: async req => (seen.push(req), here) } });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: listsFolders([]) });
+    sockets.push(client.ws);
+    const c = await mine();
+    expect((await c.request("host.folders", { on: HERE_PLACE_ID, hidden: true }))["listing"]).toEqual(here);
+    expect((await c.request("host.folders", {}))["listing"]).toEqual(here);
+    expect(seen).toEqual([{ hidden: true, wide: false }, { wide: false }]);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    expect(await ticketed.request("host.folders", { on: placeId })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
   });
 });

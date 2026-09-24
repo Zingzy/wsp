@@ -189,6 +189,20 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         machine_id: Option<String>,
     },
+    /// One level of folders under the home of the login this daemon runs as and under each project folder the
+    /// host names, for the folder picker of a computer somebody owns: folders only, no file read.
+    #[serde(rename = "fs.folders", rename_all = "camelCase")]
+    FsFolders {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dir: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hidden: Option<bool>,
+        /// Every repo under the roots instead of one level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repos: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projects: Option<Vec<String>>,
+    },
     #[serde(rename = "tunnel.open", rename_all = "camelCase")]
     TunnelOpen { tunnel_id: String, port: NonZeroU16 },
     #[serde(rename = "tunnel.write", rename_all = "camelCase")]
@@ -251,7 +265,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 37] = [
+pub const DAEMON_OPS: [&str; 38] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -278,6 +292,7 @@ pub const DAEMON_OPS: [&str; 37] = [
     "git.push",
     "git.pr",
     "git.prState",
+    "fs.folders",
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",

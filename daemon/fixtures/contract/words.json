@@ -8,6 +8,7 @@
   "noToken": "daemon refuses to start without an auth token",
   "unknownOp": "unknown op: {op}",
   "portScopeRefusal": "this socket is scoped to port {port}: only tunnel ops on it and ping are allowed",
+  "foldersOutside": "{dir} is outside the folders wsp browses on that computer: {roots}",
   "notOnThisRoad": "not on this road",
   "notOnThisKind": "not on this kind",
   "noImagesHere": "this computer keeps no images: a workspace here is a copy of the computer itself",

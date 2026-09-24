@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -2190,7 +2190,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const model = await run("run", "alpha", "--model", "claude-haiku-4-5", "review it");
     expect(model.code).toBe(3);
-    expect(model.io.errors).toEqual([`wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
+    expect(model.io.errors).toEqual([`wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001); legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8), Opus 4.7 (claude-opus-4-7), Opus 4.6 (claude-opus-4-6), Opus 4.5 (claude-opus-4-5), Fable 5 (claude-fable-5), Sonnet 4.6 (claude-sonnet-4-6), Sonnet 4.5 (claude-sonnet-4-5)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     const effort = await run("run", "alpha", "--effort", "ultra", "review it");
     expect(effort.code).toBe(3);
     expect(effort.io.errors).toEqual([`wsp run: effort "ultra" is not one Opus 5.5 takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
@@ -2243,6 +2243,13 @@ describe("wsp verbs over the host", () => {
     expect(none.io.errors).toEqual([`wsp run: Haiku 4.5 takes no effort${BUILT_IN_TABLE_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     expect(BUILT_IN_TABLE_CLAUSE).toBe("; wsp's built-in table says so, since no agent on that workspace described itself");
     expect(claude.starts).toEqual([]);
+  });
+
+  it("runs a legacy model at an effort the binary lists for it", async () => {
+    await run("new", "alpha");
+    const older = await run("run", "alpha", "--model", "claude-opus-5", "--effort", "high", "review it");
+    expect(older.code).toBe(0);
+    expect(claude.starts.map(s => [s.model, s.effort])).toEqual([["claude-opus-5", "high"]]);
   });
 
   it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {
@@ -3448,6 +3455,25 @@ describe("wsp verbs over the host", () => {
     // A line refused before anything was dialled is a usage refusal, which is the code an agent branches on.
     expect(many.code).toBe(3);
     expect(many.io.errors.join("\n")).toContain("takes one folder on this computer at most");
+  });
+
+  it("folders --on reads the computer it names, this computer by its own name, and refuses a name nobody holds with the computers there are", async () => {
+    const home = join(dir, "user");
+    mkdirSync(join(home, "code"), { recursive: true });
+    const client = await dialHost(statePath);
+    let places: PlaceView[];
+    try {
+      places = (await client.request<{ places: PlaceView[] }>("places.list")).places;
+    } finally {
+      client.close();
+    }
+    const here = places.find(p => p.id === HERE_PLACE_ID)!;
+    const mine = await run("folders", "--on", here.name, "--json");
+    expect(mine.code).toBe(0);
+    expect(json(mine.io)[0]).toMatchObject({ dir: home, roots: [home] });
+    const nobody = await run("folders", "--on", "nowhere");
+    expect(nobody.code).toBe(EXIT_CODES.usage);
+    expect(nobody.io.errors.join("\n")).toContain(noSuchPlaceRefusal("nowhere", places.map(p => p.name)));
   });
 
   it("terminal config reads this computer's Ghostty config with its theme, prints it as Ghostty lines or one object, resolves the scheme asked for, and refuses a word outside light and dark", async () => {

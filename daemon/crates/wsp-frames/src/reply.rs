@@ -209,6 +209,29 @@ pub struct FsReadReply {
     pub truncated: bool,
 }
 
+/// One folder a folder picker lists, and whether git tracks it; a repo a repos listing found carries its branch,
+/// absent on a detached head, and when git last wrote there, in ms.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostFolder {
+    pub path: String,
+    pub repo: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touched_at: Option<i64>,
+}
+
+/// One level of folders: the folder listed, the roots every level is browsed from, the folders directly inside it
+/// and how many were left out for being hidden.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostFolderListing {
+    pub dir: String,
+    pub roots: Vec<String>,
+    pub folders: Vec<HostFolder>,
+    pub hidden: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitBranch {
     pub oid: String,

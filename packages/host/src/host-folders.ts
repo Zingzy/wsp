@@ -9,8 +9,7 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { CACHE_DIRS } from "@wsp/collect";
-import { hiddenFolder, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
+import { CACHE_DIRS, foldersOutsideLine, hiddenFolder, REPO_CAP, REPO_DEPTH, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders } from "@wsp/runtime";
 import { under } from "./init-import.js";
 import { isRepoFolder } from "./project-bundle.js";
@@ -62,7 +61,7 @@ export function hostFolderRoots(paths: HostFolderPaths = {}): string[] {
 const inside = (path: string, root: string): boolean => root === "/" || under(path, root);
 
 function outside(dir: string, roots: readonly string[]): Error {
-  return new Error(`${dir} is outside the folders wsp browses on this computer: ${roots.join(", ")}`);
+  return new Error(foldersOutsideLine(dir, roots.join(", "), "this computer"));
 }
 
 /** Which folder a listing is for: absent gives the first root, and so does one inside the roots that is gone, which
@@ -103,11 +102,6 @@ export function listHostFolders(req: { dir?: string; hidden?: boolean } = {}, pa
   const folders: HostFolder[] = shown.map(name => join(dir, name)).map(path => ({ path, repo: isRepoFolder(path) }));
   return { dir, roots, folders, hidden: names.length - named.length };
 }
-
-/** How deep under a root the repos listing looks, and how many it stops at: a repo deeper than this or past the cap is
- * reached by walking or by typing its path. */
-const REPO_DEPTH = 5;
-const REPO_CAP = 400;
 
 /** The branch a checkout is on, off its HEAD file, and when git last wrote there. */
 function repoFacts(dir: string): { branch?: string; touchedAt: number } {

@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use wsp_frames::{DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply};
+use wsp_frames::{
+    numbers, words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, HostFolder, HostFolderListing,
+};
 
 use crate::git::{run_git, Runs};
-use crate::paths::OpError;
+use crate::paths::{absolute, is_inside, OpError};
 
 /// Runs blocking work off the runtime thread and folds a lost worker into the op's failure.
 pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, OpError> + Send + 'static) -> Result<T, OpError> {
@@ -91,6 +93,151 @@ fn stat_entries(dir: &Path, names: Vec<(String, bool)>) -> Result<Vec<FsEntry>, 
             Ok(FsEntry { name, kind, size, mtime: epoch_ms(meta.modified()?) })
         })
         .collect()
+}
+
+/// One level of folders for the folder picker of a computer somebody owns, by the rule the host lists its own
+/// computer's with: only inside the roots, which are `home` and each project folder it does not hold, checked
+/// lexically before anything is read and by realpath after, so neither a typed path nor a link reaches the rest of
+/// the disk. Folders only, sorted by name, each marked when git tracks it; the dot-named ones are counted and listed
+/// only when `hidden`, which is the host's hidden rule on a computer that is not a Mac. No file is opened.
+pub(crate) async fn list_folders(
+    home: PathBuf,
+    projects: Vec<String>,
+    dir: Option<String>,
+    hidden: bool,
+) -> Result<HostFolderListing, OpError> {
+    blocking(move || {
+        let roots = folder_roots(&home, &projects);
+        let real_roots: Vec<PathBuf> = roots.iter().filter_map(|root| std::fs::canonicalize(root).ok()).collect();
+        let inside_real = |path: &Path| std::fs::canonicalize(path).is_ok_and(|real| real_roots.iter().any(|root| is_inside(root, &real)));
+        let listed = folder_to_list(dir.as_deref(), &roots, &inside_real)?;
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&listed)? {
+            let entry = entry?;
+            let path = listed.join(entry.file_name());
+            if path.is_dir() && (!entry.file_type()?.is_symlink() || inside_real(&path)) {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        names.sort();
+        let dotted = names.iter().filter(|name| name.starts_with('.')).count();
+        let folders = names
+            .iter()
+            .filter(|name| hidden || !name.starts_with('.'))
+            .map(|name| listed.join(name))
+            .map(|path| HostFolder {
+                repo: path.join(".git").exists(),
+                path: path.to_string_lossy().into_owned(),
+                branch: None,
+                touched_at: None,
+            })
+            .collect();
+        Ok(HostFolderListing {
+            dir: listed.to_string_lossy().into_owned(),
+            roots: roots.iter().map(|root| root.to_string_lossy().into_owned()).collect(),
+            folders,
+            hidden: dotted as u64,
+        })
+    })
+    .await
+}
+
+/// Every repo under `home` and each project folder it does not hold, most recently written first, by the rule this
+/// computer's own repos listing walks with: REPO_DEPTH folders deep and REPO_CAP repos at most, never into a repo, a
+/// link, a dot-named folder or a folder CACHE_DIRS names. A linked worktree, whose .git is a file, is its repo's and
+/// no row of its own. Nothing is read but a repo's HEAD and the times git wrote there.
+pub(crate) async fn list_repos(home: PathBuf, projects: Vec<String>) -> Result<HostFolderListing, OpError> {
+    blocking(move || {
+        let roots = folder_roots(&home, &projects);
+        let mut found = Vec::new();
+        for root in &roots {
+            walk_repos(root, 0, &mut found);
+        }
+        found.sort_by_key(|folder| std::cmp::Reverse(folder.touched_at));
+        let named = |path: &PathBuf| path.to_string_lossy().into_owned();
+        Ok(HostFolderListing { dir: named(&roots[0]), roots: roots.iter().map(named).collect(), folders: found, hidden: 0 })
+    })
+    .await
+}
+
+fn walk_repos(dir: &Path, depth: u32, found: &mut Vec<HostFolder>) {
+    if found.len() >= numbers::REPO_CAP {
+        return;
+    }
+    let git = dir.join(".git");
+    if git.exists() {
+        if git.is_dir() {
+            found.push(HostFolder {
+                path: dir.to_string_lossy().into_owned(),
+                repo: true,
+                branch: head_branch(&git),
+                touched_at: Some(git_touched(&git)),
+            });
+        }
+        return;
+    }
+    if depth >= numbers::REPO_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) && !name.starts_with('.') && !numbers::CACHE_DIRS.contains(&name.as_str()) {
+            walk_repos(&entry.path(), depth + 1, found);
+        }
+    }
+}
+
+/// The branch a checkout is on, off its HEAD file; none on a detached head.
+fn head_branch(git: &Path) -> Option<String> {
+    let head = std::fs::read_to_string(git.join("HEAD")).ok()?;
+    head.lines().find_map(|line| line.strip_prefix("ref: refs/heads/")).filter(|branch| !branch.is_empty()).map(str::to_owned)
+}
+
+/// When git last wrote to a checkout: the newest of its index, HEAD and FETCH_HEAD, and 0 where none is there.
+fn git_touched(git: &Path) -> i64 {
+    ["index", "HEAD", "FETCH_HEAD"]
+        .iter()
+        .filter_map(|name| std::fs::metadata(git.join(name)).and_then(|m| m.modified()).ok())
+        .map(epoch_ms)
+        .max()
+        .unwrap_or(0)
+}
+
+/// The home, then each project folder that is a folder here and that the home does not already hold.
+fn folder_roots(home: &Path, projects: &[String]) -> Vec<PathBuf> {
+    let home = absolute(home);
+    let mut roots = vec![home.clone()];
+    for project in projects.iter().map(|p| absolute(Path::new(p))) {
+        if !is_inside(&home, &project) && project.is_dir() && !roots.contains(&project) {
+            roots.push(project);
+        }
+    }
+    roots
+}
+
+/// Which folder a listing is for: none gives the home, and so does one inside the roots that is gone; anything
+/// outside them, relative or through a link that leaves them, is refused.
+fn folder_to_list(dir: Option<&str>, roots: &[PathBuf], inside_real: &dyn Fn(&Path) -> bool) -> Result<PathBuf, OpError> {
+    let Some(dir) = dir.filter(|dir| !dir.is_empty()) else { return Ok(roots[0].clone()) };
+    let outside = || {
+        let named = roots.iter().map(|root| root.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ");
+        OpError::coded(DaemonErrorCode::OutsideRoot, words::folders_outside(dir, named))
+    };
+    if !Path::new(dir).is_absolute() {
+        return Err(outside());
+    }
+    let asked = absolute(Path::new(dir));
+    if !roots.iter().any(|root| is_inside(root, &asked)) {
+        return Err(outside());
+    }
+    if !asked.is_dir() {
+        return Ok(roots[0].clone());
+    }
+    if !inside_real(&asked) {
+        return Err(outside());
+    }
+    Ok(asked)
 }
 
 /// Milliseconds since the epoch, rounded as node's Math.round(mtimeMs) rounds.

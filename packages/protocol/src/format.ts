@@ -179,6 +179,11 @@ export const presentElsewhereLine = (bin: string, path: string, roadWords: strin
 export const doctorComputerRowLine = (name: string, finishedAt: string): string =>
   `the computers row read it present at ${finishedAt}; wsp add ${name} --update reads it again`;
 
+/** Why the folders of a provider are refused: a workspace there is forked fresh, so there is no computer standing
+ * to browse, and a project there starts from a repository address or from a folder here, which seeds it. */
+export const providerFoldersRefusal = (name: string): string =>
+  `${name} keeps no computer to browse, since every workspace there is forked fresh; add the project from a repository address, or from a folder on this computer, which seeds it`;
+
 /** Why a doctor's computer road was refused for a row that is not a computer somebody joined: the computer the
  * host runs on and a cloud account are proved by the terminal that typed the line, since one reads that computer's
  * own files and the other forks a machine and bills. */

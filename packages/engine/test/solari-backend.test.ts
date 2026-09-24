@@ -903,3 +903,22 @@ describe("the cap the caller puts on one call", () => {
     expect(fetchCapMs(-1)).toBe(0);
   });
 });
+
+describe("SolariBackend error bodies", () => {
+  it("keeps a plain-text error body as the refusal's words instead of an empty one", async () => {
+    const f = vi.fn(async () => new Response("Internal Server Error", { status: 500, headers: { "content-type": "text/plain" } }));
+    const b = new SolariBackend({ apiKey: "k", fetch: f, clock: { now: () => 0, sleep: async () => {} } });
+    const refused = (await b.create({ kind: "sandbox" }).then(() => null, (e: unknown) => e)) as Error & { status?: number };
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused.status).toBe(500);
+    expect(refused.message).toBe("Internal Server Error");
+  });
+
+  it("names the class and status where the provider said nothing at all", async () => {
+    const f = vi.fn(async () => new Response("", { status: 500 }));
+    const b = new SolariBackend({ apiKey: "k", fetch: f, clock: { now: () => 0, sleep: async () => {} } });
+    const refused = (await b.create({ kind: "sandbox" }).then(() => null, (e: unknown) => e)) as Error;
+    expect(refused.message).not.toBe("");
+    expect(refused.message).toContain("500");
+  });
+});

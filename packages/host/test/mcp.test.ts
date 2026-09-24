@@ -161,7 +161,7 @@ describe("the MCP server over the host", () => {
     const c = await connect();
     const { tools } = await c.listTools();
     expect(tools.map(t => t.name).sort()).toEqual(["bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
-    expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "repos"]);
+    expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["engine", "from", "max_depth", "max_machines", "name", "project", "size", "spawn"]);
@@ -692,14 +692,15 @@ describe("the MCP server over the host", () => {
     const before = claude.starts.length;
     const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(refused.text).toMatch(/^model "claude-haiku-4-5" is not one claude takes; one of: Opus 5\.5 \(claude-opus-5-5\), Fable 5\.1 \(claude-fable-5-1\), Sonnet 5 \(claude-sonnet-5\), Haiku 4\.5 \(claude-haiku-4-5-20251001\); legacy: Opus 5 \(claude-opus-5\), /);
+    expect(refused.text.endsWith(`${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`)).toBe(true);
     const mode = await call("run", { workspace: "alpha", task: "go", access: "yolo" });
     expect(mode.isError).toBe(true);
     expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
     const minted = (await rt.workspaces.list()).map(w => w.name);
     const fork = await call("fork", { workspace: "alpha", name: "cheap", task: "review", model: "claude-haiku-4-5" });
     expect(fork.isError).toBe(true);
-    expect(fork.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(fork.text).toBe(refused.text);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(minted);
     expect(claude.starts).toHaveLength(before);
   });
