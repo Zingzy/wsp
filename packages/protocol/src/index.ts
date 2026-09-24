@@ -2591,16 +2591,15 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   provision: "installing agents, tools, skills and servers",
 };
 
-/** Where the app's sheet says a step differently from the line a terminal prints. The sheet's road is a Linux box
- * and its own description names this Mac; the same install from a terminal reaches a Mac too, on a host that need
- * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
- * check would otherwise say the wait it was in rather than the state it reached. */
-export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
+/** Where the app's sheet says a step differently from the line a terminal prints. The host the app runs on need not
+ * be a Mac, so the computer it runs on is this computer in both. `done` is read once a step is finished, where a
+ * line under a check would otherwise say the wait it was in rather than the state it reached. */
+export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word?: string; done?: string }>> = {
   "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
-  reach: { word: "checking it can reach this Mac", done: "reaches this Mac" },
+  reach: { done: "reaches this computer" },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
   service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
-  join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
+  join: { done: "connected to this computer" },
 };
 
 /** The word the app's sheet draws for a step in the state it is in. */

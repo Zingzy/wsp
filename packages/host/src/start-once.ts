@@ -19,18 +19,18 @@ export interface StartedOnce<T> {
 
 export function startOnce<T>(start: () => Promise<T>, say: (why: string) => string): StartedOnce<T> {
   let holding: Promise<T> | undefined;
-  /** The reason the last start failed, so the same one twice is one line. */
+  /** The line the last failed start said, so the same one twice is one line. */
   let refused: string | undefined;
   return {
     async get() {
       const started = await (holding ??= start().catch((e: unknown) => {
         holding = undefined;
-        const why = e instanceof Error ? e.message : String(e);
-        if (refused !== why) {
-          refused = why;
-          console.warn(say(why));
+        const line = say(e instanceof Error ? e.message : String(e));
+        if (refused !== line) {
+          refused = line;
+          console.warn(line);
         }
-        throw e;
+        throw new Error(line, { cause: e });
       }));
       refused = undefined;
       return started;

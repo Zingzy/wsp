@@ -15,7 +15,6 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
-import { terminalRefusedLine } from "../src/actions/format.js";
 import { openDrawerTerminal, openPanelTerminal, splitActivePanelTerminal, splitDrawerTerminal } from "../src/shell/shellCommands.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -95,6 +94,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   provideTerminals(WS, null);
+  clearNotices();
 });
 
 describe("WorkspaceTerminalDrawer", () => {
@@ -439,26 +439,23 @@ describe("drawer resilience", () => {
     await waitFor(() => expect(count("pty.create")).toBe(1));
   });
 
-  it("a pty a live link refused is said in the app's own sentence, never in the link's words behind a name and a colon", async () => {
+  it("a pty a live link refused is said as no terminal on that workspace, with the link's own reason", async () => {
     const { count } = fakeLink({ refuseCreate: true });
     act(() => useStore.setState({ workspaces: [PANE_WS], statuses: {} }));
     clearNotices();
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await screen.findByText(/No terminals open/);
-    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
     expect(count("pty.create")).toBe(1);
-    // The link is up and this one shell was refused: no pane stands in for that, so the sentence is the app's own
-    // and says what did not happen. What used to stand here was the link's words behind a name and a colon.
-    expect(document.body.textContent).not.toContain("terminal: daemon unreachable");
 
     clearNotices();
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
-    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
 
     clearNotices();
     await act(() => openPanelTerminal(WS));
-    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
     act(() => useStore.setState({ workspaces: [] }));
     clearNotices();

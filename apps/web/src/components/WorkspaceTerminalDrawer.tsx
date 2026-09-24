@@ -75,7 +75,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
 
   useEffect(() => {
     if (status !== "live" || ids.length > 0) return;
-    spawnFirstDrawerTerminal(terms)?.then(t => store.getState().add(workspaceId, t.ptyId), () => reportTerminalRefused(workspaceId));
+    spawnFirstDrawerTerminal(terms)?.then(t => store.getState().add(workspaceId, t.ptyId), (e: unknown) => reportTerminalRefused(workspaceId, e));
   }, [terms, store, workspaceId, status, ids.length]);
 
   const split = useCallback((direction: SplitDirection) => void splitDrawerTerminal(workspaceId, direction), [workspaceId]);
