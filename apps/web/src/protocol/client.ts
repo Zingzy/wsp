@@ -33,6 +33,8 @@ import {
   type InitRoad,
   PlaceDial,
   PlaceDoorView,
+  JoinMint,
+  SshHostSuggestion,
   PlaceSpend,
   PlaceStageEvent,
   PlaceUpdateReply,
@@ -490,6 +492,12 @@ export interface Api {
   placesDoor?(): Promise<PlaceDoorView>;
   /** A fresh code for a computer to join with, and when it stops being one. */
   pairIssue?(): Promise<{ code: string; expiresAt: number }>;
+  /** A fresh join code written into every line a computer you own can join this host by, the same mint wsp add
+   * prints, and when it expires. Refused on any socket but this computer's own window. */
+  mintJoin?(): Promise<{ joins: { url: string; line: string; note?: string }[]; expiresAt: string }>;
+  /** The hosts this computer's ssh config and known_hosts name, config first, less the computers already added.
+   * Refused on any socket but this computer's own window. */
+  sshHosts?(): Promise<{ alias: string; hostName?: string; user?: string; port?: number; from: "config" | "known_hosts" }[]>;
   /** Who this wsp is signed in to, as the host reads it off this computer. Optional so a fixture with no Settings
    * page need not fake it; without it the Account row says nothing rather than guessing. */
   account?(): Promise<AccountView>;
@@ -713,6 +721,8 @@ export function makeApi(c: ProtocolClient): Api {
     workspacesLanding: async project => WorkspaceLanding.parse(await c.request<unknown>("workspaces.landing", { project })),
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
+    mintJoin: async () => JoinMint.parse(await c.request<unknown>("places.mint")),
+    sshHosts: async () => SshHostSuggestion.array().parse((await c.request<{ hosts?: unknown }>("places.sshHosts")).hosts),
     account: async () => AccountView.parse((await c.request<{ account?: unknown }>("account.get")).account),
     devicesList: async () => DeviceView.array().parse((await c.request<{ devices?: unknown }>("devices.list")).devices),
     devicesRevoke: async deviceId => {

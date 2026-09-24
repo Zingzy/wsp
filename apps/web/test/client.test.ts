@@ -84,10 +84,13 @@ describe("makeApi wrappers", () => {
     const { api, lastSent } = await connect();
     const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
-    expect(await api.preferences!()).toEqual(record);
+    // A record from a host that kept no computer icons reads as none rather than failing the whole record.
+    expect(await api.preferences!()).toEqual({ ...record, computerLook: {} });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
-    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual(record);
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {} });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, computerLook: { pl_1: { icon: "server" } } } });
+    expect((await api.preferences!()).computerLook).toEqual({ pl_1: { icon: "server" } });
     // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, theme: "sepia" } });
     await expect(api.preferences!()).rejects.toThrow();

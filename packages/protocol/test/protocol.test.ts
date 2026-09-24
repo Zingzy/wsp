@@ -879,7 +879,7 @@ describe("runtime wire types", () => {
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
       "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
-      "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "projects.add",
+      "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove",
