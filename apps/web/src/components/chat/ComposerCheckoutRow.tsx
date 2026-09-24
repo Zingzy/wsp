@@ -17,7 +17,7 @@
 // agent's tool calls move it, is what the panes follow. The branch is read,
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type DaemonLinkStatus, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
@@ -270,9 +270,12 @@ export function ComposerCheckoutRow({
   thread,
   pickerOpen,
   onPickerOpenChange,
+  access = null,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
+  /** The access picker, which the one-line composer carries here rather than in the box. */
+  access?: ReactNode;
   /** Whether the folder picker is up; the composer holds it so the footer's other folder row can open it. */
   pickerOpen: boolean;
   onPickerOpenChange: (open: boolean) => void;
@@ -336,6 +339,7 @@ export function ComposerCheckoutRow({
             ) : null}
           </>
         )}
+        {access !== null ? <span className="flex shrink-0 items-center">{access}</span> : null}
       </div>
       {branch.kind === "repo" ? (
         <Tooltip>
@@ -359,6 +363,27 @@ export function ComposerCheckoutRow({
           </TooltipPopup>
         </Tooltip>
       )}
+    </ComposerSurface.ContextStrip>
+  );
+}
+
+/** The strip under a project home's composer: no workspace exists yet, so it names the folder and the branch the
+ * send's workspace starts from, off the project's own record. */
+export function HomeCheckoutRow({ path, branch }: { path: string; branch: string }) {
+  return (
+    <ComposerSurface.ContextStrip data-composer-checkout data-composer-home>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <span className={labelClass} data-composer-folder={path}>
+          <FolderGitIcon className="size-3 shrink-0" />
+          <FolderPath path={path} />
+        </span>
+      </div>
+      {branch !== "" ? (
+        <span className={branchSlotClass} data-composer-branch={branch}>
+          <GitBranchIcon className="size-3 shrink-0" />
+          <span className="truncate">{branch}</span>
+        </span>
+      ) : null}
     </ComposerSurface.ContextStrip>
   );
 }

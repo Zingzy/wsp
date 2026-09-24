@@ -33,11 +33,12 @@
 import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
-import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useWhereWord } from "../../sidebar/workspaceRows";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
@@ -121,7 +122,13 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const latestRow = pinned ? rows.at(-1) ?? null : null;
   const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
-  const catalog = useHarnessCatalog(harness, workspaceId);
+  const listed = useHarnessCatalog(harness, workspaceId);
+  // A home's lists were read against no machine; the kind of workspace its send makes decides the mode it starts at.
+  const homeKind = useStore(s => {
+    const home = s.projects.find(p => projectHomeKey(p.id) === workspaceId);
+    return home === undefined ? null : kindForComputer(home.computer);
+  });
+  const catalog = useMemo(() => (listed === null || homeKind === null ? listed : workspaceAccess(listed, homeKind)), [homeKind, listed]);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
@@ -233,6 +240,7 @@ function ReasoningPicker({
 function AccessPicker({
   modes,
   picks,
+  className,
   /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
   note,
   onPickAccess,
@@ -241,6 +249,7 @@ function AccessPicker({
   picks: ResolvedPicks;
   note: string | null;
   onPickAccess: (mode: string) => void;
+  className?: string;
 }) {
   const access = modes.find(o => o.value === picks.permissionMode);
   const label = accessLabel(access);
@@ -249,7 +258,7 @@ function AccessPicker({
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={triggerClass}
+        className={cn(triggerClass, className)}
         aria-label={`${ACCESS_WORD}: ${label}`}
         data-composer-picker="access"
         data-access={picks.permissionMode ?? undefined}
@@ -381,7 +390,10 @@ export function ComposerOptionPickers({
   thread,
   onPickAccess,
   onOtherFolder,
+  compact = false,
 }: {
+  /** The one-line composer's pickers: the model and the reasoning only, the access having moved under the box. */
+  compact?: boolean;
   workspaceId: string;
   thread: ChatThreadHandle;
   onPickAccess: (mode: string) => void;
@@ -414,17 +426,32 @@ export function ComposerOptionPickers({
       />
       {efforts.length > 0 || contextWindows.length > 0 ? (
         <>
-          <BarRule />
+          {compact ? null : <BarRule />}
           <ReasoningPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} />
         </>
       ) : null}
-      {catalog.permissionModes.length > 0 ? (
+      {!compact && catalog.permissionModes.length > 0 ? (
         <>
           <BarRule />
           <AccessPicker modes={catalog.permissionModes} picks={picks} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
         </>
       ) : null}
-      {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
+      {!compact && projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>
+  );
+}
+
+/** The access picker alone, sized for the strip under the one-line composer. */
+export function ComposerAccessPicker({ workspaceId, thread, onPickAccess }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void }) {
+  const { catalog, picks } = useComposerPicks(workspaceId, thread);
+  if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;
+  return (
+    <AccessPicker
+      modes={catalog.permissionModes}
+      picks={picks}
+      note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
+      onPickAccess={onPickAccess}
+      className="h-7 gap-1.5 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs [&_svg]:size-3"
+    />
   );
 }

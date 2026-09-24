@@ -90,6 +90,8 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   const [onlyStarred, setOnlyStarred] = useState(false);
   const [active, setActive] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it stands.
+  const foot = notice ?? catalog.refusal ?? null;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
@@ -274,10 +276,10 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                 })
               )}
             </div>
-            {notice === null ? null : (
+            {foot === null ? null : (
               <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
-                <div className="truncate font-mono text-[10px] text-muted-foreground/70" role="status" title={notice}>
-                  {notice}
+                <div className="truncate font-mono text-[10px] text-muted-foreground/70" role="status" title={foot}>
+                  {foot}
                 </div>
               </div>
             )}
