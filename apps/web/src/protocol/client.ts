@@ -566,10 +566,13 @@ export interface Api {
   image?(name?: string): Promise<SealedImageView>;
 }
 
+/** Which daemon a channel is to: a workspace's, or a computer's own by its place, HERE_PLACE_ID for this one. */
+export type DaemonTarget = { workspaceId: string } | { placeId: string };
+
 /** The page's one transport to a daemon. The route the machine answers on and the token that opens it never leave
- * the host: a page names a workspace and the host dials the road that workspace's kind answers with. */
+ * the host: a page names a workspace or a computer and the host dials the road that one answers with. */
 export interface DaemonApi {
-  open(workspaceId: string): Promise<DaemonOpenReply>;
+  open(target: DaemonTarget): Promise<DaemonOpenReply>;
   /** Resolves with the daemon's own answer, ok or not; rejects only when the host could not carry the frame. */
   send(channel: string, frame: DaemonFrame): Promise<DaemonResponse>;
   close(channel: string): Promise<void>;
@@ -646,7 +649,7 @@ export function makeApi(c: ProtocolClient): Api {
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
     daemon: {
-      open: async workspaceId => ({ channel: (await c.request<{ channel: string }>("daemon.open", { workspaceId })).channel }),
+      open: async target => ({ channel: (await c.request<{ channel: string }>("daemon.open", target)).channel }),
       send: async (channel, frame) => (await c.request<{ reply: DaemonResponse }>("daemon.send", { channel, frame })).reply,
       close: async channel => void (await c.request("daemon.close", { channel })),
       onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),

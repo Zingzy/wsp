@@ -5034,7 +5034,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    *
    * With `placeId` in place of `workspaceId` the channel is to the daemon on a computer the person owns, over the
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
-   * One of the two, never both. */
+   * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for

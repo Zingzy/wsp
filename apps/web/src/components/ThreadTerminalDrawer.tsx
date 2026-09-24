@@ -472,6 +472,8 @@ export function TerminalViewport({
 export interface ThreadTerminalDrawerProps {
   mode?: "drawer" | "panel";
   workspaceId: string;
+  /** Where the shells run, for a drawer that is not a workspace's: a header over the panes names it. */
+  where?: string;
   visible?: boolean;
   height: number;
   terminalIds: string[];
@@ -615,9 +617,19 @@ function ShellGoneOverlay({ onNewTerminal, label }: { onNewTerminal: () => void;
   );
 }
 
+/** The header a drawer that is not a workspace's carries: where its shells run, as state is written. */
+function DrawerWhere({ where }: { where: string }) {
+  return (
+    <div data-terminal-where className="flex h-[22px] shrink-0 items-center border-b border-border/70 px-2 font-mono text-[11px] text-muted-foreground">
+      {where}
+    </div>
+  );
+}
+
 export default function ThreadTerminalDrawer({
   mode = "drawer",
   workspaceId,
+  where,
   visible = true,
   height,
   terminalIds,
@@ -960,10 +972,11 @@ export default function ThreadTerminalDrawer({
             onPointerCancel={handleResizePointerEnd}
           />
         ) : null}
+        {where !== undefined ? <DrawerWhere where={where} /> : null}
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground" data-terminal-empty={pane.kind}>
           {pane.kind === "live" ? (
             <>
-              <p>No terminals for this workspace yet.</p>
+              <p>{where !== undefined ? "No terminals open." : "No terminals for this workspace yet."}</p>
               <Button size="xs" variant="outline" onClick={onNewTerminalAction}>
                 {newTerminalActionLabel}
               </Button>
@@ -1019,9 +1032,10 @@ export default function ThreadTerminalDrawer({
           onPointerCancel={handleResizePointerEnd}
         />
       ) : null}
+      {where !== undefined ? <DrawerWhere where={where} /> : null}
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20 flex flex-col items-end gap-1.5">
+        <div className={cn("pointer-events-none absolute right-2 z-20 flex flex-col items-end gap-1.5", where !== undefined ? "top-[30px]" : "top-2")}>
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
