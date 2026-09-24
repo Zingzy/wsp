@@ -103,6 +103,10 @@ export interface ReleaseWatchOptions {
   running: string;
   /** The version the files it was started from carry now. */
   installed: () => string;
+  /** Whether host.restart brings this host back on the road it came up on. */
+  restartReturns?: boolean;
+  /** The line that moves this host onto a release, on the road it was installed by. */
+  update?: (version: string) => string;
   env?: Env;
   fetch?: typeof fetch;
   now?: () => number;
@@ -140,11 +144,13 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   const off = (): boolean => checksOff(opts.statePath, env);
 
   const view = (): ReleaseView => {
-    const own = { shape: opts.shape, restartReturns: false, ...(installed !== opts.running ? { installed } : {}) };
+    const own = { shape: opts.shape, restartReturns: opts.restartReturns === true, ...(installed !== opts.running ? { installed } : {}) };
     if (off()) return { state: "off", ...own };
+    const update = opts.update !== undefined && kept.latest !== undefined && releaseAbove(kept, opts.running) ? opts.update(kept.latest.version) : undefined;
     return {
       state: answered ?? "checking",
       ...(kept.latest !== undefined ? { latest: kept.latest } : {}),
+      ...(update !== undefined ? { update } : {}),
       ...(kept.checkedAt !== undefined ? { checkedAt: kept.checkedAt } : {}),
       ...(kept.triedAt !== undefined ? { triedAt: kept.triedAt } : {}),
       ...own,

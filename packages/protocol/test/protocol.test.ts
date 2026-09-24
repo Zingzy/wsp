@@ -882,7 +882,7 @@ describe("runtime wire types", () => {
       "places.add", "places.update", "places.remove", "places.dial", "places.doctor", "places.door", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "project.seed.plan", "project.plan", "project.import", "project.export",
-      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove",
+      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
@@ -1803,6 +1803,15 @@ describe("the newest release as the host read it", () => {
     // Off carries no reading, so nothing drawn off it can offer a download the person turned checks off for.
     expect(wire.ReleaseView.parse({ state: "off", shape: "app", restartReturns: false })).toEqual({ state: "off", shape: "app", restartReturns: false });
     expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
+    // The line that moves this host onto the release rides beside it, read on the road the host was installed by.
+    const behind = { ...release, update: "npm i -g @zingzy/wsp@0.3.0" };
+    expect(wire.ReleaseView.parse(behind)).toEqual(behind);
+  });
+
+  it("restarts the host with no arguments, an op no thread and no paired computer sends", () => {
+    expect(wire.RuntimeRequest.parse({ id: "r1", op: "host.restart" })).toEqual({ id: "r1", op: "host.restart" });
+    expect(wire.THREAD_OPS).not.toContain("host.restart");
+    expect(wire.DEVICE_OPS).not.toContain("host.restart");
   });
 
   it("reads the release as ahead only when it is above a version that runs", () => {

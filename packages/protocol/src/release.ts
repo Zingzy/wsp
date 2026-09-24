@@ -22,13 +22,16 @@ export type HostShape = z.infer<typeof HostShape>;
 /** `latest` stands whenever the host ever read one, whatever the last ask did, and is absent under `off`, so a person
  * who turned checks off is offered nothing off a stale number. `checkedAt` is the last answer, `triedAt` the last ask.
  * `installed` is the version the files this host was started from carry now, present only once it differs from the
- * running one, which is what a reinstall under a running host looks like. */
+ * running one, which is what a reinstall under a running host looks like. `update` is the line that moves this host
+ * onto `latest` on the road it was installed by, present only while `latest` is above it. `restartReturns` says
+ * whether host.restart brings this host back on the road it came up on. */
 export const ReleaseView = z.object({
   state: ReleaseState,
   latest: ReleaseLatest.optional(),
   checkedAt: z.string().optional(),
   triedAt: z.string().optional(),
   installed: z.string().optional(),
+  update: z.string().optional(),
   shape: HostShape,
   restartReturns: z.boolean(),
 });
@@ -44,3 +47,9 @@ export const releaseAbove = (view: Pick<ReleaseView, "latest">, ...running: stri
 
 /** The one word a reading says wherever it is shown: the number whenever one was read, else the state. */
 export const releaseWord = (view: Pick<ReleaseView, "state" | "latest">): string => view.latest?.version ?? view.state;
+
+/** What a host wsp up holds in a terminal says for a restart: nothing brings it back but that terminal. */
+export const UP_RESTART_LINE = "Ctrl-C the terminal running wsp up and run it again.";
+
+/** host.restart on a socket a ticket let in: a restart is the computer's own to ask for. */
+export const HOST_RESTART_TICKET_REFUSAL = "a socket let in on a ticket cannot restart this host; restart it on the computer it runs on";

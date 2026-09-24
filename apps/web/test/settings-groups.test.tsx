@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
@@ -539,6 +539,59 @@ describe("About and the newest release", () => {
     fireEvent.click(get);
     expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
     expect(getBundle).not.toHaveBeenCalled();
+  });
+
+  const hostHover = (): string | undefined => document.querySelector<HTMLElement>("[data-k=host-version]")?.title;
+
+  it("offers Restart host in place of Get once the installed files are newer and a restart brings the host back, and the click asks the host", async () => {
+    shell("0.2.0", "0.2.0");
+    const hostRestart = vi.fn(async () => undefined);
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true, update: "npm i -g @zingzy/wsp@0.3.0" }) });
+    await mount({ hostRestart } as Partial<Api>, "about");
+    expect(buttons()).toEqual([ABOUT_WORDS.restartHost, ABOUT_WORDS.releases]);
+    const restart = screen.getByRole("button", { name: ABOUT_WORDS.restartHost });
+    expect(restart.title).toBe(ABOUT_WORDS.restartHover);
+    // The files are already the release, so the hover names the restart and not the install again.
+    expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", ABOUT_WORDS.restartRuns));
+    fireEvent.click(restart);
+    await waitFor(() => expect(hostRestart).toHaveBeenCalledTimes(1));
+  });
+
+  it("a restart the host refuses lands its line as an error notice", async () => {
+    shell("0.2.0", "0.2.0");
+    const hostRestart = vi.fn(async () => {
+      throw new RequestError("a socket let in on a ticket cannot restart this host");
+    });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true }) });
+    await mount({ hostRestart } as Partial<Api>, "about");
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.restartHost }));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["a socket let in on a ticket cannot restart this host"]));
+  });
+
+  it("draws no Restart where a restart would not bring the host back, and the Host hover says the terminal's line instead", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0", { shape: "up", installed: "0.3.0", restartReturns: false }) });
+    await mount({}, "about");
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", UP_RESTART_LINE));
+  });
+
+  it("draws no Restart on a page served to another computer, whose restart the host refuses", async () => {
+    shell("0.2.0", "0.2.0");
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: false, version: "0.2.0" };
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true }) });
+    await mount({}, "about");
+    expect(buttons()).not.toContain(ABOUT_WORDS.restartHost);
+    expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", ABOUT_WORDS.restartThere));
+  });
+
+  it("the Host hover names the line that moves the host onto the release while it is behind, and the plain words otherwise", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0", { update: "npm i -g @zingzy/wsp@0.3.0" }) });
+    await mount({}, "about");
+    expect(hostHover()).toBe(ABOUT_WORDS.hostUpdateHover("npm i -g @zingzy/wsp@0.3.0", "0.3.0"));
+    await show(read("0.2.0"));
+    expect(hostHover()).toBe(ABOUT_WORDS.hostHover);
   });
 
   it("the About row in the sidebar carries the newer version as its one mono word, and nothing while level", async () => {

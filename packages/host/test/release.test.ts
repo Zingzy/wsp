@@ -202,6 +202,28 @@ describe("the host's reading of the newest release", () => {
     expect(github.asked).toHaveLength(2);
   });
 
+  it("says whether a restart brings this host back, as the road it came up on answers", async () => {
+    const github = fakeGithub([]);
+    expect(watchOn(stateIn(), { fetch: github.fetch, restartReturns: true }).watch.get().restartReturns).toBe(true);
+    expect(watchOn(stateIn(), { fetch: github.fetch }).watch.get().restartReturns).toBe(false);
+  });
+
+  it("carries the line that moves this host onto the release only while the release is above it, and none under the switch", async () => {
+    const lines: string[] = [];
+    const update = (version: string): string => {
+      lines.push(version);
+      return `npm i -g @zingzy/wsp@${version}`;
+    };
+    const statePath = stateIn();
+    const behind = watchOn(statePath, { fetch: fakeGithub([ok()]).fetch, running: "0.1.9", update });
+    expect(behind.watch.get().update).toBeUndefined();
+    expect((await behind.watch.check()).update).toBe("npm i -g @zingzy/wsp@0.2.0");
+    expect(lines).toEqual(["0.2.0"]);
+    expect((await watchOn(stateIn(), { fetch: fakeGithub([ok()]).fetch, update }).watch.check()).update).toBeUndefined();
+    writeFileSync(join(statePath, "..", ".env"), `${UPDATE_CHECK_ENV}=0\n`);
+    expect(behind.watch.get().update).toBeUndefined();
+  });
+
   it("keeps its last reading of the installed files while a reinstall has them half written", async () => {
     let installed = (): string => "0.3.0";
     const { watch, tick } = watchOn(stateIn(), { fetch: fakeGithub([ok()]).fetch, installed: () => installed() });
