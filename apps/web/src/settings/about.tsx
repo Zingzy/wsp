@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > About: the two halves of one release that can run apart, one
 // line each, the newest release as the host last read it, the computers whose
-// daemon is behind, and the road to the next release under them. A browser
-// tab has no shell half and shows the host's line alone.
-import { placeDaemonBehind, releaseAbove, releaseWord, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+// daemon is behind, and the road to the next release under them: in the app
+// on its own host the shell downloads and opens it, anywhere else Get is a
+// link. A browser tab has no shell half and shows the host's line alone.
+import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
+import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { ABOUT_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
@@ -30,6 +33,69 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
 
+type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen" | "bundleHover">;
+
+/** The shell's bundle road where this page is the app's own host's, else nothing: a page a host somewhere else
+ * serves, a browser tab and a shell from before the road all take the link form. */
+function useBundleRoad(): Bundle | undefined {
+  const bridge = desktopBridge();
+  const [here, setHere] = useState<boolean | undefined>(bridge?.hosts === undefined ? true : undefined);
+  useEffect(() => {
+    let live = true;
+    bridge?.hosts?.().then(
+      view => live && setHere(view.current === null),
+      () => live && setHere(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
+  const { getBundle, quitAndOpen, bundleHover } = bridge ?? {};
+  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen, bundleHover } : undefined;
+}
+
+/** Get while this page is behind: the shell's download only where the app itself is behind, since a host that lags
+ * alone is updated its own way and the app already installed is no update for it; the link to the release anywhere
+ * else. */
+function GetRelease({ latest, appBehind, failed }: { latest: ReleaseLatest; appBehind: boolean; failed: (e: unknown) => void }) {
+  const shellRoad = useBundleRoad();
+  const road = appBehind ? shellRoad : undefined;
+  const [phase, setPhase] = useState<"get" | "downloading" | "kept">("get");
+  // A refused get or open puts Get back: a new get fetches nothing where the kept file still matches.
+  const answered = (asked: Promise<BundleOutcome>): void =>
+    void asked.then(
+      outcome => {
+        if (!outcome.ok) failed(outcome.error);
+        setPhase(outcome.ok ? "kept" : "get");
+      },
+      (e: unknown) => {
+        failed(e);
+        setPhase("get");
+      },
+    );
+  if (road === undefined)
+    return (
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(latest.url)}>
+        {ABOUT_WORDS.get(latest.version)}
+      </Button>
+    );
+  if (phase === "kept")
+    return (
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => answered(road.quitAndOpen())}>
+        {ABOUT_WORDS.quitAndOpen}
+      </Button>
+    );
+  const get = (): void => {
+    setPhase("downloading");
+    answered(road.getBundle({ version: latest.version }));
+  };
+  return (
+    <Button size="xs" variant="outline" data-k="get-release" title={road.bundleHover} disabled={phase === "downloading"} onClick={get}>
+      {phase === "downloading" ? ABOUT_WORDS.downloading : ABOUT_WORDS.get(latest.version)}
+    </Button>
+  );
+}
+
 export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
   const { inShell, app, host } = ctx.shell;
   const { release } = ctx;
@@ -48,11 +114,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
       items: lines,
       under: (
         <>
-          {behind === undefined ? null : (
-            <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(behind.url)}>
-              {ABOUT_WORDS.get(behind.version)}
-            </Button>
-          )}
+          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />}
           <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>
