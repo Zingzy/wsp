@@ -52,6 +52,7 @@ import {
   type DaemonResponse,
   type MachineSizeOffer,
   type PlaceAddStep,
+  PLACE_LOGIN_REFUSED_KIND,
   type PlaceStageEvent,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
@@ -476,7 +477,9 @@ export const placeSweptOverLinkLine = (name: string, at: string, said?: string):
 /** The refusal the login itself got, as against anything the computer at the end of it said: ssh would not take
  * the login, so nothing ran there at all. The roads that log in throw this one for that case alone, and the lines
  * a person reads about them turn on it. */
-export class PlaceLoginRefusedError extends Error {}
+export class PlaceLoginRefusedError extends Error {
+  readonly kind = PLACE_LOGIN_REFUSED_KIND;
+}
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -1595,7 +1598,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note, placeId) => {
-        step = which;
+        if (state === "running") step = which;
         opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
@@ -1652,6 +1655,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
         stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
+        // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
+        await devices.spend(code, at).catch(() => false);
         throw e;
       } finally {
         awaiting.delete(code);
