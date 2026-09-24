@@ -143,7 +143,7 @@ describe("the agent contract on the command line and the tool door", () => {
         // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.
         closed: new Promise(() => {}),
       }),
-      placeLinks: placeWiring(statePath, {}),
+      placeLinks: placeWiring(statePath),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },

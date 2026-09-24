@@ -92,7 +92,7 @@ describe("a guest session on the host", () => {
     backend = stubBackend();
     store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-    rt = createRuntime({ backend, store, adapters: {}, placeLinks: placeWiring(statePath, {}) });
+    rt = createRuntime({ backend, store, adapters: {}, placeLinks: placeWiring(statePath) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     await handle.addProject("https://github.com/dev/alpha.git", "default");

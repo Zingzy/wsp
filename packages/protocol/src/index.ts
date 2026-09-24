@@ -3849,6 +3849,7 @@ const DAEMON_CONTENTS = [
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
   "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
+  "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4052,7 +4053,10 @@ const DAEMON_CONTENTS = [
  * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
  * Version 72 drops a copied folder's worktree records before the copy's checkout, so a copy of a repo whose base
  * branch one of its own worktrees holds lands on that branch.
- * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box. */
+ * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box.
+ * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
+ * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
+ * removed beside that project, and refuses to remove a path that is not a copy of the project it names. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5684,7 +5688,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

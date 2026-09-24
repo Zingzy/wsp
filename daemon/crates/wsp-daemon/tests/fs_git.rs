@@ -548,6 +548,28 @@ async fn git_push_goes_through_the_op_switch_and_refuses_the_base_and_a_path_out
     refused(&c.request("git.push", json!({ "cwd": "repo/escape", "base": "main" })).await, "outside-root");
 }
 
+#[tokio::test]
+async fn a_copy_left_half_removed_beside_a_project_is_swept_at_start_and_nothing_else_there_is_touched() {
+    let t = build();
+    let beside = tempfile::Builder::new().prefix("wsp-fsgit-beside-").tempdir().unwrap();
+    let project = beside.path().join("work");
+    fs::create_dir_all(&project).unwrap();
+    let left = beside.path().join(format!("{}work-feature-1-2", wsp_runtime::copy_road::aside::ASIDE_PREFIX));
+    fs::create_dir_all(left.join("node_modules/pkg")).unwrap();
+    fs::write(left.join("node_modules/pkg/index.js"), "x\n").unwrap();
+    let kept = beside.path().join(".cache");
+    fs::create_dir_all(&kept).unwrap();
+    fs::create_dir_all(t.root().join(".wsp")).unwrap();
+    fs::write(t.roots_path(), format!("{}\n", project.display())).unwrap();
+    let _d = start(t.root(), &t.roots_path()).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while left.exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!left.exists(), "the leftover copy is still there");
+    assert!(project.is_dir() && kept.is_dir(), "the sweep took a folder that was not a leftover copy");
+}
+
 /// A home as a folder picker walks it: a repository, a plain folder, a dot-named one, a file, a link to a folder
 /// inside and a link out, beside a project folder the home does not hold and a folder outside everything.
 struct Home {

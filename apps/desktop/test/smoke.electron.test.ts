@@ -150,7 +150,7 @@ function testRuntime(seedGolden = false, env: Record<string, string> = {}): Runt
   // The place wiring every host a person starts has: the key it proves is what a pairing code names and what the
   // computer taking that code holds it to, so a fixture host without one hands out a code nothing can spend.
   const statePath = join(mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-state-")), "state.json");
-  return createRuntime({ backend: stubBackend(), store, adapters: {}, env, placeLinks: placeWiring(statePath, {}) });
+  return createRuntime({ backend: stubBackend(), store, adapters: {}, env, placeLinks: placeWiring(statePath) });
 }
 
 function fixtureHost(): Promise<HostHandle> {

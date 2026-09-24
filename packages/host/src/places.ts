@@ -90,7 +90,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
-import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
 import { placeLink, sharedAgentsOn, sharedOn, signInOnBox, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
 import { systemOpener } from "./relay.js";
@@ -153,9 +153,9 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
  * address it dials. */
 export const hostKeyHere = (statePath: string): string => keyFingerprint(hostPlaceKey(statePath).publicKey);
 
-/** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
- * this computer's own row. */
-export function placeWiring(statePath: string, env: ProviderEnv, advertise?: string): PlaceWiring {
+/** What a host wires for its places: its own pair and this computer's own row. The provider row is the runtime's,
+ * read off the provider pick a saved key moves. */
+export function placeWiring(statePath: string, advertise?: string): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
     // The recipe beside that state file, put on every computer this host holds: the same two readers a copy of
@@ -174,14 +174,6 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
     log: placeLogReader(),
     update: placeUpdater(),
     leave: placeLeaver(),
-    provider: () => {
-      const module = providerModule(env);
-      // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
-      // wears the word its own machines wear, so a stand-in serving a fixture shows the cloud it is standing in for.
-      if (!isPlace(module, env)) return undefined;
-      const { pricing } = providerBackendFor(env);
-      return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
-    },
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
     // itself, so the row for the computer the host runs on carries the facts every other row carries.
