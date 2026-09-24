@@ -3818,6 +3818,7 @@ export const PLACES_WORDS = {
     /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
      * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
     joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,
+    relayNote: "when the host is linked to your relay",
     escStays: "esc closes, the code stays good",
     newCode: "New code",
     close: "Close",
@@ -3836,6 +3837,13 @@ export const PLACES_WORDS = {
     leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
   },
 } as const;
+
+/** Every line a computer you own can join this host by: one per address it answers on, and the relay's address
+ * last, with the note that it only answers while the host is linked. The one list wsp add prints and the app draws. */
+export function joinRoads(token: string, urls: readonly string[], relayUrl: string | undefined): { url: string; line: string; note?: string }[] {
+  const road = (url: string, note?: string): { url: string; line: string; note?: string } => ({ url, line: PLACES_WORDS.sheet.joinLine(url, token), ...(note === undefined ? {} : { note }) });
+  return [...urls.map(url => road(url)), ...(relayUrl === undefined ? [] : [road(relayUrl, PLACES_WORDS.sheet.relayNote)])];
+}
 
 /** What the app calls the computer it runs on, first in every hosts list. */
 export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");

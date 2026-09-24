@@ -1844,6 +1844,11 @@ export type ProjectHue = z.infer<typeof ProjectHue>;
 /** How one project is drawn: its glyph and its hue, each the default where absent. */
 export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
 export type ProjectLook = z.infer<typeof ProjectLook>;
+/** The glyphs a computer can wear on the Computers page; the app maps each word to its drawing. */
+export const ComputerIcon = z.enum(["laptop", "desktop", "server", "cloud", "cpu", "drive", "container", "home"]);
+export type ComputerIcon = z.infer<typeof ComputerIcon>;
+export const ComputerLook = z.object({ icon: ComputerIcon }).strict();
+export type ComputerLook = z.infer<typeof ComputerLook>;
 
 export const Preferences = z.object({
   theme: ThemePreference,
@@ -1863,6 +1868,9 @@ export const Preferences = z.object({
   target: PreferencesTarget.optional(),
   /** How each project is drawn, by project id; kept here so every screen that opens this wsp draws it the same. */
   projectLook: z.record(z.string(), ProjectLook),
+  /** How each computer is drawn, by place id. Defaulted rather than required, so a record from a host that kept no
+   * icons still parses on the wire and does not blank every other preference. */
+  computerLook: z.record(z.string(), ComputerLook).default({}),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1883,12 +1891,13 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
     access: z.record(z.string(), z.string().nullable()).optional(),
     projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
+    computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1916,6 +1925,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
     access: perWorkspace(current.access, patch.access),
     projectLook: perWorkspace(current.projectLook, patch.projectLook),
+    computerLook: perWorkspace(current.computerLook, patch.computerLook),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -4786,6 +4796,31 @@ export const PlaceDoorView = z.object({
 });
 export type PlaceDoorView = z.infer<typeof PlaceDoorView>;
 
+/** One line a computer you own joins this host by, as joinRoads writes it: the address it dials, the whole command
+ * typed there, and the note for the relay's address, which answers only while the host is linked. */
+export const JoinRoad = z.object({ url: z.string().url(), line: z.string().min(1), note: z.string().optional() });
+export type JoinRoad = z.infer<typeof JoinRoad>;
+
+/** What places.mint answers: a fresh code, written into every line this host can be joined by, and when it stops
+ * working. The code is the one wsp add prints, off the same mint and the same expiry. */
+export const JoinMint = z.object({ joins: z.array(JoinRoad).min(1), expiresAt: z.string().datetime() });
+export type JoinMint = z.infer<typeof JoinMint>;
+
+/** A computer the person's own ssh already knows, offered where a computer is added over ssh: a Host block of their
+ * ssh config, or a name their known_hosts holds. Read off those two files alone; no key is ever read. */
+export const SshHostSuggestion = z.object({
+  alias: z.string().min(1).max(300),
+  hostName: z.string().max(300).optional(),
+  user: z.string().max(300).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  from: z.enum(["config", "known_hosts"]),
+});
+export type SshHostSuggestion = z.infer<typeof SshHostSuggestion>;
+
+/** The refusal for reading the person's ssh hosts on any socket but this computer's own window: which computers
+ * they reach is theirs, and a paired device, a relayed socket or a thread learns none of it. */
+export const SSH_HOSTS_REFUSAL = "only a socket holding this host's own token may read the ssh hosts on this computer; open wsp on the computer the host runs on";
+
 /** The refusal a socket let in on a ticket gets for opening the door computers you own dial: the same rule the
  * device and place ops read, since the door is who may reach this wsp. */
 export const PLACE_DOOR_REFUSAL = "a socket let in on a ticket cannot open the door computers you own dial; run wsp add on the computer the host runs on";
@@ -4919,6 +4954,13 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */
   z.object({ id: reqId, op: z.literal("places.door") }),
+  /** Mints a join code and answers a JoinMint: every line a computer you own can join this host by, off the door's
+   * addresses and the relay's, and when the code expires. The code lets a stranger in, so only a socket holding the
+   * host's own token may ask, as for pair.issue. */
+  z.object({ id: reqId, op: z.literal("places.mint") }),
+  /** Answers `{ hosts: SshHostSuggestion[] }`: the ssh config's hosts first, then known_hosts, less the computers
+   * already added over ssh. Only a socket holding the host's own token may ask. */
+  z.object({ id: reqId, op: z.literal("places.sshHosts") }),
   /** Puts the agent on a Linux computer over ssh and joins it: the host logs in as the person's own ssh would,
    * installs node and wsp there, starts the agent under that login's own service manager and waits for it to dial
    * back. Answers `{ addId, place: PlaceView }` once it has dialled; the steps ride place.stage events carrying the
