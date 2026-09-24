@@ -108,7 +108,7 @@ describe("wsp verbs over the host", () => {
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), daemonChannel: daemon.open });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -177,7 +177,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -509,6 +509,9 @@ describe("wsp verbs over the host", () => {
     const none = new NoProviderBackend();
     const elsewhere = stubBackend();
     await restartHost({}, memoryStore(), { wired: "none", backend: p => (p === "none" ? none : p === "elsewhere" ? elsewhere : undefined), list: () => ["none", "elsewhere"] }, none);
+    // The project stands on the provider this host forks on, which forks nothing, while another provider does.
+    await rt.projects.remove(cloud.id);
+    cloud = await projectOn(rt, "none");
     const bare = await run("new", "alpha");
     expect(bare.code).toBe(1);
     expect(bare.io.errors).toEqual([`wsp new: ${placeForksNothingPickLine("none", ["elsewhere"])}`]);
@@ -1156,6 +1159,10 @@ describe("wsp verbs over the host", () => {
     const here = { ...workspace, kind: "local", machineId: "local" } as const;
     expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts computer is left as it is; its record and 1 thread leave this computer.");
     expect(deletedLine({ workspace: here, threads: 1 })).toBe("deleted box ws_mine: its computer is left as it is, and its record and 1 thread are gone from this computer");
+    // A workspace that is a copy of a project folder takes the copy with it; the folder it was copied from stays.
+    const copied = { ...here, copy: { road: "clonefile", path: "/Users/dev/api-fix", source: "/Users/dev/api", base: "0".repeat(40), branch: "main", carried: "deps-and-config" } } as const;
+    expect(deleteQuestion({ workspace: copied, threads: 1 })).toBe("Delete box?\nIts copy at /Users/dev/api-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
+    expect(deletedLine({ workspace: copied, threads: 1 })).toBe("deleted box ws_mine: its copy at /Users/dev/api-fix is removed and the project folder is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
     const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
     expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
@@ -2190,7 +2197,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const model = await run("run", "alpha", "--model", "claude-haiku-4-5", "review it");
     expect(model.code).toBe(3);
-    expect(model.io.errors).toEqual([`wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
+    expect(model.io.errors).toEqual([`wsp run: model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001); legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8), Opus 4.7 (claude-opus-4-7), Opus 4.6 (claude-opus-4-6), Opus 4.5 (claude-opus-4-5), Fable 5 (claude-fable-5), Sonnet 4.6 (claude-sonnet-4-6), Sonnet 4.5 (claude-sonnet-4-5)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     const effort = await run("run", "alpha", "--effort", "ultra", "review it");
     expect(effort.code).toBe(3);
     expect(effort.io.errors).toEqual([`wsp run: effort "ultra" is not one Opus 5.5 takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
@@ -2243,6 +2250,13 @@ describe("wsp verbs over the host", () => {
     expect(none.io.errors).toEqual([`wsp run: Haiku 4.5 takes no effort${BUILT_IN_TABLE_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
     expect(BUILT_IN_TABLE_CLAUSE).toBe("; wsp's built-in table says so, since no agent on that workspace described itself");
     expect(claude.starts).toEqual([]);
+  });
+
+  it("runs a legacy model at an effort the binary lists for it", async () => {
+    await run("new", "alpha");
+    const older = await run("run", "alpha", "--model", "claude-opus-5", "--effort", "high", "review it");
+    expect(older.code).toBe(0);
+    expect(claude.starts.map(s => [s.model, s.effort])).toEqual([["claude-opus-5", "high"]]);
   });
 
   it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {

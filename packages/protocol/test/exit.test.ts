@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, VerbFailure, authRefusal, exitClassOf, notFoundRefusal, usageRefusal, verbFailure } from "../src/index.js";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, RuntimeResponse, VerbFailure, authRefusal, exitClassOf, notFoundRefusal, refusal, refusalLine, usageRefusal, verbFailure } from "../src/index.js";
 
 describe("the exit code every wsp verb answers with", () => {
   it("is one table: ok 0, provider 1, auth 2, usage 3, each class with its words", () => {
@@ -32,5 +32,21 @@ describe("the exit code every wsp verb answers with", () => {
     expect(verbFailure(new Error("no workspace nope"))).toEqual({ error: "no workspace nope", class: "provider", exit: 1 });
     expect(verbFailure("plain")).toEqual({ error: "plain", class: "provider", exit: 1 });
     expect(VerbFailure.safeParse({ error: "x", class: "ok", exit: 0 }).success).toBe(false);
+  });
+
+  it("a refusal keeps both halves apart for a client and still prints as the one line the command line always printed", () => {
+    const e = refusal("spoo names no user", "Type user@spoo.", "invalid");
+    expect(e.message).toBe(refusalLine("spoo names no user", "Type user@spoo."));
+    expect(e).toMatchObject({ fix: "Type user@spoo.", kind: "invalid" });
+    expect(exitClassOf(e)).toBe("usage");
+    expect((refusal("the host is busy", "Try again.") as Error & { kind?: string }).kind).toBeUndefined();
+    const usage = usageRefusal("wsp new takes one name.", "usage: wsp new <name>");
+    expect(usage.message).toBe("wsp new takes one name. usage: wsp new <name>");
+    expect(usage).toMatchObject({ fix: "usage: wsp new <name>", kind: "usage" });
+  });
+
+  it("the refused frame declares the fix, so a client that parses the wire keeps it", () => {
+    const frame = { id: 1, ok: false, error: "spoo names no user. Type user@spoo.", kind: "invalid", fix: "Type user@spoo." };
+    expect(RuntimeResponse.parse(frame)).toEqual(frame);
   });
 });

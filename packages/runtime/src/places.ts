@@ -150,8 +150,9 @@ export interface HerePlace {
 export interface PlaceWiring {
   /** The host's own ed25519 pair, made once beside the state file by the host and never written by the runtime. */
   hostKey: PlaceKeyPair;
-  /** The one word for a provider the host is set up for, as a place; nothing when it forks nowhere. */
-  provider(): { id: string; rateUsdPerHour: number } | undefined;
+  /** The one word for a provider the host is set up for, as a place; nothing, or no reader at all, when it forks
+   * nowhere. */
+  provider?(): { id: string; rateUsdPerHour: number } | undefined;
   here(): HerePlace;
   /** What this computer calls itself, which is what a joining computer shows its person from then on. */
   hostName(): string;
@@ -715,14 +716,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The provider this host forks on when nobody names a place: the place a record with no place word stands on.
    * The wiring is what says whether this host forks on a provider at all; a runtime served with no wiring of its
    * own has a one-row table standing for its backend, which is no place a person names. */
-  const wiredProvider = (): string | undefined => wiring.provider()?.id;
+  const wiredProvider = (): string | undefined => wiring.provider?.()?.id;
   /** Every provider a fork can land at, in the table's own order, the wired one among them. A host wired to one
-   * cloud that holds the key for another can fork at either, so both are rows a person names. */
+   * cloud that holds the key for another can fork at either, so both are rows a person names; a host wired to
+   * nowhere still lists every other provider it holds a key for. */
   const providerIds = (): readonly string[] => {
     const wired = wiredProvider();
-    if (wired === undefined) return [];
-    const table = opts.providers?.().list() ?? [];
-    return table.includes(wired) ? table : [wired];
+    const table = opts.providers?.();
+    const listed = table?.list() ?? [];
+    if (wired === undefined) return listed.filter(id => id !== table?.wired);
+    return listed.includes(wired) ? listed : [wired];
   };
   /** The backend of a provider row, or nothing when the word names no provider this host holds a key for. */
   const providerBackend = (placeId: string): MachineBackend | undefined => opts.providers?.().backend(placeId);
@@ -730,7 +733,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * added by saving a key carries its price with no second table. */
   const providerRate = (placeId: string): number | undefined => {
     const at = placeId === wiredProvider() ? undefined : providerBackend(placeId);
-    if (at === undefined) return placeId === wiredProvider() ? wiring.provider()?.rateUsdPerHour : undefined;
+    if (at === undefined) return placeId === wiredProvider() ? wiring.provider?.()?.rateUsdPerHour : undefined;
     return at.pricing.rateUsdPerHour(at.pricing.defaultSize);
   };
   /** The sizes one provider offers, each at that provider's own rate, read off the backend the host built for it.

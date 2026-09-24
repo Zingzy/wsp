@@ -10,7 +10,7 @@
 // the bottom of this file rather than wording a second set of place facts.
 import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
-import { CLOUD_NAMES, keyHeld } from "./providers.js";
+import { CLOUD_NAMES } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
  * its hostname; a provider carries the name its own row in the provider table gives it, since the host words it by
@@ -191,13 +191,6 @@ export const PROJECT_PICK_WORDS = {
 } as const;
 
 
-/** Which rows the Computers table draws: this computer and every computer joined to it, always, and a cloud
- * account only once this host holds its key or a workspace stands on it. A fresh state is this computer's row
- * alone, with no cloud row and no hourly rate on any screen: a table that listed what a person had not bought
- * read as a bill. */
-export function computerRows(places: readonly PlaceView[], setup: Pick<InitSetup, "keys"> | null, counts: Record<string, number>): PlaceView[] {
-  return places.filter(place => !isProviderPlace(place) || keyHeld(place.name, setup) || (counts[place.id] ?? 0) > 0);
-}
 
 /** How a workspace's copy of a project is made on this computer, as that computer last reported it: the
  * protocol's own word (snapshot, reflink, plain), and the sentence for a computer that makes no copy at all.

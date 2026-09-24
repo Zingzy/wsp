@@ -357,6 +357,11 @@ impl Ctx {
         }
     }
 
+    /// The file naming the folders beyond the root that ops may reach, which are the project folders.
+    pub(crate) fn roots_path(&self) -> PathBuf {
+        self.options.roots_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DAEMON_ROOTS_PATH))
+    }
+
     /// What this machine's own two modules are built from; the kind picks which modules those are.
     fn readings_options(&self) -> readings::ReadingsOptions {
         readings::ReadingsOptions {
@@ -512,6 +517,16 @@ impl Daemon {
             tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
         tokio::spawn(auth::watch(Arc::clone(&self.ctx)));
+        let ctx = Arc::clone(&self.ctx);
+        // A copy sits beside its project folder, so a removal a stop cut short is left in the folder a root sits in.
+        std::thread::spawn(move || {
+            if let Ok(roots) = paths::roots_now(Path::new(&ctx.root), &ctx.roots_path()) {
+                let beside = wsp_runtime::copy_road::aside::beside(&roots[1..]);
+                for failed in wsp_runtime::copy_road::aside::sweep(beside, |p| std::fs::remove_dir_all(p)) {
+                    ctx.log(&failed.to_string());
+                }
+            }
+        });
         loop {
             let accepted = tokio::select! {
                 accepted = self.listener.accept() => accepted,

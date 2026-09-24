@@ -71,6 +71,15 @@ describe("the collector's Host over a machine", () => {
     expect(cut.refused).toEqual([`read: the answer for ${join(dir, "a")} was cut short`]);
   });
 
+  it("says why a road refused to run the reads at all, in the road's own first line, once", async () => {
+    const { login } = home();
+    const refusing: Pick<Machine, "exec"> = { exec: async () => ({ exitCode: 1, stdout: "", stderr: "runuser: user ada does not exist or the user entry does not contain all the required fields\n" }) };
+    const host = machineHost(refusing, login);
+    expect(await Promise.all([host.fs.readText("/a"), host.fs.readText("/b")])).toEqual([undefined, undefined]);
+    expect(await host.fs.readText("/c")).toBeUndefined();
+    expect(host.refused).toEqual(["read: runuser: user ada does not exist or the user entry does not contain all the required fields"]);
+  });
+
   it("runs a command word for word as the login, with the variables it is given, and answers nothing where it failed", async () => {
     const { login } = home();
     const host = machineHost(bash().machine, login);

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
@@ -202,6 +203,30 @@ async function accountSession(opts: OpenHostOptions): Promise<HostSession | unde
   return remoteSession(alias, record, record.url);
 }
 
+/** The io the host inside the app writes through: every line also lands in the host.log a service host writes, since
+ * a packaged app's own stdout and stderr go nowhere a person can read. */
+function loggedTo(io: CliIO, logPath: string): CliIO {
+  const kept = (line: string): void => {
+    try {
+      mkdirSync(dirname(logPath), { recursive: true });
+      appendFileSync(logPath, `${line}\n`);
+    } catch {
+      // A log that cannot be written never stops the host that writes it.
+    }
+  };
+  return {
+    ...io,
+    log: line => {
+      kept(line);
+      io.log(line);
+    },
+    error: line => {
+      kept(line);
+      io.error(line);
+    },
+  };
+}
+
 /** Attaches to the host already serving this state file, which its lock names
  * and this window has proof of, else opens on the host a line with no name on
  * it takes, else starts one the way the wsp bin does. Defaults held by
@@ -213,7 +238,7 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   if (away !== undefined) return away;
   const defaultsFree = (opts.port === 0 || (await canListen(opts.port))) && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
   const ports = defaultsFree ? { port: opts.port, wsPort: opts.wsPort } : { port: 0, wsPort: 0 };
-  const handle = await serve(opts.io, {
+  const handle = await serve(loggedTo(opts.io, hostLogPath(opts.statePath)), {
     ...ports,
     statePath: opts.statePath,
     webDir: opts.webDir,

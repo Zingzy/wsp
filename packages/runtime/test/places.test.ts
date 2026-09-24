@@ -1472,6 +1472,29 @@ describe("dialling a computer that stopped answering", () => {
     expect(Object.keys(road).sort()).toEqual(["from", "ssh"]);
   });
 
+  it("marks the step an install stopped in with the installer's one sentence and hands back that sentence alone", async () => {
+    const hostKey = newPlaceKeyPair();
+    const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (_req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          stage("wsp", "done", "x86_64");
+          stage("service", "running");
+          throw new Error(sentence);
+        },
+      },
+    });
+    const stages: PlaceStageEvent[] = [];
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@178.156.161.168", hostUrls: DOOR }, Date.now())).rejects.toThrow(new Error(sentence));
+    expect(stages.filter(s => s.state === "failed").map(s => [s.step, s.note])).toEqual([["service", sentence]]);
+  });
+
   it("hands back ssh's own sentence when the login is refused, and keeps it on the row", async () => {
     const hostKey = newPlaceKeyPair();
     let box: WsClient | undefined;

@@ -80,7 +80,7 @@ import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, 
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, sshDaemonPlace } from "./doctor.js";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -90,7 +90,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
-import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
 import { placeLink, sharedAgentsOn, sharedOn, signInOnBox, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
 import { systemOpener } from "./relay.js";
@@ -153,9 +153,9 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
  * address it dials. */
 export const hostKeyHere = (statePath: string): string => keyFingerprint(hostPlaceKey(statePath).publicKey);
 
-/** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
- * this computer's own row. */
-export function placeWiring(statePath: string, env: ProviderEnv, advertise?: string): PlaceWiring {
+/** What a host wires for its places: its own pair and this computer's own row. The provider row is the runtime's,
+ * read off the provider pick a saved key moves. */
+export function placeWiring(statePath: string, advertise?: string): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
     // The recipe beside that state file, put on every computer this host holds: the same two readers a copy of
@@ -174,14 +174,6 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
     log: placeLogReader(),
     update: placeUpdater(),
     leave: placeLeaver(),
-    provider: () => {
-      const module = providerModule(env);
-      // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
-      // wears the word its own machines wear, so a stand-in serving a fixture shows the cloud it is standing in for.
-      if (!isPlace(module, env)) return undefined;
-      const { pricing } = providerBackendFor(env);
-      return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
-    },
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
     // itself, so the row for the computer the host runs on carries the facts every other row carries.
@@ -313,9 +305,6 @@ async function onePlace(client: HostClient, typed: string, ref: string): Promise
   if (found.length > 1) return { refusal: twoPlacesLine(typed, found.map(p => p.id)) };
   return { place: found[0]!, joined };
 }
-
-/** The line a join prints once the computer is in. */
-export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
 
 /** The refusal a join gets on a computer whose manager wsp writes no unit for: nothing there would keep the daemon
  * up, so nothing is written. */
@@ -591,7 +580,7 @@ export function placeUpdateScript(home: string, landed: string, unit = placeUnit
 /** What the box said when wsp's own login files could not be written there: the update stops on it, since the
  * lines exit 0 by design and a failure is the link going or the login file being unreadable, and the person runs
  * the line again. */
-export const placeLoginFilesFailedLine = (name: string, said: string): string => `${name} did not take wsp's login files: ${said}`;
+export const placeLoginFilesFailedLine = (name: string, said: string): string => placeInstallFailedLine(name, "login", said);
 
 /** The refusal an update gets on a computer this host is holding no link to and was never installed over ssh: a
  * computer joined by typing a code is reached over its link alone. */
@@ -1480,7 +1469,7 @@ async function handshake(
         if (frame["id"] === 1) {
           const reply = PlaceJoinReply.safeParse(frame);
           if (!reply.success) {
-            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
+            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message.replace(/\s+/g, " ").trim()}`));
             return;
           }
           const { placeId, hostPublicKey, nonce: hostNonce, signature, ephemeral, hostName } = reply.data;

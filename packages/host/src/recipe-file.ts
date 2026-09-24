@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join } from "node:path";
 import { catalogEntry, loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
-import { Recipe, toolRowId, type RecipeRow, type ToolPin } from "@wsp/protocol";
+import { issuesLine, Recipe, toolRowId, type RecipeRow, type ToolPin } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
@@ -32,7 +32,7 @@ export function loadRecipe(path: string): Recipe {
   }
   const r = Recipe.safeParse(data);
   if (r.success) return r.data;
-  throw new Error(`${path}: invalid recipe: ${r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  throw new Error(`${path}: invalid recipe: ${issuesLine(r.error.issues)}`);
 }
 
 /** What the file at `path` is right now, for telling a recipe that arrived from one that was already there: its size

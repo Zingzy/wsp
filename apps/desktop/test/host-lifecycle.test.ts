@@ -6,8 +6,8 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dialHost, localWiring, localWorkFolder, makeRuntime, setDefaultHost, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
-import { hostNoKeyLine } from "@wsp/protocol";
+import { dialHost, hostTokenFor, localWiring, localWorkFolder, makeRuntime, setDefaultHost, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
+import { WS_PATH, hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -173,6 +173,24 @@ describe("openHost", () => {
       runtime: testRuntime(),
     });
   }
+
+  it("the host inside the app writes every line it says, and one per refused frame, to host.log beside the state file", async () => {
+    const lines: string[] = [];
+    const statePath = join(home, "state.json");
+    session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(lines), runtime: testRuntime() });
+    const ws = new WebSocket(`${session.url.replace(/^http/, "ws")}${WS_PATH}`);
+    const replies: { id?: number; ok?: boolean }[] = [];
+    ws.onmessage = m => replies.push(JSON.parse(String(m.data)) as { id?: number; ok?: boolean });
+    await new Promise(resolve => (ws.onopen = resolve));
+    ws.send(JSON.stringify({ id: 1, op: "auth", token: hostTokenFor(statePath) }));
+    ws.send(JSON.stringify({ id: 2, op: "workspaces.get", workspaceId: "nope" }));
+    await vi.waitFor(() => expect(replies.find(r => r.id === 2)).toMatchObject({ ok: false }));
+    ws.close();
+    const logged = readFileSync(join(home, "host.log"), "utf8").split("\n").filter(l => l !== "");
+    expect(logged.length).toBeGreaterThan(0);
+    expect(logged).toEqual(lines);
+    expect(logged.some(l => l.startsWith("refused workspaces.get "))).toBe(true);
+  }, 20_000);
 
   /** A record wsp hosts wrote off the account's listing: the address the relay named, the key pinned at first
    * sight, and no token until a dial admits this computer over there. */

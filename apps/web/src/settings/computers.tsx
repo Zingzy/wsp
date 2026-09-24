@@ -6,10 +6,9 @@
 // the workspaces standing on it, and the two things a person can do to it. Only facts the host carries are drawn; a fact
 // not reported is left out rather than stood in for.
 //
-// Which rows the list draws is a rule of its own (computerRows): this computer
-// and every computer joined to it always, and a cloud account only once this
-// host holds its key or a workspace stands on it. A list that named an
-// account nobody had bought, with an hourly price beside it, read as a bill.
+// The list draws every row the host's places list carries: the host lists a
+// cloud only once it holds that cloud's key or a stand-in serves in its place,
+// so nothing here filters again.
 import { useState } from "react";
 import { HERE_PLACE_ID, PLACES_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
@@ -20,7 +19,7 @@ import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { WHERE_WORDS } from "./format.js";
 import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
-import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, computerRows, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
+import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { Card, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
@@ -77,15 +76,15 @@ function ownStateWord(ctx: SettingsContext): string {
   return own === undefined ? "" : placeStateWord(own, absent);
 }
 
-/** The pages under Computers in the sidebar: one per computer the list draws, this one first, read off the same
- * rule the list reads so a row and its sidebar row cannot disagree about which computers there are. */
+/** The pages under Computers in the sidebar: one per computer the list draws, this one first, off the same list so a
+ * row and its sidebar row cannot disagree about which computers there are. */
 export function computerSubPages(ctx: SettingsContext): { at: SettingsAt; name: string }[] {
-  return computerRows(ctx.places, ctx.reads.setup, placeWorkspaceCounts(ctx.places, ctx.workspaces)).map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place, place.id === HERE_PLACE_ID) }));
+  return ctx.places.map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place, place.id === HERE_PLACE_ID) }));
 }
 
 export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const counts = placeWorkspaceCounts(ctx.places, ctx.workspaces);
-  const rows = computerRows(ctx.places, ctx.reads.setup, counts);
+  const rows = ctx.places;
   return [
     {
       id: "computers",

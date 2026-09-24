@@ -3,7 +3,8 @@
 // model on the button, since the chip has to say which agent runs a turn
 // before it says what that agent runs on; behind it a rail of the agents that
 // can run one, each named in text on hover, a search box, the models with
-// favourites first and a jump chip per row, and a footer
+// favourites first, the older models an agent still runs folded under one
+// row at the end, and a jump chip per row, and a footer
 // naming where the list came from in that agent's own words, on one line
 // whatever the words are and whole on hover, then two sentences that hold
 // whatever that line says: whose sign-in the turn runs on and where, and what
@@ -15,9 +16,9 @@
 // has the rail opened for it once, without taking focus: the box under it is
 // where the ask is typed, the pick is one click away beside it, and the first
 // keystroke takes the list away again.
-import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { noModelsLine } from "@wsp/protocol";
+import { everyModel, noModelsLine } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessModel } from "@wsp/protocol";
 import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -51,17 +52,33 @@ export const UNLISTED_MODEL_LINE = "Not in this workspace's list";
  * marked once here so the row that draws it reads the mark rather than asking the catalog again. */
 export interface ModelRow extends HarnessModel {
   readonly unlisted?: boolean;
+  readonly legacy?: boolean;
 }
 
 /** Favourites first, then the catalog's order; a search narrows by label, slug and description. The model the
- * composer names comes last under its own id where the list does not carry it, so the pick the button shows has a
- * row to sit on and moving off it is a click on another model rather than the first send. */
+ * composer names comes after the catalog's own under its own id where the list does not carry it, so the pick the
+ * button shows has a row to sit on and moving off it is a click on another model rather than the first send. The
+ * catalog's legacy models come last. */
 export function listModels(catalog: HarnessCatalog, favourites: ReadonlyArray<string>, query: string, current: HarnessModel | null): ModelRow[] {
   const q = normalizeSearchText(query);
-  const unlisted: ModelRow[] = current !== null && !catalog.models.some(m => m.value === current.value) ? [{ ...current, description: UNLISTED_MODEL_LINE, unlisted: true }] : [];
-  const rows: ModelRow[] = [...catalog.models, ...unlisted].filter(m => q === "" || normalizeSearchText(`${m.label} ${m.value} ${m.description ?? ""}`).includes(q));
+  const unlisted: ModelRow[] = current !== null && !everyModel(catalog).some(m => m.value === current.value) ? [{ ...current, description: UNLISTED_MODEL_LINE, unlisted: true }] : [];
+  const legacy: ModelRow[] = (catalog.legacyModels ?? []).map(m => ({ ...m, legacy: true }));
+  const rows: ModelRow[] = [...catalog.models, ...unlisted, ...legacy].filter(m => q === "" || normalizeSearchText(`${m.label} ${m.value} ${m.description ?? ""}`).includes(q));
   const starred = (m: ModelRow) => favourites.includes(favouriteKey(catalog.harness, m.value));
   return [...rows.filter(starred), ...rows.filter(m => !starred(m))];
+}
+
+/** The legacy fold's own place in the menu, beside the model rows the arrow keys walk. */
+const LEGACY_FOLD = "legacy-fold";
+type MenuItem = ModelRow | typeof LEGACY_FOLD;
+
+/** What the menu draws, in order: behind an unsearched agent tab the legacy models nobody starred sit under one fold
+ * row at the end, drawn only once it is open; a search or the favourites tab shows every row it finds, unfolded. */
+function menuItems(rows: ReadonlyArray<ModelRow>, starred: (m: ModelRow) => boolean, folds: boolean, open: boolean): MenuItem[] {
+  const folded = (m: ModelRow) => folds && m.legacy === true && !starred(m);
+  const tail = rows.filter(folded);
+  if (tail.length === 0) return [...rows];
+  return [...rows.filter(m => !folded(m)), LEGACY_FOLD, ...(open ? tail : [])];
 }
 
 export function jumpLabel(index: number, platform: string): string | null {
@@ -89,16 +106,20 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   const [query, setQuery] = useState("");
   const [onlyStarred, setOnlyStarred] = useState(false);
   const [active, setActive] = useState(0);
+  const [legacyOpen, setLegacyOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it stands.
   const foot = notice ?? catalog.refusal ?? null;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
-  const rows = useMemo(() => {
+  const items = useMemo(() => {
+    const starred = (m: ModelRow) => favourites.includes(favouriteKey(catalog.harness, m.value));
     const all = listModels(catalog, favourites, query, model);
-    return onlyStarred ? all.filter(m => favourites.includes(favouriteKey(catalog.harness, m.value))) : all;
-  }, [catalog, favourites, model, onlyStarred, query]);
+    return menuItems(onlyStarred ? all.filter(starred) : all, starred, query === "" && !onlyStarred, legacyOpen);
+  }, [catalog, favourites, legacyOpen, model, onlyStarred, query]);
+  const rows = useMemo(() => items.filter((item): item is ModelRow => item !== LEGACY_FOLD), [items]);
+  const currentIsLegacy = catalog.legacyModels?.some(m => m.value === model?.value) === true;
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
 
   useEffect(() => {
@@ -129,24 +150,79 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
       }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        if (rows.length === 0) return;
-        setActive(i => (i + (event.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length);
+        if (items.length === 0) return;
+        setActive(i => (i + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
         return;
       }
       if (event.key === "Enter") {
-        const row = rows[active];
-        if (row === undefined) return;
+        const item = items[active];
+        if (item === undefined) return;
         event.preventDefault();
-        pick(row);
+        if (item === LEGACY_FOLD) setLegacyOpen(on => !on);
+        else pick(item);
       }
     },
-    [active, pick, rows],
+    [active, items, pick, rows],
   );
+
+  const foldAt = items.indexOf(LEGACY_FOLD);
+  const head = foldAt === -1 ? rows : rows.slice(0, foldAt);
+  const tail = foldAt === -1 ? [] : rows.slice(foldAt);
+
+  const optionRow = (m: ModelRow, index: number) => {
+    const starred = favourites.includes(favouriteKey(catalog.harness, m.value));
+    const chip = jumpLabel(rows.indexOf(m), platform);
+    return (
+      <div
+        key={m.value}
+        role="option"
+        aria-selected={model?.value === m.value}
+        data-composer-option={m.value}
+        data-active={index === active || undefined}
+        onMouseEnter={() => setActive(index)}
+        onClick={() => pick(m)}
+        className={cn(
+          "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground",
+          index === active && "bg-accent text-accent-foreground",
+          model?.value === m.value && "bg-foreground/[0.08]",
+        )}
+      >
+        <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
+          <div className="flex items-center gap-2">
+            <span className={cn("truncate text-[15px]", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
+            {m.isDefault ? <span className="rounded border border-primary/40 bg-primary/10 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-primary">default</span> : null}
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+            <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+            <span className="truncate">{catalog.label}</span>
+          </div>
+        </div>
+        {chip !== null ? <Kbd className="h-6 min-w-0 rounded-md px-1.5 font-mono text-xs">{chip}</Kbd> : null}
+        <button
+          type="button"
+          aria-label={starred ? `Remove ${m.label} from favourites` : `Add ${m.label} to favourites`}
+          aria-pressed={starred}
+          data-composer-favourite={m.value}
+          onClick={e => {
+            e.stopPropagation();
+            toggle(catalog.harness, m.value);
+          }}
+          className={cn("shrink-0 rounded p-1 text-muted-foreground/60 opacity-60 hover:text-foreground group-hover:opacity-100", starred && "text-foreground opacity-100")}
+        >
+          <StarIcon className={cn("size-4", starred && "fill-current")} aria-hidden />
+        </button>
+      </div>
+    );
+  };
 
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={next => {
+        // Set with the open itself, so the first frame of a menu opened on a legacy model already shows it.
+        if (next) setLegacyOpen(currentIsLegacy);
+        setOpen(next);
+      }}
     >
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
@@ -225,55 +301,34 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                 data-composer-model-search
               />
             </label>
-            <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" aria-label="Models">
-              {rows.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : onlyStarred && query === "" ? "Star a model to keep it here." : "No model matches"}</div>
-              ) : (
-                rows.map((m, index) => {
-                  const starred = favourites.includes(favouriteKey(catalog.harness, m.value));
-                  const chip = jumpLabel(index, platform);
-                  return (
-                    <div
-                      key={m.value}
-                      role="option"
-                      aria-selected={model?.value === m.value}
-                      data-composer-option={m.value}
-                      data-active={index === active || undefined}
-                      onMouseEnter={() => setActive(index)}
-                      onClick={() => pick(m)}
-                      className={cn(
-                        "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground",
-                        index === active && "bg-accent text-accent-foreground",
-                        model?.value === m.value && "bg-foreground/[0.08]",
-                      )}
-                    >
-                      <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
-                        <div className="flex items-center gap-2">
-                          <span className={cn("truncate text-[15px]", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
-                          {m.isDefault ? <span className="rounded border border-primary/40 bg-primary/10 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-primary">default</span> : null}
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-                          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
-                          <span className="truncate">{catalog.label}</span>
-                        </div>
-                      </div>
-                      {chip !== null ? <Kbd className="h-6 min-w-0 rounded-md px-1.5 font-mono text-xs">{chip}</Kbd> : null}
-                      <button
-                        type="button"
-                        aria-label={starred ? `Remove ${m.label} from favourites` : `Add ${m.label} to favourites`}
-                        aria-pressed={starred}
-                        data-composer-favourite={m.value}
-                        onClick={e => {
-                          e.stopPropagation();
-                          toggle(catalog.harness, m.value);
-                        }}
-                        className={cn("shrink-0 rounded p-1 text-muted-foreground/60 opacity-60 hover:text-foreground group-hover:opacity-100", starred && "text-foreground opacity-100")}
-                      >
-                        <StarIcon className={cn("size-4", starred && "fill-current")} aria-hidden />
-                      </button>
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+              <div role="listbox" aria-label="Models">
+                {items.length === 0 ? (
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : onlyStarred && query === "" ? "Star a model to keep it here." : "No model matches"}</div>
+                ) : (
+                  head.map((m, index) => optionRow(m, index))
+                )}
+              </div>
+              {foldAt === -1 ? null : (
+                <>
+                  <button
+                    type="button"
+                    aria-expanded={legacyOpen}
+                    data-composer-legacy-fold
+                    data-active={foldAt === active || undefined}
+                    onMouseEnter={() => setActive(foldAt)}
+                    onClick={() => setLegacyOpen(on => !on)}
+                    className={cn("flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-start text-[15px] text-foreground", foldAt === active && "bg-accent text-accent-foreground")}
+                  >
+                    <span className="min-w-0 flex-1 truncate">Legacy models</span>
+                    <ChevronRightIcon className={cn("size-4 shrink-0 opacity-60 transition-transform duration-150", legacyOpen && "rotate-90")} aria-hidden />
+                  </button>
+                  {tail.length === 0 ? null : (
+                    <div role="listbox" aria-label="Legacy models">
+                      {tail.map((m, index) => optionRow(m, foldAt + 1 + index))}
                     </div>
-                  );
-                })
+                  )}
+                </>
               )}
             </div>
             {foot === null ? null : (

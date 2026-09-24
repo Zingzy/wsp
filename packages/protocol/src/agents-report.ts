@@ -118,3 +118,7 @@ export const nappingAgentsRefusal = (name: string): string => `${name} is nappin
 
 /** Why a computer that runs every line as root refused to read: the lines would run as root in somebody's home. */
 export const noRunuserRefusal = (user: string): string => `this computer runs wsp as root and has no runuser to run as ${user}, the owner of the home, so nothing was read`;
+
+/** Why a computer that runs every line as root refused to read: the home it names is not there, so there is no
+ * owner to hand the lines to and running them as root is not an answer. */
+export const noHomeRefusal = (home: string): string => `this computer runs wsp as root and its home ${home} is not there, so nothing was read`;
