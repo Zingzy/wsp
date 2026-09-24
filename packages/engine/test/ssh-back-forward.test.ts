@@ -2,6 +2,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { lineFeed } from "../src/child-exec.js";
 import { carriedSshValues, holdBackForward, sshBackArgs, type HeldChild, type SshCarried, type SshLocalRun, type SshReach } from "../src/ssh-backend.js";
 
 const DEFAULTS = [
@@ -233,6 +234,30 @@ describe("the ssh dial-back forward", () => {
     expect(fake.killed).toEqual(["SIGTERM"]);
     fake.exit(null, "SIGTERM");
     await expect(held.ended).resolves.toBe("ssh ended on SIGTERM");
+  });
+
+  it("a box that writes without a newline leaves only a bounded tail held", () => {
+    const lines: string[] = [];
+    const feed = lineFeed(line => lines.push(line), 4096);
+    const chunk = "x".repeat(65536);
+    for (let i = 0; i < 64; i++) feed.feed(chunk);
+    feed.flush();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.length).toBeLessThanOrEqual(4096);
+  });
+
+  it("a newline-free flood on stderr still lets the allocated port and ssh's last line through", async () => {
+    const fake = fakeChild();
+    const held = holdBackForward(CARRIED, 0, 4640, () => fake.child);
+    const chunk = "x".repeat(65536);
+    for (let i = 0; i < 64; i++) fake.stderr.write(chunk);
+    fake.stderr.write("\nAllocated port 41234 for remote forward to 127.0.0.1:4640\n");
+    fake.stdout.write("WSP_BACK_UP\n");
+    await expect(held.up).resolves.toBe(41234);
+    for (let i = 0; i < 64; i++) fake.stderr.write(chunk);
+    await tick();
+    fake.exit(255);
+    expect((await held.ended).length).toBeLessThanOrEqual(300);
   });
 
   it("a child that ends after it was up resolves ended with its last line", async () => {

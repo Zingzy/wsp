@@ -25,6 +25,27 @@ export interface ChildOptions {
 export const CHILD_UNSTARTABLE = 127;
 export const CHILD_TIMED_OUT = 124;
 
+/** A stream's chunks as lines, the last partial one held until its newline or the flush; past `keep` characters
+ * only its tail is held, so a writer that never ends a line cannot grow the reader. */
+export function lineFeed(onLine: (line: string) => void, keep = Infinity): { feed(chunk: string): void; flush(): void } {
+  let pending = "";
+  return {
+    feed: chunk => {
+      pending += chunk;
+      let nl: number;
+      while ((nl = pending.indexOf("\n")) !== -1) {
+        onLine(pending.slice(0, nl));
+        pending = pending.slice(nl + 1);
+      }
+      if (pending.length > keep) pending = pending.slice(-keep);
+    },
+    flush: () => {
+      if (pending !== "") onLine(pending);
+      pending = "";
+    },
+  };
+}
+
 export function runChild(file: string, args: readonly string[], opts: ChildOptions = {}): Promise<ExecResult> {
   return new Promise<ExecResult>(resolve => {
     const child = spawn(file, [...args], {
@@ -39,16 +60,7 @@ export function runChild(file: string, args: readonly string[], opts: ChildOptio
     }
     let stdout = "";
     let stderr = "";
-    let pending = "";
-    const feed = (chunk: string): void => {
-      if (opts.onLine === undefined) return;
-      pending += chunk;
-      let nl: number;
-      while ((nl = pending.indexOf("\n")) !== -1) {
-        opts.onLine(pending.slice(0, nl));
-        pending = pending.slice(nl + 1);
-      }
-    };
+    const lines = opts.onLine === undefined ? undefined : lineFeed(opts.onLine);
     let timedOut = false;
     const timer = opts.timeoutMs === undefined ? undefined : setTimeout(() => {
       timedOut = true;
@@ -58,14 +70,14 @@ export function runChild(file: string, args: readonly string[], opts: ChildOptio
     child.stdout.on("data", (b: Buffer) => {
       const chunk = text(b);
       stdout += chunk;
-      feed(chunk);
+      lines?.feed(chunk);
     });
     child.stderr.on("data", (b: Buffer) => {
       stderr += text(b);
     });
     const done = (exitCode: number): void => {
       if (timer !== undefined) clearTimeout(timer);
-      if (opts.onLine !== undefined && pending !== "") opts.onLine(pending);
+      lines?.flush();
       resolve({ exitCode, stdout, stderr });
     };
     child.on("error", e => {

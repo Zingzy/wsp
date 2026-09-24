@@ -16,7 +16,7 @@ import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
-import { runChild } from "./child-exec.js";
+import { lineFeed, runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
 import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readLists, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
@@ -102,6 +102,9 @@ export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?:
 /** How long the ssh client waits for the machine to answer the dial itself, before the script's own deadline starts
  * mattering: a machine that is off must fail rather than hang a turn. */
 export const SSH_CONNECT_TIMEOUT_S = 10;
+
+/** The most of ssh's words any message here keeps: they land in a slot two lines high. */
+export const SSH_LINE_CAP = 300;
 
 /** How long an idle master connection is kept after the last command through it. A turn polls its log every second
  * and a half, so without one every poll is a key exchange and a line in the machine's auth log (measured: seven
@@ -295,17 +298,14 @@ export interface BackForward {
 /** What ssh prints on stderr for a remote forward asked at port 0 (ssh(1), -R). */
 const ALLOCATED_PORT = /^Allocated port (\d+) for remote forward to /;
 
-/** Each line a stream writes, the last partial one held until its newline. */
+/** The most of a partial line the holder keeps waiting for its newline: room for any line ssh prints. */
+const HELD_TAIL = 4096;
+
+/** Each line a stream writes, cut to SSH_LINE_CAP. Once the session stands the box writes on both pipes, and it is
+ * not trusted with this computer's memory: a line it never ends is held only by its tail. */
 function eachLine(stream: NodeJS.ReadableStream, fn: (line: string) => void): void {
-  let pending = "";
-  stream.on("data", (chunk: Buffer | string) => {
-    pending += chunk.toString();
-    let nl: number;
-    while ((nl = pending.indexOf("\n")) !== -1) {
-      fn(pending.slice(0, nl).replace(/\r$/, ""));
-      pending = pending.slice(nl + 1);
-    }
-  });
+  const lines = lineFeed(line => fn(line.replace(/\r$/, "").slice(0, SSH_LINE_CAP)), HELD_TAIL);
+  stream.on("data", (chunk: Buffer | string) => lines.feed(chunk.toString()));
 }
 
 /** Starts the forward child and holds it. The host keeps its stdin pipe open and writes nothing to it. */
@@ -341,7 +341,7 @@ export function holdBackForward(carried: SshCarried, boxPort: number, doorPort: 
   const ended = new Promise<string>(resolve => {
     const end = (fallback: string): void => {
       const line = clientWords(said.join("\n")).split("\n").at(-1) ?? "";
-      const words = (line === "" ? fallback : line).slice(0, 300);
+      const words = (line === "" ? fallback : line).slice(0, SSH_LINE_CAP);
       settleUp.reject(new Error(words));
       resolve(words);
     };
@@ -553,10 +553,10 @@ export function clientWords(text: string): string {
 /** What ssh itself said when a login would not stand: the client's own lines with its debug chatter dropped and
  * nothing of wsp's over them. A person reading why a computer refused them needs ssh's sentence, the one they
  * would have seen in their own terminal; a wrapper naming the reader that asked is the reader talking about
- * itself. Capped because it lands in a slot two lines high. */
+ * itself. */
 export function sshRefusalLine(said: { stderr: string; exitCode: number }, reach: SshReach): string {
   const lines = clientWords(said.stderr);
-  return lines === "" ? `${reach.user}@${reach.host} refused the login over ssh (exit ${said.exitCode})` : lines.slice(-300);
+  return lines === "" ? `${reach.user}@${reach.host} refused the login over ssh (exit ${said.exitCode})` : lines.slice(-SSH_LINE_CAP);
 }
 
 /** One dial of a machine over ssh and nothing else: a command every unix runs, so what comes back is the
@@ -615,7 +615,7 @@ export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
 export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string; shell?: string }> {
   const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000 });
-  if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
+  if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-SSH_LINE_CAP)}`);
   const values = readValues(res.stdout);
   const home = values["home"];
   if (home === undefined || !isPlainPath(home)) throw new Error(homeRefusal(reach, home));
@@ -756,7 +756,7 @@ export class SshMachine implements Machine {
     if (os === undefined || uptimeMs === undefined || folder === undefined || folder === "") {
       // The caller shows pending and swallows this, so the reason lands in the host's own log instead: once for
       // this machine, and again only when what it says changes, since the read runs on every status tick.
-      const why = `${this.reach.user}@${this.reach.host} did not say what it is over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`;
+      const why = `${this.reach.user}@${this.reach.host} did not say what it is over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-SSH_LINE_CAP)}`;
       if (this.quiet !== why) console.warn(why);
       this.quiet = why;
       throw new Error(why);
@@ -779,7 +779,7 @@ export class SshMachine implements Machine {
     const tmp = `${path}.wsp-in-${randomBytes(6).toString("hex")}`;
     const res = await this.transport(this.reach, putBytesScript(path, bytes.length, tmp), { stdin: bytes, ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes(SSH_BYTES_OK)) {
-      throw new Error(`${bytes.length} bytes did not land at ${path} over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
+      throw new Error(`${bytes.length} bytes did not land at ${path} over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-SSH_LINE_CAP)}`);
     }
   }
 }
