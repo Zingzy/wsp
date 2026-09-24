@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { noHomeRefusal, noRunuserRefusal } from "@wsp/protocol";
-import { symlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { asLogin, landAsLogin, targetLogin, type TargetLogin } from "../src/target-line.js";
@@ -106,7 +105,10 @@ describe("bytes landed as the login", () => {
       id: "box",
       kind: "sandbox",
       exec: async (cmd: string) => (ran.push(cmd), fail !== undefined && cmd.includes(fail) ? { exitCode: 1, stdout: "", stderr: "Permission denied\n" } : ok),
-      putBytes: async (path: string) => void landed.push(path),
+      putBytes: async (path: string) => {
+        landed.push(path);
+        ran.push(`land ${path}`);
+      },
     } as unknown as Machine;
     return { machine, ran, landed };
   };
@@ -119,19 +121,26 @@ describe("bytes landed as the login", () => {
     const staging = landed[0]!;
     const folder = staging.slice(0, staging.lastIndexOf("/"));
     expect(folder.startsWith("/tmp/wsp-land-")).toBe(true);
-    // The folder is made private before a byte lands, and handed to the login rather than opened to everyone.
-    expect(ran[0]).toBe(`mkdir -m 0700 '${folder}'`);
-    expect(ran[1]).toBe(`chown -R 'ada' '${folder}'`);
+    // Private before a byte lands, the bytes landed while only root can open it, and only then handed to the login
+    // with the file inside: never a folder the login owns that root then writes into by name.
+    expect(ran.slice(0, 3)).toEqual([`mkdir -m 0700 '${folder}'`, `land ${staging}`, `chown -R -- 'ada' '${folder}'`]);
     expect(ran.join("\n")).not.toMatch(/chmod 0?6?44|chmod [ago]*\+r/);
-    expect(ran[2]!.startsWith("runuser -u 'ada' -- bash -c ")).toBe(true);
-    expect(ran[2]).toContain("/home/ada/.codex/config.toml");
+    expect(ran[3]!.startsWith("runuser -u 'ada' -- bash -c ")).toBe(true);
+    expect(ran[3]).toContain("/home/ada/.codex/config.toml");
     expect(ran.at(-1)).toBe(`rm -rf '${folder}'`);
+  });
+
+  it("takes away no folder it did not make: a name already taken refuses the landing and leaves that folder be", async () => {
+    const { machine, ran, landed } = machineOf("mkdir");
+    await expect(landAsLogin(machine, login, "/home/ada/.codex/config.toml", Buffer.from("x"))).rejects.toThrow(/no private folder/);
+    expect(landed).toEqual([]);
+    expect(ran).toHaveLength(1);
   });
 
   it("unpacks a folder as the login, and a write the login is refused still takes the staging folder away", async () => {
     const { machine, ran } = machineOf();
     await landAsLogin(machine, login, "/home/ada/.agents/skills/pdf", Buffer.from("tgz"), { unpack: true });
-    expect(ran[2]).toContain("tar -xzf");
+    expect(ran[3]).toContain("tar -xzf");
     const refused = machineOf("runuser");
     await expect(landAsLogin(refused.machine, login, "/home/ada/.claude.json", Buffer.from("{}"))).rejects.toThrow(/was not written as ada: Permission denied/);
     expect(refused.ran.at(-1)).toMatch(/^rm -rf '\/tmp\/wsp-land-/);
@@ -145,6 +154,7 @@ describe("bytes landed as the login", () => {
     writeFileSync(dest, "{}");
     chmodSync(dest, 0o600);
     const modes: number[] = [];
+    const folders: string[] = [];
     const run = (cmd: string): ExecResult => {
       try {
         return { exitCode: 0, stdout: execFileSync("/bin/bash", ["-c", cmd], { encoding: "utf8" }), stderr: "" };
@@ -157,6 +167,7 @@ describe("bytes landed as the login", () => {
       kind: "sandbox",
       exec: async (cmd: string) => run(cmd),
       putBytes: async (path: string, bytes: Uint8Array) => {
+        folders.push(dirname(path));
         modes.push(statSync(dirname(path)).mode & 0o777);
         writeFileSync(path, bytes);
       },
@@ -165,6 +176,8 @@ describe("bytes landed as the login", () => {
     expect(readFileSync(dest, "utf8")).toBe('{"mcpServers":{}}');
     // The bytes landed where nobody but the folder's owner could read them, and nothing of them is left in /tmp.
     expect(modes).toEqual([0o700]);
+    expect(folders).toHaveLength(1);
+    expect(existsSync(folders[0]!)).toBe(false);
     expect(execFileSync("/bin/bash", ["-c", `ls -l '${dest}'`], { encoding: "utf8" }).startsWith("-rw-------")).toBe(true);
   });
 });
