@@ -4,7 +4,7 @@
 // host's door, made again whenever it ends for as long as it is held.
 
 import { randomInt } from "node:crypto";
-import { PLACE_FILE_MODE, isLoopback, parsePlaceFile, placeDaemonPaths, placeFileText, shellQuote, type PlaceBack } from "@wsp/protocol";
+import { LOOPBACK, PLACE_FILE_MODE, authority, isLoopback, parsePlaceFile, placeDaemonPaths, placeFileText, shellQuote, type PlaceBack } from "@wsp/protocol";
 import { SSH_DIAL_MS, SSH_LINE_CAP, carriedSshValues, holdBackForward, keyFingerprint, parseSshAddress, sshClient, type BackForward, type SshCarried, type SshReach, type SshSpawn, type SshTransport } from "@wsp/engine";
 import type { PlaceBackHolder, PlaceLogin } from "@wsp/runtime";
 
@@ -16,7 +16,7 @@ const HELD_PLACE_READ_BYTES = 65_536;
 export const heldPlaceScript = (home: string): string => `head -c ${HELD_PLACE_READ_BYTES} ${shellQuote(placeDaemonPaths(home).placeFile)} 2>/dev/null || true`;
 
 /** The address a box's link dials for a forward standing on its own loopback. */
-export const backUrl = (boxPort: number): string => `http://127.0.0.1:${boxPort}`;
+export const backUrl = (boxPort: number): string => `http://${authority(LOOPBACK, boxPort)}`;
 
 /** How long the child gets to stand the forward: the dial, the login and sshd's answer to the forward. */
 const BACK_UP_MS = 20_000;
