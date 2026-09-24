@@ -22,6 +22,7 @@ import {
   type LocalWiring,
   type Machine,
   type PlaceWiring,
+  type RestartDoor,
   type Runtime,
   type SeedWiring,
   type SshWiring,
@@ -87,6 +88,7 @@ import {
   type ServiceRunner,
 } from "./service.js";
 import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
+import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
 import { connectCommand, disconnectCommand, hostDefaultCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
@@ -1260,6 +1262,8 @@ export interface ServeOptions {
   /** Which command line road brought this host up, written into its lock so wsp down can stop it. The wsp up road
    * hands in its own word; the app's road hands in none, and nothing stops the app's host from a terminal. */
   startedBy?: HostStarted;
+  /** How this host restarts itself where no command line road brought it up: the desktop hands in its relaunch. */
+  restart?: RestartRoad;
 }
 
 /** The road the desktop window brings a host up on, which is wsp up's: the state file it serves is one wsp init
@@ -1350,6 +1354,8 @@ async function hostFor(
     /** The place wiring the runtime was built with, so the doctor's road on this host reads the recipe through the
      * planner the recipe job runs and not a second one of its own. Built here for a caller that handed none. */
     links?: PlaceWiring;
+    /** The restart road the caller holds, which stands above the one the command line road names. */
+    restart?: RestartRoad;
   },
   io: CliIO,
   run: RunningWsp = runningWsp(),
@@ -1372,6 +1378,20 @@ async function hostFor(
   // The account's own computers, read by the door and written by the beats below: made here because the door is
   // wired as the host starts and the beats only begin once it serves.
   const admitted = admittedDevices(opts.statePath);
+  const road =
+    opts.restart ??
+    (started === undefined
+      ? undefined
+      : restartRoads({ exit: code => process.exit(code), respawn: ports => starterFor(run)(opts.statePath, line => io.log(line), ports), log: line => io.log(line) })[started]);
+  // Handed out before the host serves and read only once a request arrives, which is after it serves.
+  let serving: RestartingHost | undefined;
+  const restart: RestartDoor | undefined =
+    road === undefined
+      ? undefined
+      : {
+          ...(road.refusal !== undefined ? { refusal: road.refusal } : {}),
+          restart: () => (serving === undefined ? Promise.reject(new Error("the host is still starting")) : road.restart(serving)),
+        };
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1393,7 +1413,16 @@ async function hostFor(
       // The row this host forks on, so a host wired to none asks its account nothing at all.
       provider: wiredProviderId(opts.providerEnv),
       admitted,
-      release: releaseWatch({ statePath: opts.statePath, shape: started ?? "app", running: VERSION, installed: installedVersion, log: line => io.log(line) }),
+      release: releaseWatch({
+        statePath: opts.statePath,
+        shape: started ?? "app",
+        running: VERSION,
+        installed: installedVersion,
+        ...(road !== undefined ? { restart: road } : {}),
+        update: version => releaseUpdateLine(run, version),
+        log: line => io.log(line),
+      }),
+      ...(restart !== undefined ? { restart } : {}),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
@@ -1430,7 +1459,7 @@ async function hostFor(
           })
         : undefined;
     if (linked && opts.relay === false) await stopRecordedConnector(dirname(opts.statePath));
-    return {
+    const host: HostHandle = {
       ...handle,
       close: async () => {
         await relay?.close();
@@ -1438,6 +1467,8 @@ async function hostFor(
         rmSync(lockPath, { force: true });
       },
     };
+    serving = host;
+    return host;
   } catch (e) {
     rmSync(lockPath, { force: true });
     throw e;

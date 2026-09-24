@@ -713,6 +713,15 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 120_000);
 
+  it("About with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
+    for (const theme of THEMES) {
+      await open("settings-about-restart", theme, "[data-settings-at=about] [data-k=restart-host]");
+      expect(await page!.locator("[data-settings-card=about] button").allTextContents()).toEqual(["Restart host", "Releases"]);
+      expect((await read()).cutWords, `words cut at settings-about-restart ${theme}`).toEqual([]);
+      await shot(`settings-about-restart-1280-${theme}`);
+    }
+  }, 120_000);
+
   it("photographs a computer's page to its foot at both widths, so its skills, its workspaces and its two acts are read", async () => {
     for (const theme of THEMES) {
       for (const screen of FOOT_SCREENS) {
