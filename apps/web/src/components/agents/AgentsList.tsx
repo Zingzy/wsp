@@ -113,7 +113,7 @@ export function AgentsList({ shell, report, reading, error = null, on, ctx, onRe
       </p>
     ) : (
       // A report read before the computer went quiet, or before the task paused, stands dimmed: it is not current.
-      rows.map(row => <ChipRow key={row.id} row={row} dim={reading || held !== null} />)
+      rows.map(row => <ChipRow key={row.id} row={row} dim={reading || held !== null} now={now} />)
     );
 
   return (

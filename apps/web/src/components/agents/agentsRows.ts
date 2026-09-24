@@ -8,7 +8,7 @@
 // in for it.
 import { agentName, catalogEntry, loginIdOf } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { MCP_SERVER_NAME, agentOfRow, compareVersions, type AgentRow, type AgentsReport, type McpRow, type PlaceProvisionRow, type SealedImage, type SignInRoad, type SkillRow } from "@wsp/protocol";
+import { MCP_SERVER_NAME, agentOfRow, compareVersions, type AgentRow, type AgentsReport, type McpRow, type McpTool, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad, type SkillRow } from "@wsp/protocol";
 
 export type AgentsSegment = "agents" | "skills" | "servers";
 export const AGENTS_SEGMENTS: readonly AgentsSegment[] = ["agents", "skills", "servers"];
@@ -34,6 +34,10 @@ export const AGENTS_LIST_WORDS = {
   remove: "Remove",
   addTools: "Add the wsp tools",
   listTools: "List tools",
+  listing: "Listing",
+  tools: "Tools",
+  toolsCount: (n: number): string => `${n} ${n === 1 ? "tool" : "tools"}`,
+  holdsSignIn: (agent: string): string => `${agent} holds the sign-in`,
   editImage: "Edit image",
   under: { agents: "Install an agent", skills: "Add a skill", servers: "Add a server" } satisfies Record<AgentsSegment, string>,
   wspTools: "wsp tools",
@@ -87,6 +91,31 @@ export interface RowAct {
   readonly destructive?: boolean;
   /** The road it takes; absent, the act is held. */
   readonly run?: () => void;
+  /** Its road is running: the label says so beside a spinner. */
+  readonly busy?: boolean;
+}
+
+/** One server's tools as its last ask stands: running, answered, or refused by the host. */
+export interface ToolsState {
+  readonly listing: boolean;
+  readonly answer?: ServerToolsAnswer;
+  readonly error?: string;
+}
+
+/** Each server's tools on this target, and the road that asks for them. */
+export interface ServerTools {
+  of(row: McpRow): ToolsState | undefined;
+  list(row: McpRow, refresh?: boolean): void;
+}
+
+/** What the open row draws under its acts once a server was asked for its tools. */
+export interface ToolsView {
+  readonly listing: boolean;
+  readonly tools?: readonly McpTool[];
+  readonly readAt?: string;
+  readonly refused?: string;
+  /** Ask again; absent while the acts are held. */
+  readonly refresh?: () => void;
 }
 
 export interface OpenLineData {
@@ -112,6 +141,7 @@ export interface AgentsRowData {
   readonly description?: string;
   readonly lines: readonly OpenLineData[];
   readonly acts: readonly RowAct[];
+  readonly tools?: ToolsView;
 }
 
 /** What decides the acts: where the report was read, the computer a task on a box defers to, the away word every act
@@ -122,6 +152,7 @@ export interface RowsContext {
   readonly computer?: string;
   readonly heldWhy?: string | null;
   readonly editImage?: () => void;
+  readonly tools?: ServerTools;
 }
 
 const signInWord = (row: AgentRow): string | undefined =>
@@ -214,7 +245,11 @@ export function skillRowData(row: SkillRow, ctx: RowsContext): AgentsRowData {
 const serverWord = (row: McpRow): string | undefined =>
   !row.enabled ? AGENTS_LIST_WORDS.disabled : row.auth === "signed-in" ? AGENTS_LIST_WORDS.signedIn : row.auth === "unknown" ? AGENTS_LIST_WORDS.notChecked : row.auth === "failed" ? AGENTS_LIST_WORDS.failed : undefined;
 
-export function serverRowData(row: McpRow, ctx: RowsContext): AgentsRowData {
+export function serverRowData(listed: McpRow, ctx: RowsContext): AgentsRowData {
+  const state = ctx.tools?.of(listed);
+  const answer = state?.answer;
+  // A connect on the person's click says more about the sign-in than the config did.
+  const row: McpRow = answer === undefined ? listed : { ...listed, auth: answer.auth };
   const stdio = row.transport.kind === "stdio";
   const reach = row.transport.kind === "stdio" ? row.transport.line : row.transport.host;
   const names = row.envNames.join(", ");
@@ -230,19 +265,33 @@ export function serverRowData(row: McpRow, ctx: RowsContext): AgentsRowData {
     ...(names === "" ? [] : [{ id: "names", label: stdio ? AGENTS_LIST_WORDS.environment : AGENTS_LIST_WORDS.headers, value: names }]),
   ];
   const needsSignIn = row.auth === "needs-sign-in";
+  const listing = state?.listing === true;
+  const tools = ctx.tools;
+  const listAct: RowAct = {
+    id: "list-tools",
+    label: listing ? AGENTS_LIST_WORDS.listing : AGENTS_LIST_WORDS.listTools,
+    hover: answer?.holder !== undefined ? AGENTS_LIST_WORDS.holdsSignIn(agentName(answer.holder)) : AGENTS_LIST_WORDS.startsOnce,
+    ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(listed) }),
+  };
   const acts: RowAct[] =
     ctx.where === "provider"
       ? []
-      : holdAll(
-          [
-            { id: "list-tools", label: AGENTS_LIST_WORDS.listTools, hover: AGENTS_LIST_WORDS.startsOnce },
-            ...(stdio || row.auth === "open" ? [] : [{ id: "sign-in", label: AGENTS_LIST_WORDS.signIn }]),
-            { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true },
-          ],
-          ctx,
-        );
+      : holdAll([listAct, ...(stdio || row.auth === "open" ? [] : [{ id: "sign-in", label: AGENTS_LIST_WORDS.signIn }]), { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true }], ctx);
   const word = serverWord(row);
   const button = needsSignIn && row.enabled ? acts.find(a => a.id === "sign-in") : undefined;
+  const refused = state?.error ?? answer?.refused;
+  const asked = acts.find(a => a.id === "list-tools");
+  // A harness that holds the sign-in lists the tools itself; its hover says so and nothing opens under the acts.
+  const view: ToolsView | undefined =
+    state === undefined || tools === undefined || (answer?.holder !== undefined && refused === undefined)
+      ? undefined
+      : {
+          listing,
+          ...(answer?.tools === undefined ? {} : { tools: answer.tools }),
+          ...(answer === undefined ? {} : { readAt: answer.readAt }),
+          ...(refused === undefined ? {} : { refused }),
+          ...(asked?.run === undefined ? {} : { refresh: () => tools.list(listed, true) }),
+        };
   return {
     id: `server-${row.agent}-${row.scope}-${row.name}`,
     segment: "servers",
@@ -250,9 +299,11 @@ export function serverRowData(row: McpRow, ctx: RowsContext): AgentsRowData {
     mark: agentName(row.agent),
     chips,
     ...(button === undefined && word !== undefined ? { word } : {}),
+    ...(button === undefined && word === AGENTS_LIST_WORDS.failed && refused !== undefined ? { wordHover: refused } : {}),
     ...(button === undefined ? {} : { button }),
     lines,
     acts,
+    ...(view === undefined ? {} : { tools: view }),
   };
 }
 

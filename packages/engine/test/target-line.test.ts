@@ -123,11 +123,11 @@ describe("bytes landed as the login", () => {
     expect(folder.startsWith("/tmp/wsp-land-")).toBe(true);
     // Private before a byte lands, the bytes landed while only root can open it, and only then handed to the login
     // with the file inside: never a folder the login owns that root then writes into by name.
-    expect(ran.slice(0, 3)).toEqual([`mkdir -m 0700 '${folder}'`, `land ${staging}`, `chown -R -- 'ada' '${folder}'`]);
+    expect(ran.slice(0, 3)).toEqual([`mkdir -m 0700 '${folder}'`, `land ${staging}`, `chmod 0600 '${staging}' && chown -R -- 'ada' '${folder}'`]);
     expect(ran.join("\n")).not.toMatch(/chmod 0?6?44|chmod [ago]*\+r/);
     expect(ran[3]!.startsWith("runuser -u 'ada' -- bash -c ")).toBe(true);
     expect(ran[3]).toContain("/home/ada/.codex/config.toml");
-    expect(ran.at(-1)).toBe(`rm -rf '${folder}'`);
+    expect(ran.at(-1)).toBe(`rm -rf -- '${folder}'`);
   });
 
   it("takes away no folder it did not make: a name already taken refuses the landing and leaves that folder be", async () => {
@@ -143,7 +143,7 @@ describe("bytes landed as the login", () => {
     expect(ran[3]).toContain("tar -xzf");
     const refused = machineOf("runuser");
     await expect(landAsLogin(refused.machine, login, "/home/ada/.claude.json", Buffer.from("{}"))).rejects.toThrow(/was not written as ada: Permission denied/);
-    expect(refused.ran.at(-1)).toMatch(/^rm -rf '\/tmp\/wsp-land-/);
+    expect(refused.ran.at(-1)).toMatch(/^rm -rf -- '\/tmp\/wsp-land-/);
   });
 
   it("writes a real file through the line it builds, keeping the mode a file there already had", async () => {

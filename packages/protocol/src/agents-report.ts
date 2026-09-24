@@ -93,6 +93,21 @@ export const McpRow = z.object({
 });
 export type McpRow = z.infer<typeof McpRow>;
 
+/** What one server said when it was started once, or asked once over its address, on the person's click: its sign-in
+ * as that connect found it, and its tools. `holder` is the agent whose harness holds the server's sign-in, which
+ * this host never reads, so no list comes back for it; `refused` is why nothing came back. */
+export const ServerToolsAnswer = z.object({
+  auth: McpAuth,
+  tools: z.array(McpTool).optional(),
+  holder: z.string().optional(),
+  refused: z.string().optional(),
+  readAt: z.string(),
+});
+export type ServerToolsAnswer = z.infer<typeof ServerToolsAnswer>;
+
+/** Why a server started for its tools gave none: it had not answered when its time was up, and was stopped. */
+export const serverToolsLateRefusal = (ms: number): string => `Did not answer in ${Math.round(ms / 1000)} s.`;
+
 export const AgentsReport = z.object({
   target: AgentsTarget,
   home: z.string(),
@@ -115,6 +130,9 @@ export const providerAgentsRefusal = (name: string): string =>
 
 /** Why a napping workspace read nothing: a read never wakes a machine, and none was read while it ran. */
 export const nappingAgentsRefusal = (name: string): string => `${name} is napping and was not read while it ran; wake it to read what stands there`;
+
+/** Why a napping workspace's server was not started: nothing here wakes a machine. */
+export const nappingToolsRefusal = (name: string): string => `${name} is napping, and a server is started there only while it runs; wake it to list the tools`;
 
 /** Why a computer that runs every line as root refused to read: the lines would run as root in somebody's home. */
 export const noRunuserRefusal = (user: string): string => `this computer runs wsp as root and has no runuser to run as ${user}, the owner of the home, so nothing was read`;
