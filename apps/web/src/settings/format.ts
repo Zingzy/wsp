@@ -114,7 +114,7 @@ export const WHERE_WORDS = {
  * joined screen says. One road, so no word here names one. */
 export const ADD_COMPUTER_WORDS = {
   login: "ssh login",
-  loginPlaceholder: "root@host",
+  loginPlaceholder: "root@host or an ssh alias",
   add: "Add",
   adds: "adds",
   loginFirst: "type the login first",

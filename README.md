@@ -76,7 +76,7 @@ The front page of `wsp --help` is sixteen words on five nouns: image, place, wor
 | `wsp import <folder> --to <workspace>` | `wsp import <workspace> <folder>` |
 | `wsp threads --in <workspace>` | `wsp threads <workspace>` |
 | `wsp new --local [name]` | `wsp new <name> --on <place>`, naming the computer you are at |
-| `wsp new --ssh <user@host>` | `wsp add user@host`, then `wsp new <name> --on <that place>` |
+| `wsp new --ssh <user@host>` | `wsp add user@host` (or an alias from your ssh config), then `wsp new <name> --on <that place>` |
 | `wsp init --provider <id>` | `wsp add <id>` |
 | `wsp pair`, `wsp devices` | `wsp host pair`, `wsp host devices` |
 | `wsp connect <url>` | `wsp host connect <url>` |
@@ -87,7 +87,7 @@ The front page of `wsp --help` is sixteen words on five nouns: image, place, wor
 | `wsp up` to get going | nothing: the first command that needs a host starts one, and `wsp down` stops it |
 | plain `wsp` serving | plain `wsp` prints the help |
 
-This computer and every computer or provider you add are places, and `wsp places` lists them; `--on <place>` on `wsp new` is the one flag you meet, and only once you have more than one. `wsp add` is the one way a place joins: `wsp add user@host` for a computer over ssh, `wsp add <provider>` for a provider, `wsp add` alone for the line another computer types. `wsp up` is still there for a host you want to watch in a terminal or one that serves beyond this computer.
+This computer and every computer or provider you add are places, and `wsp places` lists them; `--on <place>` on `wsp new` is the one flag you meet, and only once you have more than one. `wsp add` is the one way a place joins: `wsp add user@host` for a computer over ssh (an alias from your `~/.ssh/config` works as well), `wsp add <provider>` for a provider, `wsp add` alone for the line another computer types. `wsp up` is still there for a host you want to watch in a terminal or one that serves beyond this computer.
 
 Agents on this computer get the new skill the first time the new host starts; a project folder whose `AGENTS.md` carries the old section gets the new one at the next `wsp mcp install` there.
 <!-- renames:end -->

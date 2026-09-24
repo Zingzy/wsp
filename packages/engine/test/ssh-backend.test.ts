@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ARCH_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { probeCommand } from "../src/machine-context.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -638,5 +638,61 @@ describe("the key a machine over ssh is known by", () => {
     // ssh prints neither line where the person set neither, so the machine is asked as it was.
     expect(await knownHostKey(REACH, run(""))).toBe(OFFERED_KEY);
     expect(scans).toHaveLength(1);
+  });
+});
+
+describe("an alias out of the person's ssh config", () => {
+  /** A client whose config holds a spoo block with a HostName, a User and a Port of its own, the way the owner's
+   * does, and nothing else: any other word comes back as its own hostname, which is what `ssh -G` prints for a
+   * name no block renames. Every call is kept, so a case can say nothing was asked. */
+  function config(): { run: SshLocalRun; asked: (readonly string[])[] } {
+    const asked: (readonly string[])[] = [];
+    const run: SshLocalRun = async (file, args) => {
+      asked.push([file, ...args]);
+      const word = args.at(-1)!.toLowerCase();
+      const stdout = word === "spoo" ? "host spoo\nuser root\nhostname 178.156.161.168\nport 2222\n" : `host ${word}\nuser dev\nhostname ${word}\nport 22\n`;
+      return { exitCode: 0, stdout, stderr: "" };
+    };
+    return { run, asked };
+  }
+
+  it("a bare word ssh renames is the alias itself as the host, with the config's user and port", async () => {
+    const { run, asked } = config();
+    expect(await sshWordReach("spoo", {}, run)).toEqual({ user: "root", host: "spoo", port: 2222 });
+    expect(asked).toEqual([["ssh", "-G", "spoo"]]);
+  });
+
+  it("a port or a key the person typed wins over the config's, as ssh itself lets a flag win", async () => {
+    const { run } = config();
+    expect(await sshWordReach("spoo", { port: 2200, keyPath: "/tmp/k/id" }, run)).toEqual({ user: "root", host: "spoo", port: 2200, keyPath: "/tmp/k/id" });
+  });
+
+  it("a word ssh does not rename is refused in one sentence, and a hostname ssh only lowercased is not a rename", async () => {
+    const { run } = config();
+    await expect(sshWordReach("nonsense", {}, run)).rejects.toThrow(SSH_WORD_REFUSAL("nonsense"));
+    expect(SSH_WORD_REFUSAL("nonsense")).not.toMatch(/\.\s+\S/);
+    const shouting: SshLocalRun = async () => ({ exitCode: 0, stdout: "user dev\nhostname box\nport 22\n", stderr: "" });
+    await expect(sshWordReach("BOX", {}, shouting)).rejects.toThrow(SSH_WORD_REFUSAL("BOX"));
+    const broken: SshLocalRun = async () => ({ exitCode: 255, stdout: "", stderr: "Bad configuration option\n" });
+    await expect(sshWordReach("spoo", {}, broken)).rejects.toThrow(SSH_WORD_REFUSAL("spoo"));
+  });
+
+  it("a numeric word the resolver would rewrite into an address is refused in the same sentence without asking the client", async () => {
+    const asked: string[][] = [];
+    const rewriting: SshLocalRun = async (cmd, args) => {
+      asked.push([cmd, ...args]);
+      return { exitCode: 0, stdout: "user dev\nhostname 127.0.0.1\nport 22\n", stderr: "" };
+    };
+    for (const word of ["123", "1.2.3", "2130706433", "0x7f000001", "0177.1"]) {
+      await expect(sshWordReach(word, {}, rewriting)).rejects.toThrow(SSH_WORD_REFUSAL(word));
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("a typed login is read as it always was, and a word that could be an option never reaches the client", async () => {
+    const { run, asked } = config();
+    expect(await sshWordReach("root@spoo", {}, run)).toEqual({ user: "root", host: "spoo", port: 22 });
+    await expect(sshWordReach("-oProxyCommand=touch", {}, run)).rejects.toThrow(SSH_WORD_REFUSAL("-oProxyCommand=touch"));
+    expect(asked).toEqual([]);
   });
 });
