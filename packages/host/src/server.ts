@@ -24,6 +24,7 @@ import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { NO_PROVIDER } from "./providers.js";
+import type { ReleaseWatch } from "./release.js";
 import { describeStorage, noProviderStorageLine } from "./storage.js";
 import { VERSION } from "./version.js";
 
@@ -81,6 +82,9 @@ export interface HostOptions {
    * key it trusts to sign an admission and the listing its heartbeat reads back. Without it device.auth is
    * refused, which is what a host on no account answers. */
   admitted?: AdmittedDevices;
+  /** The reading of the newest release this host serves as release.get and release.check; started once the host
+   * serves and stopped with it. Absent, both ops are refused. */
+  release?: ReleaseWatch;
 }
 
 /** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
@@ -646,6 +650,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
+      ...(opts.release !== undefined ? { release: opts.release } : {}),
     });
   } catch (e) {
     await relay.close();
@@ -696,6 +701,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     }
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
+  opts.release?.start();
 
   // A door that cannot bind is a computer that cannot dial in, not a host that will not serve: the person reads
   // who holds the port and everything else on this computer goes on working.
@@ -724,6 +730,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     importProject,
     close: async () => {
       clearInterval(reapTimer);
+      opts.release?.close();
       await relay.close();
       // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
       // what sends a waiting client the stopping code instead of cutting the socket under it.
