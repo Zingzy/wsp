@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { isAbsolute, join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { isPlainPath, shellQuote } from "@wsp/protocol";
+import { LOOPBACK, isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { lineFeed, runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
@@ -105,6 +105,10 @@ export const SSH_CONNECT_TIMEOUT_S = 10;
 
 /** The most of ssh's words any message here keeps: they land in a slot two lines high. */
 export const SSH_LINE_CAP = 300;
+
+/** Words a box wrote, going into a sentence or a log of ours: nothing left that would move a terminal, and short
+ * enough to leave the sentence's fix room. */
+export const boxWord = (said: string, cap = 48): string => said.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, cap);
 
 /** How long an idle master connection is kept after the last command through it. A turn polls its log every second
  * and a half, so without one every poll is a key exchange and a line in the machine's auth log (measured: seven
@@ -206,7 +210,7 @@ function carriedValue(value: string, shape: "one" | "rest"): string {
  * joined by spaces, so a path with a space in it arrives as two words, and a child under accept-new that read
  * neither would take a changed key for that machine as a new one. */
 export const missingKnownHostsLine = (target: string, file: string): string =>
-  `${target}: your ssh config names ${file} as a known hosts file and this computer has no file there, so wsp will not dial back over ssh with it; create it, or rename a path that has a space in it`.slice(0, SSH_LINE_CAP);
+  `${target.slice(0, 48)}: your ssh config names ${file.slice(0, 72)} as a known hosts file and this computer has no file there, so wsp will not dial back over ssh with it; create it, or rename a path that has a space in it`;
 
 /** That refusal as a sentence of its own, which a caller says whole rather than inside one of its own. */
 export class MissingKnownHostsError extends Error {}
@@ -282,7 +286,7 @@ export function sshBackArgs(carried: SshCarried, boxPort: number, doorPort: numb
     "-o",
     "ControlPath=none",
     "-R",
-    `127.0.0.1:${boxPort}:127.0.0.1:${doorPort}`,
+    `${LOOPBACK}:${boxPort}:${LOOPBACK}:${doorPort}`,
     `${carried.reach.user}@${carried.reach.host}`,
     BACK_COMMAND,
   ];
@@ -340,7 +344,7 @@ export function holdBackForward(carried: SshCarried, boxPort: number, doorPort: 
   const ended = new Promise<string>(resolve => {
     const end = (fallback: string): void => {
       const line = clientWords(said.join("\n")).split("\n").at(-1) ?? "";
-      const words = (line === "" ? fallback : line).slice(0, SSH_LINE_CAP);
+      const words = boxWord(line === "" ? fallback : line, SSH_LINE_CAP);
       settleUp.reject(new Error(words));
       resolve(words);
     };
@@ -683,14 +687,14 @@ function homeRefusal(reach: SshReach, home: string | undefined): string {
 
 /** Loopback names and addresses, and the suffix a Mac gives its own name on the local network: what a dial that
  * names the computer wsp runs on looks like. */
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
 
 /** Whether this dial reaches the computer wsp is running on: the same machine as the local workspace, under another
  * name. A request relayed from a machine may drive a workspace over ssh, and this is the one such workspace it may
  * not, since it is this computer wearing another kind's clothes. `names` is what this computer answers to. */
 export function sshDialsThisComputer(reach: SshReach, names: readonly string[]): boolean {
   const host = reach.host.toLowerCase().replace(/\.$/, "");
-  if (LOOPBACK.has(host) || host.startsWith("127.")) return true;
+  if (LOOPBACK_NAMES.has(host) || host.startsWith("127.")) return true;
   const own = names.map(n => n.toLowerCase().replace(/\.$/, "")).filter(n => n !== "");
   return own.some(name => host === name || host === `${name}.local` || `${host}.local` === name);
 }

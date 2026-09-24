@@ -80,7 +80,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, backUrl, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
@@ -419,9 +419,6 @@ export function addFlags(
   };
 }
 
-/** A name the box wrote, with nothing left in it that would move a terminal and short enough to leave the fix room. */
-const boxWord = (said: string): string => said.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 48);
-
 /** What an add is refused with on a box that already belongs to a wsp: this one, where a second install would be
  * a second record of one box, or another, whose agent and link a second join would stand beside. */
 export function placeHeldRefusal(address: string, file: PlaceFile, ownKey: string | undefined): string {
@@ -483,10 +480,10 @@ export const unreachedLine = (address: string, urls: readonly string[]): string 
  * either: sshd refused it, or put it beyond the box's loopback, in ssh's or wsp's own words. */
 export function backRefusedLine(address: string, urls: readonly string[], why: string): string {
   const line = (list: string, said: string): string =>
-    `${address} cannot reach this computer at ${list} and the forward back over ssh did not stand (${said}); link this host to your relay, or start it with --advertise naming an address it can reach`;
+    `${address.slice(0, 64)} cannot reach this computer at ${list} and the forward back over ssh did not stand (${said}); link this host to your relay, or start it with --advertise naming an address it can reach`;
   // ssh's line gives way before the fix does: it gets what one address and a count leave of the line.
   const room = SSH_LINE_CAP - line(urls.length > 1 ? `${urls[0]} and ${urls.length - 1} more` : (urls[0] ?? ""), "").length;
-  const said = why.slice(0, Math.max(0, Math.min(100, room)));
+  const said = boxWord(why, Math.max(0, Math.min(100, room)));
   return fittedList(urls, list => line(list, said));
 }
 
@@ -611,7 +608,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // port would land as the owner's own road.
     let back: PlaceBack | undefined;
     if (req.doorPort !== undefined && deps.back !== undefined && reached.every(url => url === req.relay)) {
-      const held = await deps.back.hold(road, { boxPort: req.doorPort, doorPort: req.doorPort }, { home: login.HOME }).catch((e: unknown) => {
+      const held = await deps.back.hold(road, { boxPort: req.doorPort }, { home: login.HOME }).catch((e: unknown) => {
         deps.back!.release(road);
         return e instanceof Error ? e : new Error(String(e));
       });

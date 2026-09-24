@@ -2643,10 +2643,10 @@ export function computerKindWord(place: Pick<PlaceView, "id" | "kind">, platform
 }
 
 /** A forward over the ssh login from a port on that computer's own loopback to this host's door, held by this host
- * for a computer that cannot reach it any other way: its link dials `http://127.0.0.1:<boxPort>`. */
+ * for a computer that cannot reach it any other way: its link dials `http://127.0.0.1:<boxPort>`. The door's end is
+ * read off the running host at each standing, never saved: a restarted host's door can sit on another port. */
 export const PlaceBack = z.object({
   boxPort: z.number().int().min(1).max(65535),
-  doorPort: z.number().int().min(1).max(65535),
 });
 export type PlaceBack = z.infer<typeof PlaceBack>;
 

@@ -7,7 +7,7 @@ import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -73,6 +73,8 @@ export interface HostOptions {
   door?: "closed" | "open";
   /** The line said the first time the door binds, so a person reads about the firewall prompt where they asked. */
   doorLine?: (line: string) => void;
+  /** The forwards over ssh that land on the door: handed the door as this host holds it, and let go before it closes. */
+  back?: Pick<PlaceBackHolder, "door" | "close">;
   /** What the doctor's computer road reads on this host beside the runtime, for the places.doctor op; absent, the
    * op is refused and no computer this host holds is proved from here. */
   doctor?: HostDoctorReaders;
@@ -718,6 +720,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // A door that cannot bind is a computer that cannot dial in, not a host that will not serve: the person reads
   // who holds the port and everything else on this computer goes on working.
   if (opts.door === "open") await openDoor().catch((e: unknown) => log(e instanceof Error ? e.message : String(e)));
+  opts.back?.door(async () => (await openDoor()).backPort);
 
   return {
     port,
@@ -741,6 +744,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     planProject,
     importProject,
     close: async () => {
+      // First: a forward remade while the door closes would open it again.
+      opts.back?.close();
       clearInterval(reapTimer);
       opts.release?.close();
       await relay.close();

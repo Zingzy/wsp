@@ -4093,12 +4093,13 @@ describe("the forward a computer dials back through", () => {
           return back;
         },
         release: login => void calls.push(`release ${login.ssh}`),
+        door: () => {},
         close: () => void calls.push("close"),
       },
     };
   }
 
-  const AT_DOOR: PlaceBack = { boxPort: 4640, doorPort: 4640 };
+  const AT_DOOR: PlaceBack = { boxPort: 4640 };
 
   /** One add of a box that reached this host only through the forward the install stood. */
   async function addedOverTheForward(store: Store, back: PlaceBackHolder): Promise<{ hostKey: PlaceKeyPair; placeId: string }> {
@@ -4130,9 +4131,9 @@ describe("the forward a computer dials back through", () => {
     expect(back.holds).toHaveLength(1);
     expect(back.holds[0]).toMatchObject({ login: { ssh: "root@spoo" }, back: AT_DOOR, home: "/home/maya" });
     expect((await placesOf()).find(p => p.id === placeId)?.road).toEqual({ ssh: "root@spoo", from: "127.0.0.1", back: AT_DOOR });
-    back.holds[0]!.moved!({ boxPort: 23456, doorPort: 4640 });
+    back.holds[0]!.moved!({ boxPort: 23456 });
     await until(async () => (await placesOf()).find(p => p.id === placeId)?.road?.back?.boxPort === 23456);
-    expect(((await store.get("places", placeId)) as PlaceRecord).road?.back).toEqual({ boxPort: 23456, doorPort: 4640 });
+    expect(((await store.get("places", placeId)) as PlaceRecord).road?.back).toEqual({ boxPort: 23456 });
   });
 
   it("holds it again for every record that dials back through one when the host starts, and lets every one go when it stops", async () => {
@@ -4156,6 +4157,30 @@ describe("the forward a computer dials back through", () => {
     const { placeId } = await addedOverTheForward(memoryStore(), back.holder);
     await runtime!.places!.remove(placeId);
     expect(back.calls.at(-1)).toBe("release root@spoo");
+  });
+
+  it("a move heard while the computer is being removed never writes the removed record back", async () => {
+    const inner = memoryStore();
+    let gate: Promise<void> | undefined;
+    const store: Store = {
+      ...inner,
+      get: async (collection, id) => {
+        const found = await inner.get(collection, id);
+        if (collection === "places" && gate !== undefined) await gate;
+        return found;
+      },
+    };
+    const back = backHolder();
+    const { placeId } = await addedOverTheForward(store, back.holder);
+    let open!: () => void;
+    gate = new Promise<void>(r => (open = r));
+    back.holds[0]!.moved!({ boxPort: 23456 });
+    await new Promise(r => setTimeout(r, 10));
+    gate = undefined;
+    await runtime!.places!.remove(placeId);
+    open();
+    await new Promise(r => setTimeout(r, 30));
+    expect(await inner.get("places", placeId)).toBeUndefined();
   });
 
   it("lets the forward go when the add that stood it left no record", async () => {

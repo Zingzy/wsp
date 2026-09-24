@@ -1542,6 +1542,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
           return back;
         },
         release: login => void released.push(login.ssh),
+        door: () => {},
         close: () => {},
       },
     };
@@ -1552,7 +1553,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const back = backHolder(box.ran);
     const urls = ["http://100.129.166.28:4720", "http://192.168.1.20:4720"];
     const installed = await placeInstaller({ backend: box.backend as never, back: back.holder, ...assets(tmp("back-ssh"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, doorPort: 4720 }, box.stage);
-    expect(back.asked).toEqual([{ login: { ssh: "root@spoo" }, back: { boxPort: 4720, doorPort: 4720 }, home: "/home/maya" }]);
+    expect(back.asked).toEqual([{ login: { ssh: "root@spoo" }, back: { boxPort: 4720 }, home: "/home/maya" }]);
     const hold = box.ran.indexOf("HOLD root@spoo 4720");
     const deploy = box.ran.findIndex(script => script.includes(`case "$(uname -m)" in`));
     expect(hold).toBeGreaterThan(box.ran.indexOf(reachScript(urls)));
@@ -1562,7 +1563,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(box.stages).toContain(`reach done (${dialsBackOverSshNote(urls, undefined)})`);
     expect(dialsBackOverSshNote(urls, undefined)).toBe("cannot reach this computer at http://100.129.166.28:4720, http://192.168.1.20:4720, so it dials back over ssh");
     expect(box.stages).toContain("service running (it dials this computer at http://127.0.0.1:4720)");
-    expect(installed.back).toEqual({ boxPort: 4720, doorPort: 4720 });
+    expect(installed.back).toEqual({ boxPort: 4720 });
     expect(back.released).toEqual([]);
   });
 
@@ -1606,6 +1607,11 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const long = backRefusedLine("root@spoo", urls, "x".repeat(2000));
     expect(long.length).toBeLessThanOrEqual(300);
     expect(long).toMatch(/naming an address it can reach$/);
+    // ssh copies the box's stderr raw, and the box's startup files write before the forward's up line.
+    const boxWritten = backRefusedLine(`${"u".repeat(255)}@spoo`, urls, "\x1b]0;pwned\x07Connection closed");
+    expect(boxWritten).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(boxWritten.length).toBeLessThanOrEqual(300);
+    expect(boxWritten).toMatch(/naming an address it can reach$/);
     expect(back.released).toEqual(["root@spoo"]);
     expect(box.landed).toEqual([]);
     expect(box.ran.some(script => script.includes(`case "$(uname -m)" in`))).toBe(false);

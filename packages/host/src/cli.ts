@@ -1401,6 +1401,7 @@ async function hostFor(
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
+      ...(links.back !== undefined ? { back: links.back } : {}),
       webDir: opts.webDir ?? webDirFor(),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor().workspaceEnvs(golden),

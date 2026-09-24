@@ -192,6 +192,9 @@ export interface PlaceBackHolder {
    * after the place file there names it. */
   hold(login: PlaceLogin, back: PlaceBack, on: { home: string }, moved?: (back: PlaceBack) => void): Promise<PlaceBack>;
   release(login: PlaceLogin): void;
+  /** The door every forward lands on, handed over once the host serves: its port on this computer's loopback as it
+   * stands when asked, or nothing on a host with no door of its own. Nothing stands before it is handed. */
+  door(at: () => Promise<number | undefined>): void;
   close(): void;
 }
 
@@ -836,7 +839,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       void (async () => {
         for (const id of [...kept.keys()]) {
           const current = await recordOf(id);
-          if (current !== undefined && loginOf(current)?.ssh === login.ssh && current.road !== undefined) await keep({ ...current, road: { ...current.road, back: to } });
+          // A remove that landed during the read deleted it: a write now would put the removed record back.
+          if (current !== undefined && kept.has(id) && loginOf(current)?.ssh === login.ssh && current.road !== undefined) await keep({ ...current, road: { ...current.road, back: to } });
         }
       })().catch(() => undefined);
     };

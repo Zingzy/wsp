@@ -199,6 +199,10 @@ describe("the ssh dial-back forward", () => {
     const { run } = fakeConfig([...DEFAULTS.filter(l => !l.startsWith("globalknownhostsfile ")), "globalknownhostsfile none"], "box");
     expect((await carriedSshValues(reach, run)).options).toContain("GlobalKnownHostsFile=none");
     expect(missingKnownHostsLine("root@box", "/x".repeat(400)).length).toBeLessThanOrEqual(300);
+    for (const long of [missingKnownHostsLine("root@box", "/x".repeat(400)), missingKnownHostsLine(`${"u".repeat(255)}@box`, "/etc/ssh/hosts")]) {
+      expect(long.length).toBeLessThanOrEqual(300);
+      expect(long).toContain("create it, or rename a path that has a space in it");
+    }
   });
 
   it("a literal % in the agent's path is doubled, since ssh -G printed it already expanded and the child expands it again", async () => {
@@ -230,6 +234,15 @@ describe("the ssh dial-back forward", () => {
     fake.stdout.write("WSP_BACK_UP\n");
     await expect(held.up).resolves.toBeUndefined();
     expect(fake.stdinEnded()).toBe(false);
+  });
+
+  it("a line the box wrote on stderr reaches the host with no control characters in it", async () => {
+    const fake = fakeChild();
+    const held = holdBackForward(CARRIED, 4640, 4640, () => fake.child);
+    fake.stderr.write("\x1b]0;pwned\x07motd from the box\x1b[2J\n");
+    await tick();
+    fake.exit(255);
+    await expect(held.ended).resolves.toBe("]0;pwnedmotd from the box[2J");
   });
 
   it("a child that ends before it is up rejects with ssh's last line", async () => {
