@@ -26,7 +26,6 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
-  PLACES_WORDS,
   PlaceUpdateReply,
   placeCurrentLine,
   type PlaceProvision,
@@ -34,6 +33,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   DAEMON_VERSION,
   JOIN_NO_KEY_REFUSAL,
   joinKeyRefusal,
+  joinRoads,
   joinToken,
   readJoinToken,
   placeEngineLine,
@@ -222,11 +222,9 @@ const JOIN_MS = 20_000;
  * fingerprint as one word, off the protocol's own writing of the line, so the terminal and the sheet print one
  * thing. */
 export function addLines(token: string, expiresAt: number, now: number, urls: readonly string[], publicAt: string | undefined): string[] {
-  const join = (url: string, note?: string): string => `  ${PLACES_WORDS.sheet.joinLine(url, token)}${note === undefined ? "" : `      (${note})`}`;
   return [
     "wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:",
-    ...urls.map(url => join(url)),
-    ...(publicAt === undefined ? [] : [join(relayUrlOf(publicAt), "when the host is linked to your relay")]),
+    ...joinRoads(token, urls, publicAt === undefined ? undefined : relayUrlOf(publicAt)).map(road => `  ${road.line}${road.note === undefined ? "" : `      (${road.note})`}`),
     `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
     "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you.",
     `A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`,
