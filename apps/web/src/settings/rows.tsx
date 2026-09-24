@@ -41,6 +41,8 @@ export interface SettingsRowData {
   readonly kind: "row";
   readonly id: string;
   readonly title: string;
+  /** A glyph before the title, where the row's noun has one of its own: a project's. */
+  readonly lead?: ReactNode;
   /** One mono word after the title, in the fact class: the default mark on a computer. */
   readonly mark?: string;
   /** One sentence, or machine words in the mono fact class where `mono` is set. */
@@ -122,7 +124,7 @@ export function Card({ id, head, under, body, children }: { id: string; head?: R
  * 640 px the slot stands on a line of its own under the description, the word at its left and the control at its
  * right, and the description holds two lines of the whole width; where it does not, the slot keeps its place and
  * the description holds three of the narrower box. Either way nothing is cut where no hover can read it. */
-export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
+export function Row({ id, title, lead, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn("flex min-w-0 max-w-[60%] shrink items-center gap-3", drops && (word === undefined ? "max-sm:w-full max-sm:max-w-full max-sm:justify-end" : "max-sm:w-full max-sm:max-w-full max-sm:justify-between"))}>
@@ -137,6 +139,7 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
     );
   const body = (
     <>
+      {lead === undefined ? null : <span className="flex shrink-0 items-center">{lead}</span>}
       <div className={cn("flex min-w-0 flex-1 flex-col justify-center gap-1", !drops && "max-sm:gap-0.5")}>
         <span className="flex min-w-0 items-center gap-2">
           <span data-settings-title className={cn(TITLE_CLASS, "truncate")}>

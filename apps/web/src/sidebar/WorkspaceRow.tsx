@@ -22,7 +22,7 @@
 // the same slot, opened from the menu or by a double-click on the name, so the
 // row keeps its height and its grammar. The words come from workspaceRows.ts
 // and the actions from the workspace registry.
-import { ChevronDownIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { needsRebuild, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
@@ -97,6 +97,7 @@ export function WorkspaceRow({
   const metaWhole = workspaceMetaTitle({ project, absent, outOfMemory, broughtBack });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);
+  const onBranch = meta !== "" && !metaIsProse && broughtBack === undefined;
   // The registry decides which of these a workspace of this kind in this state takes at all; the row draws the
   // glyph for one it was handed and nothing where it was handed none.
   const forgetAction = actionIfAny(actions, "forget");
@@ -143,7 +144,9 @@ export function WorkspaceRow({
         {lines === 2 ? (
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={TWO_LINE_FIRST_CLASS}>{first}</span>
-            <span className={TWO_LINE_SECOND_CLASS}>
+            <span className={cn(TWO_LINE_SECOND_CLASS, "gap-1.5")}>
+              {/* The branch says what it is by its glyph; a sentence in the same slot needs none. */}
+              {onBranch ? <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
               <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "min-w-0 flex-1 truncate")} title={absent?.sentence ?? metaWhole}>
                 {meta}
               </span>

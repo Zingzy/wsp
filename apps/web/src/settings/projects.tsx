@@ -6,6 +6,7 @@
 // while a workspace stands on the project, in the runtime's own sentence,
 // and otherwise asks first and lands the runtime's answer as the toast.
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
+import { ProjectGlyph } from "../projects/look.js";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
@@ -64,13 +65,15 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
     {
       id: "projects",
       items: ctx.projects.map(project => {
-        const computer = projectComputerWord(project, named);
+        const here = ctx.places[0];
+        const computer = projectComputerWord(project, named) ?? (here === undefined ? hereWord(true) : placeName(here, true));
         const count = workspacesOn(ctx, project).length;
         return {
           kind: "row" as const,
           id: project.id,
           title: project.name,
-          description: [sourceWord(project.source), computer === null ? undefined : PROJECTS_WORDS.on(computer)].filter((word): word is string => word !== undefined).join(" · "),
+          lead: <ProjectGlyph projectId={project.id} />,
+          description: `${computer} · ${sourceWord(project.source)}`,
           mono: true,
           // A project nothing stands on reads 0: the count is loaded, and a blank where a sibling reads 3 is a
           // fact nobody can tell from a fact that never arrived.
