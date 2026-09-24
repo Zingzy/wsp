@@ -24,6 +24,10 @@ import {
   doctorRunningLine,
   HOST_STOPPING_CLOSE,
   isJoinedComputer,
+  HostFolderListing,
+  placeBehindLine,
+  placeDaemonBehind,
+  providerFoldersRefusal,
   LOOPBACK,
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
@@ -288,6 +292,29 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const places = (): PlaceDoor => {
     if (rt.places === undefined) throw new Error(NO_PLACE_DOOR);
     return rt.places;
+  };
+
+  /** One level of folders on a computer this host holds, read by that computer's own daemon over the link it opened,
+   * with the folder of every project recorded there beside its login's home as the roots. A provider keeps no
+   * computer to browse and is refused before anything is asked. */
+  const placeFolders = async (placeId: string, asked: { dir?: string; hidden?: boolean; repos?: boolean }, origin: Caller | undefined): Promise<HostFolderListing> => {
+    const rows = await places().list(now());
+    const row = rows.find(place => place.id === placeId);
+    if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, rows.map(place => place.name))), { kind: "usage" });
+    if (!isJoinedComputer(row)) throw Object.assign(new Error(providerFoldersRefusal(row.name)), { kind: "usage" });
+    const report = await places().reportOf(row.id);
+    const behind = report === undefined ? undefined : placeDaemonBehind(report);
+    if (behind !== undefined) throw new Error(placeBehindLine(row.name, behind));
+    const link = places().channel(row.id, () => {});
+    if (link === undefined) throw new Error(absentComputer(row.name, null).sentence);
+    try {
+      const projects = (await rt.projects.list(origin)).filter(p => p.computer === row.id).flatMap(p => (p.checkout === undefined ? [] : [p.checkout]));
+      const reply = await link.send({ op: "fs.folders", ...asked, projects });
+      if (reply.ok !== true) throw new Error(reply.error);
+      return HostFolderListing.parse(reply);
+    } finally {
+      link.close();
+    }
   };
 
   /** Who a token names. The one reading: the auth frame, a socket that just redeemed a code and the HTTP routes the
@@ -1259,11 +1286,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               })();
               return;
             }
-            case "host.folders":
-              // Only this computer's own window walks the whole disk: a paired or relayed device, or a thread on any
-              // machine, stays inside the home folder and the projects.
-              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}), ...(msg.repos === true ? { repos: true } : {}), wide: road === "here" && by === undefined }) });
+            case "host.folders": {
+              const asked = { ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}), ...(msg.repos === true ? { repos: true } : {}) };
+              if (msg.on === undefined || msg.on === HERE_PLACE_ID) {
+                // Only this computer's own window walks the whole disk: a paired or relayed device, or a thread on any
+                // machine, stays inside the home folder and the projects.
+                send({ id: msg.id, ok: true, listing: await folders().list({ ...asked, wide: road === "here" && by === undefined }) });
+                return;
+              }
+              // Another computer's disk is read over the link it holds, which is the places road: the host's own.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, listing: await placeFolders(msg.on, asked, origin) });
               return;
+            }
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
