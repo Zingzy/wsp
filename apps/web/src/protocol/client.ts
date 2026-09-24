@@ -89,6 +89,9 @@ export interface ProtocolClientOptions {
 /** "connecting" until the first auth succeeds, "reconnecting" after a drop; both keep dialling. */
 export type ConnStatus = "connecting" | "live" | "reconnecting" | "closed";
 
+/** What a refusal that came with no sentence reads as. */
+const NO_REASON = "The host answered with no reason. Try again.";
+
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
   lost: "runtime connection lost",
@@ -107,13 +110,16 @@ export class DisconnectedError extends Error {
 }
 
 /** A runtime refusal. kind is the typed failure when the runtime has one (engine
- * WspError kinds such as "concurrency", the provider's machine cap). */
+ * WspError kinds such as "concurrency", the provider's machine cap); fix is what to
+ * do about it when the refusal was made with one, and the message already ends with it. */
 export class RequestError extends Error {
   readonly kind: string | undefined;
-  constructor(message: string, kind?: string) {
+  readonly fix: string | undefined;
+  constructor(message: string, kind?: string, fix?: string) {
     super(message);
     this.name = "RequestError";
     this.kind = kind;
+    this.fix = fix;
   }
 }
 
@@ -321,7 +327,7 @@ export class ProtocolClient {
     const p = this.#pending.get(id);
     if (!p) return;
     this.#pending.delete(id);
-    if (msg.ok === false) p.reject(new RequestError(String(msg.error ?? "request failed"), typeof msg.kind === "string" ? msg.kind : undefined));
+    if (msg.ok === false) p.reject(new RequestError(String(msg.error ?? NO_REASON), typeof msg.kind === "string" ? msg.kind : undefined, typeof msg.fix === "string" ? msg.fix : undefined));
     else p.resolve(msg);
   }
 

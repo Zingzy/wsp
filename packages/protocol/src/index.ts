@@ -5504,6 +5504,8 @@ export const RuntimeErrorResponse = z.object({
   ok: z.literal(false),
   error: z.string(),
   kind: z.string().optional(),
+  /** What to do about it, when the refusal was made with one; `error` already ends with it. */
+  fix: z.string().optional(),
 });
 export const RuntimeResponse = z.union([RuntimeOkResponse, RuntimeErrorResponse]);
 export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
