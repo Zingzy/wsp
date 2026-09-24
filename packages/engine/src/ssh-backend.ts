@@ -18,7 +18,7 @@ import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
-import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readLists, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -177,39 +177,33 @@ export function sshDialArgs(reach: SshReach): string[] {
 
 /** The keys of the person's config a forward child carries, by the name `ssh -G` prints and the option that sets it:
  * who it logs in as and with what, how it gets there, and where and under what name the machine's key is checked. */
-const CARRIED_SSH_OPTIONS: readonly (readonly [string, string])[] = [
-  ["identityfile", "IdentityFile"],
-  ["identitiesonly", "IdentitiesOnly"],
-  ["certificatefile", "CertificateFile"],
-  ["proxycommand", "ProxyCommand"],
-  ["userknownhostsfile", "UserKnownHostsFile"],
-  ["globalknownhostsfile", "GlobalKnownHostsFile"],
-  ["hostkeyalias", "HostKeyAlias"],
-  ["checkhostip", "CheckHostIP"],
-  ["hostkeyalgorithms", "HostKeyAlgorithms"],
-  ["pubkeyacceptedalgorithms", "PubkeyAcceptedAlgorithms"],
-  ["identityagent", "IdentityAgent"],
-  ["addkeystoagent", "AddKeysToAgent"],
-  ["usekeychain", "UseKeychain"],
+const CARRIED_SSH_OPTIONS: readonly (readonly [string, string, "one" | "rest"])[] = [
+  ["identityfile", "IdentityFile", "one"],
+  ["identitiesonly", "IdentitiesOnly", "one"],
+  ["certificatefile", "CertificateFile", "one"],
+  ["proxycommand", "ProxyCommand", "rest"],
+  ["userknownhostsfile", "UserKnownHostsFile", "rest"],
+  ["globalknownhostsfile", "GlobalKnownHostsFile", "rest"],
+  ["hostkeyalias", "HostKeyAlias", "one"],
+  ["checkhostip", "CheckHostIP", "one"],
+  ["hostkeyalgorithms", "HostKeyAlgorithms", "one"],
+  ["pubkeyacceptedalgorithms", "PubkeyAcceptedAlgorithms", "one"],
+  ["identityagent", "IdentityAgent", "one"],
+  ["addkeystoagent", "AddKeysToAgent", "one"],
+  ["usekeychain", "UseKeychain", "one"],
 ];
+
+/** A value ssh re-reads as one word: a space, a quote or a backslash in it would split it or be eaten, so it goes in
+ * double quotes with ssh's own escapes. A `rest` value (a command, a list of files) is taken as ssh printed it. */
+function carriedValue(value: string, shape: "one" | "rest"): string {
+  return shape === "rest" || !/[\s"'\\]/.test(value) ? value : `"${value.replace(/["\\]/g, "\\$&")}"`;
+}
 
 /** A dial with the person's config already read into it: the machine it lands on and the options that got it there,
  * so a child started under `-F /dev/null` reaches the same machine the same way with none of the config's forwards. */
 export interface SshCarried {
   reach: SshReach;
   options: readonly string[];
-}
-
-/** Every value `ssh -G` printed, a key that repeats (identityfile) keeping each in order. */
-function configLists(stdout: string): Map<string, string[]> {
-  const lists = new Map<string, string[]>();
-  for (const line of stdout.split("\n")) {
-    const space = line.indexOf(" ");
-    if (space <= 0) continue;
-    const key = line.slice(0, space);
-    lists.set(key, [...(lists.get(key) ?? []), line.slice(space + 1).trim()]);
-  }
-  return lists;
 }
 
 /** A ProxyJump as the ProxyCommand ssh builds for it, less the `-F` it would pass on: under `-F /dev/null` a jump named
@@ -229,16 +223,16 @@ export async function carriedSshValues(reach: SshReach, run: SshLocalRun = local
   const read = async (bare: boolean): Promise<Map<string, string[]>> => {
     const said = await run("ssh", ["-G", ...(bare ? ["-F", "/dev/null"] : []), ...sshDialArgs(reach), target], SSH_LOCAL_READ_MS);
     if (said.exitCode !== 0) throw new Error(sshRefusalLine(said, reach));
-    return configLists(said.stdout);
+    return readLists(said.stdout);
   };
   const config = await read(false);
   const defaults = await read(true);
   const first = (key: string): string => config.get(key)?.[0] ?? "";
   const options: string[] = [];
-  for (const [key, option] of CARRIED_SSH_OPTIONS) {
+  for (const [key, option, shape] of CARRIED_SSH_OPTIONS) {
     const values = config.get(key) ?? [];
     if (values.join("\n") === (defaults.get(key) ?? []).join("\n")) continue;
-    options.push(...values.filter(value => value !== "").map(value => `${option}=${value}`));
+    options.push(...values.filter(value => value !== "").map(value => `${option}=${carriedValue(value, shape)}`));
   }
   const jump = first("proxyjump");
   if (first("proxycommand") === "" && jump !== "" && jump !== "none") options.push(`ProxyCommand=${jumpCommand(jump)}`);

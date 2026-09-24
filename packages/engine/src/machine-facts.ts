@@ -13,12 +13,19 @@ import type { ExecResult } from "./machine.js";
  * the first space. A key whose command printed nothing is present and empty, which the readings below take as an
  * answer the machine does not have rather than as a value. */
 export function readValues(stdout: string): Record<string, string> {
-  const values: Record<string, string> = {};
+  return Object.fromEntries([...readLists(stdout)].map(([key, values]) => [key, values.at(-1)!]));
+}
+
+/** The same lines with a key that repeats (ssh -G's identityfile) keeping every value in order. */
+export function readLists(stdout: string): Map<string, string[]> {
+  const lists = new Map<string, string[]>();
   for (const line of stdout.split("\n")) {
     const space = line.indexOf(" ");
-    if (space > 0) values[line.slice(0, space)] = line.slice(space + 1).trim();
+    if (space <= 0) continue;
+    const key = line.slice(0, space);
+    lists.set(key, [...(lists.get(key) ?? []), line.slice(space + 1).trim()]);
   }
-  return values;
+  return lists;
 }
 
 /** The lines that ask a machine what system it runs: the distribution's own name where the machine keeps one, the

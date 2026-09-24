@@ -48,7 +48,8 @@ function fakeConfig(withConfig: string[], hostname = "203.0.113.9", user = "root
   const run: SshLocalRun = async (file, args) => {
     asked.push([file, ...args]);
     const bare = args.includes("/dev/null");
-    const lines = bare ? DEFAULTS.map(l => l.replace(/^user .*/, `user ${user}`).replace(/^hostname .*/, `hostname ${hostname}`)) : withConfig;
+    const dialed = args.includes("-p") ? args[args.indexOf("-p") + 1] : "22";
+    const lines = (bare ? DEFAULTS.map(l => l.replace(/^user .*/, `user ${user}`).replace(/^hostname .*/, `hostname ${hostname}`)) : withConfig).map(l => l.replace(/^port .*/, `port ${dialed}`));
     return { exitCode: 0, stdout: lines.join("\n") + "\n", stderr: "" };
   };
   return { run, asked };
@@ -127,14 +128,37 @@ describe("the ssh dial-back forward", () => {
     expect(args.slice(-2)).toEqual(["dev_example@compute.1234567890", "echo WSP_BACK_UP; exec cat"]);
   });
 
-  it("a config that turns CheckHostIP on or names several identities carries each", async () => {
+  it("a config that turns CheckHostIP on or names several identities carries each, at the port the read was asked for", async () => {
     const reach: SshReach = { user: "root", host: "box", port: 2222 };
-    const block = DEFAULTS.map(l => l.replace(/^port .*/, "port 2222").replace(/^checkhostip .*/, "checkhostip yes")).filter(l => !l.startsWith("identityfile ")).concat("identityfile ~/.ssh/a", "identityfile ~/.ssh/b");
+    const block = DEFAULTS.map(l => l.replace(/^checkhostip .*/, "checkhostip yes")).filter(l => !l.startsWith("identityfile ")).concat("identityfile ~/.ssh/a", "identityfile ~/.ssh/b");
     const { run } = fakeConfig(block, "box");
     const args = sshBackArgs(await carriedSshValues(reach, run), 4640, 4640);
     expect(args).toContain("CheckHostIP=yes");
     expect(args.filter(a => a.startsWith("IdentityFile="))).toEqual(["IdentityFile=~/.ssh/a", "IdentityFile=~/.ssh/b"]);
     expect(args[args.indexOf("-p") + 1]).toBe("2222");
+  });
+
+  it("a carried path with a space is quoted so ssh reads it as one value, a list and a command stay as ssh printed them", async () => {
+    const reach: SshReach = { user: "root", host: "box", port: 22 };
+    const agent = "/Users/dev/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock";
+    const block = DEFAULTS.filter(l => !l.startsWith("identityfile ") && !l.startsWith("userknownhostsfile ")).concat(
+      `identityagent ${agent}`,
+      "identityfile ~/keys/my key",
+      "identityfile ~/.ssh/id_ed25519",
+      'identityfile ~/odd/a"b\\c',
+      "userknownhostsfile ~/.ssh/known_hosts ~/.ssh/work_hosts",
+      "proxycommand nc -X 5 -x proxy:1080 %h %p",
+    );
+    const { run } = fakeConfig(block, "box");
+    const options = sshBackArgs(await carriedSshValues(reach, run), 4640, 4640).flatMap((a, i, all) => (all[i - 1] === "-o" ? [a] : []));
+    expect(options).toEqual(expect.arrayContaining([
+      `IdentityAgent="${agent}"`,
+      'IdentityFile="~/keys/my key"',
+      "IdentityFile=~/.ssh/id_ed25519",
+      'IdentityFile="~/odd/a\\"b\\\\c"',
+      "UserKnownHostsFile=~/.ssh/known_hosts ~/.ssh/work_hosts",
+      "ProxyCommand=nc -X 5 -x proxy:1080 %h %p",
+    ]));
   });
 
   it("a ProxyJump rides as the command ssh would build for it, the jump keeping the person's config", async () => {
