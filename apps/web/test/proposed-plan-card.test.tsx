@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposedPlanCard } from "../src/components/chat/ProposedPlanCard.js";
 import { useNotices } from "../src/notices/store.js";
-import { RequestError } from "../src/protocol/client.js";
+import { DisconnectedError, RequestError } from "../src/protocol/client.js";
 
 const PLAN = "# Plan\n\n1. Do the thing";
 
@@ -16,6 +16,14 @@ async function openSave(onSavePlan: (input: { path: string; contents: string }) 
   fireEvent.click(await screen.findByRole("menuitem", { name: "Save to workspace" }));
   return (await screen.findByLabelText("Workspace path")) as HTMLInputElement;
 }
+
+async function reopenSave() {
+  fireEvent.click(screen.getByRole("button", { name: "Plan actions" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Save to workspace" }));
+  await screen.findByLabelText("Workspace path");
+}
+
+const refusalText = () => document.querySelector("[data-k='plan-path-refusal']")?.textContent ?? "";
 
 beforeEach(() => act(() => useNotices.getState().clear()));
 
@@ -49,6 +57,58 @@ describe("saving a plan to the workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(document.querySelector("[data-k='plan-path-refusal']")?.textContent).toBe("Plan not saved: plans/ is not writable Check the folder's owner."));
     expect(screen.getByLabelText("Workspace path")).toBeTruthy();
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it("a refusal leaves when Save is pressed again, and a save that then goes through reopens to an empty slot", async () => {
+    let refuse = true;
+    let release = () => {};
+    const save = vi.fn(async () => {
+      if (refuse) throw new RequestError("busy", undefined, "Try again.");
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    const field = await openSave(save);
+    fireEvent.change(field, { target: { value: "plan.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refusalText()).toBe("Plan not saved: busy Try again."));
+    refuse = false;
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("button", { name: "Saving..." });
+    expect(refusalText()).toBe("");
+    await act(async () => release());
+    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await reopenSave();
+    expect(refusalText()).toBe("");
+  });
+
+  it("a refusal and then Cancel reopens to an empty slot", async () => {
+    const save = vi.fn(async () => { throw new RequestError("busy", undefined, "Try again."); });
+    const field = await openSave(save);
+    fireEvent.change(field, { target: { value: "plan.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refusalText()).toBe("Plan not saved: busy Try again."));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await reopenSave();
+    expect(refusalText()).toBe("");
+  });
+
+  it("an empty path said and then Cancel reopens to an empty slot", async () => {
+    const field = await openSave(vi.fn(async () => {}));
+    fireEvent.change(field, { target: { value: " " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(refusalText()).toBe("Type a path in the workspace to save the plan to.");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await reopenSave();
+    expect(refusalText()).toBe("");
+  });
+
+  it("a connection lost during the save says the plan was not saved, and no toast", async () => {
+    const field = await openSave(vi.fn(async () => { throw new DisconnectedError("lost"); }));
+    fireEvent.change(field, { target: { value: "plan.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refusalText()).toBe("Plan not saved: runtime connection lost"));
     expect(useNotices.getState().notices).toEqual([]);
   });
 });

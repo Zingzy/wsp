@@ -27,6 +27,7 @@ import {
 } from "../ui/dialog";
 import { addNotice, noticeFailure } from "../../notices/store";
 import { failureOf } from "../../protocol/failure";
+import { RefusalSlot } from "../../settings/sheetParts";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
@@ -46,7 +47,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const [pathRefusal, setPathRefusal] = useState<{ said: string; fix?: string | undefined } | null>(null);
+  const [pathRefusal, setPathRefusal] = useState<{ said: string; fix?: string } | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "plan",
     onError: (error) => noticeFailure(error, (said) => `Plan not copied: ${said}`),
@@ -76,11 +77,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       return;
     }
     setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
+    setPathRefusal(null);
     setIsSaveDialogOpen(true);
   };
 
   const handleSaveToWorkspace = () => {
     const relativePath = savePath.trim();
+    setPathRefusal(null);
     if (!workspaceRoot || !onSavePlan) {
       return;
     }
@@ -195,10 +198,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                   disabled={isSavingToWorkspace}
                 />
               </label>
-              <p data-k="plan-path-refusal" className="min-h-4 font-mono text-xs text-destructive-foreground">
-                {pathRefusal?.said ?? ""}
-                {pathRefusal?.fix === undefined ? null : <span className="text-foreground"> {pathRefusal.fix}</span>}
-              </p>
+              <RefusalSlot k="plan-path-refusal" {...pathRefusal} />
             </DialogPanel>
             <DialogFooter>
               <Button
