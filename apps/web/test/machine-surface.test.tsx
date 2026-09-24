@@ -19,7 +19,8 @@ const here: PlaceView = { id: HERE_PLACE_ID, kind: "computer", name: "mac", labe
 
 const slot = (k: string) => document.querySelector(`[data-chart="${k}"] [data-k="${k}"]`)!.textContent;
 const line = (k: string) => document.querySelector(`[data-chart="${k}"] [data-chart-line]`);
-const facts = () => [...document.querySelectorAll("[data-facts] p")].map(p => p.textContent);
+const facts = () => [...document.querySelectorAll("[data-facts] [data-chip]")].map(c => c.textContent);
+const path = () => document.querySelector("[data-facts] p")?.textContent ?? null;
 const actions = () => [...document.querySelectorAll<HTMLButtonElement>("[data-machine-actions] button")].map(b => b.dataset["action"]);
 
 beforeEach(() => {
@@ -55,16 +56,14 @@ describe("the Workspace pane", () => {
     });
     act(() => useStore.setState({ workspaces: [{ ...view, phase: "napping" }] }));
     expect(slot("load")).toBe("paused");
-    expect(line("load")!.getAttribute("class")).toContain("stroke-muted-foreground/40");
+    expect(line("load")!.closest("div")!.getAttribute("class")).toContain("text-muted-foreground/40");
   });
 
-  it("states the workspace's facts in two mono lines and nothing else in words", () => {
+  it("states the workspace's facts as chips and its folder in one mono line, and nothing else in words", () => {
     act(() => useStore.setState({ statuses: { [WS]: status() } }));
     const { container } = render(<MachineSurface workspaceId={WS} />);
-    const [first, second] = facts();
-    expect(first).toBe(`Running · a provider · ${fmtSize({ cpu: 4, memMb: 8192 }, "vCPU")}`);
-    expect(second).toBe("/root");
-    expect(facts()).toHaveLength(2);
+    expect(facts()).toEqual(["Running", "a provider", "4 vCPU", "8 GB"]);
+    expect(path()).toBe("/root");
     expect([...container.querySelectorAll("p")].every(p => p.closest("[data-facts]") !== null)).toBe(true);
   });
 
@@ -107,7 +106,7 @@ describe("the Workspace pane", () => {
       getLive(HERE_KEY).feedSample(sample(3, 1));
     });
     expect(slot("load")).toBe("3.00");
-    expect(facts()).toEqual([`dev's MacBook · macOS 16.1 · ${fmtSize({ cpu: 10, memMb: 32768 }, "cores")}`]);
+    expect(facts()).toEqual(["dev's MacBook", "macOS 16.1", "10 cores", "32 GB"]);
     expect(document.querySelector("[data-machine-actions]")).toBeNull();
   });
 });

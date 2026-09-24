@@ -76,8 +76,13 @@ describe("index.css", () => {
         border-color: var(--sidebar-border);
 
         & > [data-slot="sidebar-inner"] {
-          background: transparent;
+          background: var(--sidebar-veil, transparent);
         }
+      }
+
+      /* The owner's pick over the window's sidebar material, compared live against window and hud on 2026-09-24. */
+      :root:not([data-theme="light"]):is(.dark) {
+        --sidebar-veil: rgb(16 16 18 / 55%);
       }
 
       /* The window paints the glass behind the page, so the page's own canvas is
@@ -198,6 +203,13 @@ describe("index.css", () => {
         background-size: 160px 160px;
         opacity: var(--space-grain, 0);
         mix-blend-mode: soft-light;
+      }
+
+      @keyframes road-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
       }
       "
     `);

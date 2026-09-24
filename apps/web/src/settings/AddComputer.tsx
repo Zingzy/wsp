@@ -209,7 +209,7 @@ interface SshRun {
   stages: InstallStage[] | null;
   installed: PlaceView | null;
 }
-const useSshRun = create<SshRun>(() => ({ user: "", host: "", port: "", refusal: null, stages: null, installed: null }));
+export const useSshRun = create<SshRun>(() => ({ user: "", host: "", port: "", refusal: null, stages: null, installed: null }));
 const setRun = (patch: Partial<SshRun> | ((run: SshRun) => Partial<SshRun>)): void => useSshRun.setState(patch);
 
 function SshRoad({ now }: { now: () => number }) {
