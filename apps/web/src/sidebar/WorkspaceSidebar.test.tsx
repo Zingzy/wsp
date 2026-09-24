@@ -7,7 +7,7 @@ import { workspaceActions } from "../actions/workspaceActions.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
-import { THIS_COMPUTER_WORD } from "../settings/places.js";
+import { hereWord } from "@wsp/protocol";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
 
@@ -128,7 +128,7 @@ describe("the sidebar under the four nouns", () => {
     expect(depthOf("pricing page")).toBe(1);
     // A project row is two lines, its computer over its name, sentence case, no caps and no letter-spacing.
     expect(rowOf("spoo").className).toContain("h-13");
-    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe(THIS_COMPUTER_WORD);
+    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe(hereWord(true));
     expect(rowOf("spoo").className).not.toMatch(/uppercase|tracking-/);
     expect(rowOf("spoo").querySelector("[data-project-name]")!.className).not.toMatch(/uppercase|tracking-/);
     // The count rides the row while its children are shut, so a shut project still says how much it holds.
