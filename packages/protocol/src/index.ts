@@ -2069,6 +2069,8 @@ export interface DesktopBridge {
   /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
    * a shell from before the bridge carried it, which is older than any page that reads this. */
   readonly version?: string;
+  /** The words over Get on this shell's platform, from the shell's own bundle row; absent where none is built. */
+  readonly bundleHover?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */

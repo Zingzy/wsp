@@ -238,7 +238,6 @@ export const ABOUT_WORDS = {
   computersBehind: "Computers behind",
   behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
   get: (version: string): string => `Get ${version}`,
-  getHover: (mac: boolean): string => (mac ? "Downloads the disk image and checks its sha256. Unsigned builds need Privacy & Security, Open Anyway, once." : "Downloads the AppImage and checks its sha256."),
   downloading: "Downloading",
   quitAndOpen: "Quit and open",
 } as const;

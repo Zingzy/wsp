@@ -8,7 +8,6 @@ import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type 
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
-import { isMacPlatform } from "../lib/utils.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { ABOUT_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
@@ -34,7 +33,7 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
 
-type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen">;
+type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen" | "bundleHover">;
 
 /** The shell's bundle road where this page is the app's own host's, else nothing: a page a host somewhere else
  * serves, a browser tab and a shell from before the road all take the link form. */
@@ -51,17 +50,29 @@ function useBundleRoad(): Bundle | undefined {
       live = false;
     };
   }, [bridge]);
-  const { getBundle, quitAndOpen } = bridge ?? {};
-  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen } : undefined;
+  const { getBundle, quitAndOpen, bundleHover } = bridge ?? {};
+  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen, bundleHover } : undefined;
 }
 
-function GetRelease({ latest, mac, failed }: { latest: ReleaseLatest; mac: boolean; failed: (e: unknown) => void }) {
-  const road = useBundleRoad();
+/** Get while this page is behind: the shell's download only where the app itself is behind, since a host that lags
+ * alone is updated its own way and the app already installed is no update for it; the link to the release anywhere
+ * else. */
+function GetRelease({ latest, appBehind, failed }: { latest: ReleaseLatest; appBehind: boolean; failed: (e: unknown) => void }) {
+  const shellRoad = useBundleRoad();
+  const road = appBehind ? shellRoad : undefined;
   const [phase, setPhase] = useState<"get" | "downloading" | "kept">("get");
-  const said = (outcome: BundleOutcome): boolean => {
-    if (!outcome.ok) failed(outcome.error);
-    return outcome.ok;
-  };
+  // A refused get or open puts Get back: a new get fetches nothing where the kept file still matches.
+  const answered = (asked: Promise<BundleOutcome>): void =>
+    void asked.then(
+      outcome => {
+        if (!outcome.ok) failed(outcome.error);
+        setPhase(outcome.ok ? "kept" : "get");
+      },
+      (e: unknown) => {
+        failed(e);
+        setPhase("get");
+      },
+    );
   if (road === undefined)
     return (
       <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(latest.url)}>
@@ -70,22 +81,16 @@ function GetRelease({ latest, mac, failed }: { latest: ReleaseLatest; mac: boole
     );
   if (phase === "kept")
     return (
-      <Button size="xs" variant="outline" data-k="get-release" onClick={() => void road.quitAndOpen().then(said, failed)}>
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => answered(road.quitAndOpen())}>
         {ABOUT_WORDS.quitAndOpen}
       </Button>
     );
   const get = (): void => {
     setPhase("downloading");
-    road.getBundle({ version: latest.version }).then(
-      outcome => setPhase(said(outcome) ? "kept" : "get"),
-      (e: unknown) => {
-        failed(e);
-        setPhase("get");
-      },
-    );
+    answered(road.getBundle({ version: latest.version }));
   };
   return (
-    <Button size="xs" variant="outline" data-k="get-release" title={ABOUT_WORDS.getHover(mac)} disabled={phase === "downloading"} onClick={get}>
+    <Button size="xs" variant="outline" data-k="get-release" title={road.bundleHover} disabled={phase === "downloading"} onClick={get}>
       {phase === "downloading" ? ABOUT_WORDS.downloading : ABOUT_WORDS.get(latest.version)}
     </Button>
   );
@@ -109,7 +114,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
       items: lines,
       under: (
         <>
-          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} mac={isMacPlatform(ctx.platform)} failed={ctx.failed} />}
+          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />}
           <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>

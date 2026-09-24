@@ -10,7 +10,6 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { isMacPlatform } from "../src/lib/utils.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
@@ -458,9 +457,10 @@ describe("About and the newest release", () => {
     }) as typeof window.open;
     return opened;
   };
-  const shellOn = (current: string | null, bundle: Pick<DesktopBridge, "getBundle" | "quitAndOpen">): void => {
-    shell("0.2.0", "0.2.0");
-    window.wsp = { version: "0.2.0", hosts: async () => ({ here: "this Mac", current, hosts: [] }), ...bundle };
+  const HOVER = "Downloads the disk image and checks its sha256.";
+  const shellOn = (current: string | null, bundle: Pick<DesktopBridge, "getBundle" | "quitAndOpen">, app = "0.2.0", host = "0.2.0"): void => {
+    shell(app, host);
+    window.wsp = { version: app, bundleHover: HOVER, hosts: async () => ({ here: "this Mac", current, hosts: [] }), ...bundle };
   };
 
   it("in the app on its own host, Get downloads through the shell, says Downloading, then Quit and open, which hands over to the shell", async () => {
@@ -472,7 +472,7 @@ describe("About and the newest release", () => {
     await mount({}, "about");
     const opened = opens();
     const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
-    await waitFor(() => expect(get.title).toBe(ABOUT_WORDS.getHover(isMacPlatform(navigator.platform))));
+    await waitFor(() => expect(get.title).toBe(HOVER));
     fireEvent.click(get);
     expect(getBundle).toHaveBeenCalledWith({ version: "0.3.0" });
     await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.downloading, ABOUT_WORDS.releases]));
@@ -489,10 +489,39 @@ describe("About and the newest release", () => {
     shellOn(null, { getBundle, quitAndOpen: vi.fn() });
     useStore.setState({ release: read("0.3.0") });
     await mount({}, "about");
-    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(ABOUT_WORDS.getHover(isMacPlatform(navigator.platform))));
+    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
     await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => [n.kind, n.text])).toEqual([["error", "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted"]]));
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+  });
+
+  it("an open the shell refuses lands its line as an error notice and puts Get back", async () => {
+    const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg changed after it was checked and was not opened" }));
+    shellOn(null, { getBundle: vi.fn(async (): Promise<BundleOutcome> => ({ ok: true })), quitAndOpen });
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    fireEvent.click(await screen.findByRole("button", { name: ABOUT_WORDS.quitAndOpen }));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["wsp-0.3.0-mac.dmg changed after it was checked and was not opened"]));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]));
+  });
+
+  it("where only the host is behind, Get is the link to the release's page and the shell downloads nothing", async () => {
+    const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const hosts = vi.fn(async () => ({ here: "this Mac", current: null, hosts: [] }));
+    shellOn(null, { getBundle, quitAndOpen: vi.fn() }, "0.3.0", "0.2.0");
+    window.wsp = { ...window.wsp, hosts };
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    const opened = opens();
+    await waitFor(() => expect(hosts).toHaveBeenCalled());
+    await settle();
+    const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
+    expect(get.title).toBe("");
+    fireEvent.click(get);
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(getBundle).not.toHaveBeenCalled();
   });
 
   it("a remote page gets the link form: Get opens the release's page and asks the shell for nothing", async () => {

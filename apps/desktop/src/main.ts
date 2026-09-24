@@ -154,6 +154,8 @@ const bundles = (): BundleShell =>
     open: file => shell.openPath(file),
     reveal: file => shell.showItemInFolder(file),
     quit: () => app.quit(),
+    running: app.getVersion(),
+    packaged: app.isPackaged,
   }));
 answer("bundle:get", (_event, ask) => bundles().get(ask));
 answer("bundle:open", () => bundles().open());

@@ -16,6 +16,7 @@ export interface OnboardingBridge {
 
 const bridge: DesktopBridge & OnboardingBridge = {
   version: shellArgFrom(process.argv, "version"),
+  bundleHover: shellArgFrom(process.argv, "bundle-hover"),
   agents: () => ipcRenderer.invoke("onboarding:agents"),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
   finish: () => ipcRenderer.invoke("onboarding:finish"),
