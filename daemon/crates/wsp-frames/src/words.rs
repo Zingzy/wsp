@@ -75,6 +75,11 @@ pub fn unknown_op(op: &str) -> String {
     format!("unknown op: {op}")
 }
 
+/// What a folder listing outside every root it browses is refused with, naming the roots it does browse.
+pub fn folders_outside(dir: impl std::fmt::Display, roots: impl std::fmt::Display) -> String {
+    format!("{dir} is outside the folders wsp browses on that computer: {roots}")
+}
+
 pub fn port_scope_refusal(port: impl std::fmt::Display) -> String {
     format!("this socket is scoped to port {port}: only tunnel ops on it and ping are allowed")
 }

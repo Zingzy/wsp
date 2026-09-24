@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 72;
+pub const DAEMON_VERSION: u32 = 74;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -46,6 +46,34 @@ pub const HOMEBREW_PREFIX: &str = "/home/linuxbrew/.linuxbrew";
 /// where the computer has it: a root left off this list is on the computer and out of every workspace's sight while
 /// the PATH inside names it.
 pub const SHARED_TOOL_ROOTS: [&str; 1] = [HOMEBREW_HOME];
+/// Directories a machine recreates, by exact name, which a repos listing never walks into.
+pub const CACHE_DIRS: [&str; 22] = [
+    "node_modules",
+    ".pnpm-store",
+    "venv",
+    ".venv",
+    "virtenv",
+    "site-packages",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "coverage",
+    ".cache",
+    ".parcel-cache",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".gradle",
+];
+/// How deep under a root a repos listing looks, and how many repos it stops at.
+pub const REPO_DEPTH: u32 = 5;
+pub const REPO_CAP: usize = 400;
 /// The one PATH the tools on a machine sit on, in one order: a sealed image's login shell reads it from the profile
 /// the image writes, every thread and exec carries it, and a workspace on a computer somebody owns boots with it,
 /// so the boot's own children and a person's thread find the same gcc and the same gh.

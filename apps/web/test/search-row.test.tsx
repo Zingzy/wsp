@@ -43,7 +43,7 @@ describe("the search row", () => {
     expect(row.hasAttribute("data-search-row")).toBe(true);
     expect(row.className).not.toMatch(/(^|\s)(bg-sidebar-row-selected|border-sidebar-border|bg-sidebar-control-surface|bg-black|bg-white|tint|ring-1)(\s|$)/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");
-    expect(row.className).toContain("h-7");
+    expect(row.className).toContain("h-9");
   });
 
   it("is still the palette's door with the tooltip around it", () => {

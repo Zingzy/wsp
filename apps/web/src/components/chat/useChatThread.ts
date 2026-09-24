@@ -14,6 +14,7 @@
 // wait under. A turn a new thread leaves behind keeps running as its own
 // thread: the runtime runs a workspace's threads side by side and holds
 // each to one turn, so a fresh view owes the left one nothing.
+import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSessionEvent } from "@wsp/protocol";
 import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
@@ -585,6 +586,11 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
 
   useEffect(() => {
     if (!api) return;
+    // A project's home has no workspace yet, so there is no history to read for it.
+    if (isProjectHomeKey(workspaceId)) {
+      setHydratedFor(viewKey);
+      return;
+    }
     if (carriedRef.current === viewKey) {
       carriedRef.current = null;
       hydratedRef.current = viewKey;

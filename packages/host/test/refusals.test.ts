@@ -109,13 +109,17 @@ describe("what wsp says when it will not run a line", () => {
     expect(relay.code).toBe(EXIT_CODES.usage);
     expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
     // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
-    for (const argv of [["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"], ["new", "x", "--on", "here"]]) {
+    for (const argv of [["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
       expect(io.errors[0], line).toContain("Unknown option");
       expect(io.errors[0], line).toContain("usage: wsp ");
     }
+    // --on came back on wsp folders, so on another verb it is that verb's stray flag rather than an unknown one.
+    const on = await run("new", "x", "--on", "here");
+    expect(on.code).toBe(EXIT_CODES.usage);
+    expect(on.io.errors[0]).toContain("--on belongs to wsp folders; wsp new does not read it");
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {

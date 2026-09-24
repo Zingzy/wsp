@@ -143,7 +143,7 @@ describe("the Computers list", () => {
     expect(factsOf("p_2")).toBe("");
     expect(listRow("p_2").textContent).not.toMatch(/[-\u2014]/);
     expect(listRow("p_2").querySelector("[data-slot=skeleton]")).toBeNull();
-    expect(listRow("p_2").className).toContain("h-13");
+    expect(listRow("p_2").className).toContain("h-16");
   });
 
   it("counts the workspaces standing on each row off the list the sidebar shows, and a fresh state is this computer's row alone with no cloud and no price", async () => {
@@ -254,8 +254,8 @@ describe("a computer's own page", () => {
     expect(descriptionOf("answered")).toBe(WHERE_WORDS.answeredDescription);
     expect(document.querySelector("[data-settings-page] [data-k='workspace-line'] [data-settings-word]")?.textContent).toBe("Running · 2 threads");
     // The rows and the lines stand at their own two heights.
-    expect(rowOf("address")?.className).toContain("h-13");
-    expect(lineOf("system")?.className).toContain("h-8");
+    expect(rowOf("address")?.className).toContain("h-16");
+    expect(lineOf("system")?.className).toContain("h-11");
   });
 
   it("this Mac's page has no Connection card and no acts, opens on the agents found here with the one held action and no title on it", async () => {

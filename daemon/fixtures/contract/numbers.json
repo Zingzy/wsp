@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 72,
+  "daemonVersion": 74,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -57,5 +57,31 @@
   "daemonOomScoreAdj": -999,
   "daemonNice": -10,
   "workOomScoreAdj": 500,
-  "workScoreLine": "{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; renice 0 $$ >/dev/null 2>&1"
+  "workScoreLine": "{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; renice 0 $$ >/dev/null 2>&1",
+  "cacheDirs": [
+    "node_modules",
+    ".pnpm-store",
+    "venv",
+    ".venv",
+    "virtenv",
+    "site-packages",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "coverage",
+    ".cache",
+    ".parcel-cache",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".gradle"
+  ],
+  "repoDepth": 5,
+  "repoCap": 400
 }

@@ -395,6 +395,27 @@ mod tests {
         assert!(!to.exists());
     }
 
+    /// A folder whose default branch is checked out in one of its own worktrees: the copy carries the folder's git
+    /// directory, worktree records and all, and still lands on that branch, while the folder keeps its worktree.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_copy_lands_on_the_base_branch_that_a_worktree_of_the_folder_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("work");
+        repo(&from);
+        assert!(rules::git(&from, &["checkout", "--quiet", "-b", "feature"], rules::WRITE_MS).unwrap().ok());
+        let held = dir.path().join("held-main");
+        assert!(rules::git(&from, &["worktree", "add", "--quiet", &held.to_string_lossy(), "main"], rules::WRITE_MS).unwrap().ok());
+        let to = dir.path().join("work-other");
+        let report = make(&ask(&from, &to)).unwrap();
+        assert_eq!(report.road, CopyRoadName::Clonefile);
+        assert_eq!(report.branch, "main");
+        assert_eq!(rules::git(&to, &["rev-parse", "--abbrev-ref", "HEAD"], rules::READ_MS).unwrap().out(), "main");
+        let listed = rules::git(&from, &["worktree", "list", "--porcelain"], rules::READ_MS).unwrap();
+        assert!(listed.out().contains("held-main"), "the folder lost its own worktree: {}", listed.out());
+        remove(&from, &to, report.road).unwrap();
+    }
+
     /// A checkout carrying a link where a folder is meant to be: the copy stands, nothing beside the checkout is
     /// removed, and the report names the row the exclusion left standing and why.
     #[cfg(target_os = "macos")]

@@ -3,6 +3,7 @@
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { readProjectHome } from "../src/protocol/address.js";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -71,7 +72,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -118,6 +119,19 @@ describe("the workspace the address opens on", () => {
     useStore.setState({ selectedId: null });
     hash("#w/ws_gone");
     expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
+  });
+
+  it("a project's home writes #p/<id>, which a reload reads back, and a refresh while a home is open fills no selection", async () => {
+    useStore.getState().openProjectHome("pr_1");
+    expect(window.location.hash).toBe("#p/pr_1");
+    expect(readProjectHome()).toBe("pr_1");
+    expect(await refreshed([view("ws_a"), view("ws_b")])).toBeNull();
+    expect(useStore.getState().projectHome).toBe("pr_1");
+    // A pick of a workspace leaves the home, and the address says the workspace again.
+    useStore.getState().select("ws_b");
+    expect(useStore.getState().projectHome).toBeNull();
+    expect(window.location.hash).toBe("#w/ws_b");
+    expect(readProjectHome()).toBeNull();
   });
 
   it("never moves a selection the person already made", async () => {

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
-import { hostFolderRoots, hostFolders, importedProjectFolders, listHostFolders } from "../src/host-folders.js";
+import { hostFolderRoots, hostFolders, importedProjectFolders, listHostFolders, listHostRepos } from "../src/host-folders.js";
 
 // A folder the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
@@ -157,5 +157,29 @@ describe("this computer's folder listing", () => {
     const folders = hostFolders(async () => records);
     // hostFolders reads this computer's own home folder, which the paths argument is not given for.
     expect((await folders.list({ dir: project })).roots).toEqual([...hostFolderRoots(), project]);
+  });
+});
+
+describe("the repos listing and this computer's own window", () => {
+  it("answers every repo under home with its branch, newest first, leaving out dependency folders, linked worktrees and workspace copies", () => {
+    const { home } = tree();
+    mkdirSync(join(home, "deep", "a", "b", "kart", ".git"), { recursive: true });
+    writeFileSync(join(home, "deep", "a", "b", "kart", ".git", "HEAD"), "ref: refs/heads/feature/x\n");
+    mkdirSync(join(home, "code", "spoo", "node_modules", "dep", ".git"), { recursive: true });
+    mkdirSync(join(home, "node_modules", "lib", ".git"), { recursive: true });
+    mkdirSync(join(home, "wt"), { recursive: true });
+    writeFileSync(join(home, "wt", ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
+    mkdirSync(join(home, "code", "spoo-pricing", ".git"), { recursive: true });
+    const listing = listHostRepos({ home, copies: [join(home, "code", "spoo-pricing")] });
+    const paths = listing.folders.map(f => f.path).sort();
+    expect(paths).toEqual([join(home, "code", "spoo"), join(home, "deep", "a", "b", "kart")].sort());
+    expect(listing.folders.find(f => f.path.endsWith("kart"))?.branch).toBe("feature/x");
+    expect(listing.folders.every(f => f.repo && typeof f.touchedAt === "number")).toBe(true);
+  });
+
+  it("lets this computer's own window list a folder outside home, and nobody else", () => {
+    const { home, elsewhere } = tree();
+    expect(() => listHostFolders({ dir: elsewhere }, { home })).toThrow(/outside the folders/);
+    expect(listHostFolders({ dir: elsewhere }, { home, wide: true }).folders.map(f => f.path)).toEqual([join(elsewhere, "secrets")]);
   });
 });

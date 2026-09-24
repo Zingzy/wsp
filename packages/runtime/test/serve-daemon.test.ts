@@ -3,14 +3,14 @@
 // behind a stub machine whose route names it, driven through WsClient the way
 // a page drives the host.
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { LocalBackend } from "@wsp/engine";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
 import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
-import { HERE_PLACE_ID, relayedRefusal, rootsPathIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -231,23 +231,27 @@ describe("daemon.open refusals name what shut the door", () => {
   });
 });
 
+/** This computer's own wiring, its daemon the one under test. */
+function localOn(port: number): LocalWiring {
+  localRoot = mkdtempSync(join(tmpdir(), "wsp-serve-local-"));
+  const road = { url: `ws://127.0.0.1:${port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: MACHINE_TOKEN };
+  return {
+    backend: new LocalBackend({ root: localRoot }),
+    execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),
+    home: () => join(localRoot!, ".claude"),
+    homeDir: localRoot,
+    rootsPath: join(localRoot, "roots"),
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
+    copier: copyingFake(),
+    daemonRoad: async () => road,
+  };
+}
+
 describe("who may open a channel", () => {
   it("a relayed socket opens a channel only for a workspace it may drive", async () => {
     daemon = await startTestDaemon();
-    localRoot = mkdtempSync(join(tmpdir(), "wsp-serve-local-"));
-    const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: MACHINE_TOKEN };
-    const local: LocalWiring = {
-      backend: new LocalBackend({ root: localRoot }),
-      execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),
-      home: () => join(localRoot!, ".claude"),
-      homeDir: localRoot,
-      rootsPath: join(localRoot, "roots"),
-      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
-      platform: testPlatform(),
-      copier: copyingFake(),
-      daemonRoad: async () => road,
-    };
-    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local });
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local: localOn(daemon.port) });
     srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "this computer" });
 
@@ -261,5 +265,55 @@ describe("who may open a channel", () => {
 
     here.close();
     relayed.close();
+  }, 15_000);
+});
+
+describe("a channel to this computer's own daemon", () => {
+  it("opens by the place this computer is, with no workspace, and a shell there starts in the home folder", async () => {
+    daemon = await startTestDaemon();
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local: localOn(daemon.port) });
+    srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
+    const c = await client();
+    const opened = await c.request("daemon.open", { placeId: HERE_PLACE_ID });
+    expect(opened, String(opened["error"])).toMatchObject({ ok: true, channel: expect.any(String) });
+    const channel = String(opened["channel"]);
+    await until(() => framesOn(c, channel, "daemon.event").length > 0);
+    expect(framesOn(c, channel, "daemon.event")[0]!["event"]).toMatchObject({ type: "daemon.hello" });
+
+    // No cwd named: the pty is the computer's own and opens where its user's home is.
+    const created = await c.request("daemon.send", { channel, frame: { op: "pty.create", cols: 200, rows: 24, shell: "/bin/sh" } });
+    expect(created["reply"]).toMatchObject({ ok: true });
+    const ptyId = String((created["reply"] as Record<string, unknown>)["ptyId"]);
+    await c.request("daemon.send", { channel, frame: { op: "pty.attach", ptyId } });
+    await c.request("daemon.send", { channel, frame: { op: "pty.write", ptyId, data: "echo at-$(pwd)-mark\r" } });
+    const home = process.env["HOME"] ?? homedir();
+    const printed = (): string =>
+      framesOn(c, channel, "daemon.event")
+        .map(e => e["event"] as Record<string, unknown>)
+        .filter(e => e["type"] === "pty.data")
+        .map(e => String(e["data"]))
+        .join("");
+    await until(() => printed().includes(`at-${home}-mark`), 10_000);
+    c.close();
+  }, 20_000);
+
+  it("is the host's own road: a socket let in on a ticket is refused", async () => {
+    daemon = await startTestDaemon();
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local: localOn(daemon.port) });
+    srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
+    const host = await client();
+    const ticket = String((await host.request("ticket.issue", { purpose: "connect" }))["ticket"]);
+    const ticketed = await WsClient.connect(srv.port, { ticket });
+    expect(await ticketed.request("daemon.open", { placeId: HERE_PLACE_ID })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    host.close();
+    ticketed.close();
+  }, 15_000);
+
+  it("a host wired with no daemon here says so in one sentence", async () => {
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN });
+    srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
+    const c = await client();
+    expect(await c.request("daemon.open", { placeId: HERE_PLACE_ID })).toMatchObject({ ok: false, error: expect.stringMatching(/no daemon/) });
+    c.close();
   }, 15_000);
 });

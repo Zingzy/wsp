@@ -17,7 +17,7 @@
 // keystroke takes the list away again.
 import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { catalogSourceLine, noModelsLine, whoPaysLines } from "@wsp/protocol";
+import { noModelsLine } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessModel } from "@wsp/protocol";
 import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -39,7 +39,6 @@ export interface ModelPickerProps {
   where: string;
   /** Put the rail in front of the person: a project nobody has run an agent on has no agent to default to, so the
    * list is opened for them the one time. It takes no focus, since the box under it is where the ask is typed. */
-  offerAgents?: boolean;
   onPickHarness: (harness: string) => void;
   onPickModel: (harness: string, model: string) => void;
 }
@@ -70,11 +69,10 @@ export function jumpLabel(index: number, platform: string): string | null {
   return isMacPlatform(platform) ? `⌘${index + 1}` : `Ctrl+${index + 1}`;
 }
 
-/** What the button says: the agent that will run the turn, then the model it will run on. The model stood there
- * alone until a person read the row and could find no agent named anywhere on it. With no model resolved the slot
- * names what the button picks rather than standing empty. */
+/** What the button says: the model the turn runs on, beside the agent's mark, which is the agent's name enough; the
+ * agent's name alone where no model is resolved yet. */
 export function agentAndModelLine(catalog: HarnessCatalog, model: HarnessModel | null): string {
-  return `${catalog.label} · ${model?.label ?? "Model"}`;
+  return model?.label ?? catalog.label;
 }
 
 /** The one line the composer answers a cross-harness pick on a started thread with. */
@@ -82,37 +80,32 @@ export function newThreadNotice(entry: HarnessCatalog): string {
   return `Start a new thread to use ${entry.label} here`;
 }
 
-export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, offerAgents = false, onPickHarness, onPickModel }: ModelPickerProps) {
+/** A tab of the agent rail: the selected one carries a bar at its left edge rather than a fill. */
+const RAIL_TAB =
+  "relative flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 before:absolute before:top-2 before:bottom-2 before:-left-1.5 before:w-0.5 before:rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
-  // Opened by the composer rather than by the person. Every interaction of theirs clears it, so the rail keeps
-  // focus off the search box only for the one opening they did not ask for.
-  const [offered, setOffered] = useState(false);
   const [query, setQuery] = useState("");
+  const [onlyStarred, setOnlyStarred] = useState(false);
   const [active, setActive] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it stands.
+  const foot = notice ?? catalog.refusal ?? null;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
-  const rows = useMemo(() => listModels(catalog, favourites, query, model), [catalog, favourites, model, query]);
+  const rows = useMemo(() => {
+    const all = listModels(catalog, favourites, query, model);
+    return onlyStarred ? all.filter(m => favourites.includes(favouriteKey(catalog.harness, m.value))) : all;
+  }, [catalog, favourites, model, onlyStarred, query]);
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
-
-  useEffect(() => {
-    if (offerAgents) {
-      setOffered(true);
-      setOpen(true);
-      return;
-    }
-    // The offer is over the moment the person types: a list the composer opened must not stand over the box the
-    // ask is being typed into. One they opened themselves stays where they put it.
-    setOpen(open => (offered ? false : open));
-  }, [offerAgents]);
 
   useEffect(() => {
     if (!open) return;
     setQuery("");
     setActive(0);
     setNotice(null);
-    if (offered) return;
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
@@ -153,30 +146,42 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   return (
     <Popover
       open={open}
-      onOpenChange={next => {
-        setOffered(false);
-        setOpen(next);
-      }}
+      onOpenChange={setOpen}
     >
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
+        className="h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0"
         aria-label={agentAndModelLine(catalog, model)}
         data-composer-picker="model"
         data-value={model?.value}
         data-harness={catalog.harness}
       >
         <span className="inline-flex text-foreground">
-          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-4" />
         </span>
         <span className="truncate">{agentAndModelLine(catalog, model)}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
-      <PopoverPopup align="start" side="top" className="w-[22rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]" initialFocus={offered ? false : undefined}>
-        <div className="flex max-h-80 min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>
-          <div className="flex w-10 shrink-0 flex-col gap-1 border-e border-border p-1" role="tablist" aria-label="Agents">
+      <PopoverPopup align="start" side="top" className="w-[25rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]">
+        <div className="flex max-h-[26rem] min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>
+          <div className="flex w-12 shrink-0 flex-col gap-1 border-e border-border p-1.5" role="tablist" aria-label="Agents">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={onlyStarred}
+              aria-label="Favourites"
+              data-composer-favourites-tab
+              onClick={() => {
+                setOnlyStarred(on => !on);
+                setActive(0);
+              }}
+              className={cn(RAIL_TAB, onlyStarred && "text-foreground before:bg-primary")}
+            >
+              <StarIcon className={cn("size-4", onlyStarred && "fill-current")} aria-hidden />
+            </button>
+            <span aria-hidden className="mx-1.5 my-0.5 h-px bg-border" />
             {catalogs.map(entry => {
-              const selected = entry.harness === catalog.harness;
+              const selected = entry.harness === catalog.harness && !onlyStarred;
               return (
                 <Tooltip key={entry.harness}>
                   <TooltipTrigger
@@ -188,18 +193,16 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                         aria-label={entry.label}
                         data-composer-harness={entry.harness}
                         onClick={() => {
-                          if (selected) return;
+                          setOnlyStarred(false);
+                          if (entry.harness === catalog.harness) return;
                           if (pinned) setNotice(newThreadNotice(entry));
                           else onPickHarness(entry.harness);
                         }}
-                        className={cn(
-                          "flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          selected && "bg-foreground/[0.08] text-foreground",
-                        )}
+                        className={cn(RAIL_TAB, selected && "text-foreground before:bg-primary")}
                       />
                     }
                   >
-                    <HarnessMark harness={entry.harness} label={entry.label} className="size-4" />
+                    <HarnessMark harness={entry.harness} label={entry.label} className="size-5" />
                   </TooltipTrigger>
                   <TooltipPopup side="right">{entry.label}</TooltipPopup>
                 </Tooltip>
@@ -207,8 +210,8 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
             })}
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <label className="flex items-center gap-2 border-b border-border px-2.5 py-1.5 text-sm">
-              <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <label className="mx-2 flex items-center gap-2.5 border-b border-border px-1.5 py-3 text-sm transition-colors duration-150 focus-within:border-primary">
+              <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <input
                 ref={inputRef}
                 value={query}
@@ -216,15 +219,15 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                   setQuery(e.target.value);
                   setActive(0);
                 }}
-                placeholder="Search models"
+                placeholder="Search models..."
                 aria-label="Search models"
-                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-placeholder"
+                className="min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-placeholder"
                 data-composer-model-search
               />
             </label>
-            <div className="min-h-0 flex-1 overflow-y-auto p-1" role="listbox" aria-label="Models">
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox" aria-label="Models">
               {rows.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : "No model matches"}</div>
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : onlyStarred && query === "" ? "Star a model to keep it here." : "No model matches"}</div>
               ) : (
                 rows.map((m, index) => {
                   const starred = favourites.includes(favouriteKey(catalog.harness, m.value));
@@ -239,19 +242,22 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                       onMouseEnter={() => setActive(index)}
                       onClick={() => pick(m)}
                       className={cn(
-                        "group flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-foreground",
+                        "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground",
                         index === active && "bg-accent text-accent-foreground",
                         model?.value === m.value && "bg-foreground/[0.08]",
                       )}
                     >
                       <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn("truncate text-xs font-medium", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
-                          {m.isDefault ? <span className="rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground">default</span> : null}
+                        <div className="flex items-center gap-2">
+                          <span className={cn("truncate text-[15px]", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
+                          {m.isDefault ? <span className="rounded border border-primary/40 bg-primary/10 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-primary">default</span> : null}
                         </div>
-                        <div className="truncate font-mono text-[10px] text-muted-foreground/70">{m.description ?? m.value}</div>
+                        <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+                          <span className="truncate">{catalog.label}</span>
+                        </div>
                       </div>
-                      {chip !== null ? <Kbd className="h-4 min-w-0 rounded-sm px-1 font-mono text-[10px]">{chip}</Kbd> : null}
+                      {chip !== null ? <Kbd className="h-6 min-w-0 rounded-md px-1.5 font-mono text-xs">{chip}</Kbd> : null}
                       <button
                         type="button"
                         aria-label={starred ? `Remove ${m.label} from favourites` : `Add ${m.label} to favourites`}
@@ -261,30 +267,22 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                           e.stopPropagation();
                           toggle(catalog.harness, m.value);
                         }}
-                        className={cn("shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-60 hover:text-foreground group-hover:opacity-100", starred && "text-foreground opacity-100")}
+                        className={cn("shrink-0 rounded p-1 text-muted-foreground/60 opacity-60 hover:text-foreground group-hover:opacity-100", starred && "text-foreground opacity-100")}
                       >
-                        <StarIcon className={cn("size-3", starred && "fill-current")} aria-hidden />
+                        <StarIcon className={cn("size-4", starred && "fill-current")} aria-hidden />
                       </button>
                     </div>
                   );
                 })
               )}
             </div>
-            <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
-              <div
-                className="truncate font-mono text-[10px] text-muted-foreground/70"
-                data-composer-catalog-source={catalog.source}
-                role={notice !== null ? "status" : undefined}
-                title={notice ?? catalogSourceLine(catalog, where)}
-              >
-                {notice ?? catalogSourceLine(catalog, where)}
+            {foot === null ? null : (
+              <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
+                <div className="truncate font-mono text-[10px] text-muted-foreground/70" role="status" title={foot}>
+                  {foot}
+                </div>
               </div>
-              {whoPaysLines(catalog, where).map(line => (
-                <p key={line} className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                  {line}
-                </p>
-              ))}
-            </div>
+            )}
           </div>
         </div>
       </PopoverPopup>

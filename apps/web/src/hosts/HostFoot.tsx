@@ -58,7 +58,7 @@ export function HostFoot() {
         <span data-host-label className="min-w-0 flex-1 truncate text-left">
           {label}
         </span>
-        <ChevronsUpDownIcon aria-hidden className="size-3.5 shrink-0" />
+        <ChevronsUpDownIcon aria-hidden className="size-4 shrink-0" />
       </button>
       {open ? <ConnectHostSheet onClose={closeConnect} /> : null}
     </div>

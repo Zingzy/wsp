@@ -49,7 +49,7 @@ export function SectionRow({
       >
         <span className="font-mono text-[11px] uppercase tracking-[0.12em]">{label}</span>
         {shut && count !== undefined ? <span className={ROW_META_CLASS}>{count}</span> : null}
-        {onToggle === undefined ? null : <ChevronDownIcon aria-hidden className={cn("size-3.5 transition-transform duration-150", shut && "-rotate-90")} />}
+        {onToggle === undefined ? null : <ChevronDownIcon aria-hidden className={cn("size-4 transition-transform duration-150", shut && "-rotate-90")} />}
       </SidebarMenuButton>
       {action}
     </>

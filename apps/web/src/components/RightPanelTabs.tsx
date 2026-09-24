@@ -52,6 +52,8 @@ interface RightPanelTabsProps {
   diffAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
+  /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
+  heldLine?: string;
   children: ReactNode;
 }
 
@@ -207,8 +209,8 @@ function surfaceActions(
  * cannot open stays visible with a one-line reason. The person's word for one
  * of these is panel; surface is ours and stays in the code.
  */
-function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
-  const { actions } = props;
+function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLine?: string }) {
+  const { actions, heldLine } = props;
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
@@ -306,9 +308,13 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
-          <p className="mt-1 text-muted-foreground text-xs">
-            A browser, a terminal or the diff in this workspace.
-          </p>
+          {heldLine !== undefined ? (
+            <p className="mt-1 font-mono text-muted-foreground text-xs">{heldLine}</p>
+          ) : (
+            <p className="mt-1 text-muted-foreground text-xs">
+              A browser, a terminal or the diff in this workspace.
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-2">
           {actions.map((action) =>
@@ -354,9 +360,11 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                   {actionIcon(action)}
                   <span className="font-medium text-sm">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.disabledReason}
-                </span>
+                {heldLine === undefined ? (
+                  <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                    {action.disabledReason}
+                  </span>
+                ) : null}
               </div>
             ),
           )}
@@ -550,7 +558,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState actions={addSurfaceActions} />
+          <RightPanelEmptyState actions={addSurfaceActions} {...(props.heldLine !== undefined ? { heldLine: props.heldLine } : {})} />
         ) : (
           props.children
         )}
