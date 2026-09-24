@@ -102,6 +102,7 @@ import {
   defaultAgents,
   defaultConsent,
   deleteNotice,
+  onDeleteOf,
   execFolderLine,
   folderLevelLine,
   fmtBytes,
@@ -1248,7 +1249,7 @@ export function renameLine(renamed: Renamed): string {
 
 /** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
  * read the one entry, so neither can say the other kind's sentence. */
-const onDelete = (workspace: WorkspaceView): MachineOnDelete => kindWords(workspaceKind(workspace)).onDelete;
+const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy);
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
@@ -1277,7 +1278,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace))}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)}`;
 }
 
 /** The one confirmation a project image's removal asks: the id, and what goes with it. */
@@ -3391,7 +3392,7 @@ export const VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace))} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);

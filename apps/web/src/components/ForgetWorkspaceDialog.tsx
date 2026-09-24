@@ -68,7 +68,7 @@ export function ForgetWorkspaceDialog({
           <AlertDialogTitle>
             {road.word} {workspace.name}?
           </AlertDialogTitle>
-          <AlertDialogDescription>{act === "delete" ? deleteNotice(threads, workspaceKind(workspace)) : forgetNotice(threads)}</AlertDialogDescription>
+          <AlertDialogDescription>{act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}</AlertDialogDescription>
         </AlertDialogHeader>
         {refusal && (
           <p className="text-[11px] text-muted-foreground" data-k="forget-refusal">
