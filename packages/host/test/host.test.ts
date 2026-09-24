@@ -1061,7 +1061,7 @@ describe("the doctor's computer road on the host that holds the link", () => {
       lastSeenAt: "2026-09-18T09:00:00.000Z",
       report: { name: "spoo", platform: "linux", arch: "x64", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 4096 }, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, runsWorkspaces: true, engine: "none", daemonVersion: 54, agents: [], wsp: ["/usr/local/bin/wsp"] },
     });
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(join(tmpdir(), `wsp-doctor-host-${Date.now()}`, "state.json"), {}) });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(join(tmpdir(), `wsp-doctor-host-${Date.now()}`, "state.json")) });
     const dir = fakeWebDir();
     dirs.push(dir);
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir, ...(readers === undefined ? {} : { doctor: readers }) });
@@ -1089,13 +1089,13 @@ describe("the doctor's computer road on the host that holds the link", () => {
   it("reads the recipe through the planner the places wiring already holds, and no second one", async () => {
     const plan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] };
     let asked = 0;
-    const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"), {});
+    const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"));
     links.provision = { plan: async () => (asked++, plan), run: async () => [] };
     const readers = hostDoctorReaders(links, join(tmpdir(), "wsp-doctor-planner", "state.json"));
     expect(await readers.plan!()).toBe(plan);
     expect(asked).toBe(1);
     // A wiring that plans no recipe hands the road no reader at all, and the tools step says so in its own words.
-    const bare = placeWiring(join(tmpdir(), `wsp-doctor-bare-${Date.now()}`, "state.json"), {});
+    const bare = placeWiring(join(tmpdir(), `wsp-doctor-bare-${Date.now()}`, "state.json"));
     delete bare.provision;
     expect(hostDoctorReaders(bare, join(tmpdir(), "wsp-doctor-bare", "state.json")).plan).toBeUndefined();
   });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -253,6 +253,13 @@ describe("what a workspace's kind changes about its words", () => {
     expect(WORKSPACE_KIND_WORDS.ssh.onDelete.done("maya@box")).toBe("its daemon, its unit and its login line come off the computer, which is otherwise left as it is");
     // Neither sentence names the computer on a kind whose computer stays: naming it would read as the computer going.
     for (const kind of ["local", "ssh"] as const) expect(WORKSPACE_KIND_WORDS[kind].onDelete.done("m_2")).not.toContain("m_2");
+  });
+
+  it("the delete sentence for a copy of a project folder says the copy is removed and the folder it came from stays", () => {
+    const copy = { path: "/Users/dev/app-fix" };
+    expect(deleteNotice(1, "local", copy)).toBe("Its copy at /Users/dev/app-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
+    expect(onDeleteOf("local", copy).done("local")).toBe("its copy at /Users/dev/app-fix is removed and the project folder is left as it is");
+    expect(onDeleteOf("local")).toBe(WORKSPACE_KIND_WORDS.local.onDelete);
   });
 
   it("the phrase for this computer has one home: the refusals read it too", () => {

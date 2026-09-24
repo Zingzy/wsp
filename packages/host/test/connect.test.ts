@@ -108,7 +108,7 @@ function testRuntime(): { runtime: Runtime; statePath: string } {
   const store = memoryStore();
   void store.put("goldens", copyKey("default", "default"), GOLDEN);
   const statePath = join(tempDir("connect-state"), "state.json");
-  return { runtime: createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath, {}) }), statePath };
+  return { runtime: createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath) }), statePath };
 }
 
 /** One request over a raw socket that authed with the host's own token: how a person at the host's terminal mints a

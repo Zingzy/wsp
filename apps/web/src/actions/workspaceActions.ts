@@ -4,7 +4,7 @@
 // cannot take says so with `applies` and is not drawn at all; `refusal` is for
 // what this object could take and cannot right now.
 import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, GitPullRequestArrowIcon, MessageSquarePlusIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { actionRefusal, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { actionRefusal, goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type MachineState, type PlaceView, type ProjectCopy, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   BRING_BACK_HINT,
   CLIENT_CANNOT_DELETE,
@@ -52,6 +52,8 @@ export interface WorkspaceTarget {
   /** The one reading of the computer this workspace stands on while it is not answering, for the verbs whose
    * refusal would otherwise word that silence a second time; null while it answers. */
   readonly absent: AbsentComputer | null;
+  /** The copy of a project folder this workspace is, which a delete takes with it; absent on every other workspace. */
+  readonly copy?: ProjectCopy;
 }
 
 /** The one target every surface builds from the record, its status and the computers this host holds: the status
@@ -72,6 +74,7 @@ export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatu
     // itself, which on the computer the host runs on names the part that is down rather than calling the computer
     // the app is drawn on unreachable. No figure on it: a refusal is read the moment it is shown.
     absent: absenceOf(places, workspace, status, null),
+    ...(workspace.copy !== undefined ? { copy: workspace.copy } : {}),
   };
 }
 
@@ -242,7 +245,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     title: () => WORKSPACE_WORDS.delete,
     rowLabel: target => rowVerb("Delete", target.displayName),
     buttonWord: () => "Delete",
-    hint: target => DELETE_HINT(target.kind),
+    hint: target => DELETE_HINT(target.kind, target.copy),
     // A workspace whose machine is already gone has nothing to delete; its record is forgotten instead.
     applies: target => stateOf(target) !== "gone",
     refusal: (_target, verbs) => (verbs.deleteWorkspace === undefined ? CLIENT_CANNOT_DELETE : null),

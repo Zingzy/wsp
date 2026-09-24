@@ -3,7 +3,7 @@
 // ports it bound, so a second host refuses and other local tools find it.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { authority, isWildcard, LOOPBACK, relayUrlOf } from "@wsp/protocol";
+import { authority, isWildcard, LOOPBACK, relayUrlOf, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
 
 export interface HostLock {
@@ -22,7 +22,7 @@ export interface HostLock {
 
 /** The three roads a host is started by, as the lock records them: two a person's command line takes, and the
  * service this computer's own manager holds. */
-export type HostStarted = "verb" | "up" | "service";
+export type HostStarted = Exclude<HostShape, "app">;
 
 /** The variable a host something else started carries. A verb's own child and the service's unit each mark the
  * host they start, so wsp down tells them from a host a person is holding open in a terminal, and a client tells

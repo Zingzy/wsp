@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, outcomeWord, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, hereAgentLines, outcomeWord, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -161,24 +161,7 @@ describe("the one word the slot beside a row's name carries", () => {
   });
 });
 
-describe("which rows the Computers table draws", () => {
-  const setup = (keys: Record<string, boolean>): { keys: Record<string, boolean> } => ({ keys });
-
-  it("draws every computer and a cloud only once its key is held or a workspace stands on it", () => {
-    const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
-    const rows = (keys: Record<string, boolean>, counts: Record<string, number> = {}): string[] =>
-      computerRows([here, hetzner, ascii, solari], setup(keys), counts).map(place => place.id);
-    // A fresh state: this computer and the ones joined to it, and no cloud at all. A table that listed an account
-    // nobody had bought, with an hourly rate beside it, read as a bill.
-    expect(rows({})).toEqual(["here", "p_1"]);
-    expect(rows({ solari: true })).toEqual(["here", "p_1", "solari"]);
-    expect(rows({ box: true, solari: true })).toEqual(["here", "p_1", "box", "solari"]);
-    // A cloud a workspace stands on is drawn whatever the keys say, so a machine is never orphaned off the table.
-    expect(rows({}, { solari: 1 })).toEqual(["here", "p_1", "solari"]);
-    // A host that says nothing about its keys is read as holding none.
-    expect(computerRows([here, ascii], null, {}).map(place => place.id)).toEqual(["here"]);
-  });
-
+describe("the word for a row's kind", () => {
   it("names a cloud row cloud where a row's kind is read in a sentence, and a computer of the person's own by what it is", () => {
     expect(PLACE_KIND_WORDS.provider).toBe("cloud");
     expect(PLACE_KIND_WORDS.computer).toBe(JOINED_COMPUTER);
