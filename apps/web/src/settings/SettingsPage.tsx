@@ -10,11 +10,11 @@ import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useAddComputerOpen, useStore } from "../protocol/store.js";
-import { AddProjectSheet } from "../sidebar/AddProjectSheet.js";
+import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
 import { CloudSetupDialog } from "../sidebar/CloudSetupDialog.js";
 import { AddComputerSheet } from "./AddComputerSheet.js";
 import { ComputerPage } from "./computers.js";
-import { SETTINGS_WORDS } from "./format.js";
+import { GROUP_BLURBS, SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
 import { ProjectPage } from "./projects.js";
 import { Card, cardDrops, Cards, Line, Row, ROW_CLASS } from "./rows.js";
@@ -64,7 +64,18 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
 }
 
 function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
-  if (at.kind === "group") return <Cards cards={groupById(at.group).cards(ctx)} />;
+  if (at.kind === "group") {
+    const group = groupById(at.group);
+    return (
+      <>
+        <header data-k="settings-page-head" className="flex flex-col gap-1.5 pb-2">
+          <h1 className="text-lg font-medium tracking-tight">{group.name}</h1>
+          <p className="text-[13px] text-muted-foreground">{GROUP_BLURBS[at.group]}</p>
+        </header>
+        <Cards cards={group.cards(ctx)} />
+      </>
+    );
+  }
   if (at.kind === "computer") {
     const place = ctx.places.find(p => p.id === at.id);
     return place === undefined ? null : <ComputerPage place={place} ctx={ctx} />;
@@ -89,14 +100,14 @@ export function SettingsPage() {
   const searching = search !== "" && !isMobile;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-6 py-6">
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-10 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addComputer ? <AddComputerSheet onClose={closeAddComputer} /> : null}
       {editing ? <CloudSetupDialog onClose={closeSetup} /> : null}
       {addProjectAt === null ? null : (
         <Fragment key={addProjectAt}>
-          <AddProjectSheet onClose={closeAddProject} />
+          <AddProjectDialog onClose={closeAddProject} />
         </Fragment>
       )}
     </ScrollArea>

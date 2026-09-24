@@ -14,7 +14,7 @@ export function SettingsRow() {
   return (
     <div data-settings-row-foot className="px-1">
       <button type="button" data-k="settings-row" onClick={openSettings} className={FOOT_ROW_CLASS}>
-        <SettingsIcon aria-hidden className="size-3.5 shrink-0" />
+        <SettingsIcon aria-hidden className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-left">{SETTINGS_WORDS.title}</span>
         <span className={cn(ROW_META_CLASS, "shrink-0")}>⌘,</span>
       </button>

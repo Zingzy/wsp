@@ -17,7 +17,7 @@ import { CLOUD_NAMES, keyHeld } from "./providers.js";
  * its hostname; a provider carries the name its own row in the provider table gives it, since the host words it by
  * the id WSP_PROVIDER holds and nobody types that; every other computer carries the name it reported. */
 export function placeName(place: PlaceView, here = false): string {
-  if (here) return hereWord(true);
+  if (here) return place.label ?? hereWord(true);
   if (!isProviderPlace(place)) return place.name;
   return CLOUD_NAMES.find(row => row.id === place.name)?.name ?? place.name;
 }

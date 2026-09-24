@@ -33,11 +33,12 @@
 import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
-import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useWhereWord } from "../../sidebar/workspaceRows";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
@@ -45,7 +46,7 @@ import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, type PickThreads } from "./composerOptionsStore";
 import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
-import { defaultsPickerLabel, DEFAULTS_WORD } from "./format";
+import { ACCESS_WORD, accessLabel, REASONING_WORD, reasoningLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
@@ -82,10 +83,6 @@ export interface ComposerPicks {
   /** The pinned thread's latest own row, which an access pick between turns is put to through the access verb; null
    * on a thread that has not run, and on one whose rows fell off the runtime's cap. */
   readonly latestRow: SessionView | null;
-  /** Nothing here says which agent to run: no turn has run in this workspace, nobody picked, the project
-   * remembers none, more than one agent answers and nothing is typed yet. Read as one offer per workspace and
-   * never again, since the list stands over the box the ask is typed in. */
-  readonly offerAgents: boolean;
 }
 
 /** The agent the project's last thread ran, where the agents here carry it: what a fresh thread opens on, so a
@@ -101,18 +98,6 @@ export function rememberedAgent(project: Pick<ProjectView, "lastAgent"> | undefi
  * is not given back by the pick itself, which is the person reading that agent's models. The store holds the mark,
  * so the offer does not come back when the composer is remounted by a switch of threads, nor when the box is
  * emptied again. */
-function useRailOffer(workspaceId: string, conditions: boolean, typing: boolean): boolean {
-  const take = useComposerOptionsStore(s => s.takeRailOffer);
-  const [offering, setOffering] = useState(false);
-  useEffect(() => {
-    if (conditions && take(workspaceId)) setOffering(true);
-  }, [conditions, take, workspaceId]);
-  useEffect(() => {
-    if (typing) setOffering(false);
-  }, [typing]);
-  return offering;
-}
-
 /** The record for the workspace's own project, which is where its remembered agent is written. */
 function useProjectRecord(workspaceId: string): ProjectView | undefined {
   const ref = useProject(workspaceId);
@@ -137,18 +122,17 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const latestRow = pinned ? rows.at(-1) ?? null : null;
   const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
-  const catalog = useHarnessCatalog(harness, workspaceId);
+  const listed = useHarnessCatalog(harness, workspaceId);
+  // A home's lists were read against no machine; the kind of workspace its send makes decides the mode it starts at.
+  const homeKind = useStore(s => {
+    const home = s.projects.find(p => projectHomeKey(p.id) === workspaceId);
+    return home === undefined ? null : kindForComputer(home.computer);
+  });
+  const catalog = useMemo(() => (listed === null || homeKind === null ? listed : workspaceAccess(listed, homeKind)), [homeKind, listed]);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
-  // Only where the record itself says the project has run nothing: a host whose projects list has not arrived
-  // knows no better, and opening the rail over a workspace whose last agent is about to land would be a guess.
-  // More than one agent, since one leaves nothing to pick. The draft is read as one flag, so the store wakes this
-  // only as the box goes from empty to typed in.
-  const typing = useComposerDraftStore(s => (s.drafts[workspaceId]?.prompt ?? "") !== "");
-  const nothingSaysWhich = project !== undefined && project.lastAgent === undefined && latest === null && picked.harness === undefined && catalogs.length > 1;
-  const offerAgents = useRailOffer(workspaceId, !typing && nothingSaysWhich, typing);
-  return { harness, catalog, model, picks, startOptions, pinned, latestRow, offerAgents };
+  return { harness, catalog, model, picks, startOptions, pinned, latestRow };
 }
 
 /** Asks the workspace's machine for its catalogs once it runs; the table shows until then and stays when it does not answer. */
@@ -162,7 +146,7 @@ function useMachineCatalogs(workspaceId: string): void {
   }, [conn, load, running, workspaceId]);
 }
 
-const triggerClass = "shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80";
+const triggerClass = "h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0";
 
 function DefaultBadge() {
   return <span className="ms-2 rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground">default</span>;
@@ -195,32 +179,24 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
  * a person reads the row for the agent, the model and the folder, and these three are what an agent already has a
  * default for. The effort and the window belong to the thread they are picked on; the access goes onto the host's
  * record and, where the harness takes one mid-turn, into the turn in front of the person. */
-function DefaultsPicker({
+/** The reasoning effort and the context window, one menu: both are how hard and how far the model reads. */
+function ReasoningPicker({
   workspaceId,
   /** The thread an effort or a window pick belongs to: each is something the thread already runs at, so a pick here
    * is a change to this thread and not to every thread of the workspace. */
   threadKey,
   efforts,
   contextWindows,
-  modes,
   picks,
-  /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
-  note,
-  onPickAccess,
 }: {
   workspaceId: string;
   threadKey: string;
   efforts: HarnessOption[];
   contextWindows: HarnessOption[];
-  modes: ReadonlyArray<HarnessOption>;
   picks: ResolvedPicks;
-  note: string | null;
-  onPickAccess: (mode: string) => void;
 }) {
   const pick = useComposerOptionsStore(s => s.pick);
-  const access = modes.find(o => o.value === picks.permissionMode);
-  const label = defaultsPickerLabel(efforts.find(o => o.value === picks.effort), access);
-  const Icon = (picks.permissionMode !== null ? ACCESS_ICONS[picks.permissionMode] : undefined) ?? ShieldIcon;
+  const label = reasoningLabel(efforts.find(o => o.value === picks.effort), contextWindows.find(o => o.value === picks.contextWindow));
   const onPick = (key: ComposerOptionKey) => (next: unknown) => {
     if (typeof next === "string") pick(workspaceId, key, next, threadKey);
   };
@@ -229,17 +205,15 @@ function DefaultsPicker({
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className={triggerClass}
-        aria-label={`${DEFAULTS_WORD}: ${label}`}
-        data-composer-picker="defaults"
+        aria-label={`${REASONING_WORD}: ${label}`}
+        data-composer-picker="reasoning"
         data-effort={picks.effort ?? undefined}
         data-context-window={picks.contextWindow ?? undefined}
-        data-access={picks.permissionMode ?? undefined}
       >
-        <Icon className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-72">
+      <MenuPopup align="start" side="top" className="w-64">
         {efforts.length > 0 ? (
           <MenuGroup>
             <MenuGroupLabel>Reasoning</MenuGroupLabel>
@@ -257,26 +231,63 @@ function DefaultsPicker({
             </MenuRadioGroup>
           </MenuGroup>
         ) : null}
-        {(efforts.length > 0 || contextWindows.length > 0) && modes.length > 0 ? <MenuSeparator /> : null}
-        {modes.length > 0 ? (
-          <MenuGroup>
-            <MenuGroupLabel>Access</MenuGroupLabel>
-            {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
-            <MenuRadioGroup
-              value={picks.permissionMode}
-              onValueChange={next => {
-                const mode = modes.find(o => o.value === next);
-                if (mode !== undefined) onPickAccess(mode.value);
-              }}
-            >
-              <OptionRows options={modes} />
-            </MenuRadioGroup>
-          </MenuGroup>
-        ) : null}
       </MenuPopup>
     </Menu>
   );
 }
+
+/** What the agent may do without asking: its own menu, with what a pick does to a running turn over the list. */
+function AccessPicker({
+  modes,
+  picks,
+  className,
+  /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
+  note,
+  onPickAccess,
+}: {
+  modes: ReadonlyArray<HarnessOption>;
+  picks: ResolvedPicks;
+  note: string | null;
+  onPickAccess: (mode: string) => void;
+  className?: string;
+}) {
+  const access = modes.find(o => o.value === picks.permissionMode);
+  const label = accessLabel(access);
+  const Icon = (picks.permissionMode !== null ? ACCESS_ICONS[picks.permissionMode] : undefined) ?? ShieldIcon;
+  return (
+    <Menu>
+      <MenuTrigger
+        render={<Button type="button" variant="ghost" size="xs" />}
+        className={cn(triggerClass, className)}
+        aria-label={`${ACCESS_WORD}: ${label}`}
+        data-composer-picker="access"
+        data-access={picks.permissionMode ?? undefined}
+      >
+        <Icon className="size-4 shrink-0" aria-hidden />
+        <span className="truncate">{label}</span>
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
+      </MenuTrigger>
+      <MenuPopup align="start" side="top" className="w-64">
+        <MenuGroup>
+          <MenuGroupLabel>Access</MenuGroupLabel>
+          {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
+          <MenuRadioGroup
+            value={picks.permissionMode}
+            onValueChange={next => {
+              const mode = modes.find(o => o.value === next);
+              if (mode !== undefined) onPickAccess(mode.value);
+            }}
+          >
+            <OptionRows options={modes} />
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/** The hairline between two pickers of the bar, so each reads as its own control. */
+const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
 
 /** The thread an access pick is put to through the access verb, once it has run: the runtime's id for one of its
  * rows, which is what sessions.access takes, and the turn running now where one is, which the refusal note belongs
@@ -379,7 +390,10 @@ export function ComposerOptionPickers({
   thread,
   onPickAccess,
   onOtherFolder,
+  compact = false,
 }: {
+  /** The one-line composer's pickers: the model and the reasoning only, the access having moved under the box. */
+  compact?: boolean;
   workspaceId: string;
   thread: ChatThreadHandle;
   onPickAccess: (mode: string) => void;
@@ -392,7 +406,7 @@ export function ComposerOptionPickers({
   const project = useProject(workspaceId);
   const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useWhereWord(workspaceId);
-  const { catalog, model, picks, pinned, offerAgents } = useComposerPicks(workspaceId, thread);
+  const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
   const contextWindows = contextWindowsFor(catalog, model);
@@ -404,26 +418,40 @@ export function ComposerOptionPickers({
         model={model}
         pinned={pinned}
         where={where}
-        offerAgents={offerAgents}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);
           pick(workspaceId, "model", value, thread.threadKey);
         }}
       />
-      {efforts.length > 0 || contextWindows.length > 0 || catalog.permissionModes.length > 0 ? (
-        <DefaultsPicker
-          workspaceId={workspaceId}
-          threadKey={thread.threadKey}
-          efforts={efforts}
-          contextWindows={contextWindows}
-          modes={catalog.permissionModes}
-          picks={picks}
-          note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
-          onPickAccess={onPickAccess}
-        />
+      {efforts.length > 0 || contextWindows.length > 0 ? (
+        <>
+          {compact ? null : <BarRule />}
+          <ReasoningPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} />
+        </>
       ) : null}
-      {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
+      {!compact && catalog.permissionModes.length > 0 ? (
+        <>
+          <BarRule />
+          <AccessPicker modes={catalog.permissionModes} picks={picks} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
+        </>
+      ) : null}
+      {!compact && projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>
+  );
+}
+
+/** The access picker alone, sized for the strip under the one-line composer. */
+export function ComposerAccessPicker({ workspaceId, thread, onPickAccess }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void }) {
+  const { catalog, picks } = useComposerPicks(workspaceId, thread);
+  if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;
+  return (
+    <AccessPicker
+      modes={catalog.permissionModes}
+      picks={picks}
+      note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
+      onPickAccess={onPickAccess}
+      className="h-7 gap-1.5 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs [&_svg]:size-3"
+    />
   );
 }

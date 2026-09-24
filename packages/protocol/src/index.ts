@@ -1751,14 +1751,22 @@ export type ProjectExportEvent = z.infer<typeof ProjectExportEvent>;
 export const ProjectExportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), excluded: z.array(z.string()), agents: z.array(ProjectAgentResult) });
 export type ProjectExportResult = z.infer<typeof ProjectExportResult>;
 
-// --- this computer's own folders, as a browser tab browses them ---------------
+// --- a computer's folders, as a folder picker browses them --------------------
 
-/** One folder on the computer running the host. `repo` is a folder git tracks, which a picker marks. */
-export const HostFolder = z.object({ path: z.string(), repo: z.boolean() });
+/** One folder on a computer the host holds. `repo` is a folder git tracks, which a picker marks. */
+export const HostFolder = z.object({
+  path: z.string(),
+  repo: z.boolean(),
+  /** On a repo found by a repos listing: the branch its checkout is on, absent on a detached head. */
+  branch: z.string().optional(),
+  /** On a repo found by a repos listing: when git last wrote to it, in ms, which the list is sorted by. */
+  touchedAt: z.number().optional(),
+});
 export type HostFolder = z.infer<typeof HostFolder>;
-/** One level of this computer's disk: the folder listed, the roots every level is browsed from (the home folder and
- * each imported project's own folder), the folders directly inside it, and how many were left out for being hidden.
- * No web picker can hand a page a path, so this is what a browser tab has instead of the desktop shell's dialog. */
+/** One level of a computer's disk, this one's or a box's: the folder listed, the roots every level is browsed from
+ * (that computer's home folder and each of its projects' folders), the folders directly inside it, and how many
+ * were left out for being hidden. No web picker can hand a page a path, so this is what a browser tab has instead of
+ * the desktop shell's dialog, and the only way to see a box's folders at all. */
 export const HostFolderListing = z.object({
   dir: z.string(),
   roots: z.array(z.string()),
@@ -1828,6 +1836,16 @@ export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
 
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
  * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
+/** The glyphs a project can wear in the sidebar and the switcher; the app maps each word to its drawing. */
+export const ProjectIcon = z.enum(["folder", "code", "terminal", "globe", "rocket", "box", "database", "server", "cpu", "zap", "flame", "leaf", "star", "heart", "book", "music", "camera", "gamepad", "shield", "wrench"]);
+export type ProjectIcon = z.infer<typeof ProjectIcon>;
+/** The hues a project's glyph can take; the app maps each word to a colour of its own theme. */
+export const ProjectHue = z.enum(["neutral", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"]);
+export type ProjectHue = z.infer<typeof ProjectHue>;
+/** How one project is drawn: its glyph and its hue, each the default where absent. */
+export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
+export type ProjectLook = z.infer<typeof ProjectLook>;
+
 export const Preferences = z.object({
   theme: ThemePreference,
   sidebarMode: SidebarMode,
@@ -1844,6 +1862,8 @@ export const Preferences = z.object({
   /** The workspace a thread was last started on anywhere: where a new thread asked for from nowhere goes. Absent
    * until the first start. */
   target: PreferencesTarget.optional(),
+  /** How each project is drawn, by project id; kept here so every screen that opens this wsp draws it the same. */
+  projectLook: z.record(z.string(), ProjectLook),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1863,12 +1883,13 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     sidebarWidth: z.number().int().positive().nullable().optional(),
     terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
     access: z.record(z.string(), z.string().nullable()).optional(),
+    projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1895,6 +1916,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
     access: perWorkspace(current.access, patch.access),
+    projectLook: perWorkspace(current.projectLook, patch.projectLook),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -2712,6 +2734,9 @@ export const PlaceView = z.object({
   id: z.string(),
   kind: PlaceKind,
   name: z.string(),
+  /** The name the person gave this computer, a Mac's own "zingzy's MacBook Pro", drawn where the machine name is
+   * not; absent where the computer keeps none. */
+  label: z.string().optional(),
   default: z.boolean(),
   /** A computer: what it reported last. */
   os: z.string().optional(),
@@ -3181,6 +3206,16 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
   /** Where the branch's pull request stands, read back through that same command line. */
   z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
+   * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
+   * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
+   * gone. A path outside the roots, a relative one, or one through a symlink that leaves them is refused with code
+   * outside-root. Folders only, one level, `repo` where the folder holds .git; the dot-named ones are counted and
+   * listed only when `hidden`. `repos` answers every repo under the roots instead, as this computer's repos listing
+   * does: REPO_DEPTH folders deep and REPO_CAP of them at most, walking into no repo, no link, no dot-named folder and
+   * nothing in CACHE_DIRS, each with its branch and when git last wrote there, most recent first. No file is read
+   * but a repo's HEAD. */
+  z.object({ id: reqId, op: z.literal("fs.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), repos: z.boolean().optional(), projects: z.array(z.string()).optional() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3798,6 +3833,8 @@ const DAEMON_CONTENTS = [
   "311811170de5296b4e25d8b3bc6e46035a9c5fc13f6430d8ae9314be8d9815f9",
   "4202fe729182d82873c035271bb091be1fce798422a5349d9430e773567246a9",
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
+  "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
+  "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3998,7 +4035,10 @@ const DAEMON_CONTENTS = [
  * Version 69 keeps the fence's connection to the engine open until the engine answers, so a forwarded request is
  * never cancelled into a bodiless 499, and lets a workspace on a box with a refusing input chain dial its own box.
  * Version 70 counts a workspace's sessions and connections at its socket and measures a frame before parsing it, so
- * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle. */
+ * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
+ * Version 72 drops a copied folder's worktree records before the copy's checkout, so a copy of a repo whose base
+ * branch one of its own worktrees holds lands on that branch.
+ * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5027,7 +5067,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    *
    * With `placeId` in place of `workspaceId` the channel is to the daemon on a computer the person owns, over the
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
-   * One of the two, never both. */
+   * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
@@ -5171,8 +5211,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
    * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
-   * otherwise only counted. */
-  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
+   * otherwise only counted. `repos` answers every git repo under the roots instead of one level, most recent
+   * first. `on` is the id of the computer whose folders are listed, off places.list: absent or this computer's is
+   * this computer's; a computer you joined answers through its own daemon over its link, with its login's home and
+   * its projects' folders as the roots; a provider keeps no computer and is refused. */
+  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), repos: z.boolean().optional(), on: z.string().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */

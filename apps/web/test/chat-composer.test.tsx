@@ -726,15 +726,13 @@ describe("composer while the workspace is not live", () => {
     expect(screen.getByRole("status").textContent).not.toContain("m1");
   });
 
-  it("the slot is laid out at one height with or without a line, so the composer does not move when a refusal lands", async () => {
+  it("the slot takes no room while it holds no line, and room for two once a refusal lands", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
     const empty = slot();
     expect(empty).not.toBeNull();
-    // Two lines, the spec's refusal rule, empty or not, so the sentence that needs both has them and the box
-    // under the slot does not move when one lands.
-    expect(empty!.className).toContain("h-9");
+    expect(empty!.className).not.toMatch(/(^|\s)(min-)?h-/);
     expect(empty!.className).toContain("max-w-3xl");
     // The slot is the live region, present before any words land, so a screen reader hears the line when it does.
     expect(empty!.getAttribute("aria-live")).toBe("polite");
@@ -742,7 +740,7 @@ describe("composer while the workspace is not live", () => {
     emit({ type: "workspace.status", status: { ...workspace, phase: "waking", machineState: "starting", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
     expectPlainLine(sendRefusal("waking")!);
-    expect(slot()!.className).toBe(empty!.className);
+    expect(slot()!.className).toContain("min-h-9");
   });
 
   it("a pushed pausing status disables the send while the view still says running", async () => {

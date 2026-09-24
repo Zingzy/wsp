@@ -31,16 +31,18 @@ const WORD_CLASS: Record<WordClass, string> = { value: VALUE, fact: FACT };
 /** The height every row stands, whatever its words, and the two it takes below 640 px: the shorter where its slot
  * stays beside a two-line description, the taller where the slot has moved under it. A line stands at one height
  * too, and at the taller one below 640 px, where whatever is at its right stands under its label instead. */
-export const ROW_CLASS = "h-13";
-export const NARROW_ROW_CLASS = "max-sm:h-16";
-export const DROPPED_ROW_CLASS = "max-sm:h-22";
-export const LINE_CLASS = "h-8 max-sm:h-12";
+export const ROW_CLASS = "h-16";
+export const NARROW_ROW_CLASS = "max-sm:h-18";
+export const DROPPED_ROW_CLASS = "max-sm:h-24";
+export const LINE_CLASS = "h-11 max-sm:h-14";
 
 /** One row of a settings page as data: its words, which the search reads, and the slot's render. */
 export interface SettingsRowData {
   readonly kind: "row";
   readonly id: string;
   readonly title: string;
+  /** A glyph before the title, where the row's noun has one of its own: a project's. */
+  readonly lead?: ReactNode;
   /** One mono word after the title, in the fact class: the default mark on a computer. */
   readonly mark?: string;
   /** One sentence, or machine words in the mono fact class where `mono` is set. */
@@ -83,6 +85,8 @@ export interface SettingsCardData {
   readonly head?: string;
   readonly items: ReadonlyArray<SettingsItem>;
   readonly under?: ReactNode;
+  /** A control too large for a row, drawn under the head in place of the card's surface. */
+  readonly body?: ReactNode;
 }
 
 /** The words a search reads on an item: its title or label, its description and its hover sentence. */
@@ -97,20 +101,20 @@ const TWO_LINES_NARROW = "max-sm:line-clamp-2 max-sm:min-h-[2lh] max-sm:whitespa
 const THREE_LINES_NARROW = "max-sm:line-clamp-3 max-sm:min-h-[3lh] max-sm:whitespace-normal";
 
 const CARD_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
-const TITLE_CLASS = "text-[13px] leading-4 text-foreground";
+const TITLE_CLASS = "text-sm leading-5 text-foreground";
 const DESCRIPTION_CLASS = "text-xs leading-4 text-muted-foreground";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */
 const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
-export function Card({ id, head, under, children }: { id: string; head?: ReactNode; under?: ReactNode; children: ReactNode }) {
+export function Card({ id, head, under, body, children }: { id: string; head?: ReactNode; under?: ReactNode; body?: ReactNode; children?: ReactNode }) {
   return (
-    <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-2">
+    <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-3">
       {head === undefined ? null : (
-        <h2 data-settings-head className="text-[13px] leading-4 text-muted-foreground">
+        <h2 data-settings-head className="text-[13px] leading-4 font-medium text-foreground">
           {head}
         </h2>
       )}
-      <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>{children}</div>
+      {body ?? <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>{children}</div>}
       {under === undefined ? null : <div className="flex gap-2">{under}</div>}
     </section>
   );
@@ -120,7 +124,7 @@ export function Card({ id, head, under, children }: { id: string; head?: ReactNo
  * 640 px the slot stands on a line of its own under the description, the word at its left and the control at its
  * right, and the description holds two lines of the whole width; where it does not, the slot keeps its place and
  * the description holds three of the narrower box. Either way nothing is cut where no hover can read it. */
-export function Row({ id, title, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
+export function Row({ id, title, lead, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn("flex min-w-0 max-w-[60%] shrink items-center gap-3", drops && (word === undefined ? "max-sm:w-full max-sm:max-w-full max-sm:justify-end" : "max-sm:w-full max-sm:max-w-full max-sm:justify-between"))}>
@@ -135,7 +139,8 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
     );
   const body = (
     <>
-      <div className={cn("flex min-w-0 flex-1 flex-col justify-center gap-0.5", !drops && "max-sm:gap-0")}>
+      {lead === undefined ? null : <span className="flex shrink-0 items-center">{lead}</span>}
+      <div className={cn("flex min-w-0 flex-1 flex-col justify-center gap-1", !drops && "max-sm:gap-0.5")}>
         <span className="flex min-w-0 items-center gap-2">
           <span data-settings-title className={cn(TITLE_CLASS, "truncate")}>
             {title}
@@ -153,7 +158,7 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
       {slot}
     </>
   );
-  const rowClass = cn("flex items-center gap-4 px-4", ROW_CLASS, drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
+  const rowClass = cn("flex items-center gap-6 px-5", ROW_CLASS, drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
   // Marked, so the height a row stands at below 640 px is read off the row rather than worked out a second time.
   const dropMark = drops ? { "data-settings-drops": "" } : {};
   if (open !== undefined) {
@@ -178,7 +183,7 @@ export function Row({ id, title, mark, description, mono = false, word, wordClas
 export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, attrs }: Omit<SettingsLineData, "kind">) {
   const bare = value === undefined && keys === undefined;
   return (
-    <div data-settings-line={id} className={cn(LINE_CLASS, "flex items-center gap-4 px-4 max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-0")} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
+    <div data-settings-line={id} className={cn(LINE_CLASS, "flex items-center gap-4 px-5 max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-0")} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
       {/* The label grows to push the value to the right edge while the two share a line, and takes its own height
           below 640 px, where they are stacked and a grown label would be squeezed under its own line. */}
       <span data-settings-label className={cn(TITLE_CLASS, "min-w-0 flex-1 truncate max-sm:flex-none", bare && TWO_LINES_NARROW)}>
@@ -228,7 +233,7 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
       {cards.map(card => {
         const drops = cardDrops(card.items);
         return (
-          <Card key={card.id} id={card.id} head={card.head} under={card.under}>
+          <Card key={card.id} id={card.id} head={card.head} under={card.under} body={card.body}>
             {card.items.map(item => {
               if (item.kind === "line") {
                 const { kind: _line, ...line } = item;

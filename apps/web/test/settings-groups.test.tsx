@@ -2,17 +2,18 @@
 // The five groups beside Appearance and Computers: Projects with each
 // project's page and its one act, Devices with Revoke, Account's one row,
 // Keybindings as lines per platform, and About's two lines.
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { DeviceView, PlaceView, ProjectView, WorkspaceView } from "@wsp/protocol";
-import { DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
+import { placeName } from "../src/settings/places.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { crumb, descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, wordOf } from "./settings-harness.js";
 
@@ -40,13 +41,14 @@ afterEach(() => {
 });
 
 describe("Projects", () => {
-  it("lists one row per project with the source word, the computer only off this Mac and the workspace count, and the empty state with the button", async () => {
+  it("lists one row per project with its glyph, the computer it is on then its source, and the workspace count, and the empty state with the button", async () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo"), project("pr_landing", "landing", "p_spoo", { source: { kind: "github", repo: "dev/landing" } })], workspaces: [view("ws_a", "pricing page", "pr_spoo"), view("ws_b", "webhook retries", "pr_spoo")] });
     await mount({}, "projects");
     expect(rowTitles()).toEqual(["spoo", "landing"]);
-    expect(descriptionOf("pr_spoo")).toBe("/Users/dev/spoo");
+    expect(descriptionOf("pr_spoo")).toBe(`${placeName(here, true)} · /Users/dev/spoo`);
+    expect(rowOf("pr_spoo")!.querySelector("svg")).not.toBeNull();
     expect(wordOf("pr_spoo")).toBe("2");
-    expect(descriptionOf("pr_landing")).toBe("dev/landing · on spoo");
+    expect(descriptionOf("pr_landing")).toBe("spoo · dev/landing");
     // A loaded zero is a fact: a blank where a sibling reads 2 cannot be told from a count that never arrived.
     expect(wordOf("pr_landing")).toBe("0");
     fireEvent.click(screen.getByRole("button", { name: PROJECTS_WORDS.add }));
@@ -82,7 +84,9 @@ describe("Projects", () => {
     expect(lineOf("remote")?.getAttribute("title")).toBe(PROJECTS_WORDS.remoteHover);
     expect(wordOf("added")).toMatch(/^Sep 12 \d\d:\d\d$/);
     expect(wordOf("seeded")).toBe(`412 files · ${fmtBytes(3_250_000)} · memory landed`);
-    expect(rowTitles()).toEqual([PROJECTS_WORDS.branch, PROJECTS_WORDS.lastAgent, "Remove spoo"]);
+    // About comes first, then Look with its two selects, then what a new workspace starts from.
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.about, PROJECTS_WORDS.look, PROJECTS_WORDS.newWorkspaces]);
+    expect(rowTitles()).toEqual([PROJECTS_WORDS.icon, PROJECTS_WORDS.hue, PROJECTS_WORDS.branch, PROJECTS_WORDS.lastAgent, "Remove spoo"]);
     expect(wordOf("branch")).toBe("release");
     expect(wordOf("last-agent")).toBe("Codex");
     // A workspace stands on it: the button is held with no title and the refusal is the description.
@@ -114,6 +118,29 @@ describe("Projects", () => {
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_cloud" }));
     await settle();
     expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.removeAtCloud("Solari"));
+  });
+});
+
+describe("a project's Look", () => {
+  it("reads the record's look into the two selects and writes a pick as that project's look", async () => {
+    useStore.setState({ places: [here], projects: [project("pr_spoo", "spoo")], workspaces: [] });
+    const { api, sets } = settingsApi({}, { ...DEFAULT_PREFERENCES, labs: false, projectLook: { pr_spoo: { icon: "rocket" } } });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, projectLook: { pr_spoo: { icon: "rocket" } } } });
+    mountSettings({ api, at: { kind: "project", id: "pr_spoo" } });
+    await settle();
+    const iconSelect = document.querySelector<HTMLElement>("[data-settings-page] [data-k=project-icon]")!;
+    const hueSelect = document.querySelector<HTMLElement>("[data-settings-page] [data-k=project-hue]")!;
+    expect(iconSelect.textContent).toBe("Rocket");
+    expect(hueSelect.textContent).toBe("Neutral");
+    fireEvent.click(hueSelect);
+    const option = await screen.findByRole("option", { name: "Teal" });
+    await settle();
+    // Under jsdom the select takes a click on an item only once a key has highlighted it.
+    fireEvent.keyDown(option, { key: "Enter" });
+    fireEvent.click(option);
+    await waitFor(() => expect(sets).toEqual([{ projectLook: { pr_spoo: { icon: "rocket", hue: "teal" } } }]));
+    // The select leaves a portal React must unmount itself before the file's teardown empties the body.
+    cleanup();
   });
 });
 

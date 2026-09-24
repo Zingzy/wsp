@@ -13,6 +13,7 @@ vi.mock("../ui/tooltip", () => ({
 }));
 
 import { ComposerModelPicker, UNLISTED_MODEL_LINE, agentAndModelLine, listModels } from "./ComposerModelPicker";
+import { useComposerFavouritesStore } from "./composerFavouritesStore";
 
 const CLAUDE: HarnessCatalog = {
   harness: "claude",
@@ -58,23 +59,52 @@ describe("ComposerModelPicker", () => {
     await open();
     const row = screen.getByRole("option", { name: /claude-fable-5-1/ });
     expect(row.getAttribute("aria-selected")).toBe("true");
-    expect(row.textContent).toContain(UNLISTED_MODEL_LINE);
-    expect(row.querySelector("[data-unlisted-model]")).not.toBeNull();
+    // The row is the name alone, muted; the menu draws no line under a model's name.
+    expect(row.textContent).not.toContain(UNLISTED_MODEL_LINE);
+    expect(row.querySelector("[data-unlisted-model] .text-muted-foreground")?.textContent).toBe("claude-fable-5-1");
     await act(async () => fireEvent.click(row));
     expect(picked).toEqual(["claude-fable-5-1"]);
   });
 
-  it("names the agent that will run the turn on the button, beside the model", () => {
+  it("names the model on the button beside the agent's mark, which says the agent", () => {
     render(<ComposerModelPicker catalogs={[CLAUDE, CODEX]} catalog={CLAUDE} model={CLAUDE.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
-    // The button wore the model alone, so the one question a person asks before they send, which agent runs this,
-    // had no answer anywhere on the row.
-    const trigger = screen.getByRole("button", { name: "Claude Code · Opus 5" });
-    expect(trigger.textContent).toBe("Claude Code · Opus 5");
+    const trigger = screen.getByRole("button", { name: "Opus 5" });
+    expect(trigger.textContent).toBe("Opus 5");
+    expect(trigger.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
   });
 
-  it("names the slot rather than standing empty while no model is resolved", () => {
+  it("names the agent rather than standing empty while no model is resolved", () => {
     render(<ComposerModelPicker catalogs={[CODEX]} catalog={CODEX} model={null} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
-    expect(screen.getByRole("button", { name: "Codex · Model" }).textContent).toBe("Codex · Model");
+    expect(screen.getByRole("button", { name: "Codex" }).textContent).toBe("Codex");
+  });
+
+  it("draws each model row as its name with the agent's mark and name under it, and the catalog's default tagged", async () => {
+    render(<ComposerModelPicker catalogs={[CLAUDE]} catalog={CLAUDE} model={CLAUDE.models[1]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sonnet 5" })));
+    const opus = screen.getByRole("option", { name: /Opus 5/ });
+    expect(opus.textContent).toContain("default");
+    expect(opus.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
+    expect(opus.textContent).toContain("Claude Code");
+    expect(opus.textContent).not.toContain("claude-opus-5");
+    expect(screen.getByRole("option", { name: /Sonnet 5/ }).textContent).not.toContain("default");
+  });
+
+  it("lists the starred models alone on the favourites tab, and says how to keep one there while none is", async () => {
+    useComposerFavouritesStore.setState({ keys: [] });
+    render(<ComposerModelPicker catalogs={[CLAUDE, CODEX]} catalog={CLAUDE} model={CLAUDE.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Opus 5" })));
+    const tab = document.querySelector<HTMLElement>("[data-composer-favourites-tab]")!;
+    expect(tab.getAttribute("aria-selected")).toBe("false");
+    await act(async () => fireEvent.click(tab));
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.getByRole("listbox").textContent).toBe("Star a model to keep it here.");
+    // Back on the agent's own tab, a star moves the model onto the favourites tab.
+    await act(async () => fireEvent.click(document.querySelector<HTMLElement>('[data-composer-harness="claude"]')!));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Sonnet 5 to favourites" })));
+    await act(async () => fireEvent.click(tab));
+    expect(screen.getAllByRole("option").map(o => o.dataset["composerOption"])).toEqual(["claude-sonnet-5"]);
+    useComposerFavouritesStore.setState({ keys: [] });
   });
 
   it("says each rail row's agent in text a person sees, not only in an attribute", async () => {

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, OVER_SSH, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, OVER_SSH, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -239,8 +239,8 @@ async function setup(api: Api) {
 
 const picker = (kind: string) => document.querySelector<HTMLElement>(`[data-composer-picker="${kind}"]`);
 const pickerValue = (kind: string) => picker(kind)?.dataset["value"];
-/** One of the three the folded defaults button holds, off its own slots. */
-const defaultsPick = (key: "effort" | "contextWindow" | "access") => picker("defaults")?.dataset[key];
+/** One pick off the button that holds it: the effort and the window off the reasoning button, the access off its own. */
+const picked = (key: "effort" | "contextWindow" | "access") => picker(key === "access" ? "access" : "reasoning")?.dataset[key];
 const option = (value: string) => document.querySelector<HTMLElement>(`[data-composer-option="${value}"]`);
 /** What the access menu says about the turn running now, over its list. */
 const reachNote = () => document.querySelector<HTMLElement>("[data-composer-access-reach]");
@@ -271,67 +271,68 @@ describe("composer pickers", () => {
   it("sit inside the composer box with the machine's catalog, read the defaults, and picks ride the next start", async () => {
     const { api, started, listed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
     await setup(api);
-    await waitFor(() => expect(document.querySelector('[data-composer-catalog-source], [data-composer-picker="model"][data-value]')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('[data-composer-picker="model"][data-value]')).not.toBeNull());
     await waitFor(() => expect(listed).toContain(WS));
     const footer = document.querySelector("[data-chat-composer-footer]")!;
     expect(footer.contains(picker("model"))).toBe(true);
     expect(document.querySelector("[data-composer-checkout] [data-composer-picker]")).toBeNull();
-    // Defaults read: the agent that will run the turn and the catalog's default model under its mark, the default
+    // Defaults read: the catalog's default model beside its agent's mark, the default
     // context, and the mode under the word for what it sets.
-    expect(picker("model")?.textContent).toBe("Claude Code · Opus 5");
+    expect(picker("model")?.textContent).toBe("Opus 5");
     const triggerMark = picker("model")?.querySelector('svg[data-harness-mark="claude"]');
     expect(triggerMark?.classList.contains("text-agent-claude")).toBe(true);
     // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
     expect(triggerMark?.parentElement?.tagName).toBe("SPAN");
     expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
-    expect(picker("defaults")?.textContent).toBe("high · bypass");
-    expect(defaultsPick("effort")).toBe("high");
-    expect(defaultsPick("contextWindow")).toBe("1m");
-    expect(defaultsPick("access")).toBe("bypassPermissions");
+    expect(picker("reasoning")?.textContent).toBe("High 1M");
+    expect(picker("access")?.textContent).toBe("Bypass");
+    expect(picked("effort")).toBe("high");
+    expect(picked("contextWindow")).toBe("1m");
+    expect(picked("access")).toBe("bypassPermissions");
 
-    // The model menu: the machine's three models with search, jump chips and stars; the footer names the source.
+    // The model menu: the machine's three models with search, jump chips and stars, each row its name alone with no
+    // id or description line under it, and no foot at rest.
     const menu = await openModelMenu();
     await waitFor(() => expect(within(menu).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]));
-    expect(within(menu).getByText("Best for everyday, complex tasks")).toBeTruthy();
+    expect(within(menu).queryByText("Best for everyday, complex tasks")).toBeNull();
+    expect(within(menu).getAllByRole("option")[0]?.textContent).not.toContain("claude-opus-5");
     expect(within(menu).getAllByRole("option")[0]?.textContent).toMatch(/⌘1|Ctrl\+1/);
-    // Where the turn runs is the word the sidebar row reads; this fixture's record names no provider, so it is what
-    // the machine is rather than the id wsp holds it under.
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on a provider");
+    expect(menu.querySelector("[data-composer-model-foot]")).toBeNull();
     fireEvent.change(within(menu).getByLabelText("Search models"), { target: { value: "son" } });
     await waitFor(() => expect(within(menu).getAllByRole("option")).toHaveLength(1));
     fireEvent.click(option("claude-sonnet-5")!);
     await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
     expect(modelMenu()).toBeNull();
-    // Sonnet takes no context window, and the window was never on the button anyway.
-    expect(picker("defaults")?.textContent).toBe("high · bypass");
-    expect(defaultsPick("contextWindow")).toBeUndefined();
+    // Sonnet takes no context window, so the reasoning button reads the effort alone.
+    expect(picker("reasoning")?.textContent).toBe("High");
+    expect(picked("contextWindow")).toBeUndefined();
 
     fireEvent.click(option("claude-opus-5") ?? (await openModelMenu(), option("claude-opus-5")!));
     await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
 
-    // The defaults menu: three groups, each default marked and checked, and the button reads "<effort> · <access>".
-    fireEvent.click(picker("defaults")!);
+    // The reasoning menu: two groups, each default marked and checked, and the button reads "<effort> <window>".
+    fireEvent.click(picker("reasoning")!);
     const effortMenu = await screen.findByRole("menu");
-    expect(within(effortMenu).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Reasoning", "Context window", "Access"]);
+    expect(within(effortMenu).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Reasoning", "Context window"]);
     expect(option("1m")?.textContent).toContain("default");
     expect(option("high")?.textContent).toContain("default");
     expect(option("high")?.getAttribute("aria-checked")).toBe("true");
     expect(option("low")?.textContent).not.toContain("default");
     fireEvent.click(option("low")!);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("low · bypass"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("reasoning")?.textContent).toBe("Low 1M"));
+    fireEvent.click(picker("reasoning")!);
     expect(option("low")?.getAttribute("aria-checked")).toBe("true");
     expect(option("high")?.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(option("200k")!);
-    await waitFor(() => expect(defaultsPick("contextWindow")).toBe("200k"));
+    await waitFor(() => expect(picked("contextWindow")).toBe("200k"));
 
-    // The same menu's access group: an icon and a line per mode, the default marked.
-    fireEvent.click(picker("defaults")!);
+    // The access menu: an icon and a line per mode, the default marked.
+    fireEvent.click(picker("access")!);
     expect(screen.getByText("Read and plan only")).toBeTruthy();
     expect(option("bypassPermissions")?.getAttribute("aria-checked")).toBe("true");
     expect(option("bypassPermissions")?.querySelector("svg")).not.toBeNull();
     fireEvent.click(option("plan")!);
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
 
     const editor = composerEditor();
     await typeInto(editor, "go");
@@ -346,75 +347,52 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
     const menu = await openModelMenu();
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("claude table · --help 2.1.257, 2026-09-05");
     expect(within(menu).getAllByRole("option")).toHaveLength(1);
+    expect(menu.querySelector("[data-composer-model-foot]")).toBeNull();
   });
 
-  it("each tab of a machine that never answered lists that agent's own pinned models under that agent's own footer", async () => {
+  it("each tab of a machine that never answered lists that agent's own pinned models", async () => {
     const { api } = fixtureApi({ table: [CLAUDE_TABLE, CODEX_TABLE], machine: new Error("machine not running") });
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
     await openModelMenu();
-    const source = () => modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent;
     const tab = (harness: string) => modelMenu()!.querySelector<HTMLElement>(`[data-composer-harness="${harness}"]`)!;
 
     fireEvent.click(tab("codex"));
     await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(CODEX_TABLE.models.map(m => m.value)));
     expect(CODEX_TABLE.models.length).toBeGreaterThan(0);
-    expect(source()).toBe("codex table · app-server 0.153.0, 2026-09-07");
 
     fireEvent.click(tab("claude"));
-    await waitFor(() => expect(source()).toBe("claude table · --help 2.1.280, 2026-09-23"));
+    await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(CLAUDE_TABLE.models.map(m => m.value)));
   });
 
-  it("the foot says a turn runs on the agent's own sign-in on this computer and costs this wsp nothing", async () => {
-    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "local" } });
-    await setup(api);
-    await waitFor(() => expect(picker("model")).not.toBeNull());
-    const menu = await openModelMenu();
-    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
-    expect([...foot.children].map(el => el.textContent)).toEqual([
-      "Claude Code 2.1.257 on this computer",
-      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
-      "The prices are its list prices, not a bill.",
-    ]);
-    expect(foot.textContent).not.toMatch(/machine/i);
+  it("draws no foot at rest and no sentence about who pays, on this computer or anywhere else", async () => {
+    for (const workspace of [{ ...BARE, kind: "local" as const }, { ...BARE, kind: "cloud" as const, provider: "hetzner" }]) {
+      const { api } = fixtureApi({ table: [CLAUDE], workspace });
+      await setup(api);
+      await waitFor(() => expect(picker("model")).not.toBeNull());
+      const menu = await openModelMenu();
+      expect(menu.querySelector("[data-composer-model-foot]")).toBeNull();
+      expect(menu.textContent).not.toMatch(/sign-in|costs this wsp|list prices/);
+      cleanup();
+    }
   });
 
-  it("the foot on a workspace somewhere else names that place, in the same sentences", async () => {
-    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "cloud", provider: "hetzner" } });
-    await setup(api);
-    await waitFor(() => expect(picker("model")).not.toBeNull());
-    const menu = await openModelMenu();
-    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
-    expect([...foot.children].map(el => el.textContent)).toEqual([
-      "Claude Code 2.1.257 on hetzner",
-      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
-      "The prices are its list prices, not a bill.",
-    ]);
-    expect(foot.textContent).not.toContain(THIS_COMPUTER);
-    expect(foot.textContent).not.toMatch(/machine/i);
-  });
-
-  it("a binary that answered and named a sign-in as why says that in the footer, with its own pin behind it", async () => {
+  it("a binary that answered and named a sign-in as why still lists its own pinned models", async () => {
     const refused = { ...CODEX_TABLE, refusal: codexNotSignedInLine("codex login --device-auth") };
     const { api } = fixtureApi({ table: [CLAUDE_TABLE, refused], machine: [CLAUDE_TABLE, refused] });
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
     await openModelMenu();
     fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
-    await waitFor(() =>
-      expect(modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent).toBe(
-        "Codex is not signed in where this workspace runs; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
-      ),
-    );
-    expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length);
+    await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length));
   });
 
   it("sends nothing for a picker left alone, though it shows the default that will run", async () => {
     const { api, started } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("high · bypass"));
+    await waitFor(() => expect(picker("reasoning")?.textContent).toBe("High 1M"));
+    expect(picker("access")?.textContent).toBe("Bypass");
     const editor = composerEditor();
     await typeInto(editor, "go");
     await press(editor, "Enter");
@@ -428,10 +406,10 @@ describe("composer pickers", () => {
   it("a context window pick alone brings the model it rides on", async () => {
     const { api, started } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("reasoning")!);
     fireEvent.click(option("1m")!);
-    await waitFor(() => expect(picker("defaults")?.dataset["contextWindow"]).toBe("1m"));
+    await waitFor(() => expect(picked("contextWindow")).toBe("1m"));
     await typeInto(composerEditor(), "go");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
@@ -446,12 +424,12 @@ describe("composer pickers", () => {
     await openModelMenu();
     fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
     // GPT-5.6-Sol leads the tab and its app-server reports low for it.
-    await waitFor(() => expect(defaultsPick("effort")).toBe("low"));
+    await waitFor(() => expect(picked("effort")).toBe("low"));
     fireEvent.click(option("gpt-5.5")!);
     await waitFor(() => expect(pickerValue("model")).toBe("gpt-5.5"));
     // The app-server reports medium for GPT-5.5, so that is what the button reads and the menu marks.
-    expect(defaultsPick("effort")).toBe("medium");
-    fireEvent.click(picker("defaults")!);
+    expect(picked("effort")).toBe("medium");
+    fireEvent.click(picker("reasoning")!);
     expect(option("medium")?.textContent).toContain("default");
     expect(option("medium")?.getAttribute("aria-checked")).toBe("true");
     expect(option("low")?.textContent).not.toContain("default");
@@ -464,27 +442,27 @@ describe("composer pickers", () => {
     expect(started[0]?.effort).toBeUndefined();
   });
 
-  it("a model with no effort levels hides the Reasoning group and the button reads the access alone", async () => {
+  it("a model with no effort levels hides the Reasoning group and the reasoning button reads the window alone", async () => {
     const flash = { value: "claude-flash", label: "Flash", isDefault: true, efforts: [], contextWindows: ["200k", "1m"] };
     const { api } = fixtureApi({ table: [{ ...CLAUDE, models: [flash] }] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("bypass"));
-    expect(defaultsPick("effort")).toBeUndefined();
-    expect(defaultsPick("contextWindow")).toBe("1m");
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("reasoning")?.textContent).toBe("1M"));
+    expect(picker("access")?.textContent).toBe("Bypass");
+    expect(picked("effort")).toBeUndefined();
+    expect(picked("contextWindow")).toBe("1m");
+    fireEvent.click(picker("reasoning")!);
     const effortMenu = await screen.findByRole("menu");
-    expect(within(effortMenu).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Context window", "Access"]);
+    expect(within(effortMenu).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Context window"]);
     expect(option("high")).toBeNull();
   });
 
-  it("a model narrows the groups: Haiku takes no effort and no context, so the menu holds the access alone and a stale effort pick is not sent", async () => {
+  it("a model narrows the pickers: Haiku takes no effort and no context, so the bar holds the access alone and a stale effort pick is not sent", async () => {
     const { api, started } = fixtureApi({ table: [CLAUDE] });
     useComposerOptionsStore.setState({ byWorkspaceId: { [WS]: { effort: "high", model: "claude-haiku-4-5" } } });
     await setup(api);
     await waitFor(() => expect(pickerValue("model")).toBe("claude-haiku-4-5"));
-    expect(defaultsPick("effort")).toBeUndefined();
-    expect(defaultsPick("contextWindow")).toBeUndefined();
-    fireEvent.click(picker("defaults")!);
+    expect(picker("reasoning")).toBeNull();
+    fireEvent.click(picker("access")!);
     expect(within(await screen.findByRole("menu")).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Access"]);
     await typeInto(composerEditor(), "go");
     await press(composerEditor(), "Enter");
@@ -516,14 +494,14 @@ describe("composer pickers", () => {
   it("remembers the last pick per workspace across a remount", async () => {
     const { api } = fixtureApi({ table: [CLAUDE] });
     const view = await setup(api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("reasoning")!);
     fireEvent.click(option("low")!);
-    await waitFor(() => expect(defaultsPick("effort")).toBe("low"));
+    await waitFor(() => expect(picked("effort")).toBe("low"));
     expect(JSON.parse(window.localStorage.getItem("wsp:composer-options:v1") ?? "{}")).toMatchObject({ state: { byWorkspaceId: { [WS]: { effort: "low" } } } });
     view.unmount();
     render(<WorkspaceThread workspaceId={WS} />);
-    await waitFor(() => expect(defaultsPick("effort")).toBe("low"));
+    await waitFor(() => expect(picked("effort")).toBe("low"));
     expect(useComposerOptionsStore.getState().byWorkspaceId["ws_other"]).toBeUndefined();
   });
 
@@ -550,9 +528,9 @@ describe("composer pickers", () => {
     menu = await openModelMenu();
     fireEvent.click(codex());
     await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
-    // The rail stays and the list is Codex's; the button names the agent it switched to and says the slot it has no
-    // value for yet, since Codex marks no default model.
-    expect(picker("model")?.textContent).toBe("Codex · Model");
+    // The rail stays and the list is Codex's; the button names the agent it switched to, since Codex marks no
+    // default model yet.
+    expect(picker("model")?.textContent).toBe("Codex");
     await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["gpt-6-astra"]));
     fireEvent.click(option("gpt-6-astra")!);
     await waitFor(() => expect(pickerValue("model")).toBe("gpt-6-astra"));
@@ -566,12 +544,12 @@ describe("composer pickers", () => {
     useComposerOptionsStore.setState({ byWorkspaceId: { [WS]: { harness: "codex" } } });
     await setup(api);
     await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
-    fireEvent.click(picker("defaults")!);
+    fireEvent.click(picker("reasoning")!);
     fireEvent.click(option("low")!);
-    await waitFor(() => expect(defaultsPick("effort")).toBe("low"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("effort")).toBe("low"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     // The access went through the access verb, the one road that changes a thread's access, and not into the send.
     expect(moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]);
 
@@ -588,13 +566,13 @@ describe("composer pickers", () => {
     const ran: SessionView = { id: "s0", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
     const idle = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM, sessions: [ran], access: "set" });
     await setup(idle.api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
     await waitFor(() => expect(idle.moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]));
     // The button says what the thread is now at, and nothing under the box: the verb answered set, the thread's
     // record has the mode, and the next thread in this workspace starts at it too.
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
 
@@ -602,10 +580,10 @@ describe("composer pickers", () => {
     cleanup();
     const fresh = fixtureApi({ table: [CLAUDE], access: "set" });
     await setup(fresh.api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(fresh.moved).toEqual([]);
   });
 
@@ -613,20 +591,21 @@ describe("composer pickers", () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5[1m]", effort: "low", permissionMode: "plan" };
     const { api } = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")?.textContent).toBe("low · plan"));
-    expect(defaultsPick("contextWindow")).toBe("1m");
+    await waitFor(() => expect(picker("reasoning")?.textContent).toBe("Low 1M"));
+    expect(picker("access")?.textContent).toBe("Plan");
+    expect(picked("contextWindow")).toBe("1m");
     expect(pickerValue("model")).toBe("claude-opus-5");
-    expect(defaultsPick("access")).toBe("plan");
+    expect(picked("access")).toBe("plan");
   });
 
   it("keeps the access pick on the host's record, where the next thread reads it, not in this browser's storage", async () => {
     const { api, patches, started } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
 
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
     expect(patches).toEqual([{ access: { [WS]: "plan" } }]);
     // The record is the pick's one home: this browser's own store keeps the other picks and not this one.
@@ -643,34 +622,34 @@ describe("composer pickers", () => {
   it("shows the pick the record already carries for this workspace, over the mode the catalog marks", async () => {
     const { api } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
+    await waitFor(() => expect(picker("access")).not.toBeNull());
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
-    expect(picker("defaults")?.textContent).toBe("high · plan");
+    await waitFor(() => expect(picked("access")).toBe("plan"));
+    expect(picker("access")?.textContent).toBe("Plan");
   });
 
-  it("on a computer the person owns the defaults button wears the mode's short form and its menu row names the machine", async () => {
+  it("on a computer the person owns the access button wears the mode's short form and its menu row names the machine", async () => {
     const kept = workspaceAccess({ ...CLAUDE, keptMode: "plan", bypassMode: "bypassPermissions" }, "ssh");
     const { api } = fixtureApi({ table: [kept] });
     await setup(api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
-    expect(picker("defaults")?.textContent).toBe("high · plan");
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("plan"));
+    expect(picker("access")?.textContent).toBe("Plan");
+    fireEvent.click(picker("access")!);
     expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${OVER_SSH}`);
     fireEvent.click(option("bypassPermissions")!);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     // The button says the CLI's own word for the mode; whose computer it is stays in the menu row, which is where
     // the long name has the room to be read.
-    expect(picker("defaults")?.textContent).toBe("high · bypass");
-    expect(picker("defaults")?.getAttribute("aria-label")).toBe("Defaults: high · bypass");
+    expect(picker("access")?.textContent).toBe("Bypass");
+    expect(picker("access")?.getAttribute("aria-label")).toBe("Access: Bypass");
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
     const moves = fixtureApi({ table: [{ ...CLAUDE, movesAccess: true }], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
     await setup(moves.api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("access")!);
     await waitFor(() => expect(reachNote()).not.toBeNull());
     expect(reachNote()?.textContent).toBe(accessReachLine(true));
 
@@ -678,16 +657,16 @@ describe("composer pickers", () => {
     cleanup();
     const waits = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
     await setup(waits.api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("access")!);
     await waitFor(() => expect(reachNote()?.textContent).toBe(accessReachLine(false)));
 
     // Nothing to say where no turn is running: the pick only decides what the next one starts at.
     cleanup();
     const idle = fixtureApi({ table: [{ ...CLAUDE, movesAccess: true }] });
     await setup(idle.api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("access")!);
     await waitFor(() => expect(option("plan")).not.toBeNull());
     expect(reachNote()).toBeNull();
   });
@@ -697,12 +676,12 @@ describe("composer pickers", () => {
     const moves = [{ ...CLAUDE, movesAccess: true }];
     const took = fixtureApi({ table: moves, history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
     await setup(took.api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
     await waitFor(() => expect(took.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
     // The harness took it, so there is nothing to say: the turn in front of the person is at the picked mode.
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
 
     // A harness whose row says it takes the change and then refuses it: that refusal is the person's news, in the
@@ -710,13 +689,13 @@ describe("composer pickers", () => {
     cleanup();
     const refused = fixtureApi({ table: moves, history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
     await setup(refused.api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
     await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(ACCESS_REFUSED_LINE));
     // The pick is kept either way: the refusal says where it lands instead, not that it was dropped.
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
-    expect(defaultsPick("access")).toBe("plan");
+    expect(picked("access")).toBe("plan");
 
     // A harness whose row says a pick waits for the thread's next turn said so over the list before the pick, so
     // nothing is said again under the box. The pick still goes through the access verb, which is where the thread's
@@ -724,11 +703,11 @@ describe("composer pickers", () => {
     cleanup();
     const waits = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
     await setup(waits.api);
-    await waitFor(() => expect(defaultsPick("access")).toBe("bypassPermissions"));
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
+    fireEvent.click(picker("access")!);
     fireEvent.click(option("plan")!);
     await waitFor(() => expect(waits.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
-    await waitFor(() => expect(defaultsPick("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
   });
 
@@ -770,8 +749,8 @@ describe("composer pickers", () => {
   it("reads each access mode's sentence off the runtime's table, so the app spells none of them itself", async () => {
     const { api } = fixtureApi({ table: [CLAUDE_TABLE] });
     await setup(api);
-    await waitFor(() => expect(picker("defaults")).not.toBeNull());
-    fireEvent.click(picker("defaults")!);
+    await waitFor(() => expect(picker("access")).not.toBeNull());
+    fireEvent.click(picker("access")!);
     const modes = CLAUDE_TABLE.permissionModes;
     expect(modes).toHaveLength(7);
     for (const mode of modes) expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);

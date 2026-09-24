@@ -165,6 +165,11 @@ export const presentElsewhereLine = (bin: string, path: string, roadWords: strin
 export const doctorComputerRowLine = (name: string, finishedAt: string): string =>
   `the computers row read it present at ${finishedAt}; wsp add ${name} --update reads it again`;
 
+/** Why the folders of a provider are refused: a workspace there is forked fresh, so there is no computer standing
+ * to browse, and a project there starts from a repository address or from a folder here, which seeds it. */
+export const providerFoldersRefusal = (name: string): string =>
+  `${name} keeps no computer to browse, since every workspace there is forked fresh; add the project from a repository address, or from a folder on this computer, which seeds it`;
+
 /** Why a doctor's computer road was refused for a row that is not a computer somebody joined: the computer the
  * host runs on and a cloud account are proved by the terminal that typed the line, since one reads that computer's
  * own files and the other forks a machine and bills. */
@@ -326,8 +331,7 @@ export function fmtCost(usd: number): string {
 }
 
 /** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
- * a computer whose turns run on the person's own sign-in. The composer's model menu says the whole of it in
- * whoPaysLines; this is the word the figure itself carries, where a person meets the figure long before the menu. */
+ * a computer whose turns run on the person's own sign-in. */
 export const LIST_PRICE_WORD = "list price";
 
 /** A spend figure with the word that says what it is, where the surface has one to give it. */
@@ -1486,17 +1490,6 @@ export function catalogSourceLine(catalog: HarnessCatalog, where: string): strin
   if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
   return version === null ? why : `${why} · ${version}`;
-}
-
-/** What the foot of the composer's model menu says after that line, and the only place it is said. The rows above it
- * carry the agent's own dollar prices per million tokens, which a person with no account anywhere read as a bill from
- * wsp: so the foot names whose sign-in the turn runs on and where that sign-in is, and says the prices are the agent's
- * own. Both sentences hold on every workspace and only the word for where the turn runs changes, so a person who moves
- * a thread to another computer reads the same two sentences with one word swapped. The prices sentence is dropped
- * where the menu lists no model, since there is then no price on the screen for it to be about. */
-export function whoPaysLines(catalog: HarnessCatalog, where: string): string[] {
-  const runs = `Threads run on ${catalog.label}'s own sign-in on ${where}, which costs this wsp nothing.`;
-  return catalog.models.length === 0 ? [runs] : [runs, "The prices are its list prices, not a bill."];
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the

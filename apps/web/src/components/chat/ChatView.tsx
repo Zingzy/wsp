@@ -10,9 +10,10 @@
 // Under the transcript stand the threads this one's agent opened, one row each
 // with the workspace it runs on and a link to it, and the footer weighs the
 // turn's own cost against what those threads spent.
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, whoPaysLines } from "@wsp/protocol";
+import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts } from "@wsp/protocol";
 import { useHarnessCatalog, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { ThreadLink } from "../ThreadLink.js";
 import { useDiffRevealStore } from "../../diffs/reveal";
@@ -104,7 +105,6 @@ export function ChatView({
   const onThisComputer = workspace !== null && isLocalWorkspace(workspace);
   const turnRows = useThreadSessions(workspaceId, threadKey);
   const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
-  const listPrice = onThisComputer && catalog !== null ? whoPaysLines(catalog, where).join(" ") : null;
   const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
@@ -126,13 +126,46 @@ export function ChatView({
     readingThread(workspaceId, threadKey);
   }, [asked, hydrated, readingThread, threadId, threadKey, workspaceId]);
 
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const [atEnd, setAtEnd] = useState(true);
+  const atEndRef = useRef(true);
+  const onIsAtEndChange = useCallback((next: boolean) => {
+    atEndRef.current = next;
+    setAtEnd(next);
+  }, []);
+  // The transcript's end spacer reads the composer's height from a variable set here, so a composer that grows by a
+  // line moves no React state and the last message stays pinned above it while the reader is at the end.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const composer = composerRef.current;
+    if (root === null || composer === null) return;
+    const observer = new ResizeObserver(() => {
+      root.style.setProperty("--chat-composer-inset", `${composer.offsetHeight}px`);
+      const scroller = listRef.current?.getScrollableNode();
+      if (atEndRef.current && scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, []);
+  const showTranscript = thread.hydrated && !empty;
+  const footer = thread.hydrated ? (
+    <div className="mx-auto w-full min-w-0 max-w-3xl">
+      {opened.length > 0 ? <OpenedThreadRows opened={opened} /> : null}
+      {view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
+      {paused !== null ? <TimelineRuleLine data-workspace-paused line={paused} /> : null}
+    </div>
+  ) : null;
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-      <div className="relative min-h-0 flex-1">
+    <div ref={rootRef} className="relative h-full min-h-0 text-foreground">
+      <div className="absolute inset-0">
         {!thread.hydrated ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
+          <div className="flex h-full items-center justify-center pb-(--chat-composer-inset) text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
         ) : empty ? (
-          <EmptyThread workspaceName={workspace?.name ?? workspaceId} />
+          <div className="h-full pb-(--chat-composer-inset)">
+            <EmptyThread workspaceName={workspace?.name ?? workspaceId} />
+          </div>
         ) : (
           <MessagesTimeline
             isWorking={view.running}
@@ -146,6 +179,8 @@ export function ChatView({
             onImageExpand={noopImageExpand}
             onAnswerPermission={onAnswerPermission}
             onOpenFile={onOpenFile}
+            onIsAtEndChange={onIsAtEndChange}
+            footer={footer}
             markdownCwd={cwd}
             workspaceRoot={cwd}
             resolvedTheme={appDark ? "dark" : "light"}
@@ -153,23 +188,42 @@ export function ChatView({
           />
         )}
       </div>
-      {thread.hydrated && opened.length > 0 ? (
-        <div className="mx-auto w-full max-w-5xl px-4">
-          <OpenedThreadRows opened={opened} />
-        </div>
-      ) : null}
-      {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} listPrice={listPrice} /> : null}
-      {thread.hydrated && paused !== null ? (
-        <div className="mx-auto w-full max-w-5xl px-4 pb-1">
-          <TimelineRuleLine data-workspace-paused line={paused} />
-        </div>
-      ) : null}
-      {children?.(thread)}
+      <div
+        ref={composerRef}
+        data-chat-composer-dock
+        data-at-end={!showTranscript || atEnd || undefined}
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:62%] [--glass-blur:8px] data-at-end:[--glass-opacity:100%]"
+      >
+        <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />
+        {children?.(thread)}
+      </div>
     </div>
   );
 }
 
-function EmptyThread({ workspaceName }: { workspaceName: string }) {
+/** Rides over the composer while the reader is above the transcript's end; kept mounted so it fades both ways. */
+function ScrollToEnd({ hidden, onClick }: { hidden: boolean; onClick: () => void }) {
+  return (
+    <div className="pointer-events-none! absolute inset-x-0 bottom-full flex justify-center pb-2">
+      <button
+        type="button"
+        data-scroll-to-end
+        aria-hidden={hidden || undefined}
+        tabIndex={hidden ? -1 : 0}
+        onClick={onClick}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-popover/95 px-3 text-xs text-muted-foreground shadow-[0_8px_20px_-8px_rgb(0_0_0/45%),0_2px_4px_-2px_rgb(0_0_0/30%)] backdrop-blur-sm transition-[opacity,translate,color] duration-200 ease-out hover:text-foreground motion-reduce:transition-none",
+          hidden ? "pointer-events-none translate-y-1 opacity-0" : "pointer-events-auto translate-y-0 opacity-100",
+        )}
+      >
+        <ArrowDownIcon className="size-3.5" aria-hidden />
+        Scroll to end
+      </button>
+    </div>
+  );
+}
+
+export function EmptyThread({ workspaceName }: { workspaceName: string }) {
   return (
     <div className="flex h-full items-center justify-center px-6">
       <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
@@ -216,20 +270,20 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
  * the type ladder's 11 px mono, the size the rule lines above it and the row meta in the sidebar read at. A narrow
  * window breaks the line between facts and never inside one: a duration or a price split over two lines is a
  * figure a person has to reassemble before they can read it. */
-function SettledFooter({ turn, openedCostUsd, onThisComputer, listPrice }: { turn: TurnSummary; openedCostUsd: number; onThisComputer: boolean; listPrice: string | null }) {
+function SettledFooter({ turn, openedCostUsd, onThisComputer }: { turn: TurnSummary; openedCostUsd: number; onThisComputer: boolean }) {
   const failed = turn.state !== "completed";
   const parts = turnSettledParts(turn, openedCostUsd, onThisComputer ? LIST_PRICE_WORD : undefined);
   return (
     <div
       data-testid="settled-footer"
       className={cn(
-        "mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-2 px-4 py-2 font-mono text-[11px] tabular-nums sm:px-6",
+        "flex w-full flex-wrap items-center gap-x-2 px-1 pb-2 font-mono text-[11px] tabular-nums",
         failed ? "text-destructive" : "text-muted-foreground",
       )}
     >
       <span className="whitespace-nowrap">{TURN_STATUS[turn.state]}</span>
       {parts.map(part => (
-        <span key={part} className="whitespace-nowrap" {...(listPrice !== null && part.includes(LIST_PRICE_WORD) ? { title: listPrice } : {})}>
+        <span key={part} className="whitespace-nowrap">
           <span aria-hidden className="pe-2">·</span>
           {part}
         </span>

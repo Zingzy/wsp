@@ -19,7 +19,6 @@ import {
   biggerSizeLine,
   catalogSourceLine,
   codexNotSignedInLine,
-  whoPaysLines,
   THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
   ACCESS_REFUSED_LINE,
@@ -408,24 +407,10 @@ describe("where the composer's model lists came from, in one line", () => {
     expect(noModelsLine({ ...TABLE, models: [] })).toBe("No model in the Codex table");
   });
 
-  it("the foot on this computer says whose sign-in the turn runs on and that the prices are the agent's own", () => {
+  it("the foot names the agent, its version and where the turn runs, and nothing else", () => {
     const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
-    expect([catalogSourceLine(claude, THIS_COMPUTER), ...whoPaysLines(claude, THIS_COMPUTER)]).toEqual([
-      "Claude Code 2.1.257 on this computer",
-      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
-      "The prices are its list prices, not a bill.",
-    ]);
-  });
-
-  it("the foot on a workspace somewhere else names that place in the same sentences", () => {
-    const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
-    expect([catalogSourceLine(claude, "hetzner"), ...whoPaysLines(claude, "hetzner")]).toEqual([
-      "Claude Code 2.1.257 on hetzner",
-      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
-      "The prices are its list prices, not a bill.",
-    ]);
-    // The prices sentence goes where the menu has no row to put a price on.
-    expect(whoPaysLines({ ...claude, models: [] }, "hetzner")).toEqual(["Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing."]);
+    expect(catalogSourceLine(claude, THIS_COMPUTER)).toBe("Claude Code 2.1.257 on this computer");
+    expect(catalogSourceLine(claude, "hetzner")).toBe("Claude Code 2.1.257 on hetzner");
   });
 
   it("neither foot says machine, the word the app never uses to a person", () => {
@@ -438,7 +423,7 @@ describe("where the composer's model lists came from, in one line", () => {
     ];
     for (const where of [THIS_COMPUTER, "hetzner"]) {
       for (const catalog of kinds) {
-        for (const line of [catalogSourceLine(catalog, where), ...whoPaysLines(catalog, where)]) expect(line).not.toMatch(/machine/i);
+        for (const line of [catalogSourceLine(catalog, where)]) expect(line).not.toMatch(/machine/i);
       }
     }
   });

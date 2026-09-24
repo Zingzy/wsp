@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The center region under the shell header: the selected workspace's thread
-// with its composer and the terminal drawer under it, or a prompt to pick a
-// workspace. Nothing stands between the header and the thread.
+// with its composer and the terminal drawer under it, or a project's home.
+// Nothing stands between the header and the thread.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTNAME_KEPT, type EventUnion, type GoldenManifest, type WorkspaceView } from "@wsp/protocol";
@@ -89,12 +89,11 @@ describe("workspace center", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 
-  it("with a project recorded and no workspace the center asks for one instead of showing a strip", async () => {
+  it("with a project recorded and no workspace the center is that project's home instead of a strip or a line that asks for a pick", async () => {
     await mount([]);
-    // A project stands, so the centre is the line that asks for a pick rather than the first run.
     act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "https://github.com/dev/the-project.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" }] }));
-    await screen.findByText("Pick a workspace to continue");
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    await waitFor(() => expect(document.querySelector("[data-k=project-home]")).not.toBeNull());
+    expect(screen.queryByText("Pick a workspace to continue")).toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();
   });
 });
