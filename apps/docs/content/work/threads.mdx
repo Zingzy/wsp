@@ -29,14 +29,15 @@ The first stdout line is `thread <id>`. The reply streams to stderr as it arrive
 
 ## Models, efforts and access
 
-Each picker offers what that agent's binary on that machine says it accepts, asked once when the workspace runs and remembered for five minutes. A value the agent does not take is refused before anything starts, naming the list.
+Each picker offers what that agent's binary on that machine says it accepts, asked once when the workspace runs and remembered for five minutes. A value the agent does not take is refused before anything starts, naming the list. Older models the agent still runs are legacy models: `--model` takes them like any other, the app keeps them under a Legacy models row at the end of its model menu, and a refusal lists them after `legacy:`.
 
 | | Claude Code | Codex |
 | --- | --- | --- |
-| models | `claude-opus-5-5` (default), `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5-20251001` | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.2` |
-| efforts | `low`, `medium`, `high` (default), `xhigh`, `max`; none on `claude-haiku-4-5-20251001` | `low` (default), `medium`, `high`, `xhigh`, `max`, `ultra` |
+| models | `claude-opus-5-5` (default), `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5-20251001` | `gpt-5.6-sol` (default), `gpt-5.6-terra`, `gpt-5.6-luna` |
+| legacy models | `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-fable-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5` | `gpt-5.5`, `gpt-5.2` |
+| efforts | `low`, `medium`, `high` (default; `xhigh` on `claude-opus-4-7`), `xhigh`, `max`; none on `claude-haiku-4-5-20251001`, `claude-opus-4-5` or `claude-sonnet-4-5`; no `xhigh` on `claude-opus-4-6` or `claude-sonnet-4-6` | `low` (default), `medium`, `high`, `xhigh`, `max`, `ultra` |
 | access | `default`, `acceptEdits`, `plan`, `bypassPermissions` (default), `auto`, `manual`, `dontAsk` | `read-only`, `workspace-write`, `danger-full-access` (default) |
-| context | `200k`, `1m` | none |
+| context | `200k`, `1m`; none on `claude-sonnet-5`, `claude-haiku-4-5-20251001` or `claude-fable-5` | none |
 
 The default access mode on both is the one that asks nothing, because nobody is at the machine to answer a prompt: Claude Code's `bypassPermissions` and Codex's `danger-full-access`, on a throwaway machine of your own. `plan` reads and plans only. `acceptEdits` lands edits and refuses commands that need permission. Codex's `workspace-write` keeps edits and commands inside the working folder.
 

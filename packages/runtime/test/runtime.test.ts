@@ -996,7 +996,9 @@ describe("runtime session history", () => {
       // The wire's isDefault is the harness an unnamed start runs, whichever source answered.
       expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
       expect(claude.models.map(m => m.value)).toEqual(["claude-opus-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001"]);
-      expect(claude.models[0]).toMatchObject({ label: "Opus", isDefault: true, contextWindows: ["200k", "1m"] });
+      // A binary that still offers Opus 5 keeps it among its current models, under the table's name for it.
+      expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
+      expect(claude.legacyModels?.map(m => m.value)).not.toContain("claude-opus-5");
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
@@ -1179,7 +1181,7 @@ describe("runtime session history", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter } });
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await expect(rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-4-1" })).rejects.toThrow(
-        'model "claude-opus-4-1" is not one claude takes; one of: Opus (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)',
+        'model "claude-opus-4-1" is not one claude takes; one of: Opus 5 (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001); legacy: Opus 4.8 (claude-opus-4-8)',
       );
       await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
       expect(m.lastStart()).toBeUndefined();
@@ -1195,6 +1197,15 @@ describe("runtime session history", () => {
       m.done("ok");
       m.end();
       await resumed.finished;
+      // The binary's handshake lists no older model, and the table's legacy ones still start as named.
+      const heard = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+      expect(heard.source).toBe("harness");
+      expect(heard.legacyModels?.map(o => o.value)).toContain("claude-opus-4-8");
+      const legacy = await rt.sessions.start(ws.id, { prompt: "old", model: "claude-opus-4-8", effort: "xhigh" });
+      expect(m.lastStart()).toMatchObject({ model: "claude-opus-4-8", effort: "xhigh" });
+      m.done("ok");
+      m.end();
+      await legacy.finished;
       expect(probes(backend)).toHaveLength(1);
       await rt.close();
     });
