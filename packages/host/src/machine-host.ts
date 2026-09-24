@@ -88,6 +88,9 @@ const decoded = (line: string): string => Buffer.from(line, "base64").toString("
 
 export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin): MachineHost {
   const refused: string[] = [];
+  const refuse = (line: string): void => {
+    if (!refused.includes(line)) refused.push(line);
+  };
   const script = scripts(login.platform);
   /** Every line of the loop's answer for these items, one per item; undefined for an item the answer did not reach. */
   const answer = async (what: string, loop: string, items: string[]): Promise<(string | undefined)[]> => {
@@ -96,7 +99,9 @@ export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin):
       const res = await machine.exec(asLogin(login, `set -- ${run.map(shellQuote).join(" ")}; ${loop}; printf '\\036END\\n'`), { timeoutMs: BATCH_MS });
       const lines = res.stdout.split("\n");
       const whole = res.stdout.trimEnd().endsWith(END);
-      if (!whole) refused.push(`${what}: the answer for ${run.length === 1 ? run[0] : `${run.length} paths`} was cut short`);
+      const said = res.stderr.trim().split("\n")[0] ?? "";
+      // A road that ran nothing (runuser refusing the login, a shell that would not start) says why on stderr.
+      if (!whole) refuse(res.exitCode !== 0 && said !== "" ? `${what}: ${said}` : `${what}: the answer for ${run.length === 1 ? run[0] : `${run.length} paths`} was cut short`);
       for (let i = 0; i < run.length; i++) out.push(whole || i < lines.length - 1 ? lines[i] : undefined);
     }
     return out;
@@ -112,7 +117,7 @@ export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin):
   const which = batched<boolean>(async items => (await answer("which", script.which, items)).map(line => line === "1"));
   const read = batched<string | undefined>(async items =>
     (await answer("read", script.read, items)).map((line, i) => {
-      if (line === "!") refused.push(`${items[i]} is over ${MACHINE_READ_CAP / 1024 / 1024} MB and was not read`);
+      if (line === "!") refuse(`${items[i]} is over ${MACHINE_READ_CAP / 1024 / 1024} MB and was not read`);
       return line === undefined || line === "-" || line === "!" ? undefined : decoded(line);
     }),
   );
