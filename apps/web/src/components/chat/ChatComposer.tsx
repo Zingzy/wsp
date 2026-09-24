@@ -58,7 +58,7 @@
 // off its rows.
 import { cn } from "../../lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
-import { ImageIcon } from "lucide-react";
+import { PaperclipIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
@@ -650,15 +650,15 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                       <Button
                         type="button"
-                        size="icon-xs"
+                        size="icon-sm"
                         variant="ghost-muted"
-                        aria-label="Add an image"
+                        aria-label="Attach"
                         title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
                         disabled={shut}
                         onClick={() => pickerRef.current?.click()}
                         data-composer-image-picker="true"
                       >
-                        <ImageIcon />
+                        <PaperclipIcon />
                       </Button>
                       <input
                         ref={pickerRef}

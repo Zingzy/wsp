@@ -148,17 +148,17 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
     >
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
+        className="h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0"
         aria-label={agentAndModelLine(catalog, model)}
         data-composer-picker="model"
         data-value={model?.value}
         data-harness={catalog.harness}
       >
         <span className="inline-flex text-foreground">
-          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
+          <HarnessMark harness={catalog.harness} label={catalog.label} className="size-4" />
         </span>
         <span className="truncate">{agentAndModelLine(catalog, model)}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
       <PopoverPopup align="start" side="top" className="w-[25rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]">
         <div className="flex max-h-[26rem] min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>

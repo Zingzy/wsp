@@ -139,7 +139,7 @@ function useMachineCatalogs(workspaceId: string): void {
   }, [conn, load, running, workspaceId]);
 }
 
-const triggerClass = "shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80";
+const triggerClass = "h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0";
 
 function DefaultBadge() {
   return <span className="ms-2 rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground">default</span>;
@@ -204,7 +204,7 @@ function ReasoningPicker({
         data-context-window={picks.contextWindow ?? undefined}
       >
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         {efforts.length > 0 ? (
@@ -254,9 +254,9 @@ function AccessPicker({
         data-composer-picker="access"
         data-access={picks.permissionMode ?? undefined}
       >
-        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <Icon className="size-4 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         <MenuGroup>
@@ -278,7 +278,7 @@ function AccessPicker({
 }
 
 /** The hairline between two pickers of the bar, so each reads as its own control. */
-const BarRule = () => <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />;
+const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
 
 /** The thread an access pick is put to through the access verb, once it has run: the runtime's id for one of its
  * rows, which is what sessions.access takes, and the turn running now where one is, which the refusal note belongs
