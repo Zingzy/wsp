@@ -403,6 +403,7 @@ const api = {
   addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
     onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
     onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+    onStage({ step: "reach", word: placeAddSheetWord("reach", "done"), state: "done" });
     onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
     return new Promise<never>(() => {});
   },

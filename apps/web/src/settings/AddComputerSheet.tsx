@@ -9,14 +9,14 @@
 // computer already running the wsp app takes is the command line's, which
 // prints the join line; no screen here asks anybody to type a code.
 import { useState, type KeyboardEvent } from "react";
-import { PLACES_WORDS, PLACE_INSTALL, PlaceAddStep, placeAddSheetWord, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, PLACE_INSTALL, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, placeAddSheetWord, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "../components/ui/sheet.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import type { InstallStage } from "../protocol/client.js";
+import { RequestError, type InstallStage } from "../protocol/client.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
 import { ComputerRow } from "./computers.js";
@@ -56,20 +56,16 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
     if (login.trim() === "" || api?.addComputerOverSsh === undefined) return;
     setRefusal(null);
     setStages([]);
-    // Once the login stood, a refusal is the box's own sentence and the login fix would point the wrong way.
-    let loggedIn = false;
     api
       // A stage sent again for the same step is that line moving on, so the list is keyed by the step rather than
       // by its words, which a step changes when it is done.
-      .addComputerOverSsh({ address: login.trim() }, stage => {
-        if (stage.step === "connect" && stage.state === "done") loggedIn = true;
-        setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage]);
-      })
+      .addComputerOverSsh({ address: login.trim() }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage]))
       .then(
         place => setInstalled(place),
         (e: unknown) => {
           setStages(null);
-          setRefusal({ said: errorText(e), ...(loggedIn ? {} : { fix: MINE.refusedFix }) });
+          const loginRefused = e instanceof RequestError && e.kind === PLACE_LOGIN_REFUSED_KIND;
+          setRefusal({ said: errorText(e), ...(loginRefused ? { fix: MINE.refusedFix } : {}) });
         },
       );
   };

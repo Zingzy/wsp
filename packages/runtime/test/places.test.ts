@@ -13,6 +13,7 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
+  PLACE_LOGIN_REFUSED_KIND,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
   placeRefusalTranscript,
@@ -420,6 +421,8 @@ describe("a computer joining", () => {
     sockets.push(joined.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
+    const absences: Record<string, unknown>[] = [];
+    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
     const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
     expect(again.proved).toMatchObject({ ok: false });
@@ -434,6 +437,8 @@ describe("a computer joining", () => {
     const row = (await placesOf()).find(p => p.id === joined.placeId)!;
     expect(row.dialled).toMatchObject({ answered: false, said: placeCannotBootLine("old-macbook", BLOCKED) });
     expect(row.takesForks).toBe(true);
+    // The absence carries the same sentence, so a client says why rather than that the box stopped answering.
+    expect(absences).toContainEqual(expect.objectContaining({ placeId: joined.placeId, said: placeCannotBootLine("old-macbook", BLOCKED) }));
   });
 
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
@@ -1637,6 +1642,8 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
     // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
     expect(stages.at(-1)?.note).toBe("engine none");
+    // The computer is held by the time its join is done, so that step names the row a reader acts on.
+    expect(stages.at(-1)?.placeId).toBe(added.place.id);
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -1687,8 +1694,44 @@ describe("putting the agent on a computer over ssh", () => {
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
-    // An install that never reached a join leaves its code unspent, and the person's next add mints another.
-    expect(await runtime.devices.spend(minted, 1)).toBe(true);
+    // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
+    expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
+  });
+
+  it("draws a failure on the step that was under way, not on a step that only said what it had done", async () => {
+    const stages: PlaceStageEvent[] = [];
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          stage("host-key", "done", "ssh-ed25519 SHA256:abc");
+          throw new Error("root@spoo runs zsh as root's shell");
+        },
+      },
+    });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("zsh");
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect running", "host-key done", "connect failed"]);
+  });
+
+  it("answers a refused login over the wire with the kind the app reads its login fix off, and any other refusal without it", async () => {
+    let refuse: Error = new PlaceLoginRefusedError("maya@box: Permission denied (publickey).");
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(refuse) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4420, addresses: DOOR }) } });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await c.request("places.add", { address: "maya@box" })).toMatchObject({ ok: false, error: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND });
+    refuse = new Error("root@spoo runs zsh as root's shell");
+    expect(await c.request("places.add", { address: "root@spoo" })).not.toHaveProperty("kind");
+    c.close();
   });
 
   it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {
@@ -3556,6 +3599,18 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(provision.length).toBeGreaterThan(0);
     expect(provision.every(s => s.placeId === placeId)).toBe(true);
     expect(provision.filter(s => s.state === "done").map(s => s.placeId)).toEqual([placeId]);
+  });
+
+  it("counts the rows that failed on the job's last step and on no other", async () => {
+    const failing = provisioner({ rows: [...ROWS, { id: "agents/uv", label: "uv", outcome: "failed", note: "exit 2" }, { id: "agents/go", label: "Go", outcome: "failed" }], hold: true });
+    const stages: PlaceStageEvent[] = [];
+    const { placeId } = await joined({ provision: failing.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    failing.release();
+    await until(async () => stages.some(s => s.step === "provision" && s.state === "done"));
+    const done = stages.find(s => s.step === "provision" && s.state === "done")!;
+    expect(done.failed).toBe(2);
+    expect(stages.filter(s => s.state !== "done").every(s => s.failed === undefined)).toBe(true);
   });
 
   it("says nothing about the image while the job runs, and reads the image again once the job ends", async () => {

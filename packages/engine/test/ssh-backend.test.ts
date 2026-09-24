@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ARCH_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { probeCommand } from "../src/machine-context.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshHostName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -694,5 +694,31 @@ describe("an alias out of the person's ssh config", () => {
     expect(await sshWordReach("root@spoo", {}, run)).toEqual({ user: "root", host: "spoo", port: 22 });
     await expect(sshWordReach("-oProxyCommand=touch", {}, run)).rejects.toThrow(SSH_WORD_REFUSAL("-oProxyCommand=touch"));
     expect(asked).toEqual([]);
+  });
+});
+
+describe("the address a login dials", () => {
+  it("is the HostName the config gives an alias, read with nothing dialled, and the host itself where the client cannot say", async () => {
+    const asked: (readonly string[])[] = [];
+    const run: SshLocalRun = async (file, args) => {
+      asked.push([file, ...args]);
+      return { exitCode: 0, stdout: args.at(-1) === "root@me" ? "user root\nhostname 127.0.0.1\nport 22\n" : "user root\nhostname 178.156.161.168\nport 2222\n", stderr: "" };
+    };
+    expect(await sshHostName({ user: "root", host: "spoo", port: 2222 }, run)).toBe("178.156.161.168");
+    expect(asked[0]).toEqual(["ssh", "-G", ...sshDialArgs({ user: "root", host: "spoo", port: 2222 }), "root@spoo"]);
+    expect(await sshHostName({ user: "root", host: "me", port: 22 }, run)).toBe("127.0.0.1");
+    const broken: SshLocalRun = async () => ({ exitCode: 255, stdout: "", stderr: "Bad configuration option\n" });
+    expect(await sshHostName({ user: "root", host: "spoo", port: 22 }, broken)).toBe("spoo");
+    expect(await new SshBackend({ hostName: async () => "10.0.0.9" }).hostNameFor({ user: "root", host: "spoo", port: 22 })).toBe("10.0.0.9");
+  });
+
+  it("is no address of this computer's own where a ProxyJump or a ProxyCommand carries the dial", async () => {
+    const said: Record<string, string> = {
+      "root@inner": "user root\nhostname 127.0.0.1\nproxyjump bastion\n",
+      "root@piped": "user root\nhostname 127.0.0.1\nproxycommand nc %h %p\n",
+    };
+    const run: SshLocalRun = async (_file, args) => ({ exitCode: 0, stdout: said[String(args.at(-1))] ?? "", stderr: "" });
+    expect(await sshHostName({ user: "root", host: "inner", port: 22 }, run)).toBeUndefined();
+    expect(await sshHostName({ user: "root", host: "piped", port: 22 }, run)).toBeUndefined();
   });
 });
