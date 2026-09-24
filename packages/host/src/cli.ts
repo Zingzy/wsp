@@ -31,7 +31,7 @@ import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { daemonFixLine } from "./daemon-fix.js";
@@ -99,7 +99,8 @@ import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
-import { stateWriterHere, VERSION } from "./version.js";
+import { installedVersion, stateWriterHere, VERSION } from "./version.js";
+import { releaseWatch } from "./release.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -712,7 +713,7 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
     pick.id = wiredProviderId(env);
     pick.env = env;
   }
-  // The key is up: the provider is a place now, and its copy of the image is built behind the save.
+  // The wired provider's copy of the image is kept current behind the save; a place that forks nothing builds none.
   void rt.image.keepCurrent(wiredProviderId(env));
 }
 
@@ -735,7 +736,7 @@ export function makeRuntime(
   /** The links this host holds to the computers a person joined, and the one planner the recipe on this computer
    * is read through. Built here for a caller that needs none of it back; handed in by one that reads the recipe
    * off the same planner, so the doctor and the recipe job cannot read this computer two ways. */
-  links: PlaceWiring = placeWiring(statePath, env, agents?.advertise),
+  links: PlaceWiring = placeWiring(statePath, agents?.advertise),
   /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
    * read is refused at every collection read, and a caller that met that refusal has said so already. */
   store: Store = jsonFileStore(statePath, stateWriterHere()),
@@ -760,7 +761,9 @@ export function makeRuntime(
     },
     local,
     ssh: sshWiring(),
-    placeLinks: links,
+    // The provider row off the same pick the slot and the table stand on, so a key saved while this host serves
+    // makes its provider a place on every screen at once.
+    placeLinks: { ...links, provider: () => wiredPlaceRow(pick.env, slot.current()) },
     // The build this host is, written into the state file at every save, so a host that meets a record it cannot
     // read says which wsp on this computer wrote it.
     store,
@@ -1133,7 +1136,7 @@ async function init(
     beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noSolari: "offer", checkSaved: true });
   // One wiring for every runtime this run builds and for the host it serves at the end: the links and the recipe
   // planner are the same on both roads below.
-  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
+  const links = placeWiring(opts.statePath, opts.advertise);
   // The first screen names where the image is built: the host's place, or the provider this run itself forks on.
   const builds = beside !== undefined ? beside.place : forksNoMachines(providerBackendFor(providerEnv).capabilities) ? undefined : wiredProviderId(providerEnv);
   if (builds !== undefined) builtOn(screen, builds);
@@ -1264,7 +1267,7 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
   // One wiring for the runtime and for the host over it, so the links this host holds and the recipe its doctor
   // reads come from the same place.
-  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
+  const links = placeWiring(opts.statePath, opts.advertise);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
   return hostFor(rt, keys, { ...opts, providerEnv, links }, io, opts.running);
 }
@@ -1297,7 +1300,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
   // Read first, for the reason readOnce carries.
   const store = await readOnce(opts.statePath);
-  const links = placeWiring(opts.statePath, providerEnv, opts.advertise);
+  const links = placeWiring(opts.statePath, opts.advertise);
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
   try {
     // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
@@ -1349,7 +1352,7 @@ async function hostFor(
   run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
   const address = opts.address ?? LOOPBACK;
-  const links = opts.links ?? placeWiring(opts.statePath, opts.providerEnv, opts.advertise);
+  const links = opts.links ?? placeWiring(opts.statePath, opts.advertise);
   const lockPath = lockPathFor(opts.statePath);
   const started = startedByEnv(process.env) ?? opts.startedBy;
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address, ...(started !== undefined ? { startedBy: started } : {}) });
@@ -1387,6 +1390,7 @@ async function hostFor(
       // The row this host forks on, so a host wired to none asks its account nothing at all.
       provider: wiredProviderId(opts.providerEnv),
       admitted,
+      release: releaseWatch({ statePath: opts.statePath, shape: started ?? "app", running: VERSION, installed: installedVersion, log: line => io.log(line) }),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
@@ -2137,7 +2141,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         const { keys, env } = await loadKeys(io, keySources(opts.providerEnv, opts.statePath), doctorKeyAsk(computer));
         // One planner for this run: the recipe the tools step reads against is the one the recipe job puts on a
         // computer, read through the wiring this runtime holds its links with.
-        const links = placeWiring(opts.statePath, env);
+        const links = placeWiring(opts.statePath);
         const provision = links.provision;
         const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local, links);
         try {
