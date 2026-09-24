@@ -137,6 +137,8 @@ describe("the door a host opens for computers you own", () => {
     expect(first).toEqual(second);
     expect(first.port).toBe(port + PLACE_PORT_OFFSET);
     expect(first.addresses.every(at => at.endsWith(`:${port + PLACE_PORT_OFFSET}`))).toBe(true);
+    // The door's own listener is what a forward over ssh from a box may land on.
+    expect(first.backPort).toBe(port + PLACE_PORT_OFFSET);
   });
 
   it("says who holds the port rather than stepping to a free one", async () => {
@@ -154,6 +156,8 @@ describe("the door a host opens for computers you own", () => {
     expect(h.door.port()).toBeUndefined();
     expect(view.port).toBe(h.port);
     expect(view.addresses.every(at => at.endsWith(`:${h.port}`))).toBe(true);
+    // A forward into this host's main port would arrive from its loopback, which is the owner's own road: none.
+    expect(view.backPort).toBeUndefined();
   });
 });
 

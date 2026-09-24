@@ -133,7 +133,7 @@ export interface HostHandle extends WorkspaceRoads {
 
 /** What this host answers about the door a computer you own dials: where it is, and nothing about the key proved
  * there, which the runtime reads off the pair its place door signs with. */
-type DoorAt = Omit<PlaceDoorView, "hostKey">;
+type DoorAt = Omit<PlaceDoorView, "hostKey"> & { backPort?: number };
 
 /** Orphan sweep period after the one at start. Matches the age a stray
  * workspace machine must reach before reap treats it as abandoned. */
@@ -572,6 +572,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       port: at,
       addresses: doorAddresses(bound, at, opts.advertise),
       ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
+      // Only the door's own listener: on a host bound beyond loopback a forward would land on the main port, where a
+      // loopback peer is the owner's road.
+      ...(boundHere ? { backPort: at } : {}),
     };
   };
   const openDoor = async (): Promise<DoorAt> => {

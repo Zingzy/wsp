@@ -65,6 +65,7 @@ import {
   type PlaceProvision,
   type PlaceProvisionRow,
   type PlaceReport,
+  type PlaceBack,
   type PlaceRoad,
   type PlaceUpdateReply,
   type PlaceView,
@@ -178,6 +179,20 @@ export interface PlaceWiring {
   /** How the recipe this computer holds is put on a computer you own. Absent, no computer is provisioned and the
    * join and the update say nothing about it. */
   provision?: PlaceProvisioner;
+  /** The forwards over ssh this host holds for computers that reach it no other way; the installer holds one before
+   * the deploy and the records keep it held. Absent on a runtime served without the ssh road. */
+  back?: PlaceBackHolder;
+}
+
+/** The forwards a host holds from a computer's own loopback to its door, one per login. */
+export interface PlaceBackHolder {
+  /** Holds the forward for that login until it is released, making it again each time it ends. Answers where it
+   * first stood, or throws the sentence for why the first try did not; a login already held takes the new `moved`
+   * and answers where it stands. `moved` hears the port on that computer whenever a remake had to take another,
+   * after the place file there names it. */
+  hold(login: PlaceLogin, back: PlaceBack, on: { home: string }, moved?: (back: PlaceBack) => void): Promise<PlaceBack>;
+  release(login: PlaceLogin): void;
+  close(): void;
 }
 
 /** How the recipe on this computer is put on a computer you own. `plan` reads the recipe beside the host's state
@@ -264,6 +279,11 @@ export interface PlaceInstallRequest {
    * host will prove, as one word, the same one the printed join line carries. */
   code: string;
   hostUrls: readonly string[];
+  /** The door's port on this computer's loopback, where the door is a listener of its own: what a forward over ssh
+   * lands on. Absent on a host bound beyond loopback, where a forward would land on the owner's own road. */
+  doorPort?: number;
+  /** The relay's address among `hostUrls`, when this host is linked to one. */
+  relay?: string;
 }
 
 /** What the install answers once the computer has run its own join: the name it was given, and the key its ssh
@@ -278,6 +298,8 @@ export interface PlaceInstalled {
    * later dial that did not carry it would be refused for the publickey on a computer that is on, which is the
    * confusion this road exists to end. */
   sshKeyPath?: string;
+  /** The forward that computer dials back through, where it reached this host no other way. */
+  back?: PlaceBack;
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
@@ -413,7 +435,7 @@ export interface PlaceDoor {
   markUsed(placeId: string | undefined): Promise<void>;
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
-  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[] }, now: number): Promise<PlaceAdded>;
+  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string }, now: number): Promise<PlaceAdded>;
   /** Dials one computer once: a frame over the link it is holding, or one login over the road it was added on when
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
@@ -764,12 +786,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The installs waiting on a computer to dial in, keyed by the code each handed it: the join notes which place
    * the code became and the attach that follows wakes the install. The login the install logged in over is here
    * too, from the moment its ssh answered, since the record is written by whichever of the two lands second. */
-  const awaiting = new Map<string, { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void }>();
+  const awaiting = new Map<string, { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void }>();
 
   /** The road the install came in over, written onto a record: the join frame the record is made from says nothing
    * about how the computer was reached, and every later dial, update and read of its log rides this login. */
-  const withRoad = (record: PlaceRecord, login: PlaceLogin | undefined): PlaceRecord =>
-    login === undefined ? record : { ...record, road: { ...record.road, ssh: login.ssh, ...(login.keyPath !== undefined ? { keyPath: login.keyPath } : {}) } };
+  const withRoad = (record: PlaceRecord, install: { login?: PlaceLogin; back?: PlaceBack } | undefined): PlaceRecord =>
+    install?.login === undefined
+      ? record
+      : { ...record, road: { ...record.road, ssh: install.login.ssh, ...(install.login.keyPath !== undefined ? { keyPath: install.login.keyPath } : {}), ...(install.back !== undefined ? { back: install.back } : {}) } };
 
   /** The login this host holds for a computer, as every road that logs in to one takes it: the address in the
    * spelling a person would type and the key file the add named beside it, off the record's own road. Nothing
@@ -796,9 +820,28 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
   /** The login an install in flight logged in over, by the place its code became; nothing for every computer no
    * install is putting the agent on right now, whose record already carries whatever road it has. */
-  const roadOfInstall = (placeId: string): PlaceLogin | undefined => {
-    for (const waiting of awaiting.values()) if (waiting.placeId === placeId) return waiting.login;
+  const roadOfInstall = (placeId: string): { login?: PlaceLogin; back?: PlaceBack } | undefined => {
+    for (const waiting of awaiting.values()) if (waiting.placeId === placeId) return waiting;
     return undefined;
+  };
+
+  /** Keeps the forward a record dials back through held, and writes the port it moved to onto every record of that
+   * login. Nothing for a record with no forward, or a host wired with no holder. */
+  const holdBack = (record: PlaceRecord): void => {
+    const login = loginOf(record);
+    const back = record.road?.back;
+    const home = record.report.login["HOME"];
+    if (wiring.back === undefined || login === undefined || back === undefined || home === undefined) return;
+    const moved = (to: PlaceBack): void => {
+      void (async () => {
+        for (const id of [...kept.keys()]) {
+          const current = await recordOf(id);
+          if (current !== undefined && loginOf(current)?.ssh === login.ssh && current.road !== undefined) await keep({ ...current, road: { ...current.road, back: to } });
+        }
+      })().catch(() => undefined);
+    };
+    // The holder makes it again for as long as it is held, so a first try that failed is not the last.
+    void wiring.back.hold(login, back, { home }, moved).catch(() => undefined);
   };
 
   /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
@@ -1210,7 +1253,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     takesForks: true,
     // Field by field rather than spread: the key file on the record is a path on this computer and no client's
     // business, and a road copied whole would hand it over.
-    ...(record.road === undefined ? {} : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}) } }),
+    ...(record.road === undefined
+      ? {}
+      : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}), ...(record.road.back !== undefined ? { back: record.road.back } : {}) } }),
     // The folder a turn there starts in and how long it had been up: read off the same report the system name is
     // read from, so a computer that stopped answering shows what it last was rather than nothing at all.
     ...(record.report.login["HOME"] !== undefined ? { home: record.report.login["HOME"] } : {}),
@@ -1451,6 +1496,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       for (const record of await records()) {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
+        holdBack(record);
         // No job outlives the host that drove it, so a record left running is stopped here rather than holding
         // the gate on that computer shut for good.
         if (record.provision?.state === "running") {
@@ -1602,7 +1648,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
-      const waiting: { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void } = {};
+      const waiting: { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void } = {};
       awaiting.set(code, waiting);
       try {
         const { addId: _stream, ...asked } = req;
@@ -1611,6 +1657,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // does not change it: the computer that most needs a login held here is the one whose agent never dials.
         // A join still to land carries it off this entry; one that already landed has its record written again.
         waiting.login = installed.ssh === undefined ? undefined : { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
+        if (installed.back !== undefined) waiting.back = installed.back;
         const early = waiting.login === undefined || waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
         if (early !== undefined) await keep(early);
         stage("join", "running");
@@ -1634,6 +1681,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         });
         const held = await recordOf(placeId);
         if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
+        holdBack(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
         stage("join", "done", `engine ${held.report.engine}`);
@@ -1657,6 +1705,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
+        // A forward stays held for as long as a record dials back through it, and goes with an add that left none.
+        if (waiting.login !== undefined && waiting.back !== undefined) {
+          const landed = waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
+          if (landed?.road?.back === undefined) wiring.back?.release(waiting.login);
+          else holdBack(landed);
+        }
         throw e;
       } finally {
         awaiting.delete(code);
@@ -1888,6 +1942,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         }
       }
       if (reach !== undefined) cut(placeId, "removed from this host");
+      // After the sweep, since the link that sweep may ride comes in through the forward.
+      if (login !== undefined && held.road?.back !== undefined) wiring.back?.release(login);
       kept.delete(placeId);
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
@@ -1906,6 +1962,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     close: async () => {
+      wiring.back?.close();
       for (const placeId of [...live.keys()]) cut(placeId, "this host is stopping");
       for (const placeId of [...waiting.keys()]) woken(placeId, false);
       for (const [key, f] of forwards) {

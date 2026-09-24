@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { lineFeed } from "../src/child-exec.js";
-import { carriedSshValues, holdBackForward, sshBackArgs, type HeldChild, type SshCarried, type SshLocalRun, type SshReach } from "../src/ssh-backend.js";
+import { carriedSshValues, holdBackForward, missingKnownHostsLine, sshBackArgs, type HeldChild, type SshCarried, type SshLocalRun, type SshReach } from "../src/ssh-backend.js";
 
 const DEFAULTS = [
   "user root",
@@ -21,6 +24,15 @@ const DEFAULTS = [
   "clearallforwardings no",
 ];
 
+/** Known hosts files that are on this computer, since a child is never handed one that is not. */
+const HOSTS_DIR = mkdtempSync(join(tmpdir(), "wsp-known-"));
+const hostsFile = (name: string): string => {
+  const path = join(HOSTS_DIR, name);
+  writeFileSync(path, "");
+  return path;
+};
+const GOOGLE_HOSTS = hostsFile("google_compute_known_hosts");
+
 const JUMPBOX_PROXY = "/opt/homebrew/bin/python3 -S /opt/sdk/gcloud.py compute start-iap-tunnel jumpbox %p --listen-on-stdin --project=p --zone=z";
 
 /** The owner's jumpbox block as `ssh -G` answers it: a tunnel command with a token the child expands, the name
@@ -36,7 +48,7 @@ const JUMPBOX = [
   "pubkeyacceptedalgorithms ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512",
   "identityfile ~/.ssh/google_compute_engine",
   "globalknownhostsfile /etc/ssh/ssh_known_hosts /etc/ssh/ssh_known_hosts2",
-  "userknownhostsfile /Users/dev/.ssh/google_compute_known_hosts",
+  `userknownhostsfile ${GOOGLE_HOSTS}`,
   "addkeystoagent yes",
   "localforward 8080 [127.0.0.1]:8080",
   `proxycommand ${JUMPBOX_PROXY}`,
@@ -113,19 +125,19 @@ describe("the ssh dial-back forward", () => {
   it("the jumpbox block's tunnel, key name, key file and identity ride along behind -F /dev/null, its LocalForward does not", async () => {
     const reach: SshReach = { user: "dev_example", host: "jumpbox", port: 22 };
     const { run } = fakeConfig(JUMPBOX, "jumpbox", "dev_example");
-    const args = sshBackArgs(await carriedSshValues(reach, run), 0, 4640);
+    const args = sshBackArgs(await carriedSshValues(reach, run), 4640, 4640);
     expect(args.slice(0, 2)).toEqual(["-F", "/dev/null"]);
     const options = args.flatMap((a, i) => (args[i - 1] === "-o" ? [a] : []));
     expect(options).toEqual(expect.arrayContaining([
       `ProxyCommand=${JUMPBOX_PROXY}`,
       "HostKeyAlias=compute.1234567890",
-      "UserKnownHostsFile=/Users/dev/.ssh/google_compute_known_hosts",
+      `UserKnownHostsFile=${GOOGLE_HOSTS}`,
       "IdentityFile=~/.ssh/google_compute_engine",
       "IdentitiesOnly=yes",
       "AddKeysToAgent=yes",
     ]));
     expect(options.join(" ")).not.toMatch(/LocalForward|CheckHostIP|HostKeyAlgorithms/);
-    expect(args[args.indexOf("-R") + 1]).toBe("127.0.0.1:0:127.0.0.1:4640");
+    expect(args[args.indexOf("-R") + 1]).toBe("127.0.0.1:4640:127.0.0.1:4640");
     expect(args.slice(-2)).toEqual(["dev_example@compute.1234567890", "echo WSP_BACK_UP; exec cat"]);
   });
 
@@ -141,13 +153,14 @@ describe("the ssh dial-back forward", () => {
 
   it("a carried path with a space is quoted so ssh reads it as one value, a list and a command stay as ssh printed them", async () => {
     const reach: SshReach = { user: "root", host: "box", port: 22 };
+    const [known, work] = [hostsFile("known_hosts"), hostsFile("work_hosts")];
     const agent = "/Users/dev/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock";
     const block = DEFAULTS.filter(l => !l.startsWith("identityfile ") && !l.startsWith("userknownhostsfile ")).concat(
       `identityagent ${agent}`,
       "identityfile ~/keys/my key",
       "identityfile ~/.ssh/id_ed25519",
       'identityfile ~/odd/a"b\\c',
-      "userknownhostsfile ~/.ssh/known_hosts ~/.ssh/work_hosts",
+      `userknownhostsfile ${known} ${work}`,
       "proxycommand nc -X 5 -x proxy:1080 %h %p",
     );
     const { run } = fakeConfig(block, "box");
@@ -157,7 +170,7 @@ describe("the ssh dial-back forward", () => {
       'IdentityFile="~/keys/my key"',
       "IdentityFile=~/.ssh/id_ed25519",
       'IdentityFile="~/odd/a\\"b\\\\c"',
-      "UserKnownHostsFile=~/.ssh/known_hosts ~/.ssh/work_hosts",
+      `UserKnownHostsFile=${known} ${work}`,
       "ProxyCommand=nc -X 5 -x proxy:1080 %h %p",
     ]));
   });
@@ -171,12 +184,37 @@ describe("the ssh dial-back forward", () => {
     expect(args.at(-2)).toBe("root@10.0.0.7");
   });
 
+  it("a known hosts file the config names that is not on this computer refuses the forward, a path with a space included", async () => {
+    const reach: SshReach = { user: "root", host: "box", port: 22 };
+    const kept = hostsFile("kept_hosts");
+    // How ssh -G prints `UserKnownHostsFile "~/my hosts"`: expanded, and joined by spaces with the quotes gone.
+    const spaced = `${join(HOSTS_DIR, "my")} hosts`;
+    for (const [list, missing] of [
+      [`${kept} ${join(HOSTS_DIR, "gone")}`, join(HOSTS_DIR, "gone")],
+      [spaced, join(HOSTS_DIR, "my")],
+    ] as const) {
+      const { run } = fakeConfig([...DEFAULTS.filter(l => !l.startsWith("userknownhostsfile ")), `userknownhostsfile ${list}`], "box");
+      await expect(carriedSshValues(reach, run)).rejects.toThrow(missingKnownHostsLine("root@box", missing));
+    }
+    const { run } = fakeConfig([...DEFAULTS.filter(l => !l.startsWith("globalknownhostsfile ")), "globalknownhostsfile none"], "box");
+    expect((await carriedSshValues(reach, run)).options).toContain("GlobalKnownHostsFile=none");
+    expect(missingKnownHostsLine("root@box", "/x".repeat(400)).length).toBeLessThanOrEqual(300);
+  });
+
+  it("a literal % in the agent's path is doubled, since ssh -G printed it already expanded and the child expands it again", async () => {
+    const reach: SshReach = { user: "root", host: "box", port: 22 };
+    const { run } = fakeConfig([...DEFAULTS, "identityagent /Users/dev/%h", "certificatefile ~/.ssh/%h-cert.pub"], "box");
+    const options = sshBackArgs(await carriedSshValues(reach, run), 4640, 4640);
+    expect(options).toContain("IdentityAgent=/Users/dev/%%h");
+    expect(options).toContain("CertificateFile=~/.ssh/%h-cert.pub");
+  });
+
   it("a config ssh cannot read is refused with ssh's own line", async () => {
     const run: SshLocalRun = async () => ({ exitCode: 255, stdout: "", stderr: "/Users/dev/.ssh/config line 3: Bad configuration option: frob\n" });
     await expect(carriedSshValues({ user: "root", host: "box", port: 22 }, run)).rejects.toThrow("Bad configuration option: frob");
   });
 
-  it("the forward is up when the box echoes WSP_BACK_UP, at the port it was asked for", async () => {
+  it("the forward is up when the box echoes WSP_BACK_UP, and no line on stderr, which the box writes too, stands for it", async () => {
     const fake = fakeChild();
     const spawned: string[][] = [];
     const held = holdBackForward(CARRIED, 4640, 4640, (file, args) => {
@@ -184,22 +222,14 @@ describe("the ssh dial-back forward", () => {
       return fake.child;
     });
     expect(spawned).toEqual([["ssh", ...sshBackArgs(CARRIED, 4640, 4640)]]);
-    fake.stdout.write("WSP_BACK_UP\n");
-    await expect(held.up).resolves.toBe(4640);
-    expect(fake.stdinEnded()).toBe(false);
-  });
-
-  it("asked for port 0, it is up at the port sshd allocated and ssh printed on stderr", async () => {
-    const fake = fakeChild();
-    const held = holdBackForward(CARRIED, 0, 4640, () => fake.child);
-    fake.stdout.write("WSP_BACK_UP\n");
-    await tick();
     let settled = false;
     void held.up.then(() => (settled = true));
+    fake.stderr.write("Allocated port 41234 for remote forward to 127.0.0.1:4640\n");
     await tick();
     expect(settled).toBe(false);
-    fake.stderr.write("Allocated port 41234 for remote forward to 127.0.0.1:4640\n");
-    await expect(held.up).resolves.toBe(41234);
+    fake.stdout.write("WSP_BACK_UP\n");
+    await expect(held.up).resolves.toBeUndefined();
+    expect(fake.stdinEnded()).toBe(false);
   });
 
   it("a child that ends before it is up rejects with ssh's last line", async () => {
@@ -246,14 +276,13 @@ describe("the ssh dial-back forward", () => {
     expect(lines[0]!.length).toBeLessThanOrEqual(4096);
   });
 
-  it("a newline-free flood on stderr still lets the allocated port and ssh's last line through", async () => {
+  it("a newline-free flood on stderr still lets the up line and ssh's last line through", async () => {
     const fake = fakeChild();
-    const held = holdBackForward(CARRIED, 0, 4640, () => fake.child);
+    const held = holdBackForward(CARRIED, 4640, 4640, () => fake.child);
     const chunk = "x".repeat(65536);
     for (let i = 0; i < 64; i++) fake.stderr.write(chunk);
-    fake.stderr.write("\nAllocated port 41234 for remote forward to 127.0.0.1:4640\n");
     fake.stdout.write("WSP_BACK_UP\n");
-    await expect(held.up).resolves.toBe(41234);
+    await expect(held.up).resolves.toBeUndefined();
     for (let i = 0; i < 64; i++) fake.stderr.write(chunk);
     await tick();
     fake.exit(255);

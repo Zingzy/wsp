@@ -58,6 +58,7 @@ import {
   providerAgentsRefusal,
   type HostFolderListing,
   type GoldenStageEvent,
+  type PlaceBack,
   type PlaceProvision,
   type PlaceProvisionRow,
   type PlaceStageEvent,
@@ -71,7 +72,7 @@ import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { NO_AGENTS_READER, type AgentsOn, type AgentsReader } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1950,11 +1951,12 @@ describe("the door a computer you own dials", () => {
     c.close();
     await srv!.close();
     const view = { port: 4420, addresses: ["http://192.168.1.20:4420"] };
-    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => view } });
+    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => ({ ...view, backPort: 4420 }) } });
     const opened = await WsClient.connect(srv.port, { token: "host-token" });
     const answer = await opened.request("places.door");
     // Where to dial is the host's answer; the key proved there is the place door's own, off the pair it signs with.
-    expect(answer).toMatchObject({ ok: true, door: { ...view, hostKey: keyFingerprint(hostKey.publicKey) } });
+    // The port a forward over ssh lands on is this computer's business and stays off the wire.
+    expect(answer["door"]).toEqual({ ...view, hostKey: keyFingerprint(hostKey.publicKey) });
     opened.close();
   });
 
@@ -4017,5 +4019,122 @@ describe("the agents on a computer you own", () => {
     const bare = await WsClient.connect(srv!.port, { token: "host-token" });
     sockets.push(bare.ws);
     expect(await bare.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: NO_AGENTS_READER });
+  });
+});
+
+describe("the forward a computer dials back through", () => {
+  /** A holder that records every ask, standing each forward where it was asked. */
+  function backHolder(): { holder: PlaceBackHolder; holds: { login: PlaceLogin; back: PlaceBack; home: string; moved?: (back: PlaceBack) => void }[]; calls: string[] } {
+    const holds: { login: PlaceLogin; back: PlaceBack; home: string; moved?: (back: PlaceBack) => void }[] = [];
+    const calls: string[] = [];
+    return {
+      holds,
+      calls,
+      holder: {
+        hold: async (login, back, on, moved) => {
+          holds.push({ login, back, home: on.home, ...(moved !== undefined ? { moved } : {}) });
+          calls.push(`hold ${login.ssh} ${back.boxPort}`);
+          return back;
+        },
+        release: login => void calls.push(`release ${login.ssh}`),
+        close: () => void calls.push("close"),
+      },
+    };
+  }
+
+  const AT_DOOR: PlaceBack = { boxPort: 4640, doorPort: 4640 };
+
+  /** One add of a box that reached this host only through the forward the install stood. */
+  async function addedOverTheForward(store: Store, back: PlaceBackHolder): Promise<{ hostKey: PlaceKeyPair; placeId: string }> {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        back,
+        install: async req => {
+          const { client } = await join(hostKey, { code: readJoinToken(req.code).code, name: "spoo", report: report("spoo") });
+          sockets.push(client.ws);
+          answersLeave(client, [], []);
+          return { name: "spoo", ssh: "root@spoo", back: AT_DOOR };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now());
+    return { hostKey, placeId: added.place.id };
+  }
+
+  it("keeps the forward an install stood held for the record it made, and writes a port it moved to onto that record", async () => {
+    const store = memoryStore();
+    const back = backHolder();
+    const { placeId } = await addedOverTheForward(store, back.holder);
+    expect(back.holds).toHaveLength(1);
+    expect(back.holds[0]).toMatchObject({ login: { ssh: "root@spoo" }, back: AT_DOOR, home: "/home/maya" });
+    expect((await placesOf()).find(p => p.id === placeId)?.road).toEqual({ ssh: "root@spoo", from: "127.0.0.1", back: AT_DOOR });
+    back.holds[0]!.moved!({ boxPort: 23456, doorPort: 4640 });
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.road?.back?.boxPort === 23456);
+    expect(((await store.get("places", placeId)) as PlaceRecord).road?.back).toEqual({ boxPort: 23456, doorPort: 4640 });
+  });
+
+  it("holds it again for every record that dials back through one when the host starts, and lets every one go when it stops", async () => {
+    const store = memoryStore();
+    const first = backHolder();
+    const { hostKey } = await addedOverTheForward(store, first.holder);
+    await srv!.close();
+    srv = undefined;
+    await runtime!.close();
+    expect(first.calls.at(-1)).toBe("close");
+    const again = backHolder();
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(hostKey), back: again.holder } });
+    await runtime.places!.load();
+    expect(again.holds).toHaveLength(1);
+    expect(again.holds[0]).toMatchObject({ login: { ssh: "root@spoo" }, back: AT_DOOR, home: "/home/maya" });
+    expect(again.holds[0]!.moved).toBeDefined();
+  });
+
+  it("lets the forward go when the computer is removed, after the sweep that may ride it", async () => {
+    const back = backHolder();
+    const { placeId } = await addedOverTheForward(memoryStore(), back.holder);
+    await runtime!.places!.remove(placeId);
+    expect(back.calls.at(-1)).toBe("release root@spoo");
+  });
+
+  it("lets the forward go when the add that stood it left no record", async () => {
+    const back = backHolder();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), back: back.holder, install: async () => ({ name: "spoo", ssh: "root@spoo", back: AT_DOOR }) },
+      placeJoinWaitMs: 30,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now())).rejects.toThrow(placeNoLinkLine("spoo"));
+    expect(back.calls).toEqual(["release root@spoo"]);
+  });
+
+  it("hands the install the door's own port and the relay's address off the host's door", async () => {
+    let handed: PlaceInstallRequest | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async req => {
+          handed = req;
+          throw new Error("stop here");
+        },
+      },
+    });
+    const relay = "https://h645d7f8a8d48cbd6.example";
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4640, addresses: DOOR, relay, backPort: 4640 }) } });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    await c.request("places.add", { address: "root@spoo" });
+    c.close();
+    expect(handed).toMatchObject({ hostUrls: [...DOOR, relay], doorPort: 4640, relay });
   });
 });
