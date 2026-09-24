@@ -44,7 +44,7 @@ describe("the right panel's launcher", () => {
   it("offers Browser, Terminal, Diff, Workspace and Processes and nothing else", () => {
     draw();
     expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
-    for (const label of ["Browser", "Terminal", "Diff", "Task", "Processes"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Browser", "Terminal", "Diff", "Machine", "Processes"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDMP");
@@ -74,7 +74,7 @@ describe("the right panel's launcher", () => {
     draw({ surfaces: [{ id: "diff", kind: "diff" }, { id: "machine", kind: "machine" }, { id: "processes", kind: "processes" }], activeSurfaceId: "diff" });
     const strip = document.querySelector("[data-right-panel-tab-list]")?.textContent;
     expect(strip).toContain("Diff");
-    expect(strip).toContain("Task");
+    expect(strip).toContain("Machine");
     expect(strip).toContain("Processes");
     expect(document.querySelector("[data-pane]")).not.toBeNull();
   });

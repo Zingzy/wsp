@@ -209,7 +209,7 @@ function surfaceActions(
     },
     {
       key: "machine",
-      label: "Task",
+      label: "Machine",
       description: "Load, memory and disk.",
       icon: Cpu,
       shortcut: "M",
@@ -406,7 +406,7 @@ function surfaceTitle(
     case "diff":
       return "Diff";
     case "machine":
-      return "Task";
+      return "Machine";
     case "processes":
       return "Processes";
     case "terminal":
