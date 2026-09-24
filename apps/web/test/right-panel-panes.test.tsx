@@ -29,7 +29,7 @@ afterEach(cleanup);
 describe("the right panel's Workspace and Processes panes", () => {
   it.each([
     ["processes", "[data-procs]", "Processes"],
-    ["machine", "[data-machine]", "Task"],
+    ["machine", "[data-machine]", "Machine"],
   ] as const)("opens the %s pane for a workspace, named on the tab strip", (kind, pane, title) => {
     act(() => useRightPanelStore.getState().open(WS, kind));
     render(<Panel id={WS} />);
