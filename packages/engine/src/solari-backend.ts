@@ -141,7 +141,8 @@ export function previewTokenExpiry(token: string, now = Date.now()): number {
 }
 
 function fail(e: WspError): never {
-  throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
+  const message = e.message || `${e.kind} (${e.status})`;
+  throw Object.assign(new Error(message), e, { message });
 }
 
 export class SolariBackend implements MachineBackend {
@@ -226,8 +227,10 @@ export class SolariBackend implements MachineBackend {
         const text = await res.text();
         return { value: (text ? JSON.parse(text) : {}) as T, reply: res };
       }
+      // A body that is not JSON (a gateway's plain "Internal Server Error") is still the provider's words.
+      const raw = (await res.text().catch(() => "")).trim();
       let errBody: { code?: string; error?: string } = {};
-      try { errBody = await res.json() as typeof errBody; } catch { /* non-JSON error body */ }
+      try { errBody = JSON.parse(raw) as typeof errBody; } catch { errBody = raw === "" ? {} : { error: raw.slice(0, 300) }; }
       const e = classify(res.status, errBody, res.headers.get(REQUEST_ID_HEADER) ?? undefined);
       if (!shouldRetry(e, attempt)) fail(e);
       await this.clock.sleep(backoffMs(attempt));
