@@ -8,6 +8,8 @@ import type { AccountView, PlaceView, Preferences, PreferencesPatch, ProjectView
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { isDesktopShell } from "../lib/desktopShell.js";
 import type { Api } from "../protocol/client.js";
+import type { Failure } from "../protocol/failure.js";
+import { addNotice } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
 import { CLOUD_NAMES } from "./providers.js";
@@ -16,6 +18,8 @@ import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads } from
 export interface SettingsContext {
   readonly preferences: Preferences;
   readonly places: ReadonlyArray<PlaceView>;
+  /** Why the host refused the place list, while it does: the Computers page says so rather than drawing it empty. */
+  readonly placesRefused: Failure | null;
   readonly projects: ReadonlyArray<ProjectView>;
   readonly workspaces: ReadonlyArray<WorkspaceView>;
   readonly sessions: Readonly<Record<string, SessionView[]>>;
@@ -42,6 +46,7 @@ export const accountOf = (reads: SettingsReads): AccountView | null => reads.acc
 export function useSettingsContext(): SettingsContext {
   const preferences = useStore(s => s.preferences);
   const places = useStore(s => s.places);
+  const placesRefused = useStore(s => s.placesRefused);
   const projects = useStore(s => s.projects);
   const workspaces = useStore(s => s.workspaces);
   const sessions = useStore(s => s.sessions);
@@ -54,6 +59,7 @@ export function useSettingsContext(): SettingsContext {
   return {
     preferences,
     places,
+    placesRefused,
     projects,
     workspaces,
     sessions,
@@ -71,7 +77,7 @@ export function useSettingsContext(): SettingsContext {
     openSetup: () => useStore.getState().openSetup(),
     openAddProject: () => useSettingsStore.getState().openAddProject(),
     rereadDevices: () => useSettingsStore.getState().rereadDevices(),
-    toast: line => useStore.setState({ toast: line }),
+    toast: line => void addNotice({ kind: "error", text: line }),
   };
 }
 

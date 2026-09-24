@@ -14,6 +14,7 @@ import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices } from "./notice-text.js";
 
 const WS = "ws_center";
 const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
@@ -50,7 +51,8 @@ afterAll(() => restoreLayout());
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  clearNotices();
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
 afterEach(() => {

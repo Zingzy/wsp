@@ -16,6 +16,7 @@ import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js"
 import { placeName } from "../src/settings/places.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { crumb, descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, wordOf } from "./settings-harness.js";
+import { lastNotice } from "./notice-text.js";
 
 const AT = "2026-09-12T09:14:00.000Z";
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false };
@@ -112,7 +113,7 @@ describe("Projects", () => {
     expect(document.querySelector<HTMLElement>("[data-k=remove-project-confirm]")!.className).toContain("bg-destructive");
     fireEvent.click(document.querySelector("[data-k=remove-project-confirm]")!);
     await waitFor(() => expect(removed).toEqual(["pr_landing"]));
-    await waitFor(() => expect(useStore.getState().toast).toBe("landing is no longer a project on spoo"));
+    await waitFor(() => expect(lastNotice()).toBe("landing is no longer a project on spoo"));
     expect(pageAt()).toBe("projects");
     // A project at a cloud: the line names its image there.
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_cloud" }));

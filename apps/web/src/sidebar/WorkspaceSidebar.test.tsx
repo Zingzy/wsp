@@ -94,7 +94,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     selectedId: null,
     selectedThreadId: null,
     projectHome: null,
-    toast: null,
+    projectsRefused: null,
     preferences: { ...DEFAULT_PREFERENCES, labs: true },
   } as never);
   render(

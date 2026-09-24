@@ -13,6 +13,7 @@ import { ConnectHostSheet } from "../src/hosts/ConnectHostSheet.js";
 import { sentCode, shownCode } from "../src/hosts/pairingCode.js";
 import { HostFoot } from "../src/hosts/HostFoot.js";
 import { useStore } from "../src/protocol/store.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -192,6 +193,21 @@ describe("the sidebar's host foot", () => {
     render(<HostFoot />);
     await waitFor(() => expect(useStore.getState().connectOpen).toBe(true));
     expect(window.location.hash).toBe("");
+  });
+
+  it("a hosts list the shell refused reads as not read, and a refused switch is a notice in the shell's words", async () => {
+    fakeBridge({ hosts: vi.fn(async () => { throw new Error("hosts.json unreadable"); }) });
+    render(<HostFoot />);
+    await waitFor(() => expect(document.querySelector("[data-host-label]")?.textContent).toBe("hosts not read"));
+    cleanup();
+    clearNotices();
+    fakeBridge({ contextMenu: vi.fn(async () => "switch:"), switchHost: vi.fn(async () => ({ ok: false as const, error: "that host is not answering", at: "address" as const })) });
+    render(<HostFoot />);
+    await screen.findByText("maya@box");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: HOST_WORDS.hosts }));
+    });
+    expect(lastNotice()).toBe("that host is not answering");
   });
 
   it("draws nothing in a browser tab", () => {

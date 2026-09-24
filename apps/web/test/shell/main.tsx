@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
 // workspaces (running, paused, gone) and four threads, in either theme
-// (?theme=light), with a status toast in the footer (?toast=...) and with the
+// (?theme=light), with a toast over the centre pane (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
 // machine's link dropped after a near-full memory sample (?oom=1) or the
 // napping machine's last vault refused for its size (?vault=1) or every
@@ -61,6 +61,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
+import { addNotice } from "../../src/notices/store.js";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { useBrowserTabs } from "../../src/browser/tabs";
 import { parseAddress } from "../../src/browser/url";
@@ -508,7 +509,8 @@ if (params.get("version") === "behind") {
 }
 const toast = params.get("toast");
 const shown = params.get("ws");
-useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
+useStore.setState({ conn: "live", ...(shown !== null ? { selectedId: shown } : {}) });
+if (toast !== null) addNotice({ kind: "error", text: toast, where: "spoo" });
 // ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.

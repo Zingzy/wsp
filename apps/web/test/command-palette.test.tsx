@@ -22,6 +22,7 @@ import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses the
 // sidebar's search row, and Base UI's positioning against jsdom's zero-size
@@ -143,7 +144,8 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  clearNotices();
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
@@ -768,7 +770,7 @@ describe("default shortcuts", () => {
     ta.focus();
     mod("n", {}, ta);
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
     term.remove();
   });
 });
