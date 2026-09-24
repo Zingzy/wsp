@@ -10,7 +10,9 @@
 // until the hold is let go. In Spaces the same chord walks one level down,
 // over the last five threads opened in the workspace on screen: the hold
 // shows them, letting go lands on the highlighted one, and a tap is the
-// thread before this one.
+// thread before this one. With no workspace selected the terminal chord
+// opens this computer's own terminal, and the panel chord a panel whose
+// panels wait for a workspace.
 import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
@@ -18,11 +20,12 @@ import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, 
 import { threadFolderOf } from "../files/root.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
-import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { selectWorkspaceRightPanelState, useHeldPanelStore, useRightPanelStore } from "../rightPanelStore.js";
 import { absenceOf } from "../settings/places.js";
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../adapt/workspaces.js";
 import { threadTree } from "../sidebar/threadTree.js";
+import { workspaceOrHere } from "../terminal/computer.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
@@ -244,13 +247,15 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     // Settings takes the whole region right of the sidebar and mounts neither the panel nor the drawer, so a chord
     // that flips one would move a record behind a page that never shows it.
     case "rightPanel.toggle":
-      if (workspaceId && !useStore.getState().settingsOpen) useRightPanelStore.getState().toggleVisibility(workspaceId);
+      if (useStore.getState().settingsOpen) return;
+      if (workspaceId) useRightPanelStore.getState().toggleVisibility(workspaceId);
+      else useHeldPanelStore.getState().toggle();
       return;
     case "preview.toggle":
       if (workspaceId && !useStore.getState().settingsOpen) useRightPanelStore.getState().toggle(workspaceId, "preview");
       return;
     case "terminal.toggle":
-      if (workspaceId && !useStore.getState().settingsOpen) useTerminalDrawerStore.getState().toggle(workspaceId);
+      if (!useStore.getState().settingsOpen) useTerminalDrawerStore.getState().toggle(workspaceOrHere(workspaceId));
       return;
     case "terminal.new":
       if (!workspaceId) return;

@@ -52,7 +52,7 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemon: {
-      open: workspaceId => relay().api.daemon.open(workspaceId),
+      open: target => relay().api.daemon.open(target),
       send: (channel, frame) => relay().api.daemon.send(channel, frame),
       close: channel => relay().api.daemon.close(channel),
       onFrame: (channel, fn) => relay().api.daemon.onFrame(channel, fn),

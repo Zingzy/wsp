@@ -55,7 +55,7 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     // Every workspace here rides one host's relay; the harness's own workspace id is what its daemon answers for.
     daemon: {
-      open: async () => relay().api.daemon.open(relay().workspaceId),
+      open: async () => relay().api.daemon.open({ workspaceId: relay().workspaceId }),
       send: (channel, frame) => relay().api.daemon.send(channel, frame),
       close: channel => relay().api.daemon.close(channel),
       onFrame: (channel, fn) => relay().api.daemon.onFrame(channel, fn),

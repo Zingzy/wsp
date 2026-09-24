@@ -169,7 +169,7 @@ describe("makeApi wrappers", () => {
   it("the daemon api opens, sends and closes a channel, and never puts a route or a token on the wire", async () => {
     const { api, sock, lastSent } = await connect();
     ScriptedSocket.reply = f => (f["op"] === "daemon.open" ? { id: f["id"], ok: true, channel: "ch_1" } : { id: f["id"], ok: true, reply: { id: 3, ok: true, ptyId: "p1" } });
-    expect(await api.daemon.open("ws_1")).toEqual({ channel: "ch_1" });
+    expect(await api.daemon.open({ workspaceId: "ws_1" })).toEqual({ channel: "ch_1" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "daemon.open", workspaceId: "ws_1" });
 
     expect(await api.daemon.send("ch_1", { op: "pty.write", ptyId: "p1", data: "ls\r" })).toEqual({ id: 3, ok: true, ptyId: "p1" });

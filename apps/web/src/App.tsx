@@ -3,7 +3,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useCreation, useFirstRun, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
-import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
+import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
 import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
@@ -60,7 +60,8 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
 }
 
 /** The center slot: the settings page while it is open, the first run while this wsp holds no project, else the
- * selected workspace's thread with the terminal drawer under it, or the creation in progress. */
+ * selected workspace's thread with the terminal drawer under it, or the creation in progress. With no workspace on
+ * screen the drawer is this computer's own terminal. */
 function WorkspaceCenter() {
   const workspaceId = useSelectedId();
   const threadId = useSelectedThreadId();
@@ -73,18 +74,28 @@ function WorkspaceCenter() {
   // Nothing recorded and nothing standing, both answered for: the first run is the whole centre, and it is the one
   // screen that records a project. A host that holds either says the rest, since a workspace with no project record
   // of its own is still work a person can open; one that has answered about neither yet says nothing at all.
-  if (firstRun) return <FirstRun />;
+  if (firstRun) {
+    return (
+      <>
+        <FirstRun />
+        <ComputerTerminalDrawer />
+      </>
+    );
+  }
   // A host that has not yet said what projects it holds says nothing here: the first run may still be the centre,
   // and either sentence painted now is replaced a round trip later.
   if (!workspaceId && !projectsRead) return null;
   if (!workspaceId) {
     return (
-      <Empty className="flex-1">
-        <EmptyHeader>
-          <EmptyTitle>Pick a workspace to continue</EmptyTitle>
-          <EmptyDescription>Select a workspace in the sidebar or create a new one.</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <>
+        <Empty className="flex-1">
+          <EmptyHeader>
+            <EmptyTitle>Pick a workspace to continue</EmptyTitle>
+            <EmptyDescription>Select a workspace in the sidebar or create a new one.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+        <ComputerTerminalDrawer />
+      </>
     );
   }
   return (

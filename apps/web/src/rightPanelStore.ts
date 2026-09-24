@@ -523,3 +523,10 @@ export function selectPanelTerminalIds(
   const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
   return state.surfaces.flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []));
 }
+
+/** Whether the panel stands while no workspace is selected, where every pane in it is held: closed until the panel
+ * chord or the header's toggle asks, and for this page only, since nothing in it is a workspace's to keep. */
+export const useHeldPanelStore = create<{ open: boolean; toggle: () => void }>()(set => ({
+  open: false,
+  toggle: () => set(s => ({ open: !s.open })),
+}));

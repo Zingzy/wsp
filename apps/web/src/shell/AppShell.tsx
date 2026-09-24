@@ -19,15 +19,16 @@ import { useSelectedWorkspaceId, useSettingsOpen, useStore } from "../protocol/s
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
-import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { selectWorkspaceRightPanelState, useHeldPanelStore, useRightPanelStore } from "../rightPanelStore.js";
 import { SettingsHeaderActions } from "../settings/SettingsHeaderActions.js";
 import { SettingsSidebar } from "../settings/SettingsSidebar.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
+import { workspaceOrHere } from "../terminal/computer.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { hostAsleep } from "../boot.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
-import { RightPanel } from "./RightPanel.js";
+import { HeldRightPanel, RightPanel } from "./RightPanel.js";
 import { SignInBanner } from "./SignInBanner.js";
 import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
@@ -48,10 +49,14 @@ const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBIND
 
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedWorkspaceId();
+  // With no workspace on screen the terminal is this computer's own and the panel stands with every pane held.
+  const terminalKey = workspaceOrHere(workspaceId);
   const conn = useStore(s => s.conn);
   const panel = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, workspaceId));
   const toggleVisibility = useRightPanelStore(s => s.toggleVisibility);
-  const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
+  const heldOpen = useHeldPanelStore(s => s.open);
+  const toggleHeld = useHeldPanelStore(s => s.toggle);
+  const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, terminalKey).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
   // Settings takes the window: its own sidebar in the app sidebar's place and the page in the whole region right of
   // it, with Restore defaults where the layout controls were. The panel's own record is untouched, so every
@@ -59,27 +64,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const settingsOpen = useSettingsOpen();
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const viewportWidth = useViewportWidth();
-  const rightPanelOpen = workspaceId !== null && panel.isOpen && !settingsOpen;
+  const rightPanelOpen = (workspaceId !== null ? panel.isOpen : heldOpen) && !settingsOpen;
   const panelInline = rightPanelOpen && !useSheet;
   // The switch chord walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
 
   const layoutControls = (
     <PanelLayoutControls
-      terminalAvailable={workspaceId !== null}
       terminalOpen={terminalOpen}
       terminalShortcutLabel={TERMINAL_SHORTCUT_LABEL}
-      rightPanelAvailable={workspaceId !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}
-      rightPanelUnavailableLabel="Select a workspace to open the right panel"
       liveAgentCount={0}
-      onToggleTerminal={() => {
-        if (workspaceId) toggleTerminal(workspaceId);
-      }}
-      onToggleRightPanel={() => {
-        if (workspaceId) toggleVisibility(workspaceId);
-      }}
+      onToggleTerminal={() => toggleTerminal(terminalKey)}
+      onToggleRightPanel={() => (workspaceId !== null ? toggleVisibility(workspaceId) : toggleHeld())}
     />
   );
 
@@ -119,12 +117,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="flex min-h-0 flex-1 flex-col">{children}</div>
           </div>
           {rightPanelOpen ? (
-            <RightPanel
-              workspaceId={workspaceId}
-              state={panel}
-              mode={useSheet ? "sheet" : "inline"}
-              {...(useSheet ? {} : { layoutControls })}
-            />
+            workspaceId !== null ? (
+              <RightPanel
+                workspaceId={workspaceId}
+                state={panel}
+                mode={useSheet ? "sheet" : "inline"}
+                {...(useSheet ? {} : { layoutControls })}
+              />
+            ) : (
+              <HeldRightPanel mode={useSheet ? "sheet" : "inline"} onClose={toggleHeld} {...(useSheet ? {} : { layoutControls })} />
+            )
           ) : null}
         </div>
       </SidebarInset>

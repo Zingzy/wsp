@@ -36,7 +36,7 @@ let door: RefusingDoor | undefined;
 let link: DaemonLink | undefined;
 
 function connect(over: RelayHarness, opts: Partial<Parameters<typeof connectDaemonLink>[0]> = {}): DaemonLink {
-  return connectDaemonLink({ daemon: over.api.daemon, workspaceId: over.workspaceId, onEvent: () => {}, ...opts });
+  return connectDaemonLink({ daemon: over.api.daemon, target: { workspaceId: over.workspaceId }, onEvent: () => {}, ...opts });
 }
 
 /** The pane as a running workspace draws it from this link, which is what every surface reads. */
