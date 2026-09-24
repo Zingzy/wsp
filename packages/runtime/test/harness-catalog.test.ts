@@ -3,8 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCatalogProbe } from "@wsp/adapter-claude";
 import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, OVER_SSH, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
+import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, OVER_SSH, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
   it("names every harness the recipe collects, each parsing as the wire type with at most one default per picker", () => {
@@ -13,10 +13,11 @@ describe("harness catalogs", () => {
       expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
       expect(catalog.source).toBe("table");
       expect(catalog.refusal).toBeUndefined();
-      for (const list of [catalog.models, catalog.efforts, catalog.contextWindows, catalog.permissionModes]) {
+      for (const list of [everyModel(catalog), catalog.efforts, catalog.contextWindows, catalog.permissionModes]) {
         expect(list.filter(o => o.isDefault).length).toBeLessThanOrEqual(1);
         expect(new Set(list.map(o => o.value)).size).toBe(list.length);
       }
+      expect((catalog.legacyModels ?? []).some(m => m.isDefault)).toBe(false);
     }
   });
 
@@ -62,11 +63,30 @@ describe("harness catalogs", () => {
     expect(row.models.map(m => m.value)).toContain(row.smallModel);
   });
 
+  it("the claude legacy rows are the pinned binary's own model catalog, so a bump of the pin fails here until a recording and the rows move with it", () => {
+    // One entry per legacy id off the binary's baked-in model table: its name, its context and its capabilities.
+    const recording = new URL(`../../adapter-claude/test/fixtures/model-catalog-${CLAUDE_CODE.version}.json`, import.meta.url);
+    if (!existsSync(recording)) throw new Error(`no recorded model catalog for ${CLAUDE_CODE.version}; record the legacy ids' entries off the binary`);
+    type Entry = { id: string; display_name: string; context: { supports_1m_suffix?: boolean }; capabilities: string[]; default_effort?: string };
+    const entries = JSON.parse(readFileSync(recording, "utf8")) as Entry[];
+    const levels = (caps: string[]): string[] => [...(caps.includes("effort") ? ["low", "medium", "high"] : []), ...(caps.includes("xhigh_effort") ? ["xhigh"] : []), ...(caps.includes("max_effort") ? ["max"] : [])];
+    expect(harnessCatalog("claude")!.legacyModels).toEqual(
+      entries.map(e => ({
+        value: e.id,
+        label: e.display_name,
+        efforts: levels(e.capabilities),
+        ...(e.default_effort !== undefined ? { defaultEffort: e.default_effort } : {}),
+        contextWindows: e.context.supports_1m_suffix === true ? ["200k", "1m"] : [],
+      })),
+    );
+  });
+
   it("Codex offers the models and reasoning efforts its app-server reports, and no context window", () => {
     const codex = harnessCatalog("codex")!;
-    expect(codex.models.map(o => o.value)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"]);
+    expect(codex.models.map(o => o.value)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    expect(codex.legacyModels?.map(o => o.value)).toEqual(["gpt-5.5", "gpt-5.2"]);
     expect(codex.models.find(o => o.isDefault)?.value).toBe("gpt-5.6-sol");
-    expect(codex.models.map(o => o.efforts)).toEqual([
+    expect(everyModel(codex).map(o => o.efforts)).toEqual([
       ["low", "medium", "high", "xhigh", "max", "ultra"],
       ["low", "medium", "high", "xhigh", "max", "ultra"],
       ["low", "medium", "high", "xhigh", "max"],
@@ -74,7 +94,9 @@ describe("harness catalogs", () => {
       ["low", "medium", "high", "xhigh"],
     ]);
     // The app-server reports a default effort per model, not one for the binary: Sol runs low, the other four medium.
-    expect(codex.models.map(o => o.defaultEffort)).toEqual(["low", "medium", "medium", "medium", "medium"]);
+    expect(everyModel(codex).map(o => o.defaultEffort)).toEqual(["low", "medium", "medium", "medium", "medium"]);
+    // The title question still runs on the cheapest, which now sits under the fold.
+    expect(smallestModel(codex)).toBe("gpt-5.2");
     expect(codex.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
     // The effort the app-server reports for the default model, so the tab shows a default with no probe at all.
     expect(codex.efforts.find(o => o.isDefault)?.value).toBe("low");
@@ -89,6 +111,8 @@ describe("harness catalogs", () => {
     expect(claude.models.map(o => o.contextWindows)).toEqual([["200k", "1m"], ["200k", "1m"], [], []]);
     // Haiku answers no effort list, so it takes no --effort.
     expect(claude.models.map(o => o.efforts?.length)).toEqual([5, 5, 5, 0]);
+    // The older models the binary still runs as named; Opus 4.0 and 4.1 it runs as the latest Opus, Sonnet 4.0 is retired.
+    expect(claude.legacyModels?.map(o => o.value)).toEqual(["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-4-6", "claude-sonnet-4-5"]);
     expect(claude.efforts.map(o => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
     // The handshake names no default effort; the CLI documents high on every model that takes one.
     expect(claude.efforts.find(o => o.isDefault)?.value).toBe("high");
@@ -107,7 +131,7 @@ describe("harness catalogs", () => {
 
 describe("the default effort of a pick", () => {
   const codex = harnessCatalog("codex")!;
-  const model = (value: string) => codex.models.find(m => m.value === value) ?? null;
+  const model = (value: string) => modelOf(codex, value);
   const shown = (value: string | null) => markedDefault(effortsFor(codex, value === null ? null : model(value)))?.value;
 
   it("is the picked model's own, so the picker marks what that model will run rather than what the binary's default model runs", () => {
@@ -317,6 +341,20 @@ describe("startPicks", () => {
     expect(() => startPicks(codex, { model: "gpt-5.5", effort: "ultra" }, true)).toThrow('effort "ultra" is not one GPT-5.5 takes');
   });
 
+  it("a start on a legacy model runs that model at the levels the binary lists for it, and a refusal names the legacy ones apart", () => {
+    const claude = workspaceAccess(harnessCatalog("claude")!, "cloud");
+    expect(startPicks(claude, { model: "claude-opus-5", effort: "high" }, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
+    // Its own default, where the binary lists one; the catalog's high where it lists none.
+    expect(startPicks(claude, { model: "claude-opus-4-7" }, true)).toMatchObject({ effort: "xhigh" });
+    expect(startPicks(claude, { model: "claude-opus-4-6" }, true)).toMatchObject({ effort: "high" });
+    expect(() => startPicks(claude, { model: "claude-opus-4-6", effort: "xhigh" }, true)).toThrow('effort "xhigh" is not one Opus 4.6 takes');
+    expect(startPicks(claude, { model: "claude-sonnet-4-5" }, true)).toEqual({ model: "claude-sonnet-4-5", permissionMode: "bypassPermissions" });
+    expect(() => startPicks(claude, { model: "claude-sonnet-4-5", effort: "high" }, true)).toThrow("Sonnet 4.5 takes no effort");
+    expect(() => startPicks(claude, { model: "claude-opus-4-1" }, true)).toThrow(
+      'model "claude-opus-4-1" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001); legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8),',
+    );
+  });
+
   it("a harness without a catalog takes any value and fills no default; only the three picks come out, whatever else the request carries", () => {
     const request = { prompt: "go", harness: "aider", model: "gpt-9", effort: "high", requestId: "r1", startedBy: "cli", cwd: "/w" };
     expect(startPicks(undefined, request, true)).toEqual({ model: "gpt-9", effort: "high" });
@@ -355,6 +393,40 @@ describe("catalogFromProbe", () => {
     expect(catalog.permissionModes[2]).toEqual({ value: "yolo", label: "yolo" });
     // The table's bypass default is not among the binary's modes here, so nothing is default.
     expect(catalog.permissionModes.some(o => o.isDefault)).toBe(false);
+  });
+
+  it("keeps the table's legacy models on a binary that lists none of them, since it still runs each by name", () => {
+    const catalog = catalogFromProbe(harnessCatalog("claude")!, probe);
+    expect(catalog.legacyModels).toEqual(harnessCatalog("claude")!.legacyModels);
+    // One it names is among its current models, and leaves the fold.
+    const current = catalogFromProbe(harnessCatalog("claude")!, { ...probe, models: [...probe.models, { slug: "claude-opus-4-8", label: "Opus", efforts: ["low"], contextWindows: [], isDefault: false }] });
+    expect(current.models.map(m => m.value)).toContain("claude-opus-4-8");
+    expect(current.legacyModels?.map(m => m.value)).toEqual(["claude-opus-5", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-fable-5", "claude-sonnet-4-6", "claude-sonnet-4-5"]);
+    expect(startPicks(catalog, { model: "claude-fable-5" }, false)).toEqual({ model: "claude-fable-5" });
+  });
+
+  it("keeps a legacy model under the fold in the binary's own words where its list carries it, and drops one it leaves out", () => {
+    const codexProbe: HarnessCatalogProbe = {
+      version: "0.153.0",
+      models: [
+        { slug: "gpt-5.6-sol", label: "gpt-5.6-sol", efforts: ["low", "high"], defaultEffort: "low", contextWindows: [], isDefault: true },
+        { slug: "gpt-5.5", label: "gpt-5.5", efforts: ["low", "medium"], defaultEffort: "low", contextWindows: [], isDefault: false },
+      ],
+      efforts: ["low", "medium", "high"],
+      permissionModes: ["read-only"],
+    };
+    const catalog = catalogFromProbe(harnessCatalog("codex")!, codexProbe);
+    expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
+    expect(catalog.models.map(m => m.value)).toEqual(["gpt-5.6-sol"]);
+    expect(catalog.legacyModels).toEqual([{ value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium"], defaultEffort: "low", contextWindows: [] }]);
+    expect(startPicks(catalog, { model: "gpt-5.5" }, true)).toEqual({ model: "gpt-5.5", effort: "low" });
+    expect(() => startPicks(catalog, { model: "gpt-5.2" }, true)).toThrow('model "gpt-5.2" is not one codex takes');
+    // Its title question then runs on whatever the CLI runs without a model.
+    expect(smallestModel(catalog)).toBeUndefined();
+    // A binary whose own default is an older model keeps it in front, where the default mark can be seen.
+    const older = catalogFromProbe(harnessCatalog("codex")!, { ...codexProbe, models: codexProbe.models.map(m => ({ ...m, isDefault: m.slug === "gpt-5.5" })) });
+    expect(older.models.map(m => m.value)).toEqual(["gpt-5.6-sol", "gpt-5.5"]);
+    expect(older.legacyModels).toEqual([]);
   });
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {

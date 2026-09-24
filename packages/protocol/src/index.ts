@@ -1060,6 +1060,12 @@ export const HarnessCatalog = z.object({
   source: HarnessCatalogSource,
   version: z.string().nullable(),
   models: z.array(HarnessModel),
+  /** Older models the CLI still runs by name, which the composer keeps under a fold at the end of the model menu; a
+   * start takes one as it takes a model above. Read models and these together through everyModel. Absent is none. */
+  legacyModels: z.array(HarnessModel).optional(),
+  /** Whether the binary's own answer names its legacy models too, as Codex's model/list does, so one a live answer
+   * leaves out is one it no longer runs; absent, the answer is the binary's current set and legacy models run by name. */
+  legacyListed: z.boolean().optional(),
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
@@ -1201,10 +1207,15 @@ export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null):
   return options.map(({ isDefault: _harness, ...rest }) => (rest.value === own ? { ...rest, isDefault: true } : rest));
 }
 
+/** Every model a start may name: the catalog's current ones, then its legacy ones. */
+export function everyModel(catalog: HarnessCatalog): HarnessModel[] {
+  return [...catalog.models, ...(catalog.legacyModels ?? [])];
+}
+
 /** The model a pick names, as the catalog knows it; a slug the catalog does not list still counts, named by itself. */
 export function modelOf(catalog: HarnessCatalog, value: string | undefined): HarnessModel | null {
   if (value === undefined) return null;
-  return catalog.models.find(m => m.value === value) ?? { value, label: value };
+  return everyModel(catalog).find(m => m.value === value) ?? { value, label: value };
 }
 
 /** None without a model: the window rides the model as a suffix, so there is nothing to offer it on. */
@@ -1233,14 +1244,15 @@ export function listedPick(options: ReadonlyArray<HarnessOption>, value: string 
 
 const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
 
-function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined): void {
-  if (value === undefined || options.some(o => o.value === value)) return;
-  const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}`;
+function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined, legacy: ReadonlyArray<HarnessOption> = []): void {
+  if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value)) return;
+  const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
+  const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
-  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model);
+  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
@@ -3835,6 +3847,7 @@ const DAEMON_CONTENTS = [
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
   "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
+  "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4038,7 +4051,10 @@ const DAEMON_CONTENTS = [
  * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
  * Version 72 drops a copied folder's worktree records before the copy's checkout, so a copy of a repo whose base
  * branch one of its own worktrees holds lands on that branch.
- * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box. */
+ * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box.
+ * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
+ * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
+ * removed beside that project, and refuses to remove a path that is not a copy of the project it names. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5663,7 +5679,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

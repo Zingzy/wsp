@@ -692,14 +692,15 @@ describe("the MCP server over the host", () => {
     const before = claude.starts.length;
     const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(refused.text).toMatch(/^model "claude-haiku-4-5" is not one claude takes; one of: Opus 5\.5 \(claude-opus-5-5\), Fable 5\.1 \(claude-fable-5-1\), Sonnet 5 \(claude-sonnet-5\), Haiku 4\.5 \(claude-haiku-4-5-20251001\); legacy: Opus 5 \(claude-opus-5\), /);
+    expect(refused.text.endsWith(`${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`)).toBe(true);
     const mode = await call("run", { workspace: "alpha", task: "go", access: "yolo" });
     expect(mode.isError).toBe(true);
     expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
     const minted = (await rt.workspaces.list()).map(w => w.name);
     const fork = await call("fork", { workspace: "alpha", name: "cheap", task: "review", model: "claude-haiku-4-5" });
     expect(fork.isError).toBe(true);
-    expect(fork.text).toBe(`model "claude-haiku-4-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`);
+    expect(fork.text).toBe(refused.text);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(minted);
     expect(claude.starts).toHaveLength(before);
   });

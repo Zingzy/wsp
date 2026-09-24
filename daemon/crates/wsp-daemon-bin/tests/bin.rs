@@ -517,3 +517,128 @@ async fn the_copy_verb_prints_one_json_line_and_takes_the_copy_away_again() {
         );
     }
 }
+
+/// A repo named `work` with one commit on main, inside `dir`.
+#[cfg(target_os = "macos")]
+fn repo_in(dir: &std::path::Path) -> std::path::PathBuf {
+    let from = dir.join("work");
+    std::fs::create_dir_all(&from).unwrap();
+    for args in [
+        vec!["init", "--quiet", "--initial-branch", "main"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+    ] {
+        assert!(std::process::Command::new("git").args(&args).current_dir(&from).status().unwrap().success(), "{args:?}");
+    }
+    std::fs::write(from.join("README.md"), b"one\n").unwrap();
+    assert!(std::process::Command::new("git").args(["add", "README.md"]).current_dir(&from).status().unwrap().success());
+    assert!(std::process::Command::new("git").args(["commit", "--quiet", "-m", "first"]).current_dir(&from).status().unwrap().success());
+    from
+}
+
+#[cfg(target_os = "macos")]
+fn copy_remove(from: &std::path::Path, to: &std::path::Path) -> std::process::Output {
+    std::process::Command::new(BIN)
+        .args(["copy", "remove", "--from"])
+        .arg(from)
+        .arg("--to")
+        .arg(to)
+        .args(["--road", "clonefile"])
+        .output()
+        .unwrap()
+}
+
+/// A remove takes only what a make put down: a sibling of the project named after it. The project itself, a
+/// folder elsewhere and a sibling of another name stay, and the refusal says why and what to name.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_copy_verb_removes_nothing_that_is_not_a_copy_of_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = repo_in(dir.path());
+    let elsewhere = tempfile::tempdir().unwrap();
+    let far = elsewhere.path().join("work-feature");
+    let other = dir.path().join("other");
+    let bare = dir.path().join("work-");
+    for folder in [&far, &other, &bare] {
+        std::fs::create_dir_all(folder).unwrap();
+        std::fs::write(folder.join("kept"), b"mine\n").unwrap();
+    }
+    for to in [&from, &far, &other, &bare] {
+        let refused = copy_remove(&from, to);
+        assert_eq!(refused.status.code(), Some(1), "{} was taken", to.display());
+        assert_eq!(
+            String::from_utf8_lossy(&refused.stderr).trim(),
+            format!(
+                "{} is not a copy of {}, so nothing was removed; a copy sits beside its project as {}/work-<work>, and --to names that path",
+                to.display(),
+                from.display(),
+                dir.path().display()
+            )
+        );
+    }
+    assert!(from.join("README.md").is_file() && far.join("kept").is_file() && other.join("kept").is_file() && bare.join("kept").is_file());
+}
+
+/// A removal cut short leaves a hidden sibling beside the project, and the next make or remove beside that project
+/// takes it, so it never waits for the daemon's next start.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_copy_verb_takes_a_removal_left_beside_the_project_on_make_and_on_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = repo_in(dir.path());
+    let kept = dir.path().join(".cache");
+    std::fs::create_dir_all(&kept).unwrap();
+    let to = dir.path().join("work-other");
+    let leftover = |n: u32| {
+        let left = dir.path().join(format!(".wsp-removing-work-old-{n}-1"));
+        std::fs::create_dir_all(left.join("node_modules/pkg")).unwrap();
+        std::fs::write(left.join("node_modules/pkg/index.js"), b"dep\n").unwrap();
+        left
+    };
+    let gone = |left: &std::path::Path| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while left.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        !left.exists()
+    };
+    let left = leftover(1);
+    let made = std::process::Command::new(BIN).args(["copy", "make", "--from"]).arg(&from).arg("--to").arg(&to).output().unwrap();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert!(gone(&left), "a make left the leftover beside the project");
+    let left = leftover(2);
+    let removed = copy_remove(&from, &to);
+    assert!(removed.status.success(), "{}", String::from_utf8_lossy(&removed.stderr));
+    assert!(gone(&left), "a remove left the leftover beside the project");
+    assert!(kept.is_dir() && from.join("README.md").is_file());
+}
+
+/// A copy is a folder of its own: a link with a copy's name, typed with a trailing slash so a rename would follow it,
+/// and a plain file with a copy's name are refused, and neither the link, the file nor what a link points at goes.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_copy_verb_removes_no_link_and_no_file_that_carries_a_copy_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = repo_in(dir.path());
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("kept"), b"mine\n").unwrap();
+    let to_project = dir.path().join("work-link");
+    std::os::unix::fs::symlink(&from, &to_project).unwrap();
+    let to_outside = dir.path().join("work-out");
+    std::os::unix::fs::symlink(elsewhere.path(), &to_outside).unwrap();
+    let file = dir.path().join("work-file");
+    std::fs::write(&file, b"notes\n").unwrap();
+    let typed = [format!("{}/", to_project.display()), format!("{}//", to_outside.display()), file.display().to_string()];
+    for to in &typed {
+        let refused = copy_remove(&from, std::path::Path::new(to));
+        assert_eq!(refused.status.code(), Some(1), "{to} was taken");
+        assert_eq!(
+            String::from_utf8_lossy(&refused.stderr).trim(),
+            format!("{to} is not a folder of its own, so nothing was removed; a copy is a folder beside its project, never a link or a file, and --to names that folder")
+        );
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(from.join("README.md").is_file(), "the project a link pointed at went");
+    assert!(elsewhere.path().join("kept").is_file(), "the folder a link pointed at went");
+    assert!(to_project.is_symlink() && to_outside.is_symlink() && file.is_file());
+}
