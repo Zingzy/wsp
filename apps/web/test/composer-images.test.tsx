@@ -130,12 +130,15 @@ describe("an image into the composer", () => {
     expect(thumbs()[0]!.dataset["chatImage"]).toBe("dropped.png");
   });
 
-  it("the picker beside the option pickers opens the file input and what it takes lands the same way", async () => {
+  it("the paperclip beside send opens the file input and what it takes lands the same way", async () => {
     const { api } = fixtureApi();
     await setup(api);
     const input = document.querySelector<HTMLInputElement>("[data-composer-image-input]")!;
     const clicked = vi.spyOn(input, "click");
-    fireEvent.click(screen.getByRole("button", { name: "Add an image" }));
+    const attach = screen.getByRole("button", { name: "Attach" });
+    expect(attach.closest('[data-chat-composer-actions="right"]')).not.toBeNull();
+    expect(attach.querySelector("svg.lucide-paperclip")).not.toBeNull();
+    fireEvent.click(attach);
     expect(clicked).toHaveBeenCalledOnce();
     // The picker only opens the input; what the person chose arrives on its change, which is what this drives.
     act(() => void fireEvent.change(input, { target: { files: [pngFile("picked.png")] } }));
@@ -175,7 +178,7 @@ describe("what the composer will not take at all", () => {
     const { api } = fixtureApi();
     await setup(api);
     act(() => useStore.getState().setConn("closed"));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Add an image" }) as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Attach" }) as HTMLButtonElement).disabled).toBe(true));
     act(() => void paste([pngFile("shot.png")]));
     act(() => void drop([pngFile("dropped.png")]));
     await new Promise(resolve => setTimeout(resolve, 20));

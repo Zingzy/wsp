@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { LIST_PRICE_WORD, QUESTION_TOOL, THIS_COMPUTER, pickedOptionId, questionOptions, whoPaysLines } from "@wsp/protocol";
+import { LIST_PRICE_WORD, QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
@@ -198,7 +198,7 @@ describe("ChatView", () => {
     }
   });
 
-  it("says a figure on this computer is a list price, and carries the model menu's own sentence on it", async () => {
+  it("says a figure on this computer is a list price, with no sentence behind it", async () => {
     const here: WorkspaceView = { ...workspace, id: "ws_here", name: "this computer", kind: "local", provider: undefined };
     const { api } = fixtureApi([here], { ws_here: settledTurn("ws_here", "add a health route", "Added GET /health.") });
     await setup(api, "ws_here");
@@ -215,17 +215,14 @@ describe("ChatView", () => {
     expect(bare.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
     expect(bare.getAttribute("title")).toBeNull();
 
-    // The model menu's own foot rides the title once the catalog that holds the agent's name has arrived, since
-    // nobody opens that menu before sending.
+    // The catalog arriving adds nothing to the figure: no title rides it.
     act(() => useStore.setState({ harnesses: [CATALOG] }));
-    const figure = await waitFor(() => {
-      const found = figureNow();
-      expect(found?.getAttribute("title")).not.toBeNull();
-      return found!;
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 0));
     });
+    const figure = figureNow()!;
     expect(figure.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
-    expect(figure.getAttribute("title")).toBe(whoPaysLines(CATALOG, THIS_COMPUTER).join(" "));
-    expect(figure.getAttribute("title")).toContain("costs this wsp nothing");
+    expect(figure.getAttribute("title")).toBeNull();
   });
 
   it("shows the working row while a turn runs and an error when it exits without a result", async () => {

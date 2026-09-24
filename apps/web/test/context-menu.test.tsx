@@ -35,6 +35,7 @@ import { useDiffRevealStore } from "../src/diffs/reveal.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
@@ -167,7 +168,7 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useDiffRevealStore.setState({ pendingByWorkspaceId: {} });
@@ -302,14 +303,18 @@ describe("a workspace row's menu", () => {
 });
 
 describe("a project's header menu", () => {
-  it("holds the acts of a project: another piece of work on it, and forgetting it once nothing stands on it", async () => {
+  it("holds the acts of a project: another piece of work on it, its settings page, and forgetting it once nothing stands on it", async () => {
     await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
     rightClick(screen.getByRole("button", { name: PROJECT_NAME }));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([NEW_WORKSPACE, PROJECT_WORDS.remove]);
+    expect(labels()).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
     // Two workspaces stand on it, so the runtime's own sentence holds the removal back before any click.
     expect(item(PROJECT_WORDS.remove).getAttribute("aria-disabled")).toBe("true");
     expect(refusalOf(PROJECT_WORDS.remove)).toContain("workspaces standing on it");
+    // Project settings opens Settings on the project's own page, where its look is picked.
+    fireEvent.click(item(PROJECT_WORDS.settings));
+    await waitFor(() => expect(useStore.getState().settingsOpen).toBe(true));
+    expect(useSettingsStore.getState().at).toEqual({ kind: "project", id: "pr_1" });
   });
 });
 
@@ -614,6 +619,8 @@ describe("a workspace row's name box", () => {
   it("a box asked for while the project's section is shut opens that section, so it lands on a row a person can see", async () => {
     const api = fakeApi([{ ...API }], [statusOf(API)]);
     await mountSidebar(api, "api");
+    // The first click opens the project's home, the second shuts its section.
+    fireEvent.click(screen.getByRole("button", { name: PROJECT_NAME }));
     fireEvent.click(screen.getByRole("button", { name: PROJECT_NAME }));
     await waitFor(() => expect(document.querySelector("[data-row-id='ws:ws_a']")).toBeNull());
 

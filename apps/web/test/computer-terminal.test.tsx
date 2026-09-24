@@ -152,7 +152,7 @@ describe("this computer's drawer", () => {
 
   it.each([
     ["the first run, with no project yet", [] as ProjectView[], "[data-k=\"first-run\"]"],
-    ["a project with no workspace", [project], "[data-slot=\"empty\"]"],
+    ["a project's home, with no workspace", [project], "[data-k=\"project-home\"]"],
   ])("mounts under %s", async (_, projects, centre) => {
     fakeWire();
     useStore.getState().bind({ ...fakeApi([]), projectsList: async () => projects });

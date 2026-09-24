@@ -82,7 +82,7 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     expect(await api.preferences!()).toEqual(record);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });

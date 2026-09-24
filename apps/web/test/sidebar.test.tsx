@@ -16,7 +16,7 @@ import { CLOSE_TOAST_LABEL, TOAST_MS } from "../src/sidebar/toastLife.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
-import { onFirstRunFocusRequest, onNewThreadRequest, requestNewWorkspace, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
+import { onNewThreadRequest, requestNewWorkspace, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
 import { caps } from "./caps.js";
@@ -135,7 +135,7 @@ const HERE_PROJECT: ProjectView = { id: "pr_2", name: "wsp", computer: "here", s
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], projects: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], projects: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -223,9 +223,9 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    // The one idle two days is past the archive threshold, so it sits in the Archived group nested in its
-    // workspace's shelf, shut, rather than as a row on the shelf itself.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "settled:ws_a", "thread:s2", "ws:ws_b", "archived:ws_b"]);
+    // Threads never fold: the settled one stands under the working one. The one idle two days is past the archive
+    // threshold, so it sits in its workspace's Archived group, shut.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "thread:s2", "ws:ws_b", "archived:ws_b"]);
     // The one slot at the right edge: the state word while a thread is one a person acts on, the time once it rests.
     expect(threadTime(rowOf("fix the port list"))).toBeNull();
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
@@ -236,9 +236,8 @@ describe("rows from the fixture wire", () => {
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
-    // ws_a heads its shelf whether or not one of its threads is working; ws_b's shelf would hold nothing but the
-    // nested archive, so no Idle row stands over it and the archive's fold is its own.
-    expect(screen.getAllByRole("button", { name: "Idle" })).toHaveLength(1);
+    // No Idle row over threads anywhere: two workspaces are not enough to fold.
+    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
@@ -376,58 +375,13 @@ describe("rows from the fixture wire", () => {
     expect(rowOf(SHORT).className).toBe(rowOf(LONG).className);
   });
 
-  it("the idle shelf collapses per workspace and remembers it: the workspace beside it keeps its rows", async () => {
-    await mount(
-      fakeApi(
-        [API, WEB],
-        [status(API), status(WEB)],
-        [
-          session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
-          session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
-          session("s3", "ws_b", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
-        ],
-      ),
-      "api",
-    );
-    const toggle = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='settled:${id}']`)!;
-    await waitFor(() => expect(toggle("ws_a")).toBeDefined());
-    expect(toggle("ws_a").getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(toggle("ws_a"));
-    expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(toggle("ws_a").getAttribute("aria-label")).toBe("Idle 1");
-    expect(toggle("ws_b").getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("bump the lockfile")).toBeDefined();
-    expect(window.localStorage.getItem("wsp:sidebar-settled-collapsed")).toBe('["ws_a"]');
-    fireEvent.click(toggle("ws_a"));
-    expect(screen.getByText("upgrade node")).toBeDefined();
-    expect(window.localStorage.getItem("wsp:sidebar-settled-collapsed")).toBe("[]");
-  });
-
-  it("a remembered collapse shuts only the workspace it names", async () => {
-    window.localStorage.setItem("wsp:sidebar-settled-collapsed", '["ws_a"]');
-    await mount(
-      fakeApi(
-        [API, WEB],
-        [status(API), status(WEB)],
-        [
-          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
-          session("s2", "ws_a", { status: "completed", prompt: "drop the old shim", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
-          session("s3", "ws_b", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-180_000), endedAt: iso(-3_000) }),
-        ],
-      ),
-      "api",
-    );
-    await waitFor(() => expect(screen.getByText("bump the lockfile")).toBeDefined());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "ws:ws_b", "settled:ws_b", "thread:s3"]);
-    expect(screen.getByRole("button", { name: "Idle 2" })).toBeDefined();
-  });
-
-  it("a workspace whose threads are all idle still lists them under the Idle header, and the header collapses them", async () => {
+  it("never folds a workspace's threads: the settled ones stand under the working ones with no Idle row", async () => {
     await mount(
       fakeApi(
         [API],
         [status(API)],
         [
+          session("s0", "ws_a", { prompt: "fix the port list", startedAt: iso(-10_000) }),
           session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
           session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-120_000), endedAt: iso(-2_000) }),
           session("s3", "ws_a", { status: "interrupted", prompt: "drop the old shim", startedAt: iso(-180_000), endedAt: iso(-3_000) }),
@@ -436,13 +390,48 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "thread:s2", "thread:s3"]);
-    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
-    expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(screen.getByRole("button", { name: "Idle 3" })).toBeDefined();
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s0", "thread:s1", "thread:s2", "thread:s3"]);
+    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
   });
 
-  it("threads idle past the archive threshold fold into an Archived group under Idle, shut, carrying their count", async () => {
+  it("stands up to three idle workspaces as rows of their own, with no fold", async () => {
+    const idle = [view("ws_i1", "one"), view("ws_i2", "two"), view("ws_i3", "three")];
+    await mount(fakeApi([API, ...idle], [status(API), ...idle.map(w => status(w))], [session("s1", "ws_a", { prompt: "fix the port list" })]), "api");
+    await waitFor(() => expect(rowIds()).toContain("ws:ws_i3"));
+    expect(rowIds().filter(id => id?.startsWith("ws:")).sort()).toEqual(["ws:ws_a", "ws:ws_i1", "ws:ws_i2", "ws:ws_i3"]);
+    expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
+  });
+
+  it("folds a project's idle workspaces under one Idle row past three, shut at first, and remembers it opened per project", async () => {
+    const idle = [view("ws_i1", "one"), view("ws_i2", "two"), view("ws_i3", "three"), view("ws_i4", "four")];
+    await mount(fakeApi([API, ...idle], [status(API), ...idle.map(w => status(w))], [session("s1", "ws_a", { prompt: "fix the port list" })]), "api");
+    const fold = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='settled:pr_1']")!;
+    await waitFor(() => expect(fold()).not.toBeNull());
+    // The working workspace stands; the four with nothing running are behind the fold, which says how many.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "settled:pr_1"]);
+    expect(fold().getAttribute("aria-expanded")).toBe("false");
+    expect(fold().getAttribute("aria-label")).toBe("Idle 4");
+    expect(fold().textContent).toBe("Idle4");
+    fireEvent.click(fold());
+    expect(fold().getAttribute("aria-label")).toBe("Idle");
+    expect(rowIds().filter(id => id?.startsWith("ws:ws_i"))).toHaveLength(4);
+    expect(rowIds().indexOf("settled:pr_1")).toBeLessThan(rowIds().indexOf("ws:ws_i1"));
+    expect(window.localStorage.getItem("wsp:sidebar-idle-open")).toBe('["pr_1"]');
+    fireEvent.click(fold());
+    expect(rowIds().filter(id => id?.startsWith("ws:ws_i"))).toHaveLength(0);
+    expect(window.localStorage.getItem("wsp:sidebar-idle-open")).toBe("[]");
+  });
+
+  it("a remembered open fold is open on the next mount", async () => {
+    window.localStorage.setItem("wsp:sidebar-idle-open", '["pr_1"]');
+    const idle = [view("ws_i1", "one"), view("ws_i2", "two"), view("ws_i3", "three"), view("ws_i4", "four")];
+    await mount(fakeApi(idle, idle.map(w => status(w))), "one");
+    await waitFor(() => expect(document.querySelector("[data-row-id='settled:pr_1']")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "Idle" }).getAttribute("aria-expanded")).toBe("true");
+    expect(rowIds().filter(id => id?.startsWith("ws:ws_i"))).toHaveLength(4);
+  });
+
+  it("threads idle past the archive threshold fold into an Archived group, shut, carrying their count", async () => {
     await mount(
       fakeApi(
         [API],
@@ -456,15 +445,15 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
-    // The archive sits under the idle shelf, shut, and the two threads quiet for over a day are not drawn.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a"]);
+    // The archive sits after the settled threads, shut, and the two threads quiet for over a day are not drawn.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "archived:ws_a"]);
     const archived = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='archived:ws_a']")!;
     expect(archived().getAttribute("aria-expanded")).toBe("false");
     expect(archived().getAttribute("aria-label")).toBe("Archived 2");
     expect(screen.queryByText("bump the lockfile")).toBeNull();
     // One click opens it, and the rows arrive newest end first, as the shelf orders its own.
     fireEvent.click(archived());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2", "thread:s3"]);
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:s1", "archived:ws_a", "thread:s2", "thread:s3"]);
     expect(archived().getAttribute("aria-label")).toBe("Archived");
     expect(window.localStorage.getItem("wsp:sidebar-archived-open")).toBe('["ws_a"]');
     fireEvent.click(archived());
@@ -491,7 +480,7 @@ describe("rows from the fixture wire", () => {
     expect(useStore.getState().selectedThreadId).toBe("thr_old");
   });
 
-  it("a workspace whose threads are every one archived draws the archive alone: no Idle shelf stands over nothing", async () => {
+  it("a workspace whose threads are every one archived draws the archive alone", async () => {
     await mount(
       fakeApi(
         [API],
@@ -501,41 +490,11 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Archived 1" })).toBeDefined());
-    // An open shelf with nothing of its own under it is a label for nothing, so the archive stands on its own.
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a"]);
     expect(screen.queryByRole("button", { name: /^Idle/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Archived 1" }));
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a", "thread:s1"]);
     expect(screen.getByRole("button", { name: "Archived" })).toBeDefined();
-  });
-
-  it("the archive nests inside the idle shelf: shutting the shelf hides the archived header and its rows too", async () => {
-    await mount(
-      fakeApi(
-        [API],
-        [status(API)],
-        [
-          session("s1", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60_000), endedAt: iso(-1_000) }),
-          session("s2", "ws_a", { status: "completed", prompt: "bump the lockfile", startedAt: iso(-26 * 60 * 60_000), endedAt: iso(-25 * 60 * 60_000) }),
-        ],
-      ),
-      "api",
-    );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Archived 1" })).toBeDefined());
-    // Open the archive first, so what the shelf hides is a group that was showing its rows.
-    fireEvent.click(screen.getByRole("button", { name: "Archived 1" }));
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
-    // Shutting the shelf takes the archive down with it: no thread row of either kind, and no archived header.
-    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a"]);
-    expect(screen.queryByText("upgrade node")).toBeNull();
-    expect(screen.queryByText("bump the lockfile")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
-    // The shelf counts every thread it hides, the archived one included.
-    expect(screen.getByRole("button", { name: "Idle 2" })).toBeDefined();
-    // Opening it again gives the archive back as it was left, open.
-    fireEvent.click(screen.getByRole("button", { name: /^Idle/ }));
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "settled:ws_a", "thread:s1", "archived:ws_a", "thread:s2"]);
   });
 
   it("an idle thread's title reads in the muted foreground; a working one's does not", async () => {
@@ -570,8 +529,10 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("web").querySelector("[data-workspace-meta]")).toBeNull();
     expect(rowOf("web").dataset["lines"]).toBe("1");
     expect(rowOf("api").dataset["lines"]).toBe("2");
-    expect([...rowOf("web").classList].filter(c => /^h-/.test(c))).toEqual(["h-7"]);
-    expect([...rowOf("api").classList].filter(c => /^h-/.test(c))).toEqual(["h-11"]);
+    expect([...rowOf("web").classList].filter(c => /^h-/.test(c))).toEqual(["h-9"]);
+    expect([...rowOf("api").classList].filter(c => /^h-/.test(c))).toEqual(["h-13"]);
+    // The branch says what it is by its glyph.
+    expect(metaOf(rowOf("api")).parentElement!.querySelector("svg.lucide-git-branch")).not.toBeNull();
     const meta = metaOf(rowOf("api"));
     expect(meta.className).toContain("font-mono");
     expect(meta.className).toContain("truncate");
@@ -606,7 +567,7 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(stateSlot(row()).textContent).toBe(""));
   });
 
-  it("every workspace row on a branch is one two-line height, every thread row and fold row one line, the mark before a thread's title and one slot after it, and every row fades its colours alike", async () => {
+  it("every workspace row on a branch is one two-line height, every thread row one line, the mark before a thread's title and one slot after it, and every row fades its colours alike", async () => {
     await mount(
       fakeApi(
         [COPIED],
@@ -620,19 +581,16 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
     const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|min-h-|py-)/.test(c)).sort();
-    expect(heightOf(rowOf("spoo-landing"))).toEqual(["h-7", "py-0"]);
-    expect(heightOf(rowOf("api"))).toEqual(["h-11", "py-0"]);
-    expect(heightOf(rowOf("fix the port list"))).toEqual(["h-7", "py-0"]);
-    expect(heightOf(rowOf("upgrade node"))).toEqual(["h-7", "py-0"]);
+    // The project row is two lines too, its computer over its name.
+    expect(heightOf(rowOf("spoo-landing"))).toEqual(["h-13", "py-0"]);
+    expect(heightOf(rowOf("api"))).toEqual(["h-13", "py-0"]);
+    expect(heightOf(rowOf("fix the port list"))).toEqual(["h-9", "py-0"]);
+    expect(heightOf(rowOf("upgrade node"))).toEqual(["h-9", "py-0"]);
     // A button centres its text unless told otherwise; a short title starts where a long one does.
     for (const row of [rowOf("api"), rowOf("fix the port list")]) expect(row.className).toContain("text-left");
-    const idle = screen.getByRole("button", { name: /^Idle/ });
-    expect(heightOf(idle)).toEqual(["h-7", "py-0"]);
-    // No rule across the fold row: the rails carry the structure it used to draw.
-    expect(idle.querySelector(".h-px")).toBeNull();
-    // One hover on every row kind: the fill and the ink step in 150 ms on the workspace, the thread and the fold as
-    // on the search row, the head and the project row, so no row snaps while the one above it fades.
-    for (const row of [rowOf("spoo-landing"), rowOf("api"), rowOf("fix the port list"), rowOf("upgrade node"), idle, screen.getByRole("button", { name: "Search" }), head()]) {
+    // One hover on every row kind: the fill and the ink step in 150 ms on the workspace and the thread as on the
+    // search row, the head and the project row, so no row snaps while the one above it fades.
+    for (const row of [rowOf("spoo-landing"), rowOf("api"), rowOf("fix the port list"), rowOf("upgrade node"), screen.getByRole("button", { name: "Search" }), head()]) {
       expect(row.className, row.textContent ?? "").toContain("transition-[background-color,color]");
       expect(row.className, row.textContent ?? "").toContain("duration-150");
     }
@@ -808,7 +766,7 @@ describe("new thread", () => {
     // No time yet: nothing has started to count, so the slot holds the word alone.
     expect(launched.querySelector("[data-thread-time]")).toBeNull();
     expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
-    expect([...launched.classList]).toContain("h-7");
+    expect([...launched.classList]).toContain("h-9");
 
     // The workspace that has its own rows keeps them; the send belongs to the workspace it was made on.
     expect(item(rowOf("api")).querySelector("[data-thread-launch]")).toBeNull();
@@ -860,7 +818,7 @@ describe("search", () => {
     // The row is the kit's row and nothing more: no fill, no ring, no hairline of its own, the hover tint every other row has.
     expect(row.className).not.toMatch(/(^|\s)(bg-sidebar-row-selected|border-sidebar-border|ring-1|bg-background|bg-sidebar-control-surface)(\s|$)/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");
-    expect(row.className).toContain("h-7");
+    expect(row.className).toContain("h-9");
     // The head sits under it in the same fixed header, over the tree.
     expect(head().closest("[data-sidebar-search]")).not.toBeNull();
     expect(head().closest("[data-slot=sidebar-content]")).toBeNull();
@@ -892,12 +850,12 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(head().textContent).toBe(SWITCHER_WORDS.all);
   });
 
-  it("holds the head, held, and one row that points at the first run once the lists have arrived and hold nothing: no sentence, no sheet", async () => {
+  it("holds the head, held, and one row that opens Add a project once the lists have arrived and hold nothing: no sentence", async () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     act(() => useStore.setState({ ready: true, projectsRead: true }));
     const row = await screen.findByText(PROJECT_WORDS.new);
     expect(row.closest("button")!.dataset["k"]).toBe("new-project");
-    expect(row.closest("button")!.className).toContain("h-7");
+    expect(row.closest("button")!.className).toContain("h-9");
     expect(row.closest("button")!.querySelector("svg.lucide-plus")).not.toBeNull();
     expect(head().disabled).toBe(true);
     fireEvent.click(head());
@@ -911,13 +869,10 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(rowIds()).toEqual([]);
     // The compose glyph stands, held: there is no workspace to open a thread in.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
-    // Pressing the row asks the first run for its folder field and opens nothing here.
-    const asked: number[] = [];
-    const off = onFirstRunFocusRequest(() => asked.push(1));
+    // Pressing the row opens the same Add a project dialog the first run's button opens.
+    expect(document.querySelector("[data-k=add-project]")).toBeNull();
     fireEvent.click(row);
-    expect(asked).toEqual([1]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-    off();
+    await waitFor(() => expect(document.querySelector("[data-k=add-project]")).not.toBeNull());
   });
 
   it("a creation on its way holds the empty state off while the list is still coming", () => {
@@ -1003,7 +958,7 @@ describe("gone machines", () => {
     // row's glyphs: the resting row carries its word alone, and the word yields to them so nothing moves.
     const recovery = Array.from(rowOf("old").parentElement!.querySelectorAll<HTMLElement>("[data-sidebar=menu-action]"));
     expect(recovery.map(b => b.getAttribute("aria-label"))).toEqual(["Forget old", "Rebuild old"]);
-    expect(recovery.map(b => [...b.classList].find(c => c.startsWith("right-")))).toEqual(["right-7", "right-2"]);
+    expect(recovery.map(b => [...b.classList].find(c => c.startsWith("right-")))).toEqual(["right-7.5", "right-1.5"]);
     for (const glyph of recovery) expect(glyph.className).toContain("md:opacity-0");
     expect(stateSlot(rowOf("old")).className).toContain("group-hover/menu-item:opacity-0");
     expect([...rowOf("old").classList].filter(c => /pe-\d/.test(c))).toEqual(["group-has-data-[sidebar=menu-action]/menu-item:pe-2"]);
@@ -1153,12 +1108,12 @@ describe("Solari out of reach from this computer", () => {
     expect(rowOf("write the migration").getAttribute("title")).toBe("Claude Code · solari");
     expect(rowOf("ship the search rewrite").getAttribute("title")).toBe("Claude Code · the-project · you");
     expect(depthOf(rowOf("write the migration"))).toBe(depthOf(rowOf("ship the search rewrite")) + 1);
-    // Real nesting: the working child sits in a list inside the opener's item. The one that failed rests on the
-    // idle shelf, whose fold parts it from its opener, so it keeps the workspace's thread depth there.
+    // Real nesting: the working child sits in a list inside the opener's item. The one that failed rests among the
+    // settled threads, parted from its working opener, so it keeps the workspace's thread depth there.
     expect(rowOf("ship the search rewrite").closest("li[data-thread-item]")!.contains(rowOf("write the migration"))).toBe(true);
     expect(rowOf("ship the search rewrite").closest("li[data-thread-item]")!.contains(rowOf("review the diff"))).toBe(false);
     expect(depthOf(rowOf("review the diff"))).toBe(depthOf(rowOf("ship the search rewrite")));
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "thread:th_mig", "settled:ws_a", "thread:th_rev"]);
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "thread:th_mig", "thread:th_rev"]);
   });
 });
 
@@ -1279,7 +1234,7 @@ describe("the project switcher", () => {
     return api;
   };
 
-  it("reads All projects at rest over one project row per project, names the computer only beside a project that is not on this one, and no gear on any row", async () => {
+  it("reads All projects at rest over one two-line project row per project, the computer over the name, and no gear on any row", async () => {
     await two();
     expect(head().textContent).toBe(SWITCHER_WORDS.all);
     expect(head().disabled).toBe(false);
@@ -1288,25 +1243,24 @@ describe("the project switcher", () => {
     expect(head().querySelector("svg.lucide-folder")).not.toBeNull();
     expect(head().querySelector("svg.lucide-chevron-down")).not.toBeNull();
     expect(rowIds().filter(id => id?.startsWith("project:"))).toEqual(["project:pr_1", "project:pr_2"]);
-    // The project on the box names it in muted mono; the one on this computer names nothing.
+    // Every project row is two lines: the computer it lives on small over its name, this computer by its own word.
+    expect(rowOf("spoo-landing").dataset["lines"]).toBe("2");
     expect(rowOf("spoo-landing").querySelector("[data-project-computer]")!.textContent).toBe(BOX_NAME);
-    expect(rowOf("spoo-landing").querySelector("[data-project-slot]")!.className).toContain("font-mono");
-    expect(rowOf("wsp").querySelector("[data-project-computer]")).toBeNull();
+    expect(rowOf("spoo-landing").querySelector("[data-project-name]")!.textContent).toBe("spoo-landing");
+    expect(rowOf("wsp").querySelector("[data-project-computer]")!.textContent).toBe(placeName(PLACES[0]!, true));
     expect(document.querySelector("[data-sidebar-search] svg.lucide-settings, [data-sidebar-tree] svg.lucide-settings")).toBeNull();
-    // The computer word and the count share the row's one right slot, which is the row's last child and yields to
-    // the plus on hover, so the word ends where every other row's slot ends.
-    const slot = rowOf("spoo-landing").querySelector<HTMLElement>("[data-project-slot]")!;
-    expect(slot).toBe(rowOf("spoo-landing").lastElementChild);
-    expect(slot.contains(rowOf("spoo-landing").querySelector("[data-project-computer]"))).toBe(true);
-    expect(slot.className).toContain("group-hover/menu-item:opacity-0");
-    // What a screen reader is given is what the face shows: the name, the computer where it is not this one, and
-    // the count while the row is shut.
+    // What a screen reader is given is what the face shows: the name, the computer, and the count while the row is shut.
     expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}`);
-    expect(rowOf("wsp").getAttribute("aria-label")).toBe("wsp");
+    expect(rowOf("wsp").getAttribute("aria-label")).toBe(`wsp, ${placeName(PLACES[0]!, true)}`);
+    // The first click opens the project's home and leaves its workspaces showing; a click on the open home shuts it.
+    fireEvent.click(rowOf("spoo-landing"));
+    expect(useStore.getState().projectHome).toBe("pr_1");
+    expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}`);
     fireEvent.click(rowOf("spoo-landing"));
     expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}, 1`);
-    expect(slot.contains(rowOf("spoo-landing").querySelector("[data-project-count]"))).toBe(true);
-    expect(slot.textContent).toBe(`${BOX_NAME}1`);
+    const count = rowOf("spoo-landing").querySelector<HTMLElement>("[data-project-count]")!;
+    expect(count.textContent).toBe("1");
+    expect(count.className).toContain("group-hover/menu-item:opacity-0");
   });
 
   it("opens on a click to a search field, All projects checked, one row per project and Add a project at the foot; typing filters the projects while the two ends stand", async () => {
@@ -1456,13 +1410,13 @@ describe("the tree", () => {
     for (const id of ["ws:ws_a", "thread:th_lead", "thread:th_build", "thread:th_review", "ws:ws_fork", "thread:th_move"]) {
       const item = document.querySelector<HTMLElement>(`[data-row-id='${id}']`)!.closest("li")!;
       expect(item.className, id).toContain("before:w-px");
-      expect(item.parentElement!.className, id).toContain("ml-[15px]");
+      expect(item.parentElement!.className, id).toContain("ml-4");
     }
     expect(rowOf("spoo-landing").closest("li")!.className).not.toContain("before:w-px");
     expect(threadState(rowOf("review the rows"))).toBe("Needs you");
   });
 
-  it("the working rows come first, then the fold, then the idle rows while the shelf is open, all at the workspace's thread depth", async () => {
+  it("the working rows come first, then the settled rows, then the archive's fold, all at the workspace's thread depth", async () => {
     await mount(
       fakeApi(
         [API],
@@ -1470,38 +1424,44 @@ describe("the tree", () => {
         [
           session("s1", "ws_a", { prompt: "working", threadId: "th_1", startedAt: iso(-60_000) }),
           session("s2", "ws_a", { status: "completed", prompt: "idle", threadId: "th_2", startedAt: iso(-120_000), endedAt: iso(-100_000) }),
+          session("s3", "ws_a", { status: "completed", prompt: "old", threadId: "th_3", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000) }),
         ],
       ),
       "api",
     );
     await waitFor(() => expect(screen.getByText("idle")).toBeDefined());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_1", "settled:ws_a", "thread:th_2"]);
-    const fold = document.querySelector<HTMLElement>("[data-row-id='settled:ws_a']")!;
-    expect([depthOf(rowOf("working")), depthOf(fold), depthOf(rowOf("idle"))]).toEqual([2, 2, 2]);
-    // The fold: the word in the prose ink, the count beside it only while shut, the chevron at the edge, no rule.
-    expect(fold.getAttribute("aria-label")).toBe("Idle");
-    expect(fold.querySelector("[data-group-count]")).toBeNull();
-    expect(fold.querySelector("[data-group-word]")!.className).toContain("text-[var(--sidebar-prose)]");
-    expect(fold.querySelector(".h-px, .bg-sidebar-border\\/60")).toBeNull();
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_1", "thread:th_2", "archived:ws_a"]);
+    const fold = document.querySelector<HTMLElement>("[data-row-id='archived:ws_a']")!;
+    expect([depthOf(rowOf("working")), depthOf(rowOf("idle")), depthOf(fold)]).toEqual([2, 2, 2]);
+    // The fold is a label over rows rather than a row: a plain button at a short height with no fill of its own,
+    // the word in the prose ink, the count beside it only while shut, the chevron after it, no rule.
+    expect(fold.tagName).toBe("BUTTON");
+    expect(fold.dataset["sidebar"]).toBeUndefined();
     expect(fold.className).toContain("h-7");
-    fireEvent.click(fold);
-    expect(fold.getAttribute("aria-label")).toBe("Idle 1");
-    expect(fold.textContent).toBe("Idle1");
+    expect(fold.className).not.toMatch(/(^|\s)hover:bg-/);
+    expect(fold.getAttribute("aria-label")).toBe("Archived 1");
+    expect(fold.textContent).toBe("Archived1");
+    expect(fold.querySelector("[data-group-word]")!.className).toContain("text-[var(--sidebar-prose)]");
     expect(fold.querySelector("[data-group-count]")!.className).toContain("text-[var(--top-row-meta)]");
+    expect(fold.querySelector(".h-px, .bg-sidebar-border\\/60")).toBeNull();
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-label")).toBe("Archived");
+    expect(fold.querySelector("[data-group-count]")).toBeNull();
   });
 });
 
 describe("one lifted row", () => {
-  it("exactly one row is active when a thread is selected, one when a workspace is selected with no thread, none when nothing is, and none when the selected thread sits in a shut shelf", async () => {
+  it("exactly one row is active when a thread is selected, one when a workspace is selected with no thread, none when nothing is, and none when the selected thread sits in a shut archive", async () => {
     await mount(
       fakeApi(
         [API, WEB],
         [status(API), status(WEB)],
-        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1" }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-120_000), endedAt: iso(-100_000) })],
+        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1" }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000) })],
       ),
       "api",
     );
-    await waitFor(() => expect(screen.getByText("done")).toBeDefined());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archived 1" })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Archived 1" }));
     const lifted = () => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row][data-active=true]")].map(row => row.dataset["rowId"]);
     act(() => useStore.getState().select(null));
     expect(lifted()).toEqual([]);
@@ -1511,7 +1471,7 @@ describe("one lifted row", () => {
     expect(lifted()).toEqual(["ws:ws_b"]);
     fireEvent.click(rowOf("done"));
     expect(lifted()).toEqual(["thread:thr_2"]);
-    fireEvent.click(screen.getByRole("button", { name: "Idle" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archived" }));
     expect(lifted()).toEqual([]);
     // No card, no border, no shadow on any row: the fill on the one selected row is the only lift.
     for (const row of document.querySelectorAll<HTMLElement>("[data-sidebar-row]")) expect(row.className).not.toMatch(/(^|\s)(shadow[^\s]*|border-sidebar-border|bg-sidebar-control-surface)(\s|$)/);
@@ -1561,7 +1521,7 @@ describe("the creation row", () => {
     const gamma = rowOf("gamma");
     expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "creating:1", "creating:2"]);
     for (const row of [beta, gamma]) {
-      expect([...row.classList].filter(c => /^(h-|py-)/.test(c)).sort()).toEqual(["h-11", "py-0"]);
+      expect([...row.classList].filter(c => /^(h-|py-)/.test(c)).sort()).toEqual(["h-13", "py-0"]);
       const shape = (el: HTMLElement) => [...el.classList].filter(c => /^(h-|py-|px-|rounded-|text-\[|items-|gap-)/.test(c)).sort();
       expect(shape(row)).toEqual(shape(rowOf("api")));
       expect(row.querySelector(".rounded-full, .bg-destructive")).toBeNull();

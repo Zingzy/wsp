@@ -86,9 +86,9 @@ const handle = { view, hydrated: true, busy: false, sending: false, fresh: true,
 
 const WORKSPACE: WorkspaceView = { id: WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
-const accessButton = () => document.querySelector<HTMLElement>('[data-composer-picker="defaults"]');
+const accessButton = () => document.querySelector<HTMLElement>('[data-composer-picker="access"]');
 
-describe("the composer's defaults button", () => {
+describe("the composer's access button", () => {
   afterEach(() => act(() => useStore.setState({ harnesses: [], harnessesByWorkspace: {}, workspaces: [], sessions: {} })));
 
   it("is not drawn at all until the workspace's catalog lands, and then reads what that workspace starts a thread at", () => {
@@ -100,8 +100,8 @@ describe("the composer's defaults button", () => {
 
     act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [THIS_MAC] } }));
     expect(accessButton()?.dataset["access"]).toBe("bypassPermissions");
-    // The button wears the CLI's own short word, in the row's own casing; the machine it names is read in the menu.
-    expect(accessButton()?.textContent).toContain("bypass");
+    // The button wears the CLI's own short word; the machine it names is read in the menu.
+    expect(accessButton()?.textContent).toBe("Bypass");
     drawn.unmount();
   });
 });
