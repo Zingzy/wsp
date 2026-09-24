@@ -1100,7 +1100,13 @@ function hostWide(catalogs: HarnessCatalog[]): HarnessCatalog[] {
 /** The one rule for which catalogs answer for a workspace, so a surface reading many workspaces' rows and one
  * reading its own read the same thing. */
 export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCatalog[] =>
-  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? hostWide(s.harnesses);
+  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? (workspaceId?.startsWith(PROJECT_HOME_PREFIX) === true ? s.harnesses : hostWide(s.harnesses));
+
+/** The key a project's home composer keeps its draft and picks under until its send makes a workspace. A home has
+ * no machine of its own, so it reads the host-wide lists whole, access modes included, which is what the workspace
+ * its send makes is picked from. */
+const PROJECT_HOME_PREFIX = "project:";
+export const projectHomeKey = (projectId: string): string => `${PROJECT_HOME_PREFIX}${projectId}`;
 export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
   catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
 /** The thread the centre shows for a workspace, which is the one the address names: none while the centre is on a

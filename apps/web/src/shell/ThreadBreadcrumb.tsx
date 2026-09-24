@@ -9,10 +9,11 @@
 // is simply working or settled, since the pane under it already shows that; it
 // carries the one state a person has to act on, so a prompt is never hidden by
 // the header the pane is scrolled under.
+import { ProjectGlyph } from "../projects/look.js";
 import { agentName } from "@wsp/catalog";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
-import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
+import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { SettingsCrumbs } from "../settings/SettingsCrumbs.js";
@@ -29,12 +30,21 @@ export function ThreadBreadcrumb() {
   // An opener may run on any workspace, so the whole fleet is read rather than this one's threads.
   const opener = openedBy(useSidebarProjects(), { parentThreadId: thread?.parentThreadId ?? null });
   const name = workspace?.name ?? creation?.name;
+  // A project's home names its project, which is where the next task lands.
+  const home = useStore(s => (s.projectHome === null ? undefined : s.projects.find(p => p.id === s.projectHome)));
   return (
     <span className="flex min-w-0 items-center gap-2 text-sm" data-thread-breadcrumb>
       {settingsOpen ? (
         <SettingsCrumbs />
       ) : name === undefined ? (
-        firstRun ? null : <span className="truncate text-muted-foreground">No workspace selected</span>
+        home !== undefined ? (
+          <span className="flex min-w-0 items-center gap-2" data-breadcrumb-project>
+            <ProjectGlyph projectId={home.id} />
+            <span className="truncate font-medium text-foreground">{home.name}</span>
+          </span>
+        ) : firstRun ? null : (
+          <span className="truncate text-muted-foreground">No workspace selected</span>
+        )
       ) : (
         <>
           {/* The agent the open thread runs, first, so the bar says who is working before where. */}

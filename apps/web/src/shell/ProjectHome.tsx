@@ -9,7 +9,7 @@ import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
 import { useChatThread } from "../components/chat/useChatThread.js";
-import { useStore } from "../protocol/store.js";
+import { projectHomeKey, useStore } from "../protocol/store.js";
 
 /** The workspace's name off the task: its first line, cut at a few words, since the row has room for little more. */
 export function nameOfTask(task: string): string {
@@ -17,13 +17,10 @@ export function nameOfTask(task: string): string {
   return words.slice(0, 5).join(" ").slice(0, 40);
 }
 
-/** The key the home's composer keeps its draft and picks under until a workspace exists to hold them. */
-const homeKey = (projectId: string): string => `project:${projectId}`;
-
 export function ProjectHome({ projectId }: { projectId: string }) {
   const project = useStore(s => s.projects.find(p => p.id === projectId));
   const createWorkspace = useStore(s => s.createWorkspace);
-  const key = homeKey(projectId);
+  const key = projectHomeKey(projectId);
   const thread = useChatThread(key, null, true);
   if (project === undefined) return null;
 
@@ -34,6 +31,8 @@ export function ProjectHome({ projectId }: { projectId: string }) {
       const picked = s.byWorkspaceId[key];
       return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
     });
+    const access = useStore.getState().preferences.access[key];
+    if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
     useComposerDraftStore.getState().enqueue(workspaceId, prompt);
   };
 
