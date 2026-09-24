@@ -80,7 +80,7 @@ import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, 
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, sshDaemonPlace } from "./doctor.js";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -591,7 +591,7 @@ export function placeUpdateScript(home: string, landed: string, unit = placeUnit
 /** What the box said when wsp's own login files could not be written there: the update stops on it, since the
  * lines exit 0 by design and a failure is the link going or the login file being unreadable, and the person runs
  * the line again. */
-export const placeLoginFilesFailedLine = (name: string, said: string): string => `${name} did not take wsp's login files: ${said}`;
+export const placeLoginFilesFailedLine = (name: string, said: string): string => placeInstallFailedLine(name, "login", said);
 
 /** The refusal an update gets on a computer this host is holding no link to and was never installed over ssh: a
  * computer joined by typing a code is reached over its link alone. */
