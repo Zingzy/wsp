@@ -197,6 +197,9 @@ pub enum DaemonOp {
         dir: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hidden: Option<bool>,
+        /// Every repo under the roots instead of one level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repos: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         projects: Option<Vec<String>>,
     },

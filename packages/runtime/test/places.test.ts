@@ -3829,10 +3829,16 @@ describe("the folders of a computer you own", () => {
     });
     sockets.push(client.ws);
     const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
-    const listed = await (await mine()).request("host.folders", { on: placeId, dir: "/home/maya", hidden: true });
+    const c = await mine();
+    const listed = await c.request("host.folders", { on: placeId, dir: "/home/maya", hidden: true });
     expect(listed.ok, String(listed["error"])).toBe(true);
     expect(listed["listing"]).toEqual(LISTING);
-    expect(asked).toEqual([{ id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout] }]);
+    // The repos listing is that computer's too, over the same frame.
+    expect((await c.request("host.folders", { on: placeId, repos: true })).ok).toBe(true);
+    expect(asked).toEqual([
+      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout] },
+      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.checkout] },
+    ]);
   });
 
   it("carry that daemon's own refusal, and a daemon too old to list folders is named behind rather than asked", async () => {

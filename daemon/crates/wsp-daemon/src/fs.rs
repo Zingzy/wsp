@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use wsp_frames::{words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, HostFolder, HostFolderListing};
+use wsp_frames::{
+    numbers, words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, HostFolder, HostFolderListing,
+};
 
 use crate::git::{run_git, Runs};
 use crate::paths::{absolute, is_inside, OpError};
@@ -123,7 +125,12 @@ pub(crate) async fn list_folders(
             .iter()
             .filter(|name| hidden || !name.starts_with('.'))
             .map(|name| listed.join(name))
-            .map(|path| HostFolder { repo: path.join(".git").exists(), path: path.to_string_lossy().into_owned() })
+            .map(|path| HostFolder {
+                repo: path.join(".git").exists(),
+                path: path.to_string_lossy().into_owned(),
+                branch: None,
+                touched_at: None,
+            })
             .collect();
         Ok(HostFolderListing {
             dir: listed.to_string_lossy().into_owned(),
@@ -133,6 +140,68 @@ pub(crate) async fn list_folders(
         })
     })
     .await
+}
+
+/// Every repo under `home` and each project folder it does not hold, most recently written first, by the rule this
+/// computer's own repos listing walks with: REPO_DEPTH folders deep and REPO_CAP repos at most, never into a repo, a
+/// link, a dot-named folder or a folder CACHE_DIRS names. A linked worktree, whose .git is a file, is its repo's and
+/// no row of its own. Nothing is read but a repo's HEAD and the times git wrote there.
+pub(crate) async fn list_repos(home: PathBuf, projects: Vec<String>) -> Result<HostFolderListing, OpError> {
+    blocking(move || {
+        let roots = folder_roots(&home, &projects);
+        let mut found = Vec::new();
+        for root in &roots {
+            walk_repos(root, 0, &mut found);
+        }
+        found.sort_by_key(|folder| std::cmp::Reverse(folder.touched_at));
+        let named = |path: &PathBuf| path.to_string_lossy().into_owned();
+        Ok(HostFolderListing { dir: named(&roots[0]), roots: roots.iter().map(named).collect(), folders: found, hidden: 0 })
+    })
+    .await
+}
+
+fn walk_repos(dir: &Path, depth: u32, found: &mut Vec<HostFolder>) {
+    if found.len() >= numbers::REPO_CAP {
+        return;
+    }
+    let git = dir.join(".git");
+    if git.exists() {
+        if git.is_dir() {
+            found.push(HostFolder {
+                path: dir.to_string_lossy().into_owned(),
+                repo: true,
+                branch: head_branch(&git),
+                touched_at: Some(git_touched(&git)),
+            });
+        }
+        return;
+    }
+    if depth >= numbers::REPO_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) && !name.starts_with('.') && !numbers::CACHE_DIRS.contains(&name.as_str()) {
+            walk_repos(&entry.path(), depth + 1, found);
+        }
+    }
+}
+
+/// The branch a checkout is on, off its HEAD file; none on a detached head.
+fn head_branch(git: &Path) -> Option<String> {
+    let head = std::fs::read_to_string(git.join("HEAD")).ok()?;
+    head.lines().find_map(|line| line.strip_prefix("ref: refs/heads/")).filter(|branch| !branch.is_empty()).map(str::to_owned)
+}
+
+/// When git last wrote to a checkout: the newest of its index, HEAD and FETCH_HEAD, and 0 where none is there.
+fn git_touched(git: &Path) -> i64 {
+    ["index", "HEAD", "FETCH_HEAD"]
+        .iter()
+        .filter_map(|name| std::fs::metadata(git.join(name)).and_then(|m| m.modified()).ok())
+        .map(epoch_ms)
+        .max()
+        .unwrap_or(0)
 }
 
 /// The home, then each project folder that is a folder here and that the home does not already hold.

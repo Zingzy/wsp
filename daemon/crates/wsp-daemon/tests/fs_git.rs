@@ -642,3 +642,56 @@ async fn fs_folders_refuses_a_path_outside_the_roots_a_relative_one_and_a_link_t
     refused(&c.request("fs.folders", json!({ "dir": h.home.join("escape") })).await, "outside-root");
     refused(&c.request("fs.folders", json!({ "dir": h.home.join("escape/secrets") })).await, "outside-root");
 }
+
+/// A repo at `dir` whose HEAD names `head` and whose files git writes were last written `age` seconds ago.
+fn repo_at(dir: &Path, head: &str, age: u64) {
+    fs::create_dir_all(dir.join(".git")).unwrap();
+    fs::write(dir.join(".git/HEAD"), format!("{head}\n")).unwrap();
+    let when = std::time::SystemTime::now() - Duration::from_secs(age);
+    fs::File::options().write(true).open(dir.join(".git/HEAD")).unwrap().set_modified(when).unwrap();
+}
+
+#[tokio::test]
+async fn fs_folders_asked_for_repos_answers_every_repo_under_the_roots_newest_first_with_its_branch() {
+    let h = home_tree();
+    fs::remove_dir_all(h.home.join("code")).unwrap();
+    repo_at(&h.home.join("code/spoo"), "ref: refs/heads/main", 3600);
+    repo_at(&h.home.join("deep/a/b/kart"), "ref: refs/heads/feature/x", 60);
+    repo_at(&h.home.join("loose"), "3f2a9c0d1e", 7200);
+    // Five folders down is as deep as the walk looks; a repo under a sixth is left for walking or typing.
+    repo_at(&h.home.join("d1/d2/d3/d4/d5/r6"), "ref: refs/heads/main", 10);
+    // Not walked into: a dependency folder, a dot-named one, a repo's own folders, and a link.
+    repo_at(&h.home.join("node_modules/lib"), "ref: refs/heads/main", 10);
+    repo_at(&h.home.join(".hidden/r"), "ref: refs/heads/main", 10);
+    repo_at(&h.home.join("code/spoo/vendor/dep"), "ref: refs/heads/main", 10);
+    symlink(h.outside.join("secrets"), h.home.join("elsewhere")).unwrap();
+    repo_at(&h.outside.join("secrets/linked"), "ref: refs/heads/main", 10);
+    // A linked worktree, whose .git is a file, is its repo's and not a row of its own.
+    fs::create_dir(h.home.join("wt")).unwrap();
+    fs::write(h.home.join("wt/.git"), "gitdir: /elsewhere/.git/worktrees/wt\n").unwrap();
+    fs::remove_file(h.project.join(".git")).unwrap();
+    repo_at(&h.project, "ref: refs/heads/trunk", 1800);
+    let (_d, mut c) = folders_bench(&h).await;
+    let listed = c.request("fs.folders", json!({ "repos": true, "projects": [h.project] })).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!((listed["dir"].as_str(), listed["hidden"].as_u64()), (Some(h.home.to_string_lossy().as_ref()), Some(0)));
+    assert_eq!(listed["roots"], json!([h.home, h.project]));
+    let rows: Vec<(String, Option<String>)> = listed["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["path"].as_str().unwrap().to_owned(), f["branch"].as_str().map(str::to_owned)))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (at(&h.home, "deep/a/b/kart"), Some("feature/x".to_owned())),
+            (h.project.to_string_lossy().into_owned(), Some("trunk".to_owned())),
+            (at(&h.home, "code/spoo"), Some("main".to_owned())),
+            (at(&h.home, "loose"), None),
+        ]
+    );
+    let touched: Vec<i64> = listed["folders"].as_array().unwrap().iter().map(|f| f["touchedAt"].as_i64().unwrap()).collect();
+    assert!(touched.windows(2).all(|w| w[0] >= w[1]), "{touched:?}");
+    assert!(listed["folders"].as_array().unwrap().iter().all(|f| f["repo"] == true));
+}

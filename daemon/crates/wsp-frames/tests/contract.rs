@@ -359,6 +359,9 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("daemonNice", Value::from(numbers::DAEMON_NICE));
     m.insert("workOomScoreAdj", Value::from(numbers::WORK_OOM_SCORE_ADJ));
     m.insert("workScoreLine", Value::from(numbers::work_score_line()));
+    m.insert("cacheDirs", Value::from(numbers::CACHE_DIRS.to_vec()));
+    m.insert("repoDepth", Value::from(numbers::REPO_DEPTH));
+    m.insert("repoCap", Value::from(numbers::REPO_CAP));
     m
 }
 

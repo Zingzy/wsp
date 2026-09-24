@@ -24,5 +24,20 @@
     ],
     "folders": [],
     "hidden": 0
+  },
+  {
+    "dir": "/home/maya",
+    "roots": [
+      "/home/maya"
+    ],
+    "folders": [
+      {
+        "path": "/home/maya/code/spoo",
+        "repo": true,
+        "branch": "main",
+        "touchedAt": 1758700000000
+      }
+    ],
+    "hidden": 0
   }
 ]

@@ -668,8 +668,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::FsFolders { dir, hidden, projects } => {
-            answer(id, fs::list_folders(PathBuf::from(&ctx.root), projects.unwrap_or_default(), dir, hidden == Some(true)).await)
+        DaemonOp::FsFolders { dir, hidden, repos, projects } => {
+            let (home, projects) = (PathBuf::from(&ctx.root), projects.unwrap_or_default());
+            if repos == Some(true) {
+                return answer(id, fs::list_repos(home, projects).await);
+            }
+            answer(id, fs::list_folders(home, projects, dir, hidden == Some(true)).await)
         }
         DaemonOp::GitStatus { cwd, machine_id } => {
             let read = async {

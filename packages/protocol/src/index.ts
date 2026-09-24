@@ -1751,9 +1751,9 @@ export type ProjectExportEvent = z.infer<typeof ProjectExportEvent>;
 export const ProjectExportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), excluded: z.array(z.string()), agents: z.array(ProjectAgentResult) });
 export type ProjectExportResult = z.infer<typeof ProjectExportResult>;
 
-// --- this computer's own folders, as a browser tab browses them ---------------
+// --- a computer's folders, as a folder picker browses them --------------------
 
-/** One folder on the computer running the host. `repo` is a folder git tracks, which a picker marks. */
+/** One folder on a computer the host holds. `repo` is a folder git tracks, which a picker marks. */
 export const HostFolder = z.object({
   path: z.string(),
   repo: z.boolean(),
@@ -1763,9 +1763,10 @@ export const HostFolder = z.object({
   touchedAt: z.number().optional(),
 });
 export type HostFolder = z.infer<typeof HostFolder>;
-/** One level of this computer's disk: the folder listed, the roots every level is browsed from (the home folder and
- * each imported project's own folder), the folders directly inside it, and how many were left out for being hidden.
- * No web picker can hand a page a path, so this is what a browser tab has instead of the desktop shell's dialog. */
+/** One level of a computer's disk, this one's or a box's: the folder listed, the roots every level is browsed from
+ * (that computer's home folder and each of its projects' folders), the folders directly inside it, and how many
+ * were left out for being hidden. No web picker can hand a page a path, so this is what a browser tab has instead of
+ * the desktop shell's dialog, and the only way to see a box's folders at all. */
 export const HostFolderListing = z.object({
   dir: z.string(),
   roots: z.array(z.string()),
@@ -3193,8 +3194,11 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
    * gone. A path outside the roots, a relative one, or one through a symlink that leaves them is refused with code
    * outside-root. Folders only, one level, `repo` where the folder holds .git; the dot-named ones are counted and
-   * listed only when `hidden`. No file is read. */
-  z.object({ id: reqId, op: z.literal("fs.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), projects: z.array(z.string()).optional() }),
+   * listed only when `hidden`. `repos` answers every repo under the roots instead, as this computer's repos listing
+   * does: REPO_DEPTH folders deep and REPO_CAP of them at most, walking into no repo, no link, no dot-named folder and
+   * nothing in CACHE_DIRS, each with its branch and when git last wrote there, most recent first. No file is read
+   * but a repo's HEAD. */
+  z.object({ id: reqId, op: z.literal("fs.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), repos: z.boolean().optional(), projects: z.array(z.string()).optional() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3812,6 +3816,7 @@ const DAEMON_CONTENTS = [
   "311811170de5296b4e25d8b3bc6e46035a9c5fc13f6430d8ae9314be8d9815f9",
   "4202fe729182d82873c035271bb091be1fce798422a5349d9430e773567246a9",
   "dacb3a6c014686cff3aa977b424725f7270d200c3d42239b8467e94487593eb2",
+  "a23101d06f8f731d78525ec553c8013286aa03554ce2775b77c27714a68ee31f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4012,7 +4017,9 @@ const DAEMON_CONTENTS = [
  * Version 69 keeps the fence's connection to the engine open until the engine answers, so a forwarded request is
  * never cancelled into a bodiless 499, and lets a workspace on a box with a refusing input chain dial its own box.
  * Version 70 counts a workspace's sessions and connections at its socket and measures a frame before parsing it, so
- * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle. */
+ * one workspace cannot run its box daemon out of memory, and the leave removes its owned files by directory handle.
+ * Version 72 answers fs.folders, one level of a box's folders or every repo on it, so the host can offer a box's own
+ * folders to a project the way it offers this computer's. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
