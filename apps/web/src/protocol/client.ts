@@ -52,6 +52,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  ReleaseView,
   SealedImageView,
   type SessionEvent,
   type SessionView,
@@ -508,6 +509,10 @@ export interface Api {
   preferences?(): Promise<Preferences>;
   /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
   setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
+  /** The newest release as the host last read it, asking nobody. Optional so fixtures without About need not fake it. */
+  releaseGet?(): Promise<ReleaseView>;
+  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart and answers its reading. */
+  releaseCheck?(): Promise<ReleaseView>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
@@ -727,6 +732,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
+    releaseGet: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.get")).release),
+    releaseCheck: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check")).release),
     // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.

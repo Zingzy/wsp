@@ -572,9 +572,11 @@ export interface HostReading {
 
 /** What wsp status prints: whether a host serves this state file and where, then what keeps it there. Every row is
  * label and value, so a person reads the same columns wsp up prints when it starts. A host that took the lock and
- * answers nothing is a crash loop rewriting that lock, and the row says which of the two it is. */
-export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now()): string[] {
-  if (host === undefined) return ["host        not running", stateLine(statePath), `service     ${service}`];
+ * answers nothing is a crash loop rewriting that lock, and the row says which of the two it is. The newest release
+ * rides last, off the file the host keeps, where any ask was ever kept. */
+export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now(), latest?: string): string[] {
+  const release = latest === undefined ? [] : [`latest      ${latest}`];
+  if (host === undefined) return ["host        not running", stateLine(statePath), `service     ${service}`, ...release];
   const { lock } = host;
   const publicAt = publicHostname(statePath);
   const up = `pid ${lock.pid}, up ${fmtDuration(now - Date.parse(lock.startedAt))}`;
@@ -582,5 +584,6 @@ export function statusLines(statePath: string, host: HostReading | undefined, se
     host.answering ? `host        running (${up})` : `host        not answering on port ${lock.port} (${up})`,
     ...addressLines(statePath, lock, publicAt),
     `service     ${service}`,
+    ...release,
   ];
 }

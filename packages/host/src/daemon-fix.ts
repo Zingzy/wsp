@@ -3,21 +3,32 @@
 // road a wsp is installed by, read off the process this wsp is running as. The
 // binary is not built by any node build, so a host rebuilt without it runs
 // beside the one that was there before; every sentence about a daemon that is
-// behind on this computer carries this line as its fix.
+// behind on this computer carries this line as its fix. The line that moves
+// this wsp onto a newer release reads the same road.
 import { sep } from "node:path";
 import type { RunningWsp } from "./mcp-install.js";
 
 /** The published package, as an install line names it. */
 const NPM_PACKAGE = "@zingzy/wsp";
 
-/** The line that puts the right daemon beside this wsp, by the road this one was installed by: a bin under a
- * global node_modules is an npm install and takes the install line again; a bin inside the desktop app's bundle
- * moves with the app, so the app's own update is the road; anything else is a checkout, where the binary comes
- * from a cargo build placed by the script that stages it. */
+type Road = "npm" | "app" | "checkout";
+
+/** The road this wsp was installed by: a bin under a global node_modules is an npm install, a bin inside the
+ * desktop app's bundle moves with the app, and anything else is a checkout. */
+function roadOf(run: Pick<RunningWsp, "argv" | "shim">): Road {
+  const parts = (run.shim ?? run.argv[1] ?? "").split(sep);
+  if (parts.includes("node_modules")) return "npm";
+  if (parts.some(part => part.endsWith(".app"))) return "app";
+  return "checkout";
+}
+
+/** The line that puts the right daemon beside this wsp: the npm install again, the app's own update, or in a
+ * checkout a cargo build placed by the script that stages it. */
 export function daemonFixLine(run: Pick<RunningWsp, "argv" | "shim">): string {
-  const path = run.shim ?? run.argv[1] ?? "";
-  const parts = path.split(sep);
-  if (parts.includes("node_modules")) return `npm i -g ${NPM_PACKAGE}`;
-  if (parts.some(part => part.endsWith(".app"))) return "updating the wsp app";
-  return "a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary";
+  return { npm: `npm i -g ${NPM_PACKAGE}`, app: "updating the wsp app", checkout: "a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary" }[roadOf(run)];
+}
+
+/** The line that moves this wsp onto a newer release, by the same road. */
+export function releaseUpdateLine(run: Pick<RunningWsp, "argv" | "shim">, version: string): string {
+  return { npm: `npm i -g ${NPM_PACKAGE}@${version}`, app: "updating the wsp app", checkout: "a pull of the checkout and a build" }[roadOf(run)];
 }

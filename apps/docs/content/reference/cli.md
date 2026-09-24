@@ -575,11 +575,11 @@ usage: wsp stop <thread>
 
 ```text
 usage: wsp status [--watch]
-  whether a host serves this state file, on which ports and what keeps it there,
-  with a non-zero exit code when none does; on a computer joined to somebody's
-  wsp it reads the agent there instead, what that computer is doing and what is
-  running on it, and --watch draws the same rows again every second. --host
-  reads a host on another computer
+  whether a host serves this state file, on which ports, what keeps it there and
+  the newest release the host last read, with a non-zero exit code when none
+  does; on a computer joined to somebody's wsp it reads the agent there instead,
+  what that computer is doing and what is running on it, and --watch draws the
+  same rows again every second. --host reads a host on another computer
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
              ./.wsp/state.json when the current directory is a checkout of wsp,

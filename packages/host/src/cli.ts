@@ -34,7 +34,7 @@ import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, typ
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
-import { daemonFixLine } from "./daemon-fix.js";
+import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedEnv, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
@@ -100,7 +100,7 @@ import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
-import { releaseWatch } from "./release.js";
+import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -1634,6 +1634,12 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
   return 0;
 }
 
+/** The latest row's words off the file the host keeps, asking no host; nothing where no ask was ever kept. */
+function latestHere(statePath: string, env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const reading = releaseReading(statePath, env);
+  return reading === undefined ? undefined : latestWords(reading, VERSION, version => releaseUpdateLine(runningWsp(), version));
+}
+
 export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string; watch?: boolean } & HostPick, deps: ServiceDeps): Promise<number> {
   // The one line that leaves this computer only when a person named a host: --host or WSP_HOST and nothing else.
   // A verb has a host to speak to whatever the line said, so it follows the fallbacks under those two, the default
@@ -1679,7 +1685,7 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
   const reading = await serviceReading(deps.manager, serviceAddressHere(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
   const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
-  for (const line of statusLines(opts.statePath, host, reading)) io.log(line);
+  for (const line of statusLines(opts.statePath, host, reading, Date.now(), latestHere(opts.statePath, opts.env ?? process.env))) io.log(line);
   return host?.answering === true ? 0 : 1;
 }
 
@@ -1919,7 +1925,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   status: {
     page: "front",
     usage: "wsp status [--watch]",
-    about: "whether a host serves this state file, on which ports and what keeps it there, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer",
+    about: "whether a host serves this state file, on which ports, what keeps it there and the newest release the host last read, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer",
     json: false,
     host: "aimed",
     cliOnly: "reads this computer's lock and service manager, the agent on a computer that joined somebody's wsp, or dials the host named beside it; a tool that answers at all is proof a host is up",
@@ -2114,6 +2120,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // Read once, and printed at the end of every road: what is still open after a road closed what it opened is
       // what would hold this process after its last line.
       const showHandles = opts.env[DOCTOR_HANDLES_ENV] === "1";
+      const latest = latestHere(opts.statePath, opts.env);
       const handles = (road: string): void => {
         if (showHandles) io.error(`${road} left open: ${process.getActiveResourcesInfo().join(", ") || "nothing"}`);
       };
@@ -2124,7 +2131,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         const { keys, env } = await loadKeys(io, keySources(opts.providerEnv, opts.statePath), NO_CLOUD_KEY);
         const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local);
         try {
-          return await localDoctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}) });
+          return await localDoctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}), ...(latest !== undefined ? { latest } : {}) });
         } finally {
           await rt.close();
           handles("the local road");
@@ -2151,6 +2158,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
             ...(computer !== undefined ? { computer } : {}),
             ...project,
             ...(hereDaemon !== undefined ? { hereDaemon } : {}),
+            ...(latest !== undefined ? { latest } : {}),
             vault: () => vaultNow(opts.statePath),
             ...(provision !== undefined ? { plan: () => provision.plan({ home: GUEST_HOME }) } : {}),
             statePath: opts.statePath,

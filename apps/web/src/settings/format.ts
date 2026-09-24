@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { CLOUD_SETUP_WORDS, fmtPx, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, fmtPx, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -232,6 +232,14 @@ export const ABOUT_WORDS = {
   hostHover: "The wsp that serves this page.",
   unknown: "unknown",
   releases: "Releases",
+  latest: "Latest",
+  readHover: (ago: string): string => `Read from the releases page ${ago} ago.`,
+  missedHover: (ago: string, at: string): string => `Read ${ago} ago; the releases page was not reached ${at}.`,
+  unreachedHover: (at: string): string => `The releases page was not reached ${at}.`,
+  offHover: "Update checks are off on the host: WSP_UPDATE_CHECK is 0.",
+  computersBehind: "Computers behind",
+  behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
+  get: (version: string): string => `Get ${version}`,
 } as const;
 
 /** The agents on a computer's own page: one row per agent, the word for what stands there, the sign-in that has

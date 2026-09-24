@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type ProjectView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { readProjectHome } from "../src/protocol/address.js";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
@@ -1032,5 +1032,35 @@ describe("the address never leaks out of the tests that set it", () => {
     useStore.setState({ api });
     await useStore.getState().refresh();
     expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+});
+
+describe("the newest release in the store", () => {
+  const view = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://github.com/Zingzy/wsp/releases/tag/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app", restartReturns: false });
+
+  it("is read on bind and again on every reconnect, since release.changed is never replayed, and follows the event between", async () => {
+    const { api, emit } = fakeApi([], []);
+    const answers = [view("0.2.0"), view("0.3.0")];
+    let reads = 0;
+    useStore.setState({ release: null });
+    useStore.getState().bind({ ...api, releaseGet: async () => answers[reads++]! });
+    await flush();
+    expect(reads).toBe(1);
+    expect(useStore.getState().release).toEqual(view("0.2.0"));
+    emit({ type: "release.changed", release: view("0.2.1") });
+    expect(useStore.getState().release).toEqual(view("0.2.1"));
+    useStore.getState().setConn("reconnecting");
+    useStore.getState().setConn("live");
+    await flush();
+    expect(reads).toBe(2);
+    expect(useStore.getState().release).toEqual(view("0.3.0"));
+  });
+
+  it("stays unread under a host that does not answer the op", async () => {
+    const { api } = fakeApi([], []);
+    useStore.setState({ release: null });
+    useStore.getState().bind({ ...api, releaseGet: async () => Promise.reject(new Error("unknown op release.get")) });
+    await flush();
+    expect(useStore.getState().release).toBeNull();
   });
 });

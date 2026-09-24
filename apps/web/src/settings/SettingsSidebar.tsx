@@ -132,6 +132,7 @@ export function SettingsSidebar() {
     // The pages under a group stand whether it is open or not: a list that grew when a row was picked moved every
     // group under it, and a sidebar whose rows change place between states is the one thing the eye cannot forgive.
     const under = group.sub?.(ctx) ?? [];
+    const meta = group.meta?.(ctx);
     return (
       <li key={group.id} className="flex flex-col">
         <SidebarMenuButton
@@ -149,6 +150,11 @@ export function SettingsSidebar() {
         >
           <Glyph className="size-4" />
           <span className="min-w-0 flex-1 truncate">{group.name}</span>
+          {meta === undefined ? null : (
+            <span data-settings-meta className={cn(ROW_META_CLASS, "shrink-0")}>
+              {meta}
+            </span>
+          )}
         </SidebarMenuButton>
         {under.length === 0 ? null : (
           <ul className="ml-[14px] flex min-w-0 flex-col">

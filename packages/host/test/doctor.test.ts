@@ -68,7 +68,7 @@ import {
   type DaemonSocket,
 } from "../src/doctor.js";
 import { agentName, catalogEntry, GUEST_HOME, VAULT_VARIABLES } from "@wsp/catalog";
-import { daemonFixLine } from "../src/daemon-fix.js";
+import { daemonFixLine, releaseUpdateLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
 import { captured, copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 import { commandPage, COMMANDS_FOR_HELP, doctorRow, localWiring, SHARED_FLAGS, type CliIO } from "../src/cli.js";
@@ -338,6 +338,12 @@ describe("the doctor's line for a place behind this wsp", () => {
     expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] })).toBe("npm i -g @zingzy/wsp");
     expect(daemonFixLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" })).toBe("updating the wsp app");
     expect(daemonFixLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] })).toBe("a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary");
+  });
+
+  it("reads the line that gets a newer release off the same road, pinned to that release where the road takes a version", () => {
+    expect(releaseUpdateLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] }, "0.3.0")).toBe("npm i -g @zingzy/wsp@0.3.0");
+    expect(releaseUpdateLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" }, "0.3.0")).toBe("updating the wsp app");
+    expect(releaseUpdateLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] }, "0.3.0")).toBe("a pull of the checkout and a build");
   });
 
   it("says nothing where every place is level, where none has reported, and on a host holding no places at all", async () => {
@@ -1763,8 +1769,17 @@ describe("the doctor's local road", () => {
     expect(out).toContain("Claude Code answered with the word it was asked for");
     expect(out).toContain("the workspace, the project and the folder this run made are gone");
     expect(out).toContain("DOCTOR PASS: this computer is a workspace, a thread ran on it and its reply came back.");
+    expect(out).not.toContain("latest release");
     // The doctor left nothing behind: the state has no more workspaces than it started with.
     expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("opens with the newest release as the command line read it, before anything is made", async () => {
+    const { rt } = localRuntime({ claude: scripted() });
+    const io = record();
+    expect(await localDoctor(rt, io, { latest: "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it" })).toBe(0);
+    expect(io.lines[1]).toBe("latest release 0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it");
     await rt.close();
   });
 

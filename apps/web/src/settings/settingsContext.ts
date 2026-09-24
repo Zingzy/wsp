@@ -4,7 +4,7 @@
 // page, and the acts a row can raise. A page is a plain function of this, so
 // the search can walk every group's rows with one call each and the sidebar
 // can dim a group with no match.
-import type { AccountView, PlaceView, Preferences, PreferencesPatch, ProjectView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AccountView, PlaceView, Preferences, PreferencesPatch, ProjectView, ReleaseView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { isDesktopShell } from "../lib/desktopShell.js";
 import type { Api } from "../protocol/client.js";
@@ -24,6 +24,8 @@ export interface SettingsContext {
   readonly reads: SettingsReads;
   readonly now: number;
   readonly shell: { readonly inShell: boolean; readonly app: string | undefined; readonly host: string | undefined };
+  /** The newest release as the host last read it; null where it gave none. */
+  readonly release: ReleaseView | null;
   readonly platform: string;
   readonly desktopShell: boolean;
   readonly api: Api | null;
@@ -48,6 +50,7 @@ export function useSettingsContext(): SettingsContext {
   const statuses = useStore(s => s.statuses);
   const landings = useStore(s => s.landings);
   const api = useStore(s => s.api);
+  const release = useStore(s => s.release);
   const reads = useSettingsStore(s => s.reads);
   // The minute clock every countdown in the app reads, as a stamp.
   const now = Date.parse(`${useNowMinute()}:00Z`);
@@ -62,6 +65,7 @@ export function useSettingsContext(): SettingsContext {
     reads,
     now,
     shell: shellVersions(),
+    release,
     platform: navigator.platform,
     desktopShell: isDesktopShell(),
     api,
