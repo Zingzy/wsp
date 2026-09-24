@@ -1414,11 +1414,13 @@ export function refusalLine(happened: string, fix: string): string {
 }
 
 /** Text with every hidden value blanked wherever it appears, as written and trimmed: a door that trims what it read
- * before echoing it would otherwise slip the padded value past. The one rule every log that must not hold a secret
- * reads. */
+ * before echoing it would otherwise slip the padded value past. Longest first, so a value that is another's prefix
+ * leaves no tail; a value under four characters once trimmed is no key, token or code and would blank the sentence
+ * letter by letter. The one rule every log that must not hold a secret reads. */
 export function redacted(text: string, hidden: readonly string[]): string {
+  const values = [...new Set(hidden.flatMap(h => (h.trim().length < 4 ? [] : [h, h.trim()])))].sort((a, b) => b.length - a.length);
   let out = text;
-  for (const h of hidden) for (const v of new Set([h, h.trim()])) if (v !== "") out = out.split(v).join("<redacted>");
+  for (const v of values) out = out.split(v).join("<redacted>");
   return out;
 }
 

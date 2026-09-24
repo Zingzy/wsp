@@ -114,6 +114,31 @@ describe("a refused frame", () => {
     client.close();
   });
 
+  it("keeps the sentence readable when a secret field holds a stray space or a single letter", async () => {
+    const { client, lines } = await serving();
+    await client.request("init.keys", { provider: "box", key: " " });
+    expect(lines[0]).toBe("refused init.keys kind=auth: Box refused. Check it and paste it again.");
+    expect(lines[0]).not.toContain("<redacted>");
+    client.close();
+    const stranger = await WsClient.connect(srv!.port);
+    void stranger.request("auth", { token: "u" });
+    await stranger.closed();
+    expect(lines[1]).toMatch(/^refused auth kind=auth: /);
+    expect(lines[1]).not.toContain("<redacted>");
+  });
+
+  it("withholds the sentence of a frame carrying more secret values than any real one, and answers in the time of none", async () => {
+    const { client, lines } = await serving();
+    const env = Object.fromEntries(Array.from({ length: 20_000 }, (_, i) => [`V${i}`, `value-${i}-sk-ant-x`]));
+    const started = Date.now();
+    const got = await client.request("workspaces.get", { workspaceId: "w".repeat(8_000_000), env });
+    const took = Date.now() - started;
+    expect(got).toMatchObject({ ok: false });
+    expect(took).toBeLessThan(1_500);
+    expect(lines).toEqual([expect.stringMatching(/^refused workspaces\.get kind=\S+: \(sentence withheld, 20000 secret values\)$/)]);
+    client.close();
+  });
+
   it("a deeply nested secret field is refused and logged like any other frame, and the socket keeps answering", async () => {
     const { client, lines } = await serving();
     const frames: { id?: unknown; ok?: unknown }[] = [];

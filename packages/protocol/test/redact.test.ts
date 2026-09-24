@@ -9,6 +9,16 @@ describe("redacted", () => {
     expect(redacted("the door read sk-ant-x-2.", ["  sk-ant-x-2\n"])).toBe("the door read <redacted>.");
     expect(redacted("nothing here", ["", "   "])).toBe("nothing here");
   });
+
+  it("never blanks a value shorter than four characters once trimmed, so a stray space or letter cannot blank the sentence", () => {
+    expect(redacted("unauthorized: ws-80 refused", [" ", "u", "80", " ab "])).toBe("unauthorized: ws-80 refused");
+    expect(redacted("the key abcd was refused", ["abcd"])).toBe("the key <redacted> was refused");
+  });
+
+  it("blanks the longest value first, so a shorter one that is its prefix leaves no tail", () => {
+    const key = "sk-ant-x-probe-key-12345";
+    expect(redacted(`Box refused ${key}`, [key.slice(0, 12), key])).toBe("Box refused <redacted>");
+  });
 });
 
 describe("requestSecrets", () => {
