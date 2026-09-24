@@ -342,7 +342,10 @@ describe("About and the newest release", () => {
     expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host, ABOUT_WORDS.latest]);
     expect(latestWord()).toBe("0.3.0");
     expect(inks()).toContain("text-foreground");
-    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("3 d"));
+    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("3 d ago"));
+    // Ahead of the page's minute clock, as a reading the opening itself asked for is.
+    await show(read("0.3.0", { checkedAt: new Date(Date.now() + 5_000).toISOString() }));
+    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("just now"));
     await show(read("0.2.0"));
     expect(latestWord()).toBe("0.2.0");
     expect(inks()).toContain("text-muted-foreground");
@@ -350,7 +353,7 @@ describe("About and the newest release", () => {
     const tried = new Date(Date.now() - 5 * 60_000).toISOString();
     await show(read("0.3.0", { state: "unreached", triedAt: tried }));
     expect(latestWord()).toBe("0.3.0");
-    expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d", builtWhen(tried)));
+    expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
     for (const [state, word] of [["checking", "checking"], ["unreached", "unreached"], ["off", "off"]] as const) {
       await show({ state, shape: "app", restartReturns: false, ...(state === "unreached" ? { triedAt: tried } : {}) });
       expect(latestWord()).toBe(word);
@@ -374,7 +377,7 @@ describe("About and the newest release", () => {
     expect(buttons()).not.toContain(ABOUT_WORDS.get("0.3.0"));
   });
 
-  it("offers Get with the release's page while behind, points Releases at the tag, and offers nothing new when level", async () => {
+  it("offers Get with the release's page while behind, keeps Releases on the releases list, and offers nothing new when level", async () => {
     shell("0.2.0", "0.2.0");
     useStore.setState({ release: read("0.3.0") });
     await mount({}, "about");
@@ -386,7 +389,7 @@ describe("About and the newest release", () => {
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
-    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases"]);
     await show(read("0.2.0"));
     expect(buttons()).toEqual([ABOUT_WORDS.releases]);
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));

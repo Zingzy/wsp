@@ -3,7 +3,7 @@
 // line each, the newest release as the host last read it, the computers whose
 // daemon is behind, and the road to the next release under them. A browser
 // tab has no shell half and shows the host's line alone.
-import { offlineFor, placeDaemonBehind, releaseAbove, releaseWord, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+import { placeDaemonBehind, releaseAbove, releaseWord, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { ABOUT_WORDS } from "./format.js";
@@ -24,8 +24,8 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
   if (release.state === "off") return ABOUT_WORDS.offHover;
   const missed = release.state === "unreached" && release.triedAt !== undefined ? builtWhen(release.triedAt, now) : undefined;
   if (release.latest === undefined || release.checkedAt === undefined) return missed === undefined ? undefined : ABOUT_WORDS.unreachedHover(missed);
-  const ago = offlineFor(now - Date.parse(release.checkedAt));
-  return missed === undefined ? ABOUT_WORDS.readHover(ago) : ABOUT_WORDS.missedHover(ago, missed);
+  const when = ABOUT_WORDS.readWhen(now - Date.parse(release.checkedAt));
+  return missed === undefined ? ABOUT_WORDS.readHover(when) : ABOUT_WORDS.missedHover(when, missed);
 }
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
@@ -53,7 +53,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
               {ABOUT_WORDS.get(behind.version)}
             </Button>
           )}
-          <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(behind?.url ?? RELEASES)}>
+          <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>
         </>
