@@ -25,18 +25,33 @@ export const SETTINGS_WORDS = {
   appearance: "Appearance",
   theme: "Theme",
   themeDescription: "The side this Mac is set to, or one side whatever it is set to.",
-  sidebarWidth: "Sidebar width",
-  sidebarWidthDescription: "From 220 to 480 pixels. Dragging the sidebar's edge moves it too.",
-  textSize: "Terminal text size",
-  textSizeDescription: "The app's own size, or the size your Ghostty file names.",
 } as const;
 
-/** Each side as its segment names it. */
+/** Each side as its picture names it. */
 export const THEME_WORDS: Record<ThemePreference, string> = {
   system: "System",
   light: "Light",
   dark: "Dark",
 };
+
+/** What each pick does, said under the pictures. */
+export const THEME_SAYS: Record<ThemePreference, string> = {
+  system: "Follows this Mac, light by day and dark by night if it is set that way.",
+  light: "Always light, whatever this Mac is set to.",
+  dark: "Always dark, whatever this Mac is set to.",
+};
+
+/** The sentence under each settings page's name: what the page is for, before any row. */
+export const GROUP_BLURBS = {
+  general: "How wsp behaves on this Mac.",
+  appearance: "How wsp looks, on every screen that opens it.",
+  computers: "The computers your workspaces run on. This Mac is the first one.",
+  projects: "The repos wsp makes workspaces from, each on one computer.",
+  devices: "The phones and other computers paired with this wsp.",
+  account: "Your sign-in, which lets your other devices find this wsp.",
+  keybindings: "The keys wsp answers to.",
+  about: "Which wsp this is.",
+} as const;
 
 /** What the Computers pages say beyond the words the wire already carries in PLACES_WORDS: the list row, a
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
@@ -161,6 +176,12 @@ export const DEVICES_WORDS = {
 
 /** Settings > Projects: the list, a project's own page and its one act. */
 export const PROJECTS_WORDS = {
+  look: "Look",
+  about: "About",
+  icon: "Icon",
+  iconDescription: "Drawn beside the project in the sidebar and the switcher.",
+  hue: "Colour",
+  hueDescription: "The icon's colour, so the project reads at a glance.",
   title: "Projects",
   add: "Add a project",
   on: (computer: string): string => `on ${computer}`,

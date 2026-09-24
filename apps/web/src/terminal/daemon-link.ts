@@ -7,7 +7,7 @@
 // cannot protocol-ping, so liveness is an app-level ping op, and every channel
 // is fresh, so the pane re-subscribes on every live transition.
 import { DaemonErrorCode, DaemonEvent, linkBackoffMs, type DaemonChannelEvent, type DaemonLinkStatus } from "@wsp/protocol";
-import type { DaemonApi } from "../protocol/client.js";
+import type { DaemonApi, DaemonTarget } from "../protocol/client.js";
 import { errorText } from "../lib/utils.js";
 import { NOT_OPENED_YET, type TerminalWire } from "./link.js";
 
@@ -26,7 +26,7 @@ export class DaemonRequestError extends Error {
 
 export interface DaemonLinkOptions {
   daemon: DaemonApi;
-  workspaceId: string;
+  target: DaemonTarget;
   onEvent(e: DaemonEvent): void;
   /** Fires on every transition, with the door's sentence when the status is refused; dead is terminal. */
   onStatus?(s: DaemonLinkStatus, refusal?: string): void;
@@ -212,7 +212,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     if (status !== "refused") setStatus(dialing());
     let opened: { channel: string };
     try {
-      opened = await opts.daemon.open(opts.workspaceId);
+      opened = await opts.daemon.open(opts.target);
     } catch (e) {
       if (closed) return;
       const kind = (e as { kind?: unknown }).kind;

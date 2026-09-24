@@ -11,15 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { SETTINGS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, GROUP_BLURBS, SETTINGS_WORDS, THEME_SAYS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useThemeEffect } from "../src/settings/theme.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
-import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
-import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
-import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds, wordOf } from "./settings-harness.js";
+import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds } from "./settings-harness.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false, shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
@@ -31,7 +29,6 @@ const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId
 const group = (name: string): HTMLElement => screen.getByRole("radiogroup", { name });
 const checked = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.getAttribute("aria-checked") ?? "");
 const segments = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.textContent ?? "");
-const widthField = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k=sidebar-width]")!;
 const field = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k=settings-search] input, input[data-k=settings-search]")!;
 const restore = (): HTMLElement | null => document.querySelector("[data-k=restore-defaults]");
 
@@ -137,18 +134,17 @@ describe("search", () => {
     useStore.setState({ places: [here], projects: [project("pr_spoo", "spoo")] });
     mountSettings({ api: settingsApi().api });
     await settle();
-    fireEvent.change(field(), { target: { value: "width" } });
+    // A line matches by its hover sentence too.
+    fireEvent.change(field(), { target: { value: "serves this page" } });
     expect(pageAt()).toBe("search");
     expect(crumb()).toBe("Settings/Search");
-    expect(rowTitles()).toEqual([SETTINGS_WORDS.sidebarWidth]);
-    expect(document.querySelector("[data-k=search-group-appearance]")?.textContent).toBe(SETTINGS_WORDS.appearance);
-    // The pick made on the results page is made: the stepper writes the record from here.
-    fireEvent.click(screen.getByRole("button", { name: "Wider" }));
-    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH + 8));
+    expect(lineLabels()).toEqual([ABOUT_WORDS.host]);
+    expect(rowTitles()).toEqual([]);
+    expect(document.querySelector("[data-k=search-group-about]")?.textContent).toBe(ABOUT_WORDS.title);
     // A computer or a project under a dimmed group dims with it: left lit under a dimmed head it would read as
     // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(dimmed).toEqual(["group:appearance", "group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
     expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("opacity-50");
@@ -179,7 +175,9 @@ describe("the row grammar", () => {
   });
   const check = (where: string): void => {
     const { rows, lines, cards } = walk();
-    expect(rows.length + lines.length, where).toBeGreaterThan(0);
+    // Appearance is the theme picker alone, drawn in place of a card's rows.
+    if (where === "appearance") expect(document.querySelector("[data-settings-page] [data-k=theme-picker]"), where).not.toBeNull();
+    else expect(rows.length + lines.length, where).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.querySelector("[data-settings-title]")?.textContent, `${where}: a row's title`).not.toBe("");
       expect(row.querySelector("[data-settings-description]")?.textContent, `${where}: a row's description`).not.toBe("");
@@ -199,7 +197,7 @@ describe("the row grammar", () => {
     }
     for (const card of cards) {
       const kinds = new Set([...card.querySelectorAll("[data-settings-row], [data-settings-line]")].map(el => (el.hasAttribute("data-settings-row") ? "row" : "line")));
-      expect(kinds.size, `${where}: a card holds rows or lines, never both`).toBe(1);
+      expect(kinds.size, `${where}: a card holds rows or lines, never both`).toBeLessThanOrEqual(1);
     }
     for (const held of document.querySelectorAll("[data-settings-page] button[disabled]")) expect(held.hasAttribute("title"), `${where}: no disabled control carries a title`).toBe(false);
   };
@@ -259,37 +257,19 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ theme: "light" }, { theme: "dark" }]);
   });
 
-  it("the width steps by eight, types, clamps to the drag's bounds and writes one patch per change; the text size segments read App and Ghostty file and the word resolves as the three cases", async () => {
-    const { api, sets } = settingsApi({ hostTerminalConfig: async () => FILE } as Partial<Api>);
+  it("is the page's head over the theme picker alone, and the line under the pictures says what the pick does", async () => {
+    const { api } = settingsApi();
     mountSettings({ api });
     await settle();
-    expect(widthField().value).toBe(String(SIDEBAR_DEFAULT_WIDTH));
-    expect(widthField().className).toContain("font-mono");
-    fireEvent.click(screen.getByRole("button", { name: "Wider" }));
-    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(SIDEBAR_DEFAULT_WIDTH + 8));
-    fireEvent.change(widthField(), { target: { value: "300" } });
-    fireEvent.blur(widthField());
-    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(300));
-    fireEvent.change(widthField(), { target: { value: "1000" } });
-    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(480));
-    fireEvent.blur(widthField());
-    fireEvent.change(widthField(), { target: { value: "10" } });
-    await waitFor(() => expect(useStore.getState().preferences.sidebarWidth).toBe(220));
-    fireEvent.blur(widthField());
-    expect(segments(SETTINGS_WORDS.textSize)).toEqual(["App", "Ghostty file"]);
-    expect(wordOf("terminal-size")).toBe(`${appTerminalFontSize()} px`);
-    fireEvent.click(within(group(SETTINGS_WORDS.textSize)).getByRole("radio", { name: "Ghostty file" }));
-    await waitFor(() => expect(wordOf("terminal-size")).toBe("16 px"));
-    await settle();
-    expect(sets).toEqual([{ sidebarWidth: SIDEBAR_DEFAULT_WIDTH + 8 }, { sidebarWidth: 300 }, { sidebarWidth: 480 }, { sidebarWidth: 220 }, { terminalSize: "file" }]);
-    // A file naming no size hands the pane the app's own.
-    document.body.innerHTML = "";
-    resetSettings();
-    const bare = settingsApi({ hostTerminalConfig: async () => ({ ...FILE, fontSize: undefined }) } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, terminalSize: "file" });
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, terminalSize: "file" } });
-    mountSettings({ api: bare.api });
-    await settle();
-    expect(wordOf("terminal-size")).toBe(`${appTerminalFontSize()} px`);
+    const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
+    expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
+    expect(head.querySelector("p")!.textContent).toBe(GROUP_BLURBS.appearance);
+    expect(document.querySelectorAll("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")).toHaveLength(0);
+    expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
+    expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
+    expect(document.querySelector("[data-k=theme-says]")!.textContent).toBe(THEME_SAYS.system);
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    await waitFor(() => expect(document.querySelector("[data-k=theme-says]")!.textContent).toBe(THEME_SAYS.dark));
   });
 
   it("Restore defaults is absent on the defaults, stands once any pick is off them, writes the one patch, and is absent on every other group", async () => {
@@ -297,16 +277,16 @@ describe("Appearance", () => {
     mountSettings({ api });
     await settle();
     expect(restore()).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Wider" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
     await waitFor(() => expect(restore()).not.toBeNull());
     fireEvent.click(document.querySelector("[data-k=settings-about]")!);
     expect(restore()).toBeNull();
     fireEvent.click(document.querySelector("[data-k=settings-appearance]")!);
     fireEvent.click(restore()!);
     await waitFor(() => expect(restore()).toBeNull());
-    expect(useStore.getState().preferences.sidebarWidth).toBeUndefined();
+    expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", sidebarWidth: null, terminalSize: "app" });
+    expect(sets.at(-1)).toEqual({ theme: "system" });
   });
 });
 

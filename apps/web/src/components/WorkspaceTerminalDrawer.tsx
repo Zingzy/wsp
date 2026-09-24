@@ -14,6 +14,7 @@ import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { reconcileTerminalIds, type TerminalUiState } from "../terminal/groups.js";
 import { getTerminals, onTerminals, type PtyTabView, type WorkspaceTerminals } from "../terminal/link.js";
 import { useTerminalPane } from "../terminal/paneWords.js";
+import { HERE_KEY, HERE_WHERE } from "../terminal/computer.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 
 // One first-open spawn per link: concurrent mounts share the create and a
@@ -40,14 +41,20 @@ export function lostTerminals(tabs: readonly PtyTabView[]): ReadonlySet<string> 
   return new Set(tabs.filter(t => t.lost).map(t => t.ptyId));
 }
 
-export function WorkspaceTerminalDrawer({ workspaceId }: { workspaceId: string }) {
+/** `where` names the computer and folder the drawer's shells run in, for a drawer that is not a workspace's. */
+export function WorkspaceTerminalDrawer({ workspaceId, where }: { workspaceId: string; where?: string }) {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
   const ui = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId));
   if (!terms || !ui.terminalOpen) return null;
-  return <LinkedDrawer terms={terms} workspaceId={workspaceId} ui={ui} />;
+  return <LinkedDrawer terms={terms} workspaceId={workspaceId} ui={ui} {...(where !== undefined ? { where } : {})} />;
 }
 
-function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; workspaceId: string; ui: TerminalUiState }) {
+/** The drawer on this computer's own terminal, whose shells open in the home folder. */
+export function ComputerTerminalDrawer() {
+  return <WorkspaceTerminalDrawer workspaceId={HERE_KEY} where={HERE_WHERE} />;
+}
+
+function LinkedDrawer({ terms, workspaceId, ui, where }: { terms: WorkspaceTerminals; workspaceId: string; ui: TerminalUiState; where?: string }) {
   const tabs = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.tabs());
   const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
   const refusal = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.refusal());
@@ -77,6 +84,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
   return (
     <ThreadTerminalDrawer
       workspaceId={workspaceId}
+      {...(where !== undefined ? { where } : {})}
       height={ui.terminalHeight}
       terminalIds={shown.terminalIds}
       activeTerminalId={shown.activeTerminalId}

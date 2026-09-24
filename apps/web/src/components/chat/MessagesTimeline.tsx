@@ -221,6 +221,8 @@ export interface MessagesTimelineProps {
   onManualNavigation?: () => void;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
+  /** Lines that belong to the transcript's end, scrolled with it above the composer's inset. */
+  footer?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +260,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onManualNavigation = NOOP_MANUAL_NAVIGATION,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
+  footer = null,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -593,7 +596,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               topFadeEnabled && "topbar-scroll-fade",
             )}
             ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
-            ListFooterComponent={TIMELINE_LIST_FOOTER}
+            ListFooterComponent={
+              <>
+                {footer}
+                {TIMELINE_LIST_FOOTER}
+                <div aria-hidden className="h-(--chat-composer-inset,0px)" />
+              </>
+            }
           />
           <TimelineMinimap
             items={minimapItems}

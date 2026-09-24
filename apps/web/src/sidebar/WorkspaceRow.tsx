@@ -22,7 +22,7 @@
 // the same slot, opened from the menu or by a double-click on the name, so the
 // row keeps its height and its grammar. The words come from workspaceRows.ts
 // and the actions from the workspace registry.
-import { ChevronDownIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { needsRebuild, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
@@ -35,9 +35,9 @@ import { RowNameInput } from "./RowNameInput.js";
 import { GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SELECTED_ROW_GLYPH_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { holdsStateWord, metaSentences, stateSlotWord, workspaceMetaLine, workspaceMetaTitle } from "./workspaceRows.js";
 
-/** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
-const GLYPH_CLASS = cn(HOVER_GLYPH_CLASS, "peer-data-[size=lg]/menu-button:top-1 right-2");
-const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
+/** The glyphs sit on line one of a two-line row, centred on it, the inner one a slot in from the edge one. */
+const GLYPH_CLASS = cn(HOVER_GLYPH_CLASS, "peer-data-[size=lg]/menu-button:top-4");
+const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7.5");
 /** The slot holds the longest state word there is, so a word arriving or leaving never moves the name beside it:
  * Unreachable measures 72.9 px in the row's mono at 11 px, and at 44 px the slot took the 16 px it needed off the
  * name, which moved under a person reading it. The word yields to the glyphs on hover and focus, and to the
@@ -97,6 +97,7 @@ export function WorkspaceRow({
   const metaWhole = workspaceMetaTitle({ project, absent, outOfMemory, broughtBack });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);
+  const onBranch = meta !== "" && !metaIsProse && broughtBack === undefined;
   // The registry decides which of these a workspace of this kind in this state takes at all; the row draws the
   // glyph for one it was handed and nothing where it was handed none.
   const forgetAction = actionIfAny(actions, "forget");
@@ -143,7 +144,9 @@ export function WorkspaceRow({
         {lines === 2 ? (
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={TWO_LINE_FIRST_CLASS}>{first}</span>
-            <span className={TWO_LINE_SECOND_CLASS}>
+            <span className={cn(TWO_LINE_SECOND_CLASS, "gap-1.5")}>
+              {/* The branch says what it is by its glyph; a sentence in the same slot needs none. */}
+              {onBranch ? <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" /> : null}
               <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "min-w-0 flex-1 truncate")} title={absent?.sentence ?? metaWhole}>
                 {meta}
               </span>

@@ -284,6 +284,11 @@ pub fn fetch(to: &Path, branch: &str) -> Option<String> {
 /// when it was copied, and every untracked file dropped. `clean -fd` and not `-fdx`, so the dependencies and the
 /// config files git ignores stay and the half-edited work does not.
 pub fn reset_to(to: &Path, branch: &str, sha: &str) -> Result<(), String> {
+    // The records are the folder's worktrees, copied in with its git directory; kept, git refuses a branch one holds.
+    match std::fs::remove_dir_all(to.join(".git").join("worktrees")) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", to.join(".git/worktrees").display())),
+        _ => {}
+    }
     let checked = git(to, &["checkout", "-f", "-B", branch, sha], WRITE_MS).map_err(|e| format!("git checkout: {e}"))?;
     if !checked.ok() {
         return Err(checked.why());

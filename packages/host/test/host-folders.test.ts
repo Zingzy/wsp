@@ -161,7 +161,7 @@ describe("this computer's folder listing", () => {
 });
 
 describe("the repos listing and this computer's own window", () => {
-  it("answers every repo under home with its branch, newest first, and walks into no repo, dependency folder or linked worktree", () => {
+  it("answers every repo under home with its branch, newest first, leaving out dependency folders, linked worktrees and workspace copies", () => {
     const { home } = tree();
     mkdirSync(join(home, "deep", "a", "b", "kart", ".git"), { recursive: true });
     writeFileSync(join(home, "deep", "a", "b", "kart", ".git", "HEAD"), "ref: refs/heads/feature/x\n");
@@ -169,7 +169,8 @@ describe("the repos listing and this computer's own window", () => {
     mkdirSync(join(home, "node_modules", "lib", ".git"), { recursive: true });
     mkdirSync(join(home, "wt"), { recursive: true });
     writeFileSync(join(home, "wt", ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
-    const listing = listHostRepos({ home });
+    mkdirSync(join(home, "code", "spoo-pricing", ".git"), { recursive: true });
+    const listing = listHostRepos({ home, copies: [join(home, "code", "spoo-pricing")] });
     const paths = listing.folders.map(f => f.path).sort();
     expect(paths).toEqual([join(home, "code", "spoo"), join(home, "deep", "a", "b", "kart")].sort());
     expect(listing.folders.find(f => f.path.endsWith("kart"))?.branch).toBe("feature/x");

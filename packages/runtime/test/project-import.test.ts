@@ -353,9 +353,9 @@ describe("project.import on a workspace", () => {
     expect(bundler.calls).toEqual([]);
   });
 
-  it("over the wire the host's folder browser answers host.folders with the level asked for; a server without one refuses it", async () => {
+  it("over the wire the host's folder browser answers host.folders with the level asked for, wide only for this computer's own window; a server without one refuses it", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    const asked: { dir?: string; hidden?: boolean }[] = [];
+    const asked: { dir?: string; hidden?: boolean; repos?: boolean; wide?: boolean }[] = [];
     const listing: HostFolderListing = { dir: SOURCE, roots: ["/Users/dev", "/Volumes/work/api"], folders: [{ path: `${SOURCE}/spoo`, repo: true }], hidden: 3 };
     srv = await serveRuntime(rt, {
       port: 0,
@@ -369,7 +369,8 @@ describe("project.import on a workspace", () => {
     });
     expect(await wsRequest(srv.port, "t", { op: "host.folders", dir: SOURCE, hidden: true })).toMatchObject({ ok: true, listing });
     expect(await wsRequest(srv.port, "t", { op: "host.folders" })).toMatchObject({ ok: true, listing });
-    expect(asked).toEqual([{ dir: SOURCE, hidden: true }, {}]);
+    expect(await wsRequest(srv.port, "t", { op: "host.folders", repos: true, origin: "here" })).toMatchObject({ ok: true, listing });
+    expect(asked).toEqual([{ dir: SOURCE, hidden: true, wide: false }, { wide: false }, { repos: true, wide: true }]);
     await srv.close();
     srv = await serveRuntime(rt, { port: 0, authToken: "t" });
     expect(await wsRequest(srv.port, "t", { op: "host.folders" })).toMatchObject({ ok: false, error: "this runtime cannot browse the folders on this computer" });

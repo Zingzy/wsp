@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, labs: false });
+    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, labs: false });
+    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -38,6 +38,18 @@ describe("the preferences record", () => {
     expect(applyPreferencesPatch(two, { access: { ws_a: null } }).access).toEqual({ ws_b: "plan" });
     // A record from a host that kept no picks reads as none, not as undefined a caller has to guard.
     expect(preferencesFrom({ theme: "light" }).access).toEqual({});
+  });
+
+  it("a project's look lands per project, a null entry dropping that project's, and a stored record without looks reads as none", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { projectLook: { pr_1: { icon: "rocket", hue: "teal" } } });
+    expect(one.projectLook).toEqual({ pr_1: { icon: "rocket", hue: "teal" } });
+    const two = applyPreferencesPatch(one, { projectLook: { pr_2: { hue: "blue" } } });
+    expect(two.projectLook).toEqual({ pr_1: { icon: "rocket", hue: "teal" }, pr_2: { hue: "blue" } });
+    expect(applyPreferencesPatch(two, { projectLook: { pr_1: null } }).projectLook).toEqual({ pr_2: { hue: "blue" } });
+    expect(preferencesFrom({ theme: "light" }).projectLook).toEqual({});
+    expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "rocket" } } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "unicorn" } } }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { hue: "blue", size: 3 } } }).success).toBe(false);
   });
 
   it("labs comes from the host's environment alone, and no patch carries it", () => {

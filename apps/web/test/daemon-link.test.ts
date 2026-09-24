@@ -28,7 +28,7 @@ let door: RefusingDoor | undefined;
 let tokenDir: string | undefined;
 
 function connect(over: RelayHarness, opts: Partial<Parameters<typeof connectDaemonLink>[0]> = {}, onEvent: (e: DaemonEvent) => void = () => {}): DaemonLink {
-  return connectDaemonLink({ daemon: over.api.daemon, workspaceId: over.workspaceId, onEvent, ...opts });
+  return connectDaemonLink({ daemon: over.api.daemon, target: { workspaceId: over.workspaceId }, onEvent, ...opts });
 }
 
 afterEach(async () => {

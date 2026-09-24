@@ -23,6 +23,8 @@ export interface HostFolderPaths {
   platform?: string;
   /** This computer's own window: the whole disk is a root after the home folder. */
   wide?: boolean;
+  /** The folders wsp made as workspace copies, which are repos of their own and never a project to add. */
+  copies?: readonly string[];
 }
 
 /** The project folders the records name, each once: an import lands a folder on the machine at the path it has here,
@@ -122,15 +124,17 @@ function repoFacts(dir: string): { branch?: string; touchedAt: number } {
 
 /** Every repo under the home folder and the project roots, most recently written first. Hidden folders, the Mac's
  * Library and the dependency and cache folders are not walked into, nor is a repo, whose own folders are its code. A
- * linked worktree, whose .git is a file, is left out: the repo it belongs to is listed at its own checkout. */
+ * linked worktree, whose .git is a file, is left out: the repo it belongs to is listed at its own checkout. So is a
+ * workspace copy wsp made, which is a repo of its own and belongs to the project it was copied from. */
 export function listHostRepos(paths: HostFolderPaths = {}): HostFolderListing {
   const roots = hostFolderRoots({ ...paths, wide: false });
   const machine = { home: roots[0]!, mac: (paths.platform ?? process.platform) === "darwin" };
+  const copies = new Set((paths.copies ?? []).map(p => resolve(p)));
   const found: HostFolder[] = [];
   const walk = (dir: string, depth: number): void => {
     if (found.length >= REPO_CAP) return;
     if (isRepoFolder(dir)) {
-      if (isFolder(join(dir, ".git"))) found.push({ path: dir, repo: true, ...repoFacts(dir) });
+      if (isFolder(join(dir, ".git")) && !copies.has(dir)) found.push({ path: dir, repo: true, ...repoFacts(dir) });
       return;
     }
     if (depth >= REPO_DEPTH) return;
@@ -157,7 +161,9 @@ export function listHostRepos(paths: HostFolderPaths = {}): HostFolderListing {
 export function hostFolders(workspaces: () => Promise<readonly WorkspaceView[]>): HostFolders {
   return {
     list: async req => {
-      const paths = { projects: importedProjectFolders(await workspaces()), wide: req.wide === true };
+      const all = await workspaces();
+      const copies = all.flatMap(w => (w.copy === undefined ? [] : [w.copy.path]));
+      const paths = { projects: importedProjectFolders(all), wide: req.wide === true, copies };
       return req.repos === true ? listHostRepos(paths) : listHostFolders(req, paths);
     },
   };

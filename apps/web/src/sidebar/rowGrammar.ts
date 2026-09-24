@@ -18,24 +18,24 @@ export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
 export const ROW_PROSE_CLASS = `${ROW_META_GRAMMAR} text-[var(--sidebar-prose)]`;
 /** A sentence with a period, which is read through rather than glanced at: the sans at the rows' size, in the ink
  * that clears AA. The leaf under a project with no workspace wears it. */
-export const ROW_SENTENCE_CLASS = "text-[13px] text-[var(--sidebar-prose)]";
+export const ROW_SENTENCE_CLASS = "text-sm text-[var(--sidebar-prose)]";
 /** Every row's text: the sans at 13 px, the kit's medium weight kept for the one selected row. A project row, the
  * search row and the head read in the rest ink; a workspace's name and a working thread's title take the sidebar's
  * foreground, since the rest ink on the dark side sits under the muted ink a settled title wears. */
-const ROW_TEXT_CLASS = "text-[13px] font-normal";
+const ROW_TEXT_CLASS = "text-sm font-normal";
 /** The one lifted row: the selected fill, and a hairline edge in the token the light side sets to the component
  * tier and the dark side leaves clear, so the lift reads on a light ground where a fill alone does not. */
 const LIFTED_ROW_CLASS = "data-[active=true]:inset-ring data-[active=true]:inset-ring-[var(--sidebar-row-edge)]";
 const ROW_SHAPE_CLASS = `rounded-[var(--control-radius)] px-2 py-0 text-left ${ROW_TEXT_CLASS} ${ROW_FADE_CLASS} ${LIFTED_ROW_CLASS}`;
 /** A one-line row: the search row, the switcher head, a project, a thread, a fold, a leaf, a workspace whose copy
  * carries no branch. 28 px whatever its words. */
-export const ONE_LINE_ROW_CLASS = `h-7 gap-2 ${ROW_SHAPE_CLASS}`;
+export const ONE_LINE_ROW_CLASS = `h-9 gap-2.5 ${ROW_SHAPE_CLASS}`;
 /** A two-line row: a workspace on a branch, a creation. 44 px: the first line is a one-line row's height, so the
  * tree's tick lands on it as on every other row, and the second line takes the rest. */
-export const TWO_LINE_ROW_CLASS = `h-11 items-start gap-2 ${ROW_SHAPE_CLASS}`;
-export const TWO_LINE_FIRST_CLASS = "flex h-7 items-center gap-2";
+export const TWO_LINE_ROW_CLASS = `h-13 items-start gap-2.5 ${ROW_SHAPE_CLASS}`;
+export const TWO_LINE_FIRST_CLASS = "flex h-8 items-center gap-2.5";
 export const TWO_LINE_SECOND_CLASS = "flex h-4 items-center leading-4";
-export const ROW_LEAD_CLASS = "flex size-3.5 shrink-0 items-center justify-center";
+export const ROW_LEAD_CLASS = "flex size-4 shrink-0 items-center justify-center";
 /** A row whose frame puts glyphs beside it on hover keeps its text running to its own inset: the glyphs land in the
  * slot at the row's right edge, where the word or the count yields to them, rather than taking room off the row. */
 export const GLYPH_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
@@ -49,15 +49,16 @@ export const SELECTED_ROW_GLYPH_CLASS = "max-md:peer-data-[active=true]/menu-but
 
 /** A child list of the tree: 15 px in, so its rail runs under the centre of the parent's lead (the 8 px inset plus
  * half the 14 px mark), no gap between rows, so the rail segments read as one line. */
-export const CHILD_LIST_CLASS = "ml-[15px] flex min-w-0 flex-col";
+export const CHILD_LIST_CLASS = "ml-4 flex min-w-0 flex-col";
 /** One item of a child list: the rail down its left edge for its whole height, a tick into its row's first line,
- * and the rail stopping at that tick on the last item, which is the elbow. Its row starts 1 px in, past the rail. */
+ * and the rail stopping at that tick on the last item, which is the elbow. Its row starts past the elbow, so a
+ * lifted or hovered row never paints over it. */
 export const RAIL_ITEM_CLASS =
-  "relative pl-px before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[14px] after:absolute after:top-[14px] after:left-0 after:h-px after:w-1.5 after:bg-[var(--sidebar-rail)]";
+  "relative pl-1.5 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[18px] after:absolute after:top-[18px] after:left-0 after:h-px after:w-1 after:bg-[var(--sidebar-rail)]";
 
-/** The sidebar footer's own row: 28 px, muted mono, the whole width. Every row in the foot wears it, so the foot
+/** The sidebar footer's own row: 36 px, muted, the whole width, the rows' own pitch. Every row in the foot wears it, so the foot
  * reads as one column whether the row is a button or a line with a link at its edge. */
-export const FOOT_ROW_GRAMMAR = "flex h-7 w-full items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-sidebar-muted-foreground";
+export const FOOT_ROW_GRAMMAR = "flex h-9 w-full items-center gap-2.5 rounded-md px-2 text-sm text-sidebar-muted-foreground";
 /** A foot row the whole width of which is pressed, with the same hover and focus every other row wears. The host
  * switcher and the Settings row are both one of these. */
 export const FOOT_ROW_CLASS = `${FOOT_ROW_GRAMMAR} transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none`;

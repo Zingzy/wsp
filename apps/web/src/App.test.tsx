@@ -21,7 +21,7 @@ const workspace: WorkspaceView = {
 
 function mount({ projects, workspaces, projectsRead = true }: { projects: ProjectView[]; workspaces: WorkspaceView[]; projectsRead?: boolean }) {
   useStore.setState({
-    api: { subscribe: () => () => {}, initGet: async () => ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null }) } as unknown as Api,
+    api: { subscribe: () => () => {}, sessionHistory: async () => [], initGet: async () => ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null }) } as unknown as Api,
     ready: true,
     projectsRead,
     projects,
@@ -52,18 +52,19 @@ describe("what the centre of the window shows", () => {
   it("is nothing at all until the host has answered about the projects, so that screen never paints over work", () => {
     mount({ projects: [], workspaces: [], projectsRead: false });
     expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
-    expect(screen.queryByText("Pick a workspace to continue")).toBeNull();
+    expect(document.querySelector("[data-k=project-home]")).toBeNull();
   });
 
-  it("is not the first run while a workspace stands, whose project record has not arrived yet", () => {
+  it("is not the first run while a workspace stands, whose project record has not arrived yet, and no project's home either", () => {
     mount({ projects: [], workspaces: [workspace] });
     expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
-    expect(screen.getByText("Pick a workspace to continue")).toBeDefined();
+    expect(document.querySelector("[data-k=project-home]")).toBeNull();
   });
 
-  it("is the line that asks for a pick once there is a project and nothing is picked", () => {
+  it("is the first project's home once there is a project and nothing is picked, never a line that asks for a pick", () => {
     mount({ projects: [project], workspaces: [workspace] });
-    expect(screen.getByText("Pick a workspace to continue")).toBeDefined();
+    expect(document.querySelector("[data-k=project-home]")).not.toBeNull();
     expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
+    expect(screen.queryByText("Pick a workspace to continue")).toBeNull();
   });
 });
