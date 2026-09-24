@@ -16,7 +16,7 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale">;
 export type AgentsOn =
   | { kind: "here"; project?: string }
   | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string> }
-  | { kind: "machine"; machine: Pick<Machine, "exec">; project?: string };
+  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string };
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */

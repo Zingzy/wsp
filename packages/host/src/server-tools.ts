@@ -3,10 +3,14 @@
 // command server is started once on the target as the login, with its own
 // command and variables, and asked initialize then tools/list over its stdin;
 // an address is asked the same over curl from the target, since it may be
-// reachable only from there. The deadline stops the server's whole process
-// group. A server behind a sign-in the harness holds is asked of the harness
-// for its word, and no login file is read. Values reach the child through its
-// environment or a private file, never a command line another login can read.
+// reachable only from there. The deadline stops the server's process group
+// and every process of the login still carrying the run's marker in its
+// environment, which reaches a child that left the group but not one that
+// cleared its environment, nor, on a Mac, an Apple binary whose environment
+// ps does not show. A server behind a sign-in the harness holds is asked of
+// the harness for its word, and no login file is read. Values reach the child
+// through its environment or a private file, never a command line another
+// login can read.
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { MCP_AGENTS, MCP_AGENT_IDS, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
@@ -19,25 +23,38 @@ export const TOOLS_DEADLINE_MS = 20_000;
 export const TOOLS_KEPT_MS = 60 * 60_000;
 /** The most of a server's tools answer read back; a list past it is refused, never cut. */
 const ANSWER_CAP = 1024 * 1024;
+/** What of a server's stdout and stderr is kept on the target while it runs; past it the rest is read and dropped.
+ * dd a byte at a time, since head holds a small answer in its buffer where the wait for it cannot see it. */
+const OUT_CAP = 4 * ANSWER_CAP;
+const ERR_CAP = 64 * 1024;
 const PROTOCOL_VERSION = "2025-06-18";
 
 const INITIALIZE = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "wsp", version: "1" } } });
 const INITIALIZED = JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" });
 const TOOLS_LIST = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" });
 
-/** Starts `"$@"` in `$1` (after the shift) in a process group of its own on a fifo, sends initialize, waits for its
- * answer, then initialized and tools/list, and waits for that answer; stops the group when it came or the time ran
- * out. Prints `\x1e<outcome> <exit>`, the tools answer's line, `\x1e`, then the tail of what it said on stderr.
- * Outcome 0 answered, 1 exited first, 2 late. */
+/** Starts `"$@"` in `$1` (after the shift) in a process group of its own on a fifo, with a marker in its environment,
+ * sends initialize, waits for its answer, then initialized and tools/list, and waits for that answer; stops the group
+ * and every process carrying the marker when it came or the time ran out. Prints `\x1e<outcome> <exit>`, the tools
+ * answer's line, `\x1e`, then the tail of what it said on stderr. Outcome 0 answered, 1 exited first, 2 late. */
 const stdioScript = (seconds: number): string =>
   [
     'c=$1; shift; [ -n "$c" ] && cd "$c"',
-    'd=$(mktemp -d) || exit 1',
+    'd=$(mktemp -d "${TMPDIR:-/tmp}/wsp-tools.XXXXXX") || exit 1',
     "trap 'rm -rf \"$d\"' EXIT",
     "trap '' PIPE",
-    'mkfifo "$d/in" || exit 1',
+    'mkfifo "$d/in" "$d/o" "$d/e" || exit 1',
+    "m=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
+    '[ -n "$m" ] || exit 1',
+    // Linux names a process's environment in /proc; a Mac's ps shows it after the command.
+    'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzx -- "WSP_TOOLS_RUN=$m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
+      'else l=$(ps eww -U "$(id -u)" -o pid=,command= | M="WSP_TOOLS_RUN=$m" awk \'index($0 " ", " " ENVIRON["M"] " ") { print $1 }\'); fi; [ -n "$l" ] && kill "-$1" $l 2>/dev/null; }',
     "set -m",
-    '"$@" < "$d/in" > "$d/out" 2> "$d/err" &',
+    `{ dd bs=1 count=${OUT_CAP} of="$d/out" 2>/dev/null; cat > /dev/null; } < "$d/o" &`,
+    "ro=$!",
+    `{ dd bs=1 count=${ERR_CAP} of="$d/err" 2>/dev/null; cat > /dev/null; } < "$d/e" &`,
+    "re=$!",
+    'WSP_TOOLS_RUN=$m "$@" < "$d/in" > "$d/o" 2> "$d/e" &',
     "p=$!",
     'exec 3> "$d/in"',
     `end=$((SECONDS + ${seconds}))`,
@@ -47,8 +64,9 @@ const stdioScript = (seconds: number): string =>
     "upto 1; r=$?",
     `[ "$r" = 0 ] && { printf '%s\\n%s\\n' ${shellQuote(INITIALIZED)} ${shellQuote(TOOLS_LIST)} >&3; upto 2; r=$?; }`,
     "exec 3>&-",
-    'kill -TERM -- "-$p" 2>/dev/null; sleep 0.2; kill -KILL -- "-$p" 2>/dev/null',
+    'kill -TERM -- "-$p" 2>/dev/null; sweep TERM; sleep 0.2; kill -KILL -- "-$p" 2>/dev/null; sweep KILL',
     'wait "$p" 2>/dev/null; x=$?',
+    'kill -KILL -- "-$ro" "-$re" 2>/dev/null',
     "printf '\\036%s %s\\n' \"$r\" \"$x\"",
     `grep -E '"id"[[:space:]]*:[[:space:]]*2[[:space:]]*[,}]' "$d/out" | head -c ${ANSWER_CAP + 1}`,
     "printf '\\036'",
@@ -121,14 +139,21 @@ type Asked = Omit<ServerToolsAnswer, "readAt">;
 
 const RUN_MARGIN_MS = 10_000;
 
-async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number): Promise<Asked> {
+const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const variableNameRefusal = (name: string): string => `its variable ${JSON.stringify(name)} is not a name a shell takes, so it was not started`;
+
+async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, log: (said: string) => void): Promise<Asked> {
+  const bad = Object.keys(t.env).find(k => !SHELL_NAME.test(k));
+  if (bad !== undefined) return { auth: "failed", refused: variableNameRefusal(bad) };
   const out = await host.exec.run("bash", ["-c", stdioScript(Math.max(1, Math.ceil(deadlineMs / 1000))), "bash", cwd, t.command, ...t.args], { env: t.env, timeoutMs: deadlineMs + RUN_MARGIN_MS });
   const [, head = "", err = ""] = (out ?? "").split("\x1e");
   const [status = "", ...rest] = head.split("\n");
   const [outcome, exit] = status.trim().split(" ");
   if (out === undefined || outcome === undefined || outcome === "") return { auth: "failed", refused: "it could not be started there" };
+  // What a server says on stderr may carry its own key, so it goes to the host's log and never onto the page.
+  if (outcome !== "0" && err.trim() !== "") log(`it said on stderr: ${err.trim()}`);
   if (outcome === "2") return { auth: "failed", refused: serverToolsLateRefusal(deadlineMs) };
-  if (outcome === "1") return { auth: "failed", refused: lastLine(err) ?? `it exited with ${exit ?? "no code"} before it answered` };
+  if (outcome === "1") return { auth: "failed", refused: `it exited with ${exit ?? "no code"} before it answered` };
   const read = toolsOf(rest.join("\n"));
   return "tools" in read ? { auth: "open", tools: read.tools } : { auth: "failed", refused: read.refused };
 }
@@ -157,7 +182,7 @@ async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string
   const check = agent.mcp.check;
   if (check === undefined) return { auth: "unknown", holder: agent.id };
   const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs + RUN_MARGIN_MS });
-  return { auth: (out === undefined ? undefined : check.auth(out)) ?? "unknown", holder: agent.id };
+  return { auth: (out === undefined ? undefined : check.auth(out, name)) ?? "unknown", holder: agent.id };
 }
 
 /** One server as its agent's file defines it there: the agent's own file first, then the project's. */
@@ -201,7 +226,11 @@ export interface KeptTools {
 /** The tools of one server there, kept an hour per target and per definition, so an edited entry is asked again.
  * Only a list is kept: an answer that brought none back, a refusal or a harness's word on a sign-in the person may
  * have just changed, is asked again on the next click. */
-export async function serverTools(host: Host, ask: ServerToolsAsk, o: { kept: Map<string, KeptTools>; now: () => number; project?: string; deadlineMs?: number }): Promise<ServerToolsAnswer> {
+export async function serverTools(
+  host: Host,
+  ask: ServerToolsAsk,
+  o: { kept: Map<string, KeptTools>; now: () => number; project?: string; deadlineMs?: number; log: (line: string) => void },
+): Promise<ServerToolsAnswer> {
   const agent = MCP_AGENTS.find(a => a.id === ask.agent);
   if (agent === undefined) throw new Error(noMcpAgentRefusal(ask.agent));
   const found = await findServer(host, agent, ask.name, o.project);
@@ -215,7 +244,7 @@ export async function serverTools(host: Host, ask: ServerToolsAsk, o: { kept: Ma
   const cwd = found.project && o.project !== undefined ? o.project : host.home;
   const t = found.server.transport;
   let asked: Asked;
-  if (t.kind === "stdio") asked = await askStdio(host, t, t.cwd ?? cwd, deadlineMs);
+  if (t.kind === "stdio") asked = await askStdio(host, t, t.cwd ?? cwd, deadlineMs, said => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${said}`));
   else {
     const http = await askHttp(host, t, deadlineMs);
     asked = "unauthorized" in http ? await askHarness(host, agent, ask.name, cwd, deadlineMs) : http;

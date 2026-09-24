@@ -180,11 +180,11 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
 /** The reader the runtime is wired with: this computer's own Host for this computer and a workspace on it, and
  * machineHost for everything else, after one read of who its lines run as. A computer you joined hands a command
  * its stdin, so the variables a started server is given ride there. Each server's tools answer is kept here. */
-export function agentsReader(o: { vault: () => Readonly<Record<string, string>>; here?: () => Host; now?: () => number; toolsMs?: number }): AgentsReader {
+export function agentsReader(o: { vault: () => Readonly<Record<string, string>>; here?: () => Host; now?: () => number; toolsMs?: number; log?: (line: string) => void }): AgentsReader {
   const kept = new Map<string, KeptTools>();
   const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string }> => {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
-    return { host: machineHost(on.machine, login, { envOnStdin: on.kind === "box" }), user: login.user };
+    return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user };
   };
   return {
     read: async (on: AgentsOn) => {
@@ -197,7 +197,7 @@ export function agentsReader(o: { vault: () => Readonly<Record<string, string>>;
     tools: async (on, ask) => {
       const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
       const project = on.kind === "box" ? undefined : on.project;
-      return serverTools(host, ask, { kept, now: o.now ?? Date.now, ...(project !== undefined ? { project } : {}), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
+      return serverTools(host, ask, { kept, now: o.now ?? Date.now, log: o.log ?? (line => console.warn(line)), ...(project !== undefined ? { project } : {}), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
     },
   };
 }

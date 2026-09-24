@@ -10,7 +10,7 @@ import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
-import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
+import { CLAUDE_MCP_CHECK, CODEX_MCP_CHECK } from "./mcp-check.js";
 import { RELEASE_PINS } from "./release-pins.js";
 import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
@@ -222,7 +222,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope" },
+    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope", check: CODEX_MCP_CHECK },
     hooks: CODEX_HOOKS,
     configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
