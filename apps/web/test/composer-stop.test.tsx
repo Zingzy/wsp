@@ -136,7 +136,7 @@ describe("composer stop", () => {
     };
     fireEvent.click(stopButton());
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
-    await waitFor(() => expect(footer()).toContain("completed"));
+    await waitFor(() => expect(footer()).toContain("Worked for"));
     await settle();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop generation|Stopping/ })).toBeNull();

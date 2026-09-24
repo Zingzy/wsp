@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import { FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
+import { Activity, Cpu, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -47,23 +47,28 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddMachine: () => void;
+  onAddProcesses: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
+  machineAvailable: boolean;
+  processesAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
-  heldLine?: string;
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "diff";
+type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   browser: "Available while the workspace is running.",
   terminal: "Available while the workspace is running.",
   diff: "Review changes once the workspace is running.",
+  machine: "Available when a workspace is selected.",
+  processes: "Available while the workspace is running.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -160,9 +165,13 @@ function surfaceActions(
     | "onAddBrowser"
     | "onAddTerminal"
     | "onAddDiff"
+    | "onAddMachine"
+    | "onAddProcesses"
     | "browserAvailable"
     | "terminalAvailable"
     | "diffAvailable"
+    | "machineAvailable"
+    | "processesAvailable"
     | "unavailableReasons"
   >,
 ): readonly SurfaceAction[] {
@@ -198,6 +207,26 @@ function surfaceActions(
       disabledReason: reason("diff"),
       onClick: props.onAddDiff,
     },
+    {
+      key: "machine",
+      label: "Workspace",
+      description: "Load, memory and disk.",
+      icon: Cpu,
+      shortcut: "M",
+      available: props.machineAvailable,
+      disabledReason: reason("machine"),
+      onClick: props.onAddMachine,
+    },
+    {
+      key: "processes",
+      label: "Processes",
+      description: "Inspect and kill what runs.",
+      icon: Activity,
+      shortcut: "P",
+      available: props.processesAvailable,
+      disabledReason: reason("processes"),
+      onClick: props.onAddProcesses,
+    },
   ];
 }
 
@@ -209,8 +238,8 @@ function surfaceActions(
  * cannot open stays visible with a one-line reason. The person's word for one
  * of these is panel; surface is ours and stays in the code.
  */
-function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLine?: string }) {
-  const { actions, heldLine } = props;
+function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
+  const { actions } = props;
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
@@ -308,13 +337,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLi
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
-          {heldLine !== undefined ? (
-            <p className="mt-1 font-mono text-muted-foreground text-xs">{heldLine}</p>
-          ) : (
-            <p className="mt-1 text-muted-foreground text-xs">
-              A browser, a terminal or the diff in this workspace.
-            </p>
-          )}
+          <p className="mt-1 text-muted-foreground text-xs">
+            A browser, a terminal, the diff, the workspace or what runs on it.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {actions.map((action) =>
@@ -360,11 +385,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLi
                   {actionIcon(action)}
                   <span className="font-medium text-sm">{action.label}</span>
                 </span>
-                {heldLine === undefined ? (
-                  <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                    {action.disabledReason}
-                  </span>
-                ) : null}
+                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                  {action.disabledReason}
+                </span>
               </div>
             ),
           )}
@@ -382,6 +405,10 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "machine":
+      return "Workspace";
+    case "processes":
+      return "Processes";
     case "terminal":
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
     case "preview": {
@@ -403,6 +430,10 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <Globe2 className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
+    case "machine":
+      return <Cpu className="size-3 shrink-0" />;
+    case "processes":
+      return <Activity className="size-3 shrink-0" />;
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
   }
@@ -558,7 +589,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState actions={addSurfaceActions} {...(props.heldLine !== undefined ? { heldLine: props.heldLine } : {})} />
+          <RightPanelEmptyState actions={addSurfaceActions} />
         ) : (
           props.children
         )}

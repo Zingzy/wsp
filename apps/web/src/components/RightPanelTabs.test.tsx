@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The right panel's launcher and its tab strip: three panes and no others,
+// The right panel's launcher and its tab strip: five panes and no others,
 // each with its own letter, and a pane the workspace cannot serve yet drawn
 // held with the one line that says why.
 import { cleanup, render, screen } from "@testing-library/react";
@@ -9,7 +9,7 @@ import type { RightPanelSurface } from "../rightPanelStore";
 
 const NONE: ReadonlySet<string> = new Set();
 
-function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean } = {}) {
+function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean } = {}) {
   return render(
     <RightPanelTabs
       mode="inline"
@@ -23,9 +23,13 @@ function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string |
       onAddBrowser={vi.fn()}
       onAddTerminal={vi.fn()}
       onAddDiff={vi.fn()}
+      onAddMachine={vi.fn()}
+      onAddProcesses={vi.fn()}
       browserAvailable
       terminalAvailable
       diffAvailable={over.diffAvailable ?? true}
+      machineAvailable
+      processesAvailable={over.processesAvailable ?? true}
     >
       <div data-pane />
     </RightPanelTabs>,
@@ -37,17 +41,13 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-surface-la
 afterEach(cleanup);
 
 describe("the right panel's launcher", () => {
-  it("offers Browser, Terminal and Diff and nothing else", () => {
+  it("offers Browser, Terminal, Diff, Workspace and Processes and nothing else", () => {
     draw();
-    expect(cards()).toEqual(["browser", "terminal", "diff"]);
-    expect(screen.getByText("Browser")).toBeTruthy();
-    expect(screen.getByText("Terminal")).toBeTruthy();
-    expect(screen.getByText("Diff")).toBeTruthy();
+    expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
+    for (const label of ["Browser", "Terminal", "Diff", "Workspace", "Processes"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Files")).toBeNull();
-    expect(screen.queryByText("Processes")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
-    expect(screen.queryByText("Workspace")).toBeNull();
-    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTD");
+    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDMP");
   });
 
   it("says what the Browser pane is for in the person's own words", () => {
@@ -57,15 +57,25 @@ describe("the right panel's launcher", () => {
 
   it("keeps a pane it cannot open drawn, held, with the one line that says why", () => {
     draw({ diffAvailable: false });
-    expect(cards()).toEqual(["browser", "terminal", "diff"]);
+    expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
     expect(diff.textContent).toContain("Review changes once the workspace is running.");
   });
 
-  it("names the open panes on the tab strip and nothing the panel no longer has", () => {
-    draw({ surfaces: [{ id: "diff", kind: "diff" }], activeSurfaceId: "diff" });
-    expect(document.querySelector("[data-right-panel-tab-list]")?.textContent).toContain("Diff");
+  it("holds Processes with the line that says why", () => {
+    draw({ processesAvailable: false });
+    const procs = document.querySelector<HTMLElement>('[data-surface-launch="processes"]')!;
+    expect(procs.dataset["available"]).toBe("false");
+    expect(procs.textContent).toContain("Available while the workspace is running.");
+  });
+
+  it("names the open panes on the tab strip", () => {
+    draw({ surfaces: [{ id: "diff", kind: "diff" }, { id: "machine", kind: "machine" }, { id: "processes", kind: "processes" }], activeSurfaceId: "diff" });
+    const strip = document.querySelector("[data-right-panel-tab-list]")?.textContent;
+    expect(strip).toContain("Diff");
+    expect(strip).toContain("Workspace");
+    expect(strip).toContain("Processes");
     expect(document.querySelector("[data-pane]")).not.toBeNull();
   });
 });

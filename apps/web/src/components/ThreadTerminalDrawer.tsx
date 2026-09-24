@@ -472,8 +472,6 @@ export function TerminalViewport({
 export interface ThreadTerminalDrawerProps {
   mode?: "drawer" | "panel";
   workspaceId: string;
-  /** Where the shells run, for a drawer that is not a workspace's: a header over the panes names it. */
-  where?: string;
   visible?: boolean;
   height: number;
   terminalIds: string[];
@@ -617,19 +615,9 @@ function ShellGoneOverlay({ onNewTerminal, label }: { onNewTerminal: () => void;
   );
 }
 
-/** The header a drawer that is not a workspace's carries: where its shells run, as state is written. */
-function DrawerWhere({ where }: { where: string }) {
-  return (
-    <div data-terminal-where className="flex h-[22px] shrink-0 items-center border-b border-border/70 px-2 font-mono text-[11px] text-muted-foreground">
-      {where}
-    </div>
-  );
-}
-
 export default function ThreadTerminalDrawer({
   mode = "drawer",
   workspaceId,
-  where,
   visible = true,
   height,
   terminalIds,
@@ -959,7 +947,7 @@ export default function ThreadTerminalDrawer({
         data-terminal-owner={isPanel ? "right-panel" : "drawer"}
         className={cn(
           "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",
-          isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
+          isPanel ? "h-full flex-1" : "shrink-0 border-t border-border",
         )}
         style={isPanel ? undefined : { height: `${drawerHeight}px` }}
       >
@@ -972,11 +960,10 @@ export default function ThreadTerminalDrawer({
             onPointerCancel={handleResizePointerEnd}
           />
         ) : null}
-        {where !== undefined ? <DrawerWhere where={where} /> : null}
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground" data-terminal-empty={pane.kind}>
           {pane.kind === "live" ? (
             <>
-              <p>{where !== undefined ? "No terminals open." : "No terminals for this workspace yet."}</p>
+              <p>No terminals open.</p>
               <Button size="xs" variant="outline" onClick={onNewTerminalAction}>
                 {newTerminalActionLabel}
               </Button>
@@ -1019,7 +1006,7 @@ export default function ThreadTerminalDrawer({
       data-terminal-owner={isPanel ? "right-panel" : "drawer"}
       className={cn(
         "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",
-        isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
+        isPanel ? "h-full flex-1" : "shrink-0 border-t border-border",
       )}
       style={isPanel ? undefined : { height: `${drawerHeight}px` }}
     >
@@ -1032,10 +1019,9 @@ export default function ThreadTerminalDrawer({
           onPointerCancel={handleResizePointerEnd}
         />
       ) : null}
-      {where !== undefined ? <DrawerWhere where={where} /> : null}
 
       {!hasTerminalSidebar && (
-        <div className={cn("pointer-events-none absolute right-2 z-20 flex flex-col items-end gap-1.5", where !== undefined ? "top-[30px]" : "top-2")}>
+        <div className="pointer-events-none absolute top-2 right-2 z-20 flex flex-col items-end gap-1.5">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
@@ -1092,7 +1078,6 @@ export default function ThreadTerminalDrawer({
         <div
           className={cn(
             "flex h-full min-h-0 bg-[var(--terminal-background)]",
-            hasTerminalSidebar && "gap-1.5",
           )}
         >
           <div className="min-w-0 flex-1">
@@ -1139,9 +1124,9 @@ export default function ThreadTerminalDrawer({
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="relative flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10" data-terminal-tabs>
+            <aside className="relative flex w-36 min-w-36 flex-col border-l border-border bg-muted/10" data-terminal-tabs>
               {fontOpen ? <TerminalFontCard className="absolute right-0 top-[22px] z-30" onClose={closeFont} /> : null}
-              <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
+              <div className="flex h-[22px] items-stretch justify-end border-b border-border">
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
                     className={`inline-flex h-full items-center px-1 text-foreground/90 transition-colors ${

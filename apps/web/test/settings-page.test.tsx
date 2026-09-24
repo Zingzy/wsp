@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, GROUP_BLURBS, SETTINGS_WORDS, THEME_SAYS } from "../src/settings/format.js";
+import { ABOUT_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useThemeEffect } from "../src/settings/theme.js";
@@ -257,19 +257,17 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ theme: "light" }, { theme: "dark" }]);
   });
 
-  it("is the page's head over the theme picker alone, and the line under the pictures says what the pick does", async () => {
+  it("is the page's name over the theme picker alone, with no sentence under either", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
-    expect(head.querySelector("p")!.textContent).toBe(GROUP_BLURBS.appearance);
+    expect(head.querySelector("p")).toBeNull();
     expect(document.querySelectorAll("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
-    expect(document.querySelector("[data-k=theme-says]")!.textContent).toBe(THEME_SAYS.system);
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
-    await waitFor(() => expect(document.querySelector("[data-k=theme-says]")!.textContent).toBe(THEME_SAYS.dark));
+    expect(within(group(SETTINGS_WORDS.theme)).queryByText(/whatever this Mac/)).toBeNull();
   });
 
   it("Restore defaults is absent on the defaults, stands once any pick is off them, writes the one patch, and is absent on every other group", async () => {

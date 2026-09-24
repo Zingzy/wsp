@@ -149,10 +149,16 @@ export function ChatView({
     return () => observer.disconnect();
   }, []);
   const showTranscript = thread.hydrated && !empty;
+  // A turn that completed says so by its reply standing, so its facts join that reply's row; any other ending keeps
+  // its own line, since the state word is the news.
+  const settledOnReply = view.settled?.state === "completed";
+  const replyMeta = settledOnReply ? (
+    <SettledFacts parts={turnSettledParts(view.settled!, openedSpend(opened), onThisComputer ? LIST_PRICE_WORD : undefined)} />
+  ) : null;
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreadRows opened={opened} /> : null}
-      {view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
+      {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
       {paused !== null ? <TimelineRuleLine data-workspace-paused line={paused} /> : null}
     </div>
   ) : null;
@@ -181,6 +187,7 @@ export function ChatView({
             onOpenFile={onOpenFile}
             onIsAtEndChange={onIsAtEndChange}
             footer={footer}
+            replyMeta={replyMeta}
             markdownCwd={cwd}
             workspaceRoot={cwd}
             resolvedTheme={appDark ? "dark" : "light"}
@@ -255,6 +262,19 @@ function OpenedThreadRows({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace>
         </TimelineRuleLine>
       ))}
     </>
+  );
+}
+
+function SettledFacts({ parts }: { parts: ReadonlyArray<string> }) {
+  return (
+    <p data-testid="settled-footer" className="flex flex-wrap items-center gap-x-2 text-muted-foreground text-xs tabular-nums">
+      {parts.map(part => (
+        <span key={part} className="whitespace-nowrap">
+          <span aria-hidden className="pe-2">·</span>
+          {part}
+        </span>
+      ))}
+    </p>
   );
 }
 

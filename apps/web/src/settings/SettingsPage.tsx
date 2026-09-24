@@ -14,7 +14,7 @@ import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
 import { CloudSetupDialog } from "../sidebar/CloudSetupDialog.js";
 import { AddComputerSheet } from "./AddComputerSheet.js";
 import { ComputerPage } from "./computers.js";
-import { GROUP_BLURBS, SETTINGS_WORDS } from "./format.js";
+import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
 import { ProjectPage } from "./projects.js";
 import { Card, cardDrops, Cards, Line, Row, ROW_CLASS } from "./rows.js";
@@ -68,9 +68,8 @@ function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
     const group = groupById(at.group);
     return (
       <>
-        <header data-k="settings-page-head" className="flex flex-col gap-1.5 pb-2">
+        <header data-k="settings-page-head" className="pb-2">
           <h1 className="text-lg font-medium tracking-tight">{group.name}</h1>
-          <p className="text-[13px] text-muted-foreground">{GROUP_BLURBS[at.group]}</p>
         </header>
         <Cards cards={group.cards(ctx)} />
       </>
