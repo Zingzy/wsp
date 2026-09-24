@@ -108,7 +108,7 @@ describe("wsp verbs over the host", () => {
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), daemonChannel: daemon.open });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -177,7 +177,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -509,6 +509,9 @@ describe("wsp verbs over the host", () => {
     const none = new NoProviderBackend();
     const elsewhere = stubBackend();
     await restartHost({}, memoryStore(), { wired: "none", backend: p => (p === "none" ? none : p === "elsewhere" ? elsewhere : undefined), list: () => ["none", "elsewhere"] }, none);
+    // The project stands on the provider this host forks on, which forks nothing, while another provider does.
+    await rt.projects.remove(cloud.id);
+    cloud = await projectOn(rt, "none");
     const bare = await run("new", "alpha");
     expect(bare.code).toBe(1);
     expect(bare.io.errors).toEqual([`wsp new: ${placeForksNothingPickLine("none", ["elsewhere"])}`]);
