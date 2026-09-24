@@ -151,6 +151,8 @@ export interface ServeOptions {
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
+  /** Takes one line per refused frame: the op, the kind and the sentence's first line, never the request itself. */
+  log?: (line: string) => void;
 }
 
 /** How the runtime asks the host who this wsp is signed in to. The host owns the records; the runtime owns who may
@@ -263,6 +265,24 @@ function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
     if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
     return opts.terminalConfig;
   };
+}
+
+/** The request fields a secret rides in. Their values are cut out of a log line even when a refusal repeats them. */
+const SECRET_FIELDS = ["token", "key", "rows", "code", "passphrase"];
+/** One level down and no deeper: a record of logins is as deep as a secret field goes, and a frame is a stranger's. */
+const leaves = (v: unknown): string[] =>
+  typeof v === "string" ? [v] : typeof v === "object" && v !== null ? Object.values(v).filter((x): x is string => typeof x === "string") : [];
+
+/** The log line of one refused frame. The op is read off a frame nobody has let in yet, so only a name shaped like
+ * an op is written, and never a line break a stranger sent. */
+function refusedLine(frame: unknown, payload: Record<string, unknown>): string {
+  const asked = isObjectFrame(frame) ? frame["op"] : undefined;
+  const op = typeof asked === "string" && /^[a-z][\w.-]{0,63}$/i.test(asked) ? asked : "frame";
+  const kind = typeof payload["kind"] === "string" ? payload["kind"] : "none";
+  let line = `refused ${op} kind=${kind}: ${String(payload["error"]).split("\n")[0]}`;
+  const secrets = isObjectFrame(frame) ? SECRET_FIELDS.flatMap(field => leaves(frame[field])) : [];
+  for (const secret of secrets) if (secret !== "") line = line.split(secret).join("[redacted]");
+  return line;
 }
 
 /** Every workspace a verb answers with goes through here on its way out. The record's view holds the display stream
@@ -495,11 +515,19 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       const text = JSON.stringify(payload);
       ws.send(seal === undefined ? text : seal.seal(text));
     };
+    const answering =
+      (frame: () => unknown) =>
+      (payload: Record<string, unknown>): void => {
+        send(payload);
+        if (payload["ok"] === false) opts.log?.(refusedLine(frame(), payload));
+      };
 
     const onMessage = (raw: unknown): void => {
       if (handedOver) return;
       void (async () => {
         let parsed: unknown;
+        // Every reply to this frame goes through here, so a refusal is logged against the request it answers.
+        const send = answering(() => parsed);
         try {
           // A frame that does not open under the key both ends agreed, and a frame sent in the clear after the
           // seal began, are both a carrier writing into this link rather than the computer on the other end.
@@ -763,14 +791,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "places.list":
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, places: await places().list(now()) });
               return;
             case "places.update": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, ...(await places().update(msg.placeId, msg.addId)) });
@@ -778,7 +806,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.remove": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
@@ -786,7 +814,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.dial": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
@@ -794,7 +822,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.doctor": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               if (opts.doctor === undefined) {
@@ -843,7 +871,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.add": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               // The addresses the computer being installed on is to dial are the door's own reading, asked for here
@@ -870,7 +898,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "account.get": {
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: ACCOUNT_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: ACCOUNT_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               if (opts.account === undefined) {
@@ -882,7 +910,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "devices.list":
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, devices: await devices().list() });
@@ -891,7 +919,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A paired computer takes any device's token away, its own included: the laptop is where a person
               // looks to see who holds a token to their box. A ticket's socket still cannot, whoever minted it.
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               // The reply goes between the record and the cut, so a device that revoked itself reads the answer
@@ -901,7 +929,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "ticket.issue": {
               if (stamped !== undefined) {
-                send({ id: msg.id, ok: false, error: RELAY_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: RELAY_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               const ticket = randomBytes(24).toString("base64url");
@@ -1055,7 +1083,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 // computer's own daemon where the place is this one.
                 if (msg.workspaceId !== undefined) throw new Error(DAEMON_OPEN_ONE_OF);
                 if (!ownRoad()) {
-                  send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                  send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                   return;
                 }
                 if (msg.placeId === HERE_PLACE_ID) ch = await rt.hereChannel(onEvent);
@@ -1206,7 +1234,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // What the person's computers and providers have cost them is read on the same road their list is:
               // a socket let in on a ticket sees neither.
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, places: await rt.status.spend((await rt.places?.list(now())) ?? []) });
@@ -1296,7 +1324,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               // Another computer's disk is read over the link it holds, which is the places road: the host's own.
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, listing: await placeFolders(msg.on, asked, origin) });
@@ -1359,12 +1387,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
           }
         } catch (e) {
-          const kind = (e as { kind?: unknown }).kind;
+          const { kind, fix } = e as { kind?: unknown; fix?: unknown };
           send({
             id: msg.id,
             ok: false,
             error: e instanceof Error ? e.message : String(e),
             ...(typeof kind === "string" ? { kind } : {}),
+            ...(typeof fix === "string" ? { fix } : {}),
           });
         }
       })();

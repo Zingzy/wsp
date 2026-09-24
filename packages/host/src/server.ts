@@ -52,7 +52,7 @@ export interface HostOptions {
   workspaceEnvs?: (golden: GoldenVersion) => Record<string, string>;
   probeTimeoutMs?: number;
   /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails;
-   * also one per sign-in page opened and per port forwarded, refused or closed. */
+   * also one per sign-in page opened, per port forwarded, refused or closed, and per frame the runtime refused. */
   log?: (line: string) => void;
   /** Opens a guest tool's sign-in URL on this computer; the platform opener by default (the desktop app passes its own). */
   openUrl?: UrlOpener;
@@ -646,6 +646,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
+      log,
     });
   } catch (e) {
     await relay.close();
