@@ -1754,7 +1754,14 @@ export type ProjectExportResult = z.infer<typeof ProjectExportResult>;
 // --- this computer's own folders, as a browser tab browses them ---------------
 
 /** One folder on the computer running the host. `repo` is a folder git tracks, which a picker marks. */
-export const HostFolder = z.object({ path: z.string(), repo: z.boolean() });
+export const HostFolder = z.object({
+  path: z.string(),
+  repo: z.boolean(),
+  /** On a repo found by a repos listing: the branch its checkout is on, absent on a detached head. */
+  branch: z.string().optional(),
+  /** On a repo found by a repos listing: when git last wrote to it, in ms, which the list is sorted by. */
+  touchedAt: z.number().optional(),
+});
 export type HostFolder = z.infer<typeof HostFolder>;
 /** One level of this computer's disk: the folder listed, the roots every level is browsed from (the home folder and
  * each imported project's own folder), the folders directly inside it, and how many were left out for being hidden.
@@ -5172,7 +5179,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
    * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
    * otherwise only counted. */
-  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
+  z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional(), repos: z.boolean().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */

@@ -1263,7 +1263,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "host.folders":
-              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}) }) });
+              // Only this computer's own window walks the whole disk: a paired or relayed device, or a thread on any
+              // machine, stays inside the home folder and the projects.
+              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}), ...(msg.repos === true ? { repos: true } : {}), wide: road === "here" && by === undefined }) });
               return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });

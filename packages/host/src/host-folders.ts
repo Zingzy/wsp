@@ -6,9 +6,10 @@
 // imported project's folder. The lexical check runs before anything under a
 // path is read and the realpath check refuses a symlink that leaves the roots,
 // so neither a typed path nor a link inside home reaches the rest of the disk.
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { CACHE_DIRS } from "@wsp/collect";
 import { hiddenFolder, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders } from "@wsp/runtime";
 import { under } from "./init-import.js";
@@ -21,6 +22,8 @@ export interface HostFolderPaths {
   projects?: readonly string[];
   /** What this computer runs, for the one folder a Mac keeps in every home; absent reads the process's own. */
   platform?: string;
+  /** This computer's own window: the whole disk is a root after the home folder. */
+  wide?: boolean;
 }
 
 /** The project folders the records name, each once: an import lands a folder on the machine at the path it has here,
@@ -50,8 +53,11 @@ function realOf(path: string): string | null {
 export function hostFolderRoots(paths: HostFolderPaths = {}): string[] {
   const home = resolve(paths.home ?? homedir());
   const projects = (paths.projects ?? []).map(p => resolve(p)).filter(p => !under(p, home) && isFolder(p));
-  return [home, ...new Set(projects)];
+  return paths.wide === true ? [home, "/"] : [home, ...new Set(projects)];
 }
+
+/** Whether a path is inside a root, the disk's own root included, which no path is under by a separator after it. */
+const inside = (path: string, root: string): boolean => root === "/" || under(path, root);
 
 function outside(dir: string, roots: readonly string[]): Error {
   return new Error(`${dir} is outside the folders wsp browses on this computer: ${roots.join(", ")}`);
@@ -63,10 +69,10 @@ function folderToList(dir: string | undefined, roots: readonly string[], realRoo
   if (dir === undefined || dir === "") return roots[0]!;
   if (!isAbsolute(dir)) throw outside(dir, roots);
   const asked = resolve(dir);
-  if (!roots.some(root => under(asked, root))) throw outside(dir, roots);
+  if (!roots.some(root => inside(asked, root))) throw outside(dir, roots);
   if (!isFolder(asked)) return roots[0]!;
   const real = realOf(asked);
-  if (real === null || !realRoots.some(root => under(real, root))) throw outside(dir, roots);
+  if (real === null || !realRoots.some(root => inside(real, root))) throw outside(dir, roots);
   return asked;
 }
 
@@ -85,7 +91,7 @@ export function listHostFolders(req: { dir?: string; hidden?: boolean } = {}, pa
       if (!isFolder(path)) return false;
       if (!e.isSymbolicLink()) return true;
       const real = realOf(path);
-      return real !== null && realRoots.some(root => under(real, root));
+      return real !== null && realRoots.some(root => inside(real, root));
     })
     .map(e => e.name)
     .sort();
@@ -96,8 +102,69 @@ export function listHostFolders(req: { dir?: string; hidden?: boolean } = {}, pa
   return { dir, roots, folders, hidden: names.length - named.length };
 }
 
+/** How deep under a root the repos listing looks, and how many it stops at: a repo deeper than this or past the cap is
+ * reached by walking or by typing its path. */
+const REPO_DEPTH = 5;
+const REPO_CAP = 400;
+
+/** The branch a checkout is on, off its HEAD file, and when git last wrote there. */
+function repoFacts(dir: string): { branch?: string; touchedAt: number } {
+  const git = join(dir, ".git");
+  const stamp = (name: string): number => {
+    try {
+      return statSync(join(git, name)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  let branch: string | undefined;
+  try {
+    branch = /^ref: refs\/heads\/(.+)$/m.exec(readFileSync(join(git, "HEAD"), "utf8"))?.[1];
+  } catch {
+    branch = undefined;
+  }
+  return { ...(branch !== undefined ? { branch } : {}), touchedAt: Math.max(stamp("index"), stamp("HEAD"), stamp("FETCH_HEAD")) };
+}
+
+/** Every repo under the home folder and the project roots, most recently written first. Hidden folders, the Mac's
+ * Library and the dependency and cache folders are not walked into, nor is a repo, whose own folders are its code. A
+ * linked worktree, whose .git is a file, is left out: the repo it belongs to is listed at its own checkout. */
+export function listHostRepos(paths: HostFolderPaths = {}): HostFolderListing {
+  const roots = hostFolderRoots({ ...paths, wide: false });
+  const machine = { home: roots[0]!, mac: (paths.platform ?? process.platform) === "darwin" };
+  const found: HostFolder[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (found.length >= REPO_CAP) return;
+    if (isRepoFolder(dir)) {
+      if (isFolder(join(dir, ".git"))) found.push({ path: dir, repo: true, ...repoFacts(dir) });
+      return;
+    }
+    if (depth >= REPO_DEPTH) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || CACHE_DIRS.has(e.name)) continue;
+      const path = join(dir, e.name);
+      if (hiddenFolder(path, machine)) continue;
+      walk(path, depth + 1);
+    }
+  };
+  for (const root of roots) walk(root, 0);
+  found.sort((a, b) => (b.touchedAt ?? 0) - (a.touchedAt ?? 0));
+  return { dir: roots[0]!, roots, folders: found, hidden: 0 };
+}
+
 /** The host's side of host.folders. The records are read on every ask, so a project imported while the app is open is
  * browsable at once, and the home folder is this computer's own. */
 export function hostFolders(workspaces: () => Promise<readonly WorkspaceView[]>): HostFolders {
-  return { list: async req => listHostFolders(req, { projects: importedProjectFolders(await workspaces()) }) };
+  return {
+    list: async req => {
+      const paths = { projects: importedProjectFolders(await workspaces()), wide: req.wide === true };
+      return req.repos === true ? listHostRepos(paths) : listHostFolders(req, paths);
+    },
+  };
 }

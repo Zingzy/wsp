@@ -2581,10 +2581,11 @@ function printTable(ctx: VerbContext, value: unknown, lines: (depth: number) => 
 
 /** One level of this computer's own folders over the protocol: the folder picker a browser tab has, and the same
  * answer here, so a line or an agent can look before it names a folder to import. */
-async function hostFolders(client: HostClient, dir: string | undefined, hidden: boolean | undefined): Promise<HostFolderListing> {
+async function hostFolders(client: HostClient, dir: string | undefined, hidden: boolean | undefined, repos?: boolean): Promise<HostFolderListing> {
   const { listing } = await client.request<{ listing: HostFolderListing }>("host.folders", {
     ...(dir !== undefined ? { dir } : {}),
     ...(hidden === true ? { hidden } : {}),
+    ...(repos === true ? { repos } : {}),
   });
   return listing;
 }
@@ -2599,7 +2600,7 @@ async function initSetup(client: HostClient): Promise<InitSetup> {
  * outside those is refused. The app's own browser draws the roots as crumbs instead. */
 function folderLines(listing: HostFolderListing): string[] {
   return [
-    ...table([["FOLDER", "GIT"], ...listing.folders.map(f => [f.path, f.repo ? "git" : ""])]),
+    ...table([["FOLDER", "GIT"], ...listing.folders.map(f => [f.path, f.repo ? (f.branch ?? "git") : ""])]),
     `${folderLevelLine(listing)} Browsable: ${listing.roots.join(", ")}.`,
   ];
 }
@@ -3637,14 +3638,14 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "folders",
-    usage: "wsp folders [<folder>] [--hidden]",
-    about: "the folders inside one folder on this computer, for naming one to import; the home folder and every imported project are the roots and nothing outside them is listed",
+    usage: "wsp folders [<folder>] [--hidden] [--repos]",
+    about: "the folders inside one folder on this computer, or with --repos every git repo under the home folder, most recently used first, for naming one to record",
     page: "app",
-    options: { hidden: { type: "boolean" } },
+    options: { hidden: { type: "boolean" }, repos: { type: "boolean" } },
     run: async ctx => {
       const [folder] = ctx.args;
       if (ctx.args.length > 1) throw usageRefusal("wsp folders takes one folder on this computer at most.", usageIs(ctx));
-      const listing = await hostFolders(await ctx.client(), folder === undefined ? undefined : resolve(folder), ctx.flags["hidden"] === true);
+      const listing = await hostFolders(await ctx.client(), folder === undefined ? undefined : resolve(folder), ctx.flags["hidden"] === true, ctx.flags["repos"] === true);
       ctx.out.emit(listing, folderLines(listing).join("\n"));
       return 0;
     },
@@ -3654,10 +3655,11 @@ export const VERBS: readonly Verb[] = [
       input: {
         folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
         hidden: z.boolean().optional().describe("true lists the hidden folders too, which are otherwise only counted"),
+        repos: z.boolean().optional().describe("true answers every git repo under the home folder and the recorded projects instead of one level, each with its branch and when git last wrote to it, most recent first; folder is ignored"),
       },
       output: HostFolderListing.shape,
-      call: async ({ folder, hidden }, deps) => {
-        const listing = await hostFolders(await deps.client(), folder === undefined ? undefined : absolutePath("folder is a path on this computer", folder), hidden);
+      call: async ({ folder, hidden, repos }, deps) => {
+        const listing = await hostFolders(await deps.client(), folder === undefined ? undefined : absolutePath("folder is a path on this computer", folder), hidden, repos);
         return asText(folderLines(listing).join("\n"), listing);
       },
     }),
@@ -3798,6 +3800,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
+  repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
   "max-depth": "how many levels of threads may stand under the root thread; needs --spawn on, and defaults to 1",
