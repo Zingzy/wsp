@@ -212,6 +212,11 @@ export function placeHere(name: string = placeNameHere()): HerePlace {
  * there is a typo in the address as often as it is a network. */
 const JOIN_MS = 20_000;
 
+/** What a join says of a host that never answered. The app shows it behind the install's failed step and a person
+ * running wsp join on the box reads it as it is, so it asks for another try rather than another add. */
+export const joinUnansweredLine = (url: string): string =>
+  `the host at ${url} did not answer in ${JOIN_MS / 1000} s; put both computers on one network, or link that host to your relay, and try again`;
+
 /** The whole of what wsp add prints with no argument: the line to type on the computer being joined, at every
  * address this host answers on, and the other two roads in one line each. The token is the code and the host key's
  * fingerprint as one word, off the protocol's own writing of the line, so the terminal and the sheet print one
@@ -1540,7 +1545,7 @@ async function handshake(
   let answered: { placeId: string; hostPublicKey: string; hostName: string } | undefined;
   try {
     return await new Promise((done, fail) => {
-      const deadline = setTimeout(() => fail(new JoinRefused("address", `the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
+      const deadline = setTimeout(() => fail(new JoinRefused("address", joinUnansweredLine(url))), JOIN_MS);
       const end = (e: Error): void => {
         clearTimeout(deadline);
         fail(e);

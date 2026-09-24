@@ -133,11 +133,9 @@ export const DELETE_HINT = (kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path"
 export const CLIENT_CANNOT_DELETE = "This client cannot delete workspaces";
 
 /** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in
- * for this and the sentence says what did not happen and what is left to try. The link's own words are not
- * quoted; they end in whatever threw, and the line used to begin with a workspace name and a colon. Named where
- * the app holds a record for the workspace, which is everywhere but a pane outliving its own row. */
-export const terminalRefusedLine = (name?: string): string =>
-  name === undefined ? "No terminal opened; try again in a moment." : `No terminal opened on ${name}; try again in a moment.`;
+ * for this, and the link's reason is what a person can act on. Named where the app holds a record for the
+ * workspace, which is everywhere but a pane outliving its own row. */
+export const terminalRefusedLine = (name: string | undefined, said: string): string => (name === undefined ? `No terminal: ${said}` : `No terminal on ${name}: ${said}`);
 
 export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal("open a terminal") : null);
 export const openBrowserRefusal = (state: WorkspaceState): string | null => actionRefusal(state, "preview");

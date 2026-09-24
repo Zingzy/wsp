@@ -7,7 +7,7 @@
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -407,6 +407,13 @@ describe("terminal actions", () => {
     for (const id of ["paste", "clear", "split", "split-vertical", "new", "close"]) await actionById(actions, id).run();
     await actionById(full, "copy").run();
     for (const verb of Object.values(verbs)) expect(verb).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a terminal the link refused", () => {
+  it("says no terminal, on the workspace where the app holds its record, with the link's reason", () => {
+    expect(terminalRefusedLine("api", "daemon unreachable")).toBe("No terminal on api: daemon unreachable");
+    expect(terminalRefusedLine(undefined, "daemon unreachable")).toBe("No terminal: daemon unreachable");
   });
 });
 

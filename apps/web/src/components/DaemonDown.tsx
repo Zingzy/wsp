@@ -6,15 +6,21 @@
 // was, so the host's refusal lands under it rather than in the sidebar's
 // corner.
 import { useCallback, useState } from "react";
-import type { AbsentComputer } from "@wsp/protocol";
+import { refusalLine, type AbsentComputer } from "@wsp/protocol";
+import { NO_REASON } from "../protocol/client.js";
+import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { Button } from "./ui/button.js";
 
 const STARTING_WORD = "Starting…";
 
-/** What a start that threw says under the button. The host's own words are not quoted: a spawn that failed ends in
- * whatever it threw, and an exception's words are never what a person reads. */
-const START_REFUSED_LINE = "No daemon started; try again.";
+/** What a start the host refused says under the button: the host's sentence, then its fix or another start. The
+ * no-reason sentence already asks for another try. */
+function startRefusedLine(e: unknown): string {
+  const { said, fix } = failureOf(e);
+  if (fix !== undefined) return refusalLine(said, fix);
+  return said === NO_REASON ? said : refusalLine(said, "Start again.");
+}
 
 /** The ask, and what the last one left behind: the button is held while it is in flight and one written sentence
  * stands under it when the host refused. A client whose host offers no such road hands back no ask, and the panes
@@ -22,21 +28,21 @@ const START_REFUSED_LINE = "No daemon started; try again.";
 export function useDaemonRestart(workspaceId: string): { start: (() => void) | null; busy: boolean; refusal: string | null } {
   const api = useStore(s => s.api);
   const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const restart = api?.restartDaemon;
   const start = useCallback(() => {
     if (restart === undefined) return;
     setBusy(true);
-    setRefused(false);
+    setRefusal(null);
     void restart(workspaceId).then(
       () => setBusy(false),
-      () => {
+      (e: unknown) => {
         setBusy(false);
-        setRefused(true);
+        setRefusal(startRefusedLine(e));
       },
     );
   }, [restart, workspaceId]);
-  return { start: restart === undefined ? null : start, busy, refusal: refused ? START_REFUSED_LINE : null };
+  return { start: restart === undefined ? null : start, busy, refusal };
 }
 
 /** The button alone, for a pane whose own title already says the sentence. Nothing at all on a reading this host
@@ -50,7 +56,7 @@ export function StartDaemonButton({ absent, workspaceId }: { absent: AbsentCompu
         {busy ? STARTING_WORD : absent.start}
       </Button>
       {refusal !== null ? (
-        <p className="text-xs text-muted-foreground" data-k="start-daemon-refused">
+        <p className="break-words text-xs text-muted-foreground" data-k="start-daemon-refused">
           {refusal}
         </p>
       ) : null}
