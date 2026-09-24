@@ -27,6 +27,12 @@ import {
   HOST_STOPPING_CLOSE,
   HOST_STOPPING_LINE,
   HostFolderListing,
+  AgentRow,
+  AgentsReport,
+  AgentsTarget,
+  McpRow,
+  SkillRow,
+  agentSignInWord,
   InitSetup,
   initSetupLines,
   IMAGES_MAX,
@@ -2657,6 +2663,57 @@ async function drawRows(ctx: VerbContext, words: string, frame: (client: HostCli
   return 0;
 }
 
+/** The computer or workspace a list of what stands there names: a workspace by its name, a computer by the name
+ * wsp computers shows it under, and this computer where neither is given. Refused where both are, since a workspace
+ * already names the computer it is on. */
+async function agentsTarget(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string): Promise<AgentsTarget> {
+  if (workspace !== undefined && on !== undefined) throw usageRefusal("A workspace already names its computer; give the workspace or --on <computer>, not both.", usage);
+  if (workspace !== undefined) return { workspaceId: (await workspaceOf(client, workspace)).id };
+  if (on !== undefined) return { placeId: (await placeNamed(client, on)).id };
+  return { placeId: HERE_PLACE_ID };
+}
+
+/** One read of what stands on a computer or workspace, which each of the three lists prints its own part of. */
+async function agentsReport(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string): Promise<AgentsReport> {
+  const target = await agentsTarget(client, workspace, on, usage);
+  return AgentsReport.parse((await client.request<{ report: unknown }>("agents.read", { target })).report);
+}
+
+/** What every one of the three lists answers beside its own rows. */
+const AGENTS_FRAME = AgentsReport.omit({ agents: true, skills: true, servers: true }).shape;
+
+/** The report's own facts, beside the rows one list prints. */
+function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "user" | "readAt" | "stale" | "refused"> {
+  return { target: r.target, home: r.home, user: r.user, readAt: r.readAt, ...(r.stale !== undefined ? { stale: r.stale } : {}), refused: r.refused };
+}
+
+/** The lines under every list: a napping workspace's report is the one it last had, and each reader that could not
+ * answer is named. */
+function reportTail(r: AgentsReport): string[] {
+  return [...(r.stale === "napping" ? ["napping: this is what stood there when it last ran"] : []), ...r.refused.map(line => `refused: ${line}`)];
+}
+
+function agentRowLines(r: AgentsReport): string[] {
+  const word = (a: AgentRow): string => (!a.installed ? "not found" : a.signIn === "unknown" ? "sign-in unknown" : agentSignInWord(a.signIn));
+  return [...table([["AGENT", "VERSION", "SIGN-IN", "WSP TOOLS", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", word(a), a.wspTools ? "yes" : "no", a.path ?? "-"])]), ...reportTail(r)];
+}
+
+function skillRowLines(r: AgentsReport): string[] {
+  const where = (s: SkillRow): string => s.paths.map(p => (p.linkTo === undefined ? p.path : `${p.path} -> ${p.linkTo}`)).join(", ");
+  return [...(r.skills.length === 0 ? ["no skills"] : table([["SKILL", "KIND", "WHERE"], ...r.skills.map(s => [s.name, s.scope, where(s)])])), ...reportTail(r)];
+}
+
+function serverRowLines(r: AgentsReport): string[] {
+  const reach = (s: McpRow): string => (s.transport.kind === "stdio" ? `stdio ${s.transport.line}` : `http ${s.transport.host}`);
+  const state = (s: McpRow): string => [s.enabled ? s.auth : "disabled", ...(s.inRecipe === false ? ["not in recipe"] : [])].join(", ");
+  return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), reach(s), s.file, state(s)])])), ...reportTail(r)];
+}
+
+const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
+const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
+const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
+const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
+
 export const VERBS: readonly Verb[] = [
   {
     name: "computers",
@@ -2676,6 +2733,72 @@ export const VERBS: readonly Verb[] = [
       input: {},
       output: { computers: z.array(PlaceView) },
       call: async (_args, deps) => asJson({ computers: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
+    }),
+  },
+  {
+    name: "agents",
+    usage: "wsp agents [<workspace>] [--on <computer>]",
+    about: "the coding agents on this computer, a box you added or a workspace: each one's version, whether it is signed in there, and whether it carries the wsp tools",
+    page: "agent",
+    options: { on: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp agents takes one workspace at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      ctx.out.emit({ ...reportFacts(report), agents: report.agents }, agentRowLines(report).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. ${AGENTS_READ_WORDS}`,
+      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      output: { ...AGENTS_FRAME, agents: z.array(AgentRow) },
+      call: async ({ workspace, on }, deps) => {
+        const report = await agentsReport(await deps.client(), workspace, on, "agents takes a workspace or on, not both");
+        return asText(agentRowLines(report).join("\n"), { ...reportFacts(report), agents: report.agents });
+      },
+    }),
+  },
+  {
+    name: "skills",
+    usage: "wsp skills [<workspace>] [--on <computer>]",
+    about: "the skills on this computer, a box you added or a workspace, each by name with every folder it lives in and which agent loads it from there",
+    page: "agent",
+    options: { on: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp skills takes one workspace at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      ctx.out.emit({ ...reportFacts(report), skills: report.skills }, skillRowLines(report).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `Every skill on one computer or workspace, one row per name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
+      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      output: { ...AGENTS_FRAME, skills: z.array(SkillRow) },
+      call: async ({ workspace, on }, deps) => {
+        const report = await agentsReport(await deps.client(), workspace, on, "skills takes a workspace or on, not both");
+        return asText(skillRowLines(report).join("\n"), { ...reportFacts(report), skills: report.skills });
+      },
+    }),
+  },
+  {
+    name: "servers",
+    usage: "wsp servers [<workspace>] [--on <computer>]",
+    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and whether it needs a sign-in",
+    page: "agent",
+    options: { on: { type: "string" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp servers takes one workspace at most.", usageIs(ctx));
+      const report = await agentsReport(await ctx.client(), ctx.args[0], flag(ctx.flags, "on"), usageIs(ctx));
+      ctx.out.emit({ ...reportFacts(report), servers: report.servers }, serverRowLines(report).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `Every MCP server each agent's own config file defines on one computer or workspace, and a workspace's project files: the agent, the file, how it is reached (its command with every value hidden, or its url's host), the names of the variables it sets or reads and never their values, whether the file switches it off, whether wsp's recipe put it there on a box, and its sign-in as the config alone says it: open for a command or a fixed header, unknown for a remote server until something connects. ${AGENTS_READ_WORDS}`,
+      input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+      output: { ...AGENTS_FRAME, servers: z.array(McpRow) },
+      call: async ({ workspace, on }, deps) => {
+        const report = await agentsReport(await deps.client(), workspace, on, "servers takes a workspace or on, not both");
+        return asText(serverRowLines(report).join("\n"), { ...reportFacts(report), servers: report.servers });
+      },
     }),
   },
   {
@@ -3811,6 +3934,9 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "folders on": "the computer whose folders to list, by the name wsp computers shows; a box you added answers from its own disk, and this computer is listed without it",
+  "agents on": AGENTS_ON_WORDS,
+  "skills on": AGENTS_ON_WORDS,
+  "servers on": AGENTS_ON_WORDS,
   repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",

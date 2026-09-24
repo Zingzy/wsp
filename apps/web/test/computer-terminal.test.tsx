@@ -109,7 +109,7 @@ describe("the right panel chord with no workspace", () => {
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
-    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff"]);
+    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff", "agents"]);
     // Shown and not clickable: no card is a button.
     for (const card of cards) {
       expect(card.getAttribute("data-available")).toBe("false");

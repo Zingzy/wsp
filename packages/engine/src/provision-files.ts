@@ -22,7 +22,7 @@ import {
   shellQuote,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
-import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, skillsDirOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackFiles } from "./golden.js";
@@ -62,7 +62,7 @@ const covers = (dest: string, rel: string): boolean => rel === dest || rel.start
  * MCP servers in. */
 function agentPaths(a: (typeof CATALOG_AGENTS)[number]): string[] {
   // Under the home and nowhere else: a path the catalog writes some other way names no file this may land.
-  return [`~/${a.stateHome}`, a.skills, ...a.configPaths, ...(a.mcp?.files ?? [])].filter(p => p.startsWith("~/")).map(p => p.replace(/\/+$/, ""));
+  return [`~/${a.stateHome}`, skillsDirOf(a), ...a.configPaths, ...(a.mcp?.files ?? [])].filter(p => p.startsWith("~/")).map(p => p.replace(/\/+$/, ""));
 }
 
 /** Whether one planned file may land in an agent's home on a computer somebody owns: its row is that agent's own

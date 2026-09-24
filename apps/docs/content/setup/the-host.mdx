@@ -43,7 +43,7 @@ The unit holds no key. It carries `PATH`, `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CH
 
 After loading, `wsp up --service` waits up to twenty seconds until the lock exists and the port answers a request. The lock alone is not proof, since a host that cannot bind takes the lock and dies under restart, over and over. On failure it prints the last twenty lines of the log.
 
-`wsp down` stops the service and takes the unit away. `wsp status` prints whether a host is serving this state file, its ports, its token file and what keeps it there, with a non-zero exit code when none does.
+`wsp down` stops the service and takes the unit away. `wsp status` prints whether a host is serving this state file, its ports, its token file, what keeps it there and the latest release off `release.json`, with a non-zero exit code when none does.
 
 ## What it keeps
 

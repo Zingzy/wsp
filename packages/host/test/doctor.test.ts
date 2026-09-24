@@ -37,6 +37,7 @@ import {
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   deployFailureLine,
+  joinedPlace,
   removeDaemonScript,
   GUEST_ENVS,
   claudeEnvs,
@@ -67,7 +68,7 @@ import {
   type DaemonSocket,
 } from "../src/doctor.js";
 import { agentName, catalogEntry, GUEST_HOME, VAULT_VARIABLES } from "@wsp/catalog";
-import { daemonFixLine } from "../src/daemon-fix.js";
+import { daemonFixLine, releaseUpdateLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
 import { captured, copyingFake, createOn, projectOn } from "./verbs-fixture.js";
 import { commandPage, COMMANDS_FOR_HELP, doctorRow, localWiring, SHARED_FLAGS, type CliIO } from "../src/cli.js";
@@ -337,6 +338,12 @@ describe("the doctor's line for a place behind this wsp", () => {
     expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] })).toBe("npm i -g @zingzy/wsp");
     expect(daemonFixLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" })).toBe("updating the wsp app");
     expect(daemonFixLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] })).toBe("a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary");
+  });
+
+  it("reads the line that gets a newer release off the same road, pinned to that release where the road takes a version", () => {
+    expect(releaseUpdateLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] }, "0.3.0")).toBe("npm i -g @zingzy/wsp@0.3.0");
+    expect(releaseUpdateLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" }, "0.3.0")).toBe("updating the wsp app");
+    expect(releaseUpdateLine({ argv: ["/n", "/Users/dev/wsp/packages/wspx/dist/bin.js"] }, "0.3.0")).toBe("a pull of the checkout and a build");
   });
 
   it("says nothing where every place is level, where none has reported, and on a host holding no places at all", async () => {
@@ -863,6 +870,17 @@ describe("which road wsp doctor takes", () => {
     expect(await doctor(host.rt, io, { computer: { id: "solari", kind: "provider", name: "solari", default: false } })).toBe(1);
     expect(io.errors.join("\n")).toContain("the fork road ran, and nothing named its row");
   });
+
+  it("opens every road with the newest release, the one that bills included", async () => {
+    const latest = "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it";
+    const bare = captured();
+    expect(await doctor(fakeHost([]).rt, bare, { latest, vault: () => ({}) })).toBe(0);
+    expect(bare.lines[0]).toBe(`latest release ${latest}`);
+    expect(bare.lines.filter(l => l.startsWith("latest release"))).toHaveLength(1);
+    const cloud = captured();
+    expect(await doctor(fakeHost([]).rt, cloud, { latest, computer: { id: "solari", kind: "provider", name: "solari", default: false } })).toBe(1);
+    expect(cloud.lines[0]).toBe(`latest release ${latest}`);
+  });
 });
 
 
@@ -1109,7 +1127,7 @@ describe("guest environment", () => {
 
 describe("what a deploy that would not come up says", () => {
   it("names the commands it was running, as they ran, with the machine's own last words first", () => {
-    const said = deployFailureLine(CLOUD_PLACE, { stdout: "WSP_READY\n", stderr: "boom" }, ".preview.example.com");
+    const said = deployFailureLine(CLOUD_PLACE, { exitCode: 1, stdout: "WSP_READY\n", stderr: "boom" }, ".preview.example.com");
     expect(said.startsWith("daemon deploy failed: WSP_READY")).toBe(true);
     // The unit printed is the unit that ran: the deploy states the dev server allowlist on it, and a near copy
     // without that line would send the next person to read a file that does not match what is on the machine.
@@ -1117,7 +1135,73 @@ describe("what a deploy that would not come up says", () => {
     expect(said).toContain(daemonUnit(CLOUD_PLACE, GUEST_TARGET, ".preview.example.com"));
     // A fork's token is written by a line of its own and a box's is landed over the byte road; no start line has it.
     expect(said).not.toContain("aabbcc");
-    expect(deployFailureLine(CLOUD_PLACE, { stdout: "", stderr: "" }, ".preview.example.com")).not.toContain("aabbcc");
+    expect(deployFailureLine(CLOUD_PLACE, { exitCode: 1, stdout: "", stderr: "" }, ".preview.example.com")).not.toContain("aabbcc");
+  });
+
+  const SPOO = joinedPlace({ home: "/root", path: "/usr/bin:/bin" }, { hostUrls: ["http://100.129.166.28:4640"], codeFile: "/root/.wsp/join-code", name: "spoo" });
+  const SSH_FORWARD_NOISE = ["bind [127.0.0.1]:8080: Address already in use", "channel_setup_fwd_listener_tcpip: cannot listen to port: 8080", "Could not request local forwarding."];
+
+  it("says a joined computer's failure in one sentence: the step it stopped in and the box's own refusal, never the script", () => {
+    // The live failure of 2026-09-24: the apparmor line was stdout before the join, the join's refusal its stderr.
+    const said = deployFailureLine(SPOO, {
+      exitCode: 1,
+      stdout: ["WSP_STEP files", "WSP_STEP login", "WSP_STEP agent", "the wsp-workspace apparmor profile is loaded, so workspaces isolate here", "WSP_READY", ""].join("\n"),
+      stderr: [...SSH_FORWARD_NOISE, "the host at http://100.129.166.28:4640 did not answer in 20s", ""].join("\n"),
+    });
+    expect(said).toBe("spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s");
+    expect(said).not.toContain('case "$(uname -m)"');
+  });
+
+  it("names the step the last marker opened, with the box's last line and not ssh's own", () => {
+    const tar = deployFailureLine(SPOO, { exitCode: 2, stdout: "WSP_STEP files\n", stderr: "tar: /root/.wsp/daemon.tgz: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now\n" });
+    expect(tar).toBe("spoo did not take wsp's files: tar: /root/.wsp/daemon.tgz: Cannot open: No such file or directory");
+    const chip = deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\n", stderr: "unsupported arch: riscv64\n" });
+    expect(chip).toBe("spoo did not set up wsp's agent: unsupported arch: riscv64");
+    // A box that wrote nothing of its own on stderr: ssh's forward warnings are not its words.
+    const quiet = deployFailureLine(SPOO, { exitCode: 0, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\nPLACE_JOINED\nDAEMON_DOWN\n", stderr: `${SSH_FORWARD_NOISE.join("\n")}\n` });
+    expect(quiet).toBe("spoo took wsp but could not connect back: it said nothing about why (exit 0)");
+  });
+
+  it("reads the line that says why, not tar's closing line, on a full disk", () => {
+    const full = deployFailureLine(SPOO, { exitCode: 2, stdout: "WSP_STEP files\n", stderr: "tar: ./daemon/x86_64/wsp-daemon: Cannot write: No space left on device\ntar: Exiting with failure status due to previous errors\n" });
+    expect(full).toBe("spoo did not take wsp's files: tar: ./daemon/x86_64/wsp-daemon: Cannot write: No space left on device");
+  });
+
+  it("names the agent's start once the box printed that it joined, since it did connect back", () => {
+    const said = deployFailureLine(SPOO, {
+      exitCode: 1,
+      stdout: ["WSP_STEP files", "WSP_STEP login", "WSP_STEP agent", "WSP_READY", "spoo joined the wsp at http://100.129.166.28:4640; it dials that host on its own from now on.", ""].join("\n"),
+      stderr: "systemctl enable --now wsp-place-abc exited 1 and said: Job for wsp-place-abc.service failed\n",
+    });
+    expect(said).toBe("spoo connected back but its agent did not start: systemctl enable --now wsp-place-abc exited 1 and said: Job for wsp-place-abc.service failed");
+  });
+
+  it("takes a marker only when it is one of the steps, word for word", () => {
+    const stray = deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP whatever\nsomething mentions WSP_READY here\n", stderr: "boom\r\n" });
+    expect(stray).toBe("spoo did not take wsp's login files: boom");
+  });
+
+  it("holds the sentence to 300 characters and keeps a box's own line that merely mentions a port", () => {
+    expect(deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_READY\n", stderr: `${"x".repeat(3000)}\n` }).length).toBeLessThanOrEqual(300);
+    expect(deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_READY\n", stderr: "wsp: cannot listen to port: 4400\n" })).toBe("spoo took wsp but could not connect back: wsp: cannot listen to port: 4400");
+  });
+
+  it("marks each step of a joined computer's deploy and no step of a fork's, so the daemon's content stands", async () => {
+    const lines = deployScript(SPOO, "aabbcc").split("\n");
+    const at = (line: string): number => lines.findIndex(l => l.startsWith(line));
+    expect(at("echo WSP_STEP files")).toBeGreaterThan(-1);
+    expect(at("echo WSP_STEP files")).toBeLessThan(at("tar -xzf"));
+    expect(at("tar -xzf")).toBeLessThan(at("echo WSP_STEP login"));
+    expect(at("echo WSP_STEP login")).toBeLessThan(at("mkdir -p '/root/.wsp' && printf"));
+    expect(at("echo WSP_STEP agent")).toBeLessThan(at('case "$(uname -m)" in'));
+    for (const place of [CLOUD_PLACE, CONTAINER_PLACE, sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" })]) expect(deployScript(place, "aabbcc")).not.toContain("WSP_STEP");
+    const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-joined-"));
+    try {
+      writeFileSync(join(dir, "deploy.sh"), deployScript(SPOO, "aabbcc"));
+      await promisify(execFile)("bash", ["-n", join(dir, "deploy.sh")]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1696,6 +1780,7 @@ describe("the doctor's local road", () => {
     expect(out).toContain("Claude Code answered with the word it was asked for");
     expect(out).toContain("the workspace, the project and the folder this run made are gone");
     expect(out).toContain("DOCTOR PASS: this computer is a workspace, a thread ran on it and its reply came back.");
+    expect(out).not.toContain("latest release");
     // The doctor left nothing behind: the state has no more workspaces than it started with.
     expect(await rt.workspaces.list()).toEqual([]);
     await rt.close();

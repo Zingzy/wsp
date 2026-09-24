@@ -5,11 +5,12 @@
 // keyboard and to a reader.
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
+import type { ReactNode } from "react";
 import { cn } from "../../lib/utils.js";
 
 export interface Segment<T extends string> {
   readonly value: T;
-  readonly label: string;
+  readonly label: ReactNode;
 }
 
 export function SegmentedControl<T extends string>({

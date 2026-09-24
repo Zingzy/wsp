@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
@@ -785,11 +785,13 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // A guest exec carries PATH and nothing else (measured 2026-09-05), and the machine's own service manager reads
     // its home. What the daemon itself hands to every pty comes from its unit, not from here.
     ...place.exportEnv,
+    ...stepMark(place, "files"),
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
+    ...stepMark(place, "login"),
     ...loginFilesStep(place),
     // Login shells read it from the profile file; the daemon's ptys inherit it from the daemon, exported before it starts.
     ...(previewHostSuffix !== undefined
@@ -801,6 +803,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // A fork is root's alone, so its token is written here; a machine somebody else may hold an account on gets
     // it over the byte road before this runs, since a command sits in a world readable /proc/<pid>/cmdline.
     ...(place.tokenRoad === "script" ? [writeDaemonTokenScript(token, place.tokenPath)] : []),
+    ...stepMark(place, "agent"),
     ...onTheChipItIs(place, targets, previewHostSuffix),
     ...place.supervise.up(place)
   ].join("\n");
@@ -922,13 +925,68 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * the machine's hello announces from then on. */
 export const DAEMON_DEPLOYED_LINE = `daemon v${DAEMON_VERSION}`;
 
-/** What a deploy that would not come up says: the machine's own last words, then the commands the deploy was running
- * on it when they stopped, which on a joined computer is its own `wsp join`. Named so the next person runs them on
- * the machine rather than working out what wsp ran there first. The token is never among them: it is landed over
- * the byte road or written by a line of its own, and no supervision's start lines carry it. */
-export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
+/** A joined computer's deploy echoes `WSP_STEP <step>` before each step; WSP_READY opens the join and the join's
+ * own joinedLine opens the service. */
+const PLACE_DEPLOY_STEPS = {
+  files: "did not take wsp's files",
+  login: "did not take wsp's login files",
+  agent: "did not set up wsp's agent",
+  join: "took wsp but could not connect back",
+  service: "connected back but its agent did not start",
+} as const;
+type PlaceDeployStep = keyof typeof PLACE_DEPLOY_STEPS;
+const WSP_STEP_LINE = "WSP_STEP";
+const isDeployStep = (word: string): word is PlaceDeployStep => Object.hasOwn(PLACE_DEPLOY_STEPS, word);
+
+/** A joined computer's deploy alone: a fork's script is hashed into the daemon's content. */
+const stepMark = (place: DaemonPlace, step: "files" | "login" | "agent"): string[] => (place.join === undefined ? [] : [`echo ${WSP_STEP_LINE} ${step}`]);
+
+/** What `wsp join` prints once the place file is written, before it installs the service. */
+export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
+
+/** The engine's readers of a box's words bound them at this length. */
+const SAID_MAX = 300;
+
+export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => {
+  const line = `${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`;
+  return line.length <= SAID_MAX ? line : `${line.slice(0, SAID_MAX - 1)}…`;
+};
+
+/** A tool's closing line after the one that said why, which is not the box's reason. */
+const TOOL_TRAILER = /^tar: (Exiting with failure status due to previous errors|Error is not recoverable: exiting now)$/;
+
+/** Under set -e the line that ended the script is the last the box wrote on stderr. */
+function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
+  let step: PlaceDeployStep = "files";
+  // Whichever address answered: the join may spell it as it normalised it.
+  const [joinedHead, joinedTail] = joinedLine(join.name, "\0").split("\0") as [string, string];
+  for (const raw of res.stdout.split("\n")) {
+    const line = raw.trim();
+    const word = line.startsWith(`${WSP_STEP_LINE} `) ? line.slice(WSP_STEP_LINE.length + 1) : undefined;
+    if (word !== undefined && isDeployStep(word)) step = word;
+    else if (line === WSP_READY_LINE) step = "join";
+    else if (line.startsWith(joinedHead) && line.endsWith(joinedTail)) step = "service";
+  }
+  const said = clientWords(res.stderr.replace(/\r/g, ""))
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line !== "" && !TOOL_TRAILER.test(line))
+    .at(-1);
+  return placeInstallFailedLine(join.name, step, said ?? `it said nothing about why (exit ${res.exitCode})`);
+}
+
+/** Everything a deploy that would not come up printed: the machine's own last words, then the commands the deploy
+ * was running on it when they stopped, which on a joined computer is its own `wsp join`. Named so the next person
+ * runs them on the machine rather than working out what wsp ran there first. The token is never among them: it is
+ * landed over the byte road or written by a line of its own, and no supervision's start lines carry it. */
+function deployFailureDetail(place: DaemonPlace, res: { stdout: string; stderr: string }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
   const said = `daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim();
   return [said, "it stopped in these commands, which run on that computer:", ...onTheChipItIs(place, targets, previewHostSuffix)].join("\n");
+}
+
+/** A fork's failure is the whole detail; a joined computer's is one sentence, its detail going to the host's log. */
+export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string; exitCode: number }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
+  return place.join === undefined ? deployFailureDetail(place, res, previewHostSuffix, targets) : joinedFailureLine(place.join, res);
 }
 
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
@@ -972,6 +1030,7 @@ export async function deployDaemon(
     const suffix = await previewHostSuffix(machine);
     const res = await machine.run(deployScript(place, token, suffix, targets), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
+      if (place.join !== undefined) console.warn(deployFailureDetail(place, res, suffix, targets));
       throw new Error(deployFailureLine(place, res, suffix, targets));
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
@@ -1267,6 +1326,8 @@ export interface DoctorOptions {
   plan?: () => Promise<ProvisionPlan | { noRecipe: string }>;
   /** The daemon this host runs for its own computer's workspace, for the line that says it is behind. */
   hereDaemon?: HereDaemon;
+  /** The newest release as the command line read it off the host's file, worded; absent where none was kept. */
+  latest?: string;
 }
 
 /** The repo the doctor's own project clones when nobody names one: a public repo of one commit, small enough that
@@ -1638,6 +1699,7 @@ export async function doctorOverHost(client: DoctorClient, io: CliIO, places: re
  * somebody joined takes neither: its link is held by the host it dials, so that host runs its road and the line
  * prints what it says. */
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  if (opts.latest !== undefined) io.log(`latest release ${opts.latest}`);
   // This computer's own row takes the local road, and so does a line that named nothing: a workspace here is a
   // copy of a folder on this computer, so the proof forks no machine and bills nothing.
   return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);

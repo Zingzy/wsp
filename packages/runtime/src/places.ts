@@ -596,11 +596,18 @@ export function signInsOf(
       words[id] = "signed-in";
       continue;
     }
-    const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
-    const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
-    words[id] = token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
+    words[id] = vaultSignIn(id, vault);
   }
   return words;
+}
+
+/** The word for an agent whose own login is not on the computer: this host's vault holds the token or the key it
+ * reads, which every turn there is handed, or nothing stands for it. The one reading every sign-in word falls to. */
+export function vaultSignIn(agentId: string, vault: Readonly<Record<string, string>>): AgentSignInState {
+  const signIn = CATALOG_AGENTS.find(a => a.id === agentId)?.signIn;
+  const token = signIn !== undefined && mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
+  const keyEnv = signIn === undefined ? undefined : keyEnvOf(signIn);
+  return token !== undefined || (keyEnv !== undefined && vault[keyEnv] !== undefined) ? "vault-key" : "none";
 }
 
 /** How long between writes of a linked place's last seen. */

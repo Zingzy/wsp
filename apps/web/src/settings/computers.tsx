@@ -2,22 +2,24 @@
 // Settings > Computers: one row per computer this wsp runs on, this one
 // first, each opening the computer's own page; and that page, which says what
 // the host knows about the computer as lines, its connection and what a
-// workspace there is made of as rows, the agents on it with what stands there,
-// what the recipe put beside them, the workspaces standing on it, and the two
-// things a person can do to it. Only facts the host carries are drawn; a fact
+// workspace there is made of as rows, the agents, skills and MCP servers on it,
+// the workspaces standing on it, and the two things a person can do to it. Only facts the host carries are drawn; a fact
 // not reported is left out rather than stood in for.
 //
 // The list draws every row the host's places list carries: the host lists a
 // cloud only once it holds that cloud's key or a stand-in serves in its place,
 // so nothing here filters again.
 import { useState } from "react";
-import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
+import { AgentsList } from "../components/agents/AgentsList.js";
+import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
+import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
-import { AGENTS_WORDS, WHERE_WORDS } from "./format.js";
+import { WHERE_WORDS } from "./format.js";
 import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
-import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
+import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -167,42 +169,24 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
   );
 }
 
-/** The agents' rows: the catalog name over the version and the sign-in word, Sign in held where none stands there,
- * with why in the description's last clause and no title. On this computer the word is whether the agent's own
- * config names the wsp tools, and the one action is handing them over, held the same way. */
-function agentRows(agents: readonly AgentLine[], here: boolean, computer: string): SettingsItem[] {
-  if (agents.length === 0) return [{ kind: "line", id: "no-agents", label: AGENTS_WORDS.noneOn(computer), attrs: { "data-k": "no-agents" } }];
-  return agents.map(agent => {
-    const heldAdd = here && agent.state === "" && agent.takesTools === true;
-    const heldSignIn = !here && agent.signedIn !== true;
-    const state = heldAdd ? AGENTS_WORDS.notAdded : agent.state;
-    const description = [state, heldAdd || heldSignIn ? WHERE_WORDS.notFromApp : undefined].filter((word): word is string => word !== undefined && word !== "").join(" · ");
-    return {
-      kind: "row" as const,
-      id: `agent-${agent.id}`,
-      title: agent.name,
-      description,
-      mono: true,
-      attrs: { "data-k": "agent", "data-agent": agent.id },
-      ...(heldAdd
-        ? {
-            control: (
-              <Button data-k="agent-add" size="xs" variant="outline" held>
-                {AGENTS_WORDS.add}
-              </Button>
-            ),
-          }
-        : heldSignIn
-          ? {
-              control: (
-                <Button data-k="agent-sign-in" size="xs" variant="outline" held>
-                  {AGENTS_WORDS.signIn}
-                </Button>
-              ),
-            }
-          : {}),
-    };
-  });
+/** The agents, skills and MCP servers a computer reports, read when its page opens. Every act is held with the
+ * page's away word while the computer is not answering, over the last report this window read. */
+function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
+  const { report, reading, error, refresh } = useAgentsReport({ placeId: place.id });
+  const away = absentOf(place, ctx.now, here)?.away ?? null;
+  return (
+    <AgentsList
+      shell="page"
+      report={report}
+      reading={reading}
+      error={error}
+      on={here ? THIS_COMPUTER_WORD : placeName(place)}
+      ctx={{ where: here ? "here" : "box", heldWhy: away }}
+      onRefresh={refresh}
+      now={ctx.now}
+      misses={recipeMissLines(place.provision?.rows ?? [])}
+    />
+  );
 }
 
 /** What a computer has cost, as its own line: the month's figure and the hourly rate, both the protocol's. The
@@ -252,9 +236,13 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
       {IMAGE_WORDS.edit}
     </Button>
   );
+  // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
+  const agents =
+    image === null ? undefined : <AgentsList shell="page" report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: ctx.openSetup }} now={ctx.now} />;
   return [
     // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
     ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts, ...(edit === undefined ? {} : { under: edit }) }]),
+    ...(agents === undefined ? [] : [{ id: "agents", items: [], body: agents }]),
     ...(copies.length === 0 ? [] : [{ id: "copies", head: IMAGE_WORDS.copies, items: copies }]),
     {
       id: "acts",
@@ -326,16 +314,13 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     ...(copies === "" ? [] : [{ kind: "row" as const, id: "copies", title: WHERE_WORDS.copies, description: WHERE_WORDS.copiesDescription, word: copies, attrs: { "data-k": "copies" } }]),
     ...(ports === "" ? [] : [{ kind: "row" as const, id: "ports", title: WHERE_WORDS.ports, description: WHERE_WORDS.portsDescription, word: ports, attrs: { "data-k": "ports" } }]),
   ];
-  const recipe = recipeLines(place).map(row => ({ kind: "line" as const, id: `recipe-${row.id}`, label: row.label, value: `${PROVISION_KIND_WORDS[row.kind]} · ${row.state}`, valueClass: "fact" as const, attrs: { "data-k": "recipe-row", "data-kind": row.kind } }));
   const workspaces = holding.workspaces.map((w, at) => ({ kind: "line" as const, id: `workspace-${at}`, label: w.name, value: `${w.state} · ${threadWord(w.threads)}`, valueClass: "fact" as const, attrs: { "data-k": "workspace-line" } }));
   const imageBytes = ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
   const cards: SettingsCardData[] = [
     ...(facts.length === 0 ? [] : [{ id: "facts", items: facts }]),
     ...(connection.length === 0 ? [] : [{ id: "connection", head: WHERE_WORDS.connection, items: connection }]),
     ...(workspaceThere.length === 0 ? [] : [{ id: "workspace-there", head: WHERE_WORDS.workspaceThere, items: workspaceThere }]),
-    { id: "agents", head: WHERE_WORDS.agents, items: agentRows(here ? hereAgentLines(ctx.reads.setup) : placeAgentLines(place), here, here ? THIS_COMPUTER_WORD : placeName(place)) },
-    // The card stands only on a computer with a provision, one muted line where it has no such rows.
-    ...(place.provision === undefined ? [] : [{ id: "recipe", head: WHERE_WORDS.recipe, items: recipe.length === 0 ? [{ kind: "line" as const, id: "no-recipe", label: WHERE_WORDS.recipeNone, attrs: { "data-k": "no-recipe" } }] : recipe }]),
+    { id: "agents", items: [], body: <ComputerAgents place={place} here={here} ctx={ctx} /> },
     ...(workspaces.length === 0 ? [] : [{ id: "workspaces", head: WHERE_WORDS.workspaces, items: workspaces }]),
     // This computer is the one nothing can be done to: it is the computer the host runs on.
     ...(here

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The right region: one of three panes at a time over the copied tab strip,
+// The right region: one of four panes at a time over the copied tab strip,
 // keyed by the selected workspace. A pane the workspace cannot serve yet (not
 // running) stays greyed out in the picker with a reason. Terminal
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
@@ -11,6 +11,7 @@ import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "..
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider.js";
 import { RightPanelSheet } from "../components/RightPanelSheet.js";
 import { RightPanelTabs } from "../components/RightPanelTabs.js";
+import { AgentsSurface } from "../components/agents/AgentsSurface.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
 import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
@@ -43,9 +44,11 @@ export function HeldRightPanel({ mode, layoutControls, onClose }: { mode: Previe
       onAddBrowser={NOTHING}
       onAddTerminal={NOTHING}
       onAddDiff={NOTHING}
+      onAddAgents={NOTHING}
       browserAvailable={false}
       terminalAvailable={false}
       diffAvailable={false}
+      agentsAvailable={false}
       heldLine={HELD_PANELS_LINE}
     >
       {null}
@@ -108,9 +111,12 @@ export function RightPanel({
       onAddBrowser={() => open(workspaceId, "preview")}
       onAddTerminal={() => void openPanelTerminal(workspaceId)}
       onAddDiff={() => open(workspaceId, "diff")}
+      onAddAgents={() => open(workspaceId, "agents")}
       browserAvailable={workspace?.phase === "running"}
       terminalAvailable={workspace?.phase === "running" && absent === null}
       diffAvailable={workspace?.phase === "running"}
+      // A paused task answers its last report and is never woken for it.
+      agentsAvailable={workspace !== null}
       // A panel terminal cannot open at all without a pty, so its tab keeps the computer's own sentence as the
       // reason it is held, and the drawer under the chat is where that sentence carries the button.
       {...(absent === null ? {} : { unavailableReasons: { terminal: absent.sentence } })}
@@ -119,6 +125,8 @@ export function RightPanel({
         <WorkspaceTerminalPanel workspaceId={workspaceId} surface={active} />
       ) : active?.kind === "preview" ? (
         <BrowserSurface key={active.id} workspaceId={workspaceId} surface={active} />
+      ) : active?.kind === "agents" ? (
+        <AgentsSurface workspaceId={workspaceId} />
       ) : active?.kind === "diff" ? (
         <DiffWorkerPoolProvider theme={theme}>
           <DiffSurface workspaceId={workspaceId} theme={theme} />

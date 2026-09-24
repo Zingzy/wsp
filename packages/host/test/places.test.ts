@@ -11,13 +11,13 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { OWN_MARK, SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
+import { OWN_MARK, SshBackend, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -163,7 +163,7 @@ interface FakeHost {
   frames: Record<string, unknown>[];
 }
 
-async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
+async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[]; unreadable?: boolean } = {}): Promise<FakeHost> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
   const other = generateKeyPairSync("ed25519");
@@ -181,6 +181,10 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
         if (opts.refuse !== undefined) {
           ws.send(JSON.stringify({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" }));
           ws.close(4401, "unauthorized");
+          return;
+        }
+        if (opts.unreadable === true) {
+          ws.send(JSON.stringify({ id: frame["id"], ok: true }));
           return;
         }
         const placeId = "p_ab12cd34ab12cd34";
@@ -289,6 +293,8 @@ describe("what wsp add prints with no argument", () => {
     expect(addRefusal("nonsense")).toContain("box, solari");
     expect(addRefusal("nonsense")).toContain("user@host");
     expect(addRefusal("nonsense")).toContain("wsp add with no argument");
+    expect(addRefusal("nonsense")).toContain("an alias your ssh config gives a HostName");
+    expect(addRefusal("nonsense")).not.toMatch(/\.\s+\S/);
   });
 });
 
@@ -296,7 +302,19 @@ describe("what wsp add prints with no argument", () => {
  * provider. The dial is the one road that reaches a host, and the tests that take it hand their own. */
 /** The sign-in on a computer you own, answered here: a unit test opens no pty on a box. A test that means to
  * exercise it hands its own signIn and reads what it was given. */
+/** An ssh client config holding one block, spoo renamed to its address with root as its user and the port given,
+ * and nothing else: every other word comes back as its own hostname, which is what `ssh -G` prints for a name no
+ * block renames. Nothing here runs the real client. */
+const spooConfig =
+  (port = 22): SshLocalRun =>
+  async (_file, args) => {
+    const word = args.at(-1)!;
+    const stdout = word === "spoo" ? `user root\nhostname 178.156.161.168\nport ${port}\n` : `user dev\nhostname ${word}\nport 22\n`;
+    return { exitCode: 0, stdout, stderr: "" };
+  };
+
 const noBoxSignIn = {
+  sshWord: (word: string, o: { port?: number; keyPath?: string }) => sshWordReach(word, o, spooConfig()),
   // Every road that is not the first dial of a stranger reads a computer this Mac's client has already met, and
   // none of them reaches the real client: a scan leaves this computer.
   heldHostKey: async (): Promise<string | undefined> => "ssh-ed25519 SHA256:held",
@@ -685,6 +703,15 @@ describe("a computer joining a wsp", () => {
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
     expect(existsSync(join(home, ".config", "systemd", "user"))).toBe(false);
+  });
+
+  it("says a join answer it cannot read on one line, since the add reads the box's last line as its sentence", async () => {
+    const home = tmp("join-unreadable");
+    const host = await fakeHost({ unreadable: true });
+    const said = await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run)).catch((e: unknown) => (e as Error).message);
+    expect(String(said)).toContain(`${host.url} answered the join with something this computer cannot read: `);
+    expect(String(said)).not.toContain("\n");
+    expect(String(said)).toContain("placeId");
   });
 
   it("joins the host whose key the line named, as it did before", async () => {
@@ -1194,6 +1221,44 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(sent.at(-1)!["hostKey"]).toBeUndefined();
   });
 
+  it("takes an alias out of the person's ssh config as the login its block names, and still refuses a word no block renames", async () => {
+    const sent: (Record<string, unknown> | undefined)[] = [];
+    const read: SshReach[] = [];
+    const client = {
+      request: async (_op: string, params?: Record<string, unknown>) => {
+        sent.push(params);
+        return { place: { id: "p_1", kind: "computer", name: "spoo", default: true, engine: "none", present: true, takesForks: true } as PlaceView } as Record<string, unknown>;
+      },
+      events: async () => {},
+      onFrame: () => () => {},
+      closeWords: () => "",
+      closed: Promise.resolve(),
+      close: () => {},
+      terminate: () => {},
+    };
+    const deps = { ...systemPlaceDeps, dial: async () => client as never, heldHostKey: async (reach: SshReach) => (read.push(reach), "ssh-ed25519 SHA256:held") };
+
+    // The alias stays the host so the block keeps applying, and the record reads the login that block names.
+    const io = captured();
+    expect(await addCommand(io, opts(tmp("add-alias")), ["spoo"], {}, deps), io.errors.join("\n")).toBe(0);
+    expect(sent.at(-1)).toMatchObject({ address: "root@spoo" });
+    expect(read.at(-1)).toEqual({ user: "root", host: "spoo", port: 22 });
+
+    // A block with a Port of its own keeps it: a 22 on the dial would override the config.
+    const ported = captured();
+    const portDeps = { ...deps, sshWord: (word: string, o: { port?: number; keyPath?: string }) => sshWordReach(word, o, spooConfig(2222)) };
+    expect(await addCommand(ported, opts(tmp("add-alias-port")), ["spoo"], {}, portDeps), ported.errors.join("\n")).toBe(0);
+    expect(sent.at(-1)).toMatchObject({ address: "root@spoo:2222" });
+    expect(read.at(-1)).toEqual({ user: "root", host: "spoo", port: 2222 });
+
+    // A word ssh does not rename is refused as it always was, and nothing was asked of the host.
+    const before = sent.length;
+    const refused = captured();
+    expect(await addCommand(refused, opts(tmp("add-no-alias")), ["nonsense"], {}, deps)).toBe(1);
+    expect(refused.errors).toEqual([addRefusal("nonsense")]);
+    expect(sent.length).toBe(before);
+  });
+
   it("reads the port and the key by the rule every ssh road on this command line reads them by", () => {
     expect(addFlags("box", "2222", "/tmp/id_ed25519")).toEqual({ name: "box", sshPort: 2222, keyPath: "/tmp/id_ed25519" });
     expect(addFlags(undefined, undefined, undefined)).toEqual({});
@@ -1505,7 +1570,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(PlaceReport.safeParse({ ...placeReport({ name: "box", home: tmp("one-reader-home") }), dialed: "http://192.168.1.20:4400" }).success).toBe(true);
   });
 
-  it("names the commands it was running when a deploy will not come up, so nobody reproduces them by hand first", async () => {
+  it("throws one sentence when a deploy will not come up and leaves the commands it was running to the host's log", async () => {
     const root = tmp("deploy-said");
     const machine = {
       id: "ssh://maya@box:22",
@@ -1513,14 +1578,23 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       putBytes: async () => {},
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
       facts: async () => ({ os: "Ubuntu 24.04.4 LTS" }),
-      run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : { exitCode: 1, stdout: `${WSP_READY_LINE}\n`, stderr: "zod: report.docker required" }),
+      run: async (script: string) =>
+        script.includes("PREFLIGHT_OK")
+          ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" }
+          : { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: "the host at http://192.168.1.20:4400 did not answer in 20s\n" },
     };
     const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY };
     const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
-    const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
-    // The box's own last words, and then the join it was running, spelled as it ran there.
-    expect(said).toContain("report.docker required");
-    expect(said).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((...said: unknown[]) => void warned.push(said.map(String).join(" ")));
+    try {
+      const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
+      expect(said).toBe("box took wsp but could not connect back: the host at http://192.168.1.20:4400 did not answer in 20s");
+      // The join it was running, spelled as it ran there, is for whoever reads the host's log.
+      expect(warned.join("\n")).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("answers the login it used and the key file it was given, so a later dial of that box takes the same road", async () => {
@@ -1696,6 +1770,23 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       const install = placeInstaller({ backend: box.backend as never, ...assets(tmp(`shell-ok-${shell ?? "unsaid"}`), [X86]) });
       expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage), shell).toMatchObject({ name: "box" });
     }
+  });
+
+  it("takes an alias out of the person's ssh config from the sheet, and refuses a word no block renames before any dial", async () => {
+    const box = fakeBox("x86_64");
+    const dialled: SshReach[] = [];
+    const backend = { ...(box.backend as Record<string, unknown>), adopt: async (reach: SshReach) => (dialled.push(reach), (box.backend as { adopt: () => Promise<unknown> }).adopt()) };
+    const sshWord = (word: string, o: { port?: number; keyPath?: string }) => sshWordReach(word, o, spooConfig(2222));
+    const install = placeInstaller({ backend: backend as never, sshWord, ...assets(tmp("alias-sheet"), [X86]) });
+    expect(await install({ address: "spoo", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage)).toMatchObject({ name: "spoo", ssh: "root@spoo:2222" });
+    expect(dialled).toEqual([{ user: "root", host: "spoo", port: 2222 }]);
+
+    const stranger = fakeBox("x86_64");
+    await expect(placeInstaller({ backend: stranger.backend as never, sshWord, ...assets(tmp("alias-none"), [X86]) })({ address: "nonsense", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, stranger.stage)).rejects.toThrow(
+      SSH_WORD_REFUSAL("nonsense"),
+    );
+    expect(stranger.ran).toEqual([]);
+    expect(stranger.landed).toEqual([]);
   });
 
   it("leaves the known_hosts step alone where the dial never got far enough to exchange a key", async () => {

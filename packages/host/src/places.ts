@@ -76,11 +76,11 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, sshDaemonPlace } from "./doctor.js";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -220,7 +220,7 @@ export function addLines(token: string, expiresAt: number, now: number, urls: re
     ...urls.map(url => join(url)),
     ...(publicAt === undefined ? [] : [join(relayUrlOf(publicAt), "when the host is linked to your relay")]),
     `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
-    "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you.",
+    "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you, and an alias from your ssh config works in place of user@host.",
     `A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`,
   ];
 }
@@ -236,14 +236,14 @@ export const providerPlaceLine = (id: string, rateUsdPerHour: number): string =>
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {
-  return `wsp add ${word}: that is neither a provider this wsp can be set up for (${addableProviders().join(", ")}) nor an address over ssh (user@host). wsp add with no argument prints the line to type on a computer you are sitting at.`;
+  return `wsp add ${word}: that is neither a provider this wsp can be set up for (${addableProviders().join(", ")}) nor an address over ssh (user@host, or an alias your ssh config gives a HostName), and wsp add with no argument prints the line to type on a computer you are sitting at.`;
 }
 
 /** The one line `--name`, `--ssh-port` and `--ssh-key` get when no address was typed beside them. All three belong
  * to the road that installs the agent on a computer over ssh; the printed join line is typed on that computer,
  * where `wsp join --name` is what names it. */
 export const ADD_FLAGS_REFUSAL =
-  "wsp add: --name, --ssh-port and --ssh-key belong to wsp add user@host, which installs the agent on a computer over ssh. On the computer you are sitting at, wsp join <address> --code <code> --name <name> names it.";
+  "wsp add: --name, --ssh-port and --ssh-key belong to wsp add user@host or wsp add <ssh alias>, which installs the agent on a computer over ssh. On the computer you are sitting at, wsp join <address> --code <code> --name <name> names it.";
 
 /** The refusal an install gets when nothing but this computer's own loopback could be dialled back: the box would
  * have no address to reach this host at, so the agent would be installed and never link. */
@@ -305,9 +305,6 @@ async function onePlace(client: HostClient, typed: string, ref: string): Promise
   if (found.length > 1) return { refusal: twoPlacesLine(typed, found.map(p => p.id)) };
   return { place: found[0]!, joined };
 }
-
-/** The line a join prints once the computer is in. */
-export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
 
 /** The refusal a join gets on a computer whose manager wsp writes no unit for: nothing there would keep the daemon
  * up, so nothing is written. */
@@ -413,6 +410,9 @@ export function addFlags(
   };
 }
 
+/** How a typed word becomes a dial: the engine's one reading unless a test hands its own. */
+type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) => Promise<SshReach>;
+
 /** How the daemon is put on a computer over ssh, for the host that wires the runtime: the ssh road the workspace
  * kind already had, reused as one function. The dial and the login read are one call (`adopt`), the bundle and
  * the join code go over the same connection, and the join itself is run on that computer by the deploy, so wsp
@@ -421,9 +421,9 @@ export function addFlags(
  *
  * Nothing waits here for the link: the computer dials this host on its own, and the place door is what knows when
  * it has. */
-export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string; cliDir?: string; advertise?: string } = {}): PlaceInstaller {
+export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordReader; daemonDir?: string; cliDir?: string; advertise?: string } = {}): PlaceInstaller {
   return async (req, stage) => {
-    const reach = parseSshAddress(req.address, {
+    const reach = await (deps.sshWord ?? sshWordReach)(req.address, {
       ...(req.sshPort !== undefined ? { port: req.sshPort } : {}),
       ...(req.keyPath !== undefined ? { keyPath: req.keyPath } : {}),
     });
@@ -583,7 +583,7 @@ export function placeUpdateScript(home: string, landed: string, unit = placeUnit
 /** What the box said when wsp's own login files could not be written there: the update stops on it, since the
  * lines exit 0 by design and a failure is the link going or the login file being unreadable, and the person runs
  * the line again. */
-export const placeLoginFilesFailedLine = (name: string, said: string): string => `${name} did not take wsp's login files: ${said}`;
+export const placeLoginFilesFailedLine = (name: string, said: string): string => placeInstallFailedLine(name, "login", said);
 
 /** The refusal an update gets on a computer this host is holding no link to and was never installed over ssh: a
  * computer joined by typing a code is reached over its link alone. */
@@ -780,6 +780,8 @@ interface PlaceDeps {
   heldHostKey(reach: SshReach): Promise<string | undefined>;
   /** The key a computer answers a scan with, and what in the person's own ssh config stopped the scan. */
   offeredHostKey(reach: SshReach): Promise<{ key?: string; stoppedBy?: string }>;
+  /** The dial a typed word names, a login or an alias out of the person's ssh config. */
+  sshWord: SshWordReader;
 }
 
 const systemDeps: PlaceDeps = {
@@ -794,6 +796,7 @@ const systemDeps: PlaceDeps = {
   signIn: signInOnBox,
   heldHostKey: reach => knownHostKey(reach),
   offeredHostKey: reach => offeredHostKey(reach),
+  sshWord: (word, opts) => sshWordReach(word, opts),
 };
 
 /** What the two host-side words work on: the state file the host on this computer serves, and where this run would
@@ -854,16 +857,20 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined;
   // What one word names is read once, in the protocol: a computer of the person's own over ssh, a repo a computer
   // clones, or a folder this computer holds. A provider's own word is neither and is read first.
-  const kind = word === undefined || addableProviders().includes(word) ? undefined : sourceKindOf(word);
+  const provider = word !== undefined && addableProviders().includes(word);
+  const kind = word === undefined || provider ? undefined : sourceKindOf(word);
   if (kind === "computer") return addOverSsh(io, opts, aim, word!, flags, deps);
   // Every other kind a word can name is a project's source, whichever of them it is: the host reads the word again
   // and records it, so a source added to the protocol's own reading needs no second list here.
   if (kind !== undefined) return addProject(io, opts, aim, word!, flags, deps);
+  // A bare word is a computer when the person's ssh config renames it, and the login its block names is what is sent.
+  const alias = word === undefined || provider ? undefined : await deps.sshWord(word, sshFlags(flags)).catch(() => undefined);
+  if (alias !== undefined) return addOverSsh(io, opts, aim, sshLoginWord(alias), flags, deps);
   if (named) {
     io.error(ADD_FLAGS_REFUSAL);
     return 1;
   }
-  if (word !== undefined && addableProviders().includes(word)) return addProvider(io, opts, word, deps);
+  if (provider) return addProvider(io, opts, word!, deps);
   if (word !== undefined) {
     io.error(addRefusal(word));
     return 1;
@@ -899,7 +906,7 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
 const ADD_USAGE = [
   "usage: wsp add",
   "       wsp add <provider>",
-  "       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+  "       wsp add <user@host|ssh alias> [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
   "       wsp add <place> --update",
   "       wsp add <place> --sign-in <agent>",
 ].join("\n");
@@ -1151,10 +1158,7 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
  * back at all where the add is not to go on. */
 async function confirmedHostKey(io: CliIO, address: string, flags: AddFlags, deps: PlaceDeps): Promise<{ hostKey?: string } | undefined> {
   if (flags.hostKey !== undefined) return { hostKey: flags.hostKey };
-  const reach = parseSshAddress(address, {
-    ...(flags.sshPort !== undefined ? { port: flags.sshPort } : {}),
-    ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
-  });
+  const reach = await deps.sshWord(address, sshFlags(flags));
   if ((await deps.heldHostKey(reach).catch(() => undefined)) !== undefined) return {};
   const offered = await deps.offeredHostKey(reach).catch((): { key?: string; stoppedBy?: string } => ({}));
   if (offered.key === undefined) {
@@ -1164,6 +1168,11 @@ async function confirmedHostKey(io: CliIO, address: string, flags: AddFlags, dep
   if (io.isTTY === true && (await io.ask(hostKeyAsk(address, offered.key))) === "yes") return { hostKey: offered.key };
   io.error(hostKeyUnconfirmedRefusal(address, offered.key));
   return undefined;
+}
+
+/** The port and key a person typed beside an address, in the shape every ssh reading takes them. */
+function sshFlags(flags: AddFlags): { port?: number; keyPath?: string } {
+  return { ...(flags.sshPort !== undefined ? { port: flags.sshPort } : {}), ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}) };
 }
 
 /** One step of an install as a terminal prints it: the step's own words, a tick where it is done and what the
@@ -1472,7 +1481,7 @@ async function handshake(
         if (frame["id"] === 1) {
           const reply = PlaceJoinReply.safeParse(frame);
           if (!reply.success) {
-            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
+            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message.replace(/\s+/g, " ").trim()}`));
             return;
           }
           const { placeId, hostPublicKey, nonce: hostNonce, signature, ephemeral, hostName } = reply.data;
