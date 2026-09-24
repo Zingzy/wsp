@@ -202,8 +202,20 @@ pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> 
     if !copy_of(from, to) {
         return Err(not_a_copy(from, to));
     }
+    let at = to.parent().zip(to.file_name()).map_or_else(|| to.to_path_buf(), |(parent, name)| parent.join(name));
+    if std::fs::symlink_metadata(&at).is_ok_and(|m| !m.is_dir()) {
+        return Err(not_a_folder(to));
+    }
     sweep_beside(from);
-    taking.remove(from, to).map_err(|e| e.to_string())
+    taking.remove(from, &at).map_err(|e| e.to_string())
+}
+
+/// Why a link or a file carrying a copy's name is not taken away.
+pub fn not_a_folder(to: &Path) -> String {
+    format!(
+        "{} is not a folder of its own, so nothing was removed; a copy is a folder beside its project, never a link or a file, and --to names that folder",
+        to.display()
+    )
 }
 
 /// Whether `to` has the shape every copy of `from` is made at: beside it, under its name with the work's on the end.

@@ -23,7 +23,8 @@ pub(crate) fn set_aside_then(to: &Path, later: impl FnOnce(&Path) -> io::Result<
     };
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
     let aside = parent.join(format!("{ASIDE_PREFIX}{}-{}-{nanos}", name.to_string_lossy(), std::process::id()));
-    match fs::rename(to, &aside) {
+    // The name and not the path as typed: rename(2) follows a link written with a trailing slash.
+    match fs::rename(parent.join(name), &aside) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", to.display()))),

@@ -612,3 +612,33 @@ async fn the_copy_verb_takes_a_removal_left_beside_the_project_on_make_and_on_re
     assert!(gone(&left), "a remove left the leftover beside the project");
     assert!(kept.is_dir() && from.join("README.md").is_file());
 }
+
+/// A copy is a folder of its own: a link with a copy's name, typed with a trailing slash so a rename would follow it,
+/// and a plain file with a copy's name are refused, and neither the link, the file nor what a link points at goes.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_copy_verb_removes_no_link_and_no_file_that_carries_a_copy_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = repo_in(dir.path());
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("kept"), b"mine\n").unwrap();
+    let to_project = dir.path().join("work-link");
+    std::os::unix::fs::symlink(&from, &to_project).unwrap();
+    let to_outside = dir.path().join("work-out");
+    std::os::unix::fs::symlink(elsewhere.path(), &to_outside).unwrap();
+    let file = dir.path().join("work-file");
+    std::fs::write(&file, b"notes\n").unwrap();
+    let typed = [format!("{}/", to_project.display()), format!("{}//", to_outside.display()), file.display().to_string()];
+    for to in &typed {
+        let refused = copy_remove(&from, std::path::Path::new(to));
+        assert_eq!(refused.status.code(), Some(1), "{to} was taken");
+        assert_eq!(
+            String::from_utf8_lossy(&refused.stderr).trim(),
+            format!("{to} is not a folder of its own, so nothing was removed; a copy is a folder beside its project, never a link or a file, and --to names that folder")
+        );
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(from.join("README.md").is_file(), "the project a link pointed at went");
+    assert!(elsewhere.path().join("kept").is_file(), "the folder a link pointed at went");
+    assert!(to_project.is_symlink() && to_outside.is_symlink() && file.is_file());
+}
