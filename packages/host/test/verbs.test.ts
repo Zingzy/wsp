@@ -1156,6 +1156,10 @@ describe("wsp verbs over the host", () => {
     const here = { ...workspace, kind: "local", machineId: "local" } as const;
     expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts computer is left as it is; its record and 1 thread leave this computer.");
     expect(deletedLine({ workspace: here, threads: 1 })).toBe("deleted box ws_mine: its computer is left as it is, and its record and 1 thread are gone from this computer");
+    // A workspace that is a copy of a project folder takes the copy with it; the folder it was copied from stays.
+    const copied = { ...here, copy: { road: "clonefile", path: "/Users/dev/api-fix", source: "/Users/dev/api", base: "0".repeat(40), branch: "main", carried: "deps-and-config" } } as const;
+    expect(deleteQuestion({ workspace: copied, threads: 1 })).toBe("Delete box?\nIts copy at /Users/dev/api-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
+    expect(deletedLine({ workspace: copied, threads: 1 })).toBe("deleted box ws_mine: its copy at /Users/dev/api-fix is removed and the project folder is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
     const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
     expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
