@@ -2,7 +2,7 @@
 // The project's actions, one registry: what a project's header row in the
 // sidebar and the palette offer for one project. A project is where a piece of
 // work starts and what a workspace is made of; nothing here touches a machine.
-import { PlusIcon, Settings2Icon, Trash2Icon } from "lucide-react";
+import { PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import { projectInUseRefusal } from "@wsp/protocol";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../sidebar/words.js";
 import type { ActionEntry } from "./registry.js";
@@ -41,7 +41,7 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
   {
     id: "project-settings",
     group: "open",
-    icon: () => Settings2Icon,
+    icon: () => SettingsIcon,
     searchTerms: ["project settings", "project icon", "project colour", "project color"],
     title: () => PROJECT_WORDS.settings,
     rowLabel: target => `${PROJECT_WORDS.settings} for ${target.name}`,

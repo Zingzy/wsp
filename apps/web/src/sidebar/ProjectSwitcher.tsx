@@ -7,7 +7,7 @@
 // stands in for that project's row: its plus on hover is New workspace and a
 // right-click opens the project's menu. On a wsp with no project the head is
 // held, since there is nothing to pick.
-import { CheckIcon, ChevronDownIcon, FolderIcon, PlusIcon, SearchIcon, Settings2Icon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, FolderIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
@@ -222,7 +222,7 @@ export function ProjectSwitcher({
                     }}
                     className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-background/60 hover:text-foreground"
                   >
-                    <Settings2Icon className="size-4" aria-hidden />
+                    <SettingsIcon className="size-4" aria-hidden />
                   </button>
                 )}
               </div>
