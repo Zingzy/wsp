@@ -490,7 +490,7 @@ export function WorkspaceSidebar() {
         {made.map(creation => creationItem(creation, depth, rail))}
         {group.workspaces.length === 0 && made.length === 0 ? (
           <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
-            <p data-k="no-workspaces" data-depth={depth} className="flex h-9 items-center pr-2 pl-3 text-[13px] text-sidebar-foreground/45">
+            <p data-k="no-workspaces" data-depth={depth} className="flex h-9 items-center px-2 text-[13px] text-sidebar-foreground/45">
               {PROJECT_WORDS.noWorkspaces}
             </p>
           </li>
