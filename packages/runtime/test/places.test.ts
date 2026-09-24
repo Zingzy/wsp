@@ -13,6 +13,7 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
+  PLACE_LOGIN_REFUSED_KIND,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
   placeRefusalTranscript,
@@ -1687,8 +1688,44 @@ describe("putting the agent on a computer over ssh", () => {
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
-    // An install that never reached a join leaves its code unspent, and the person's next add mints another.
-    expect(await runtime.devices.spend(minted, 1)).toBe(true);
+    // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
+    expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
+  });
+
+  it("draws a failure on the step that was under way, not on a step that only said what it had done", async () => {
+    const stages: PlaceStageEvent[] = [];
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          stage("host-key", "done", "ssh-ed25519 SHA256:abc");
+          throw new Error("root@spoo runs zsh as root's shell");
+        },
+      },
+    });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("zsh");
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect running", "host-key done", "connect failed"]);
+  });
+
+  it("answers a refused login over the wire with the kind the app reads its login fix off, and any other refusal without it", async () => {
+    let refuse: Error = new PlaceLoginRefusedError("maya@box: Permission denied (publickey).");
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(refuse) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4420, addresses: DOOR }) } });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await c.request("places.add", { address: "maya@box" })).toMatchObject({ ok: false, error: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND });
+    refuse = new Error("root@spoo runs zsh as root's shell");
+    expect(await c.request("places.add", { address: "root@spoo" })).not.toHaveProperty("kind");
+    c.close();
   });
 
   it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {

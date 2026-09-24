@@ -2566,7 +2566,7 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join", "provision"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "reach", "wsp", "service", "join", "provision"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
@@ -2574,6 +2574,7 @@ export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
   "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
+  reach: "checking it can reach this computer",
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2586,6 +2587,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
  * check would otherwise say the wait it was in rather than the state it reached. */
 export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
   "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
+  reach: { word: "checking it can reach this Mac", done: "reaches this Mac" },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
   service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
   join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
@@ -2596,6 +2598,10 @@ export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done")
   const said = PLACE_ADD_SHEET_WORDS[step];
   return (state === "done" ? said?.done : undefined) ?? said?.word ?? PLACE_ADD_WORDS[step];
 }
+
+/** The kind a places.add refusal carries when the ssh login itself did not stand or the word typed names no login:
+ * the one case where checking the user, the address or the key is the fix. */
+export const PLACE_LOGIN_REFUSED_KIND = "login";
 
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */

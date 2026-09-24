@@ -197,6 +197,13 @@ describe("the steps of an install on a computer over ssh", () => {
     // It belongs where it happens: the dial that connects is what writes the file.
     expect(PlaceAddStep.options.indexOf("host-key")).toBe(PlaceAddStep.options.indexOf("connect") + 1);
   });
+
+  it("checks the box can reach this host as a step of its own, after the login and before anything of wsp's lands", () => {
+    expect(PlaceAddStep.options.slice(0, 4)).toEqual(["connect", "host-key", "reach", "wsp"]);
+    expect(PLACE_ADD_WORDS.reach).toBe("checking it can reach this computer");
+    expect(placeAddSheetWord("reach", "running")).toBe("checking it can reach this Mac");
+    expect(placeAddSheetWord("reach", "done")).toBe("reaches this Mac");
+  });
 });
 
 describe("where a computer joined as a place keeps its own two files", () => {
