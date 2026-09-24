@@ -5308,6 +5308,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
    * changed view is pushed to every socket as release.changed. */
   z.object({ id: reqId, op: z.literal("release.check") }),
+  /** Replies { ok } and then restarts this host on the files it was installed from, by the road it came up on;
+   * refused where that road would not bring it back. The socket closes on the host's stopping code. */
+  z.object({ id: reqId, op: z.literal("host.restart") }),
   /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
    * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
    * none of them, and refused naming the project when that source is already recorded on that computer. */

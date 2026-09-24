@@ -2,6 +2,7 @@
 export { ASSETS_DIR, ASSET_KINDS, REQUIRE_DAEMON_ENV, assetDir, assetProof, packedAsset, stageAsset, stageAssetOrSkip, stagedAsset, workspaceAsset, type AssetKind } from "./assets.js";
 export { stateWriterHere, VERSION } from "./version.js";
 export { RELEASE_BODY_MAX_BYTES, RELEASE_TIMEOUT_MS, cappedText, releaseAssetUrl, releaseTagUrl } from "./release.js";
+export { type RestartingHost, type RestartRoad } from "./restart.js";
 export {
   startHost,
   type HostOptions,

@@ -82,7 +82,7 @@ const remount = (): void => {
   act(() => useNotices.getState().clear());
   mounted = render(<Harness />);
 };
-const releaseView = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://example.test/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app", restartReturns: true });
+const releaseView = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://example.test/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app" });
 const openComputers = (): void => {
   act(() => {
     useStore.setState({ settingsOpen: true });
@@ -392,7 +392,7 @@ describe("a workspace gone and a newer release", () => {
   it("a release above the running host is one note per version, with Get onto its page", () => {
     (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
-    const view = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://example.test/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app", restartReturns: true });
+    const view = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://example.test/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app" });
     act(() => useStore.setState({ release: view("0.1.0") }));
     expect(notices()).toEqual([]);
     act(() => useStore.setState({ release: view("0.2.0") }));

@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeOwn } from "@wsp/own-file";
-import { RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, releaseAbove, releaseWord, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
+import { HOST_NO_RESTART_LINE, RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, releaseAbove, releaseWord, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
 import type { ReleaseDoor } from "@wsp/runtime";
 import { RELEASES, REPO, RELEASE_TAG } from "../../wspx/scripts/bundles.mjs";
 import { keyIn, savedEnv } from "./env-keys.js";
@@ -103,6 +103,10 @@ export interface ReleaseWatchOptions {
   running: string;
   /** The version the files it was started from carry now. */
   installed: () => string;
+  /** The road host.restart takes, whose refusal the view carries; absent, the host has none. */
+  restart?: { refusal?: string };
+  /** The line that moves this host onto a release, on the road it was installed by. */
+  update?: (version: string) => string;
   env?: Env;
   fetch?: typeof fetch;
   now?: () => number;
@@ -140,11 +144,14 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   const off = (): boolean => checksOff(opts.statePath, env);
 
   const view = (): ReleaseView => {
-    const own = { shape: opts.shape, restartReturns: false, ...(installed !== opts.running ? { installed } : {}) };
+    const restartRefusal = opts.restart === undefined ? HOST_NO_RESTART_LINE : opts.restart.refusal;
+    const own = { shape: opts.shape, ...(restartRefusal !== undefined ? { restartRefusal } : {}), ...(installed !== opts.running ? { installed } : {}) };
     if (off()) return { state: "off", ...own };
+    const update = opts.update !== undefined && kept.latest !== undefined && releaseAbove(kept, opts.running) ? opts.update(kept.latest.version) : undefined;
     return {
       state: answered ?? "checking",
       ...(kept.latest !== undefined ? { latest: kept.latest } : {}),
+      ...(update !== undefined ? { update } : {}),
       ...(kept.checkedAt !== undefined ? { checkedAt: kept.checkedAt } : {}),
       ...(kept.triedAt !== undefined ? { triedAt: kept.triedAt } : {}),
       ...own,

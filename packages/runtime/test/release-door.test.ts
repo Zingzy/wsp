@@ -9,7 +9,7 @@ import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 import { WsClient, wsRequest } from "./ws-client.js";
 
-const CHECKING: ReleaseView = { state: "checking", shape: "app", restartReturns: false };
+const CHECKING: ReleaseView = { state: "checking", shape: "app" };
 const READ: ReleaseView = { ...CHECKING, state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" } };
 
 function fakeDoor(): ReleaseDoor {

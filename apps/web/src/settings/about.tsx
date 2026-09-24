@@ -3,9 +3,12 @@
 // line each, the newest release as the host last read it, the computers whose
 // daemon is behind, and the road to the next release under them: in the app
 // on its own host the shell downloads and opens it, anywhere else Get is a
-// link. A browser tab has no shell half and shows the host's line alone.
+// link. Once newer files are installed under a running host, Restart host
+// stands in Get's place. A browser tab has no shell half and shows the host's
+// line alone.
 import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect, useState } from "react";
+import { onAnotherComputer } from "../boot.js";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
@@ -23,6 +26,18 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
   if (release.latest === undefined || release.checkedAt === undefined) return missed === undefined ? undefined : ABOUT_WORDS.unreachedHover(missed);
   const when = ABOUT_WORDS.readWhen(now - Date.parse(release.checkedAt));
   return missed === undefined ? ABOUT_WORDS.readHover(when) : ABOUT_WORDS.missedHover(when, missed);
+}
+
+/** Restart where the installed files are newer, a restart brings the host back, and the page is on the host's own
+ * computer, since the host refuses a restart asked from anywhere else. */
+const restartShown = (release: ReleaseView | null): boolean => release?.installed !== undefined && release.restartRefusal === undefined && !onAnotherComputer();
+
+/** The Host line's hover: the files installed under the running host first, since the install already happened and
+ * only its restart is left, then the line that installs the release while the host is behind it. */
+function hostHover(release: ReleaseView | null): string {
+  if (release?.installed !== undefined) return ABOUT_WORDS.hostInstalledHover(release.installed, release.restartRefusal ?? (restartShown(release) ? ABOUT_WORDS.restartRuns : ABOUT_WORDS.restartThere));
+  if (release?.update !== undefined && release.latest !== undefined) return ABOUT_WORDS.hostUpdateHover(release.update, release.latest.version);
+  return ABOUT_WORDS.hostHover;
 }
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
@@ -98,7 +113,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
   const hover = release === null ? undefined : latestHover(release, ctx.now);
   const lines: SettingsLineData[] = [
     ...(inShell ? [{ kind: "line" as const, id: "app-version", label: ABOUT_WORDS.app, value: app ?? ABOUT_WORDS.unknown, hover: ABOUT_WORDS.appHover, attrs: { "data-k": "app-version" } }] : []),
-    { kind: "line", id: "host-version", label: ABOUT_WORDS.host, value: host ?? ABOUT_WORDS.unknown, hover: ABOUT_WORDS.hostHover, attrs: { "data-k": "host-version" } },
+    { kind: "line", id: "host-version", label: ABOUT_WORDS.host, value: host ?? ABOUT_WORDS.unknown, hover: hostHover(release), attrs: { "data-k": "host-version" } },
     ...(release === null ? [] : [{ kind: "line" as const, id: "latest-version", label: ABOUT_WORDS.latest, value: releaseWord(release), valueClass: behind === undefined ? ("fact" as const) : ("value" as const), ...(hover === undefined ? {} : { hover }), attrs: { "data-k": "latest-version" } }]),
     ...(late.length === 0 ? [] : [{ kind: "line" as const, id: "computers-behind", label: ABOUT_WORDS.computersBehind, value: String(late.length), valueClass: "fact" as const, hover: ABOUT_WORDS.behindHover(late), attrs: { "data-k": "computers-behind" } }]),
   ];
@@ -108,7 +123,11 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
       items: lines,
       under: (
         <>
-          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />}
+          {restartShown(release) ? (
+            <Button size="xs" variant="outline" data-k="restart-host" title={ABOUT_WORDS.restartHover} onClick={() => void ctx.api?.hostRestart?.().catch(ctx.failed)}>
+              {ABOUT_WORDS.restartHost}
+            </Button>
+          ) : behind === undefined ? null : <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />}
           <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>

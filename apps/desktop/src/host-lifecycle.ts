@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HostLock, type HostRecord, type RestartRoad, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
@@ -55,6 +55,8 @@ export interface OpenHostOptions {
   running?: RunningWsp;
   /** How a host on the account is dialled, which is the command line's own dial. */
   dial?: typeof dialHost;
+  /** How the host this window starts restarts itself: the app relaunching. */
+  restart?: RestartRoad;
 }
 
 function canListen(port: number): Promise<boolean> {
@@ -245,6 +247,7 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
     ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
     ...(opts.running !== undefined ? { running: opts.running } : {}),
+    ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
   });
   return { url: `http://${authority(LOOPBACK, handle.port)}`, port: handle.port, owned: true, remote: false, label: hereWord(process.platform === "darwin"), close: () => handle.close() };
 }

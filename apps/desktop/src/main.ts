@@ -8,6 +8,7 @@ import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, s
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
+import { appRestartRoad } from "./restart-road.js";
 import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
@@ -252,6 +253,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       openUrl: url => shell.openExternal(url).then(() => true, () => false),
       // The wsp tools the cloud setup writes into an agent's config run the shim, as the first launch's install does.
       running: { ...runningWsp(), shim: shimPath(wspHome()) },
+      restart: appRestartRoad(app),
     });
   } else {
     session = located.session;
