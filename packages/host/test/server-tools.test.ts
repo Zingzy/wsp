@@ -42,7 +42,17 @@ exec "$(dirname "$0")/$1"
 const FLOOD = `#!/bin/bash\nhead -c 8000000 /dev/zero | tr '\\0' x\nsleep 60 & wait\n`;
 /** Claude Code's single-server check as its words read, for a server whose sign-in it holds. */
 const CLAUDE = `#!/bin/bash\n[ "$1 $2 $3" = "mcp get linear" ] || exit 9\necho asked >> "$HOME/claude-asks"\nprintf 'linear:\\n  Scope: User config (available in all your projects)\\n  Status: ⚠ Needs authentication\\n'\n`;
-
+/** Answers initialize, then tools/list with a JSON-RPC error whose message carries a key. */
+const REFUSES = `#!/bin/bash
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":2,"error":{"code":-32001,"message":"bad key %s"}}\\n' "$FAKE_TOKEN" ;;
+  esac
+done
+`;
+/** grep as it is, keeping every argument list it was handed. */
+const GREP = `#!/bin/bash\nprintf '%s\\n' "$*" >> "$HOME/grep-args"\nPATH=/usr/bin:/bin exec grep "$@"\n`;
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -94,7 +104,7 @@ function fixture(): Fixture {
   mkdirSync(home);
   mkdirSync(bin);
   mkdirSync(join(root, "tmp"));
-  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, flood: FLOOD })) {
+  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, flood: FLOOD, refuses: REFUSES })) {
     writeFileSync(join(bin, name), text);
     chmodSync(join(bin, name), 0o755);
   }
@@ -147,6 +157,15 @@ const alive = (pid: number): boolean => {
     return false;
   }
 };
+/** The pid a server wrote to that file, waited for up to five seconds. */
+async function pidIn(path: string): Promise<number> {
+  for (let i = 0; i < 50; i++) {
+    const pid = existsSync(path) ? Number(readFileSync(path, "utf8").trim()) : 0;
+    if (Number.isInteger(pid) && pid > 0) return pid;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`no pid was written to ${path}`);
+}
 const escaped = (f: Fixture): number[] => readFileSync(join(f.home, "escaped.pid"), "utf8").trim().split("\n").map(Number);
 
 /** A computer you joined whose daemon runs as root: every line through the root road's probe answer, then bash with
@@ -204,14 +223,16 @@ describe("one MCP server's tools, on the person's ask", () => {
     f.config({ mute: { command: join(f.bin, "mute"), args: [] }, crash: { command: join(f.bin, "crash"), args: [] } });
     const logged: string[] = [];
     const reader = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 2_000, log: line => logged.push(line) });
+    const began = Date.now();
     const late = await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" });
+    expect(Date.now() - began, "the server was stopped before its time was up").toBeGreaterThanOrEqual(1_950);
     expect(late).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(2_000) });
     expect(late.tools).toBeUndefined();
-    const pid = Number(readFileSync(join(f.home, "mute.pid"), "utf8"));
+    const pid = await pidIn(join(f.home, "mute.pid"));
     expect(() => process.kill(pid, 0), "the server outlived its deadline").toThrow();
     rmSync(join(f.home, "mute.pid"));
     await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" });
-    expect(existsSync(join(f.home, "mute.pid")), "a refused answer was kept").toBe(true);
+    expect(await pidIn(join(f.home, "mute.pid")), "a refused answer was kept").toBeGreaterThan(0);
     // What a server said on stderr can carry its own key: it goes to the host's log, never onto the page.
     const crashed = await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash" });
     expect(crashed).toMatchObject({ auth: "failed", refused: "it exited with 1 before it answered" });
@@ -241,7 +262,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("says curl's last words for an address that did not answer, with any query string in a URL cut off", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://mcp.example.test/sse?token=${SECRET}&x=1 port 443" >&2\nprintf 000\nexit 7\n`);
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://mcp.example.test/sse?token=${SECRET}&x=1 port 443" >&2\nexit 7\n`);
     chmodSync(join(f.bin, "curl"), 0o755);
     f.config({ notion: { type: "http", url: `https://mcp.example.test/sse?token=${SECRET}` } });
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
@@ -251,7 +272,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("cuts a user and password out of a URL in curl's last words", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://ada:${SECRET}@mcp.example.test/sse port 443" >&2\nprintf 000\nexit 7\n`);
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://ada:${SECRET}@mcp.example.test/sse port 443" >&2\nexit 7\n`);
     chmodSync(join(f.bin, "curl"), 0o755);
     f.config({ notion: { type: "http", url: `https://ada:${SECRET}@mcp.example.test/sse` } });
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
@@ -332,5 +353,69 @@ describe("one MCP server's tools, on the person's ask", () => {
     }
     expect(most).toBeGreaterThan(0);
     expect(most).toBeLessThanOrEqual(4 * 1024 * 1024);
+  }, 20_000);
+
+  it("keeps what an address answers under a cap on the target while it is read", async () => {
+    const f = fixture();
+    const srv = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        const chunk = Buffer.alloc(64 * 1024, "x");
+        let sent = 0;
+        const more = (): void => {
+          if (res.destroyed) return;
+          if (sent >= 8 * 1024 * 1024) return void res.end();
+          sent += chunk.length;
+          res.write(chunk);
+          setTimeout(more, 5);
+        };
+        res.on("error", () => undefined);
+        more();
+      });
+    });
+    servers.push(srv);
+    await new Promise<void>(resolve => srv.listen(0, "127.0.0.1", resolve));
+    f.config({ flood: { type: "http", url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp` } });
+    const tmp = join(f.root, "tmp");
+    let most = 0;
+    const sizes = (dir: string): void => {
+      for (const d of readdirSync(dir, { withFileTypes: true })) {
+        try {
+          if (d.isDirectory()) sizes(join(dir, d.name));
+          else most = Math.max(most, statSync(join(dir, d.name)).size);
+        } catch {}
+      }
+    };
+    const watch = setInterval(() => sizes(tmp), 10);
+    let answer;
+    try {
+      answer = await agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 5_000 }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "flood" });
+    } finally {
+      clearInterval(watch);
+    }
+    expect(answer).toMatchObject({ auth: "failed", refused: "its tools answer is over 1 MB and was not read" });
+    expect(most).toBeGreaterThan(0);
+    expect(most).toBeLessThanOrEqual(1024 * 1024 + 1);
+  }, 20_000);
+
+  it("names a server's error by its code alone, and its message goes to the host's log", async () => {
+    const f = fixture();
+    f.config({ refuses: { command: join(f.bin, "refuses"), args: [], env: { FAKE_TOKEN: SECRET } } });
+    const logged: string[] = [];
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f), log: line => logged.push(line) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "refuses" });
+    expect(answer).toMatchObject({ auth: "failed", refused: "it answered tools/list with error -32001" });
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
+    expect(logged.join("\n")).toContain(`bad key ${SECRET}`);
+  }, 20_000);
+
+  it("hands the run's marker to no command's argument list", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "grep"), GREP);
+    chmodSync(join(f.bin, "grep"), 0o755);
+    f.config({ silent: { command: join(f.bin, "escape"), args: ["mute"] } });
+    expect(await agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 1_000 }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "silent" })).toMatchObject({ refused: serverToolsLateRefusal(1_000) });
+    expect(existsSync(join(f.home, "grep-args"))).toBe(true);
+    expect(readFileSync(join(f.home, "grep-args"), "utf8")).not.toContain("WSP_TOOLS_RUN=");
   }, 20_000);
 });

@@ -28,4 +28,3 @@ export const CLAUDE_MCP_CHECK: McpCheck = {
     return undefined;
   },
 };
-

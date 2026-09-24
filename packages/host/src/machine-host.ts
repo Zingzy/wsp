@@ -5,10 +5,9 @@
 // with its own bound, so the reads a caller asks for together (every stat of
 // a Promise.all) ride one command, and an answer the road cut short is a
 // refusal named on the host rather than a file that seems not to be there.
-import { randomBytes } from "node:crypto";
 import type { Host, HostExec, HostFs, RunOptions, Stat } from "@wsp/collect";
 import { EXEC_TIMEOUT_MAX_MS, shellQuote } from "@wsp/protocol";
-import { asLogin, landBytes, type Machine, type TargetLogin } from "@wsp/engine";
+import { asLogin, stageAsLogin, type Machine, type TargetLogin } from "@wsp/engine";
 
 /** A Host whose reads may have been refused: one line per read that could not answer whole. */
 export interface MachineHost extends Host {
@@ -144,18 +143,7 @@ export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin, 
     const pairs = Buffer.from(vars.map(([k, v]) => `${k}\0${v}\0`).join(""));
     if (vars.length === 0) return ok(await machine.exec(asLogin(login, `${line} </dev/null`), bound));
     if ("stdin" in envRoad) return ok(await machine.exec(asLogin(login, `${ENV_FROM_STDIN}${line} </dev/null`), { ...bound, stdin: pairs }));
-    const dir = `/tmp/wsp-env-${randomBytes(6).toString("hex")}`;
-    const folder = shellQuote(dir);
-    const file = shellQuote(`${dir}/env`);
-    if ((await machine.exec(`mkdir -m 0700 ${folder}`, { timeoutMs: STAGE_MS })).exitCode !== 0) return undefined;
-    try {
-      await landBytes(envRoad.land, `${dir}/env`, pairs, { timeoutMs: STAGE_MS });
-      const handed = await machine.exec(`chmod 0600 ${file}${login.runAs !== undefined ? ` && chown -R -- ${shellQuote(login.runAs)} ${folder}` : ""}`, { timeoutMs: STAGE_MS });
-      if (handed.exitCode !== 0) return undefined;
-      return ok(await machine.exec(asLogin(login, `${ENV_FROM_FILE} ${file} ${folder} ${line} </dev/null`), bound));
-    } finally {
-      await machine.exec(`rm -rf -- ${folder}`, { timeoutMs: STAGE_MS }).catch(() => undefined);
-    }
+    return ok(await stageAsLogin(machine, envRoad.land, login, "the command's variables", pairs, (file, folder) => machine.exec(asLogin(login, `${ENV_FROM_FILE} ${shellQuote(file)} ${shellQuote(folder)} ${line} </dev/null`), bound), { timeoutMs: STAGE_MS }));
   };
   const fs: HostFs = {
     stat,

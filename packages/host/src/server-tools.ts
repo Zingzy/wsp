@@ -36,7 +36,7 @@ const TOOLS_LIST = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" 
  * sends initialize, waits for its answer, then initialized and tools/list, and waits for that answer; stops the group
  * and every process carrying the marker when it came or the time ran out. Prints `\x1e<outcome> <exit>`, the tools
  * answer's line, `\x1e`, then the tail of what it said on stderr. Outcome 0 answered, 1 exited first, 2 late. */
-const stdioScript = (seconds: number): string =>
+const stdioScript = (seconds: string): string =>
   [
     'c=$1; shift; [ -n "$c" ] && cd "$c"',
     'd=$(mktemp -d "${TMPDIR:-/tmp}/wsp-tools.XXXXXX") || exit 1',
@@ -45,8 +45,9 @@ const stdioScript = (seconds: number): string =>
     'mkfifo "$d/in" "$d/o" "$d/e" || exit 1',
     "m=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
     '[ -n "$m" ] || exit 1',
+    `printf 'WSP_TOOLS_RUN=%s' "$m" > "$d/m"`,
     // Apple's own binaries show no environment to a Mac's ps, so there only the group kill covers them.
-    'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzx -- "WSP_TOOLS_RUN=$m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
+    'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzxF -f "$d/m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
       'else l=$(ps eww -U "$(id -u)" -o pid=,command= | M="WSP_TOOLS_RUN=$m" awk \'index($0 " ", " " ENVIRON["M"] " ") { print $1 }\'); fi; [ -n "$l" ] && kill "-$1" $l 2>/dev/null; }',
     "set -m",
     `{ dd bs=1 count=${OUT_CAP} of="$d/out" 2>/dev/null; cat > /dev/null; } < "$d/o" &`,
@@ -56,14 +57,15 @@ const stdioScript = (seconds: number): string =>
     'WSP_TOOLS_RUN=$m "$@" < "$d/in" > "$d/o" 2> "$d/e" &',
     "p=$!",
     'exec 3> "$d/in"',
-    `end=$((SECONDS + ${seconds}))`,
+    `sleep ${seconds} &`,
+    "t=$!",
     `seen() { grep -Eq "\\"id\\"[[:space:]]*:[[:space:]]*$1[[:space:]]*[,}]" "$d/out"; }`,
-    'upto() { while ! seen "$1"; do kill -0 "$p" 2>/dev/null || return 1; [ "$SECONDS" -lt "$end" ] || return 2; sleep 0.1; done; }',
+    'upto() { while ! seen "$1"; do kill -0 "$p" 2>/dev/null || return 1; kill -0 "$t" 2>/dev/null || return 2; sleep 0.1; done; }',
     `printf '%s\\n' ${shellQuote(INITIALIZE)} >&3`,
     "upto 1; r=$?",
     `[ "$r" = 0 ] && { printf '%s\\n%s\\n' ${shellQuote(INITIALIZED)} ${shellQuote(TOOLS_LIST)} >&3; upto 2; r=$?; }`,
     "exec 3>&-",
-    'kill -TERM -- "-$p" 2>/dev/null; sweep TERM; sleep 0.2; kill -KILL -- "-$p" 2>/dev/null; sweep KILL',
+    'kill "$t" 2>/dev/null; kill -TERM -- "-$p" 2>/dev/null; sweep TERM; sleep 0.2; kill -KILL -- "-$p" 2>/dev/null; sweep KILL',
     'wait "$p" 2>/dev/null; x=$?',
     'kill -KILL -- "-$ro" "-$re" 2>/dev/null',
     "printf '\\036%s %s\\n' \"$r\" \"$x\"",
@@ -73,12 +75,13 @@ const stdioScript = (seconds: number): string =>
   ].join("\n");
 
 /** Writes a curl config off the variables it was handed (the url and each header), so no value is on a command line,
- * then posts initialize, initialized and tools/list with the session the first answer names. Prints
+ * then posts initialize, initialized and tools/list with the session the first answer names, keeping each body under
+ * the cap on the target; a status is the last one its headers name. Prints
  * `\x1e<status of initialize> <status of tools/list>`, the tools answer, `\x1e`, then curl's own last words. */
 const httpScript = (seconds: number): string =>
   [
     "command -v curl >/dev/null 2>&1 || { printf '\\036nocurl\\n'; exit 0; }",
-    'd=$(mktemp -d) || exit 1',
+    'd=$(mktemp -d "${TMPDIR:-/tmp}/wsp-tools.XXXXXX") || exit 1',
     "trap 'rm -rf \"$d\"' EXIT",
     `end=$((SECONDS + ${seconds}))`,
     'cq() { local v=${1//\\\\/\\\\\\\\}; v=${v//\\"/\\\\\\"}; printf \'"%s"\' "$v"; }',
@@ -86,7 +89,8 @@ const httpScript = (seconds: number): string =>
     '{ printf \'url = %s\\n\' "$(cq "$WSP_MCP_URL")"; i=0; while v="WSP_MCP_H_$i"; [ -n "${!v+x}" ]; do printf \'header = %s\\n\' "$(cq "${!v}")"; i=$((i+1)); done; } > "$d/k"',
     'sid=',
     "post() { local t=$((end - SECONDS)); [ \"$t\" -gt 0 ] || t=1; curl -sS -m \"$t\" -K \"$d/k\" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' " +
-      `-H 'MCP-Protocol-Version: ${PROTOCOL_VERSION}' $\{sid:+-H "Mcp-Session-Id: $sid"} -D "$d/$2.h" -o "$d/$2.b" -w '%{http_code}' --data-binary "$1" 2>> "$d/e"; }`,
+      `-H 'MCP-Protocol-Version: ${PROTOCOL_VERSION}' $\{sid:+-H "Mcp-Session-Id: $sid"} -D "$d/$2.h" -o - --data-binary "$1" 2>> "$d/e" | head -c ${ANSWER_CAP + 1} > "$d/$2.b"; ` +
+      `c=$(sed -n 's/^HTTP\\/[^ ]* \\([0-9][0-9]*\\).*/\\1/p' "$d/$2.h" 2>/dev/null | tail -n 1); echo "\${c:-000}"; }`,
     `a=$(post ${shellQuote(INITIALIZE)} i)`,
     'if [ "$a" = 200 ]; then',
     "  sid=$(grep -i '^mcp-session-id:' \"$d/i.h\" | head -n 1 | cut -d: -f2- | tr -d ' \\r')",
@@ -106,8 +110,9 @@ const curlSaid = (err: string): string | undefined =>
     .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
 
 /** The tools off a JSON-RPC answer to tools/list, or why there are none: the server's own error, or a list past the
- * cap. An SSE body carries the answer on its `data:` lines. */
-function toolsOf(body: string): { tools: McpTool[] } | { refused: string } {
+ * cap. An SSE body carries the answer on its `data:` lines. A server's error message may carry its own key, so the
+ * page is told its code and the message is only `said`, for the host's log. */
+function toolsOf(body: string): { tools: McpTool[] } | { refused: string; said?: string } {
   if (body.length > ANSWER_CAP) return { refused: `its tools answer is over ${ANSWER_CAP / 1024 / 1024} MB and was not read` };
   const candidates = body.split("\n").map(l => (l.startsWith("data:") ? l.slice(5).trim() : l.trim()));
   for (const line of candidates) {
@@ -118,8 +123,11 @@ function toolsOf(body: string): { tools: McpTool[] } | { refused: string } {
       continue;
     }
     if (typeof msg !== "object" || msg === null || (msg as { id?: unknown }).id !== 2) continue;
-    const { result, error } = msg as { result?: { tools?: unknown }; error?: { message?: unknown } };
-    if (error !== undefined) return { refused: `it answered tools/list with an error: ${typeof error.message === "string" ? error.message : "no message"}` };
+    const { result, error } = msg as { result?: { tools?: unknown }; error?: { code?: unknown; message?: unknown } };
+    if (error !== undefined) {
+      const refused = `it answered tools/list with ${typeof error.code === "number" ? `error ${error.code}` : "an error"}`;
+      return { refused, ...(typeof error.message === "string" ? { said: `${refused}: ${error.message}` } : {}) };
+    }
     if (!Array.isArray(result?.tools)) break;
     return {
       tools: result.tools.flatMap((t: unknown) => {
@@ -142,7 +150,7 @@ export const variableNameRefusal = (name: string): string => `its variable ${JSO
 async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, log: (said: string) => void): Promise<Asked> {
   const bad = Object.keys(t.env).find(k => !SHELL_NAME.test(k));
   if (bad !== undefined) return { auth: "failed", refused: variableNameRefusal(bad) };
-  const out = await host.exec.run("bash", ["-c", stdioScript(Math.max(1, Math.ceil(deadlineMs / 1000))), "bash", cwd, t.command, ...t.args], { env: t.env, timeoutMs: deadlineMs + RUN_MARGIN_MS });
+  const out = await host.exec.run("bash", ["-c", stdioScript((Math.max(100, deadlineMs) / 1000).toFixed(1)), "bash", cwd, t.command, ...t.args], { env: t.env, timeoutMs: deadlineMs + RUN_MARGIN_MS });
   const [, head = "", err = ""] = (out ?? "").split("\x1e");
   const [status = "", ...rest] = head.split("\n");
   const [outcome, exit] = status.trim().split(" ");
@@ -151,13 +159,20 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
   if (outcome !== "0" && err.trim() !== "") log(`it said on stderr: ${err.trim()}`);
   if (outcome === "2") return { auth: "failed", refused: serverToolsLateRefusal(deadlineMs) };
   if (outcome === "1") return { auth: "failed", refused: `it exited with ${exit ?? "no code"} before it answered` };
-  const read = toolsOf(rest.join("\n"));
-  return "tools" in read ? { auth: "open", tools: read.tools } : { auth: "failed", refused: read.refused };
+  return read(rest.join("\n"), log);
+}
+
+/** The tools answer as the page takes it, with a server's own words sent to the log. */
+function read(body: string, log: (said: string) => void): Asked {
+  const got = toolsOf(body);
+  if ("tools" in got) return { auth: "open", tools: got.tools };
+  if (got.said !== undefined) log(got.said);
+  return { auth: "failed", refused: got.refused };
 }
 
 type HttpAsked = Asked | { unauthorized: true };
 
-async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, deadlineMs: number): Promise<HttpAsked> {
+async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, deadlineMs: number, log: (said: string) => void): Promise<HttpAsked> {
   const env: Record<string, string> = { WSP_MCP_URL: t.url };
   Object.entries(t.headers).forEach(([name, value], i) => (env[`WSP_MCP_H_${i}`] = `${name}: ${value}`));
   const out = await host.exec.run("bash", ["-c", httpScript(Math.max(1, Math.ceil(deadlineMs / 1000))), "bash"], { env, timeoutMs: deadlineMs * 3 + RUN_MARGIN_MS });
@@ -170,8 +185,7 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
   if (first === "000") return { auth: "failed", refused: /timed out/i.test(err) ? serverToolsLateRefusal(deadlineMs) : (curlSaid(err) ?? "its address did not answer") };
   if (first !== "200") return { auth: "failed", refused: `its address answered initialize with ${first}` };
   if (listed !== "200") return { auth: "failed", refused: `its address answered tools/list with ${listed === "" ? "nothing" : listed}` };
-  const read = toolsOf(rest.join("\n"));
-  return "tools" in read ? { auth: "open", tools: read.tools } : { auth: "failed", refused: read.refused };
+  return read(rest.join("\n"), log);
 }
 
 /** The harness's own word on a server whose address wants a sign-in wsp does not hold. */
@@ -241,9 +255,10 @@ export async function serverTools(
   const cwd = found.project && o.project !== undefined ? o.project : host.home;
   const t = found.server.transport;
   let asked: Asked;
-  if (t.kind === "stdio") asked = await askStdio(host, t, t.cwd ?? cwd, deadlineMs, said => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${said}`));
+  const log = (said: string): void => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${said}`);
+  if (t.kind === "stdio") asked = await askStdio(host, t, t.cwd ?? cwd, deadlineMs, log);
   else {
-    const http = await askHttp(host, t, deadlineMs);
+    const http = await askHttp(host, t, deadlineMs, log);
     asked = "unauthorized" in http ? await askHarness(host, agent, ask.name, cwd, deadlineMs) : http;
   }
   const answer: ServerToolsAnswer = { ...asked, readAt: new Date(now).toISOString() };
