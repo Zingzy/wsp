@@ -391,6 +391,15 @@ export const useStore = create<State>((set, get) => {
   };
 
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
+  const readPlaces = (api: Api): void => {
+    // An answer either way settles it, and a host whose wire carries no place list settles it at once: nothing
+    // waits on a reply that is never coming.
+    const placesAsked = api.placesList?.();
+    if (placesAsked === undefined) set({ placesRead: true });
+    else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
+    // The landings go with it: a host that has gained a computer or an image since answers differently now.
+    set({ landings: {} });
+  };
   const pull = (api: Api): void => {
     void get().refresh().catch(() => {});
     void api
@@ -411,13 +420,7 @@ export const useStore = create<State>((set, get) => {
         clearEndedNeed(setup.job?.needsYou);
       })
       .catch(() => {});
-    // An answer either way settles it, and a host whose wire carries no place list settles it at once: nothing
-    // waits on a reply that is never coming.
-    const placesAsked = api.placesList?.();
-    if (placesAsked === undefined) set({ placesRead: true });
-    else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
-    // The landings go with it: a host that has gained a computer or an image since answers differently now.
-    set({ landings: {} });
+    readPlaces(api);
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
     if (projectsAsked === undefined) set({ projectsRead: true });
@@ -762,7 +765,7 @@ export const useStore = create<State>((set, get) => {
       if (api?.initKeys === undefined) throw new Error(WHERE_WORDS.cannotSaveKey);
       const setup = await api.initKeys(keys);
       useSettingsStore.getState().setReads({ setup });
-      void api.placesList?.().then(places => set({ places }), () => {});
+      readPlaces(api);
       return setup;
     },
     async dialPlace(placeId) {

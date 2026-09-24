@@ -509,7 +509,7 @@ describe("wsp verbs over the host", () => {
     const none = new NoProviderBackend();
     const elsewhere = stubBackend();
     await restartHost({}, memoryStore(), { wired: "none", backend: p => (p === "none" ? none : p === "elsewhere" ? elsewhere : undefined), list: () => ["none", "elsewhere"] }, none);
-    // The other provider is a computer of its own now, so the project is put on the one this host forks on.
+    // The project stands on the provider this host forks on, which forks nothing, while another provider does.
     await rt.projects.remove(cloud.id);
     cloud = await projectOn(rt, "none");
     const bare = await run("new", "alpha");

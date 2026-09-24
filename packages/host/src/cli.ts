@@ -712,7 +712,7 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
     pick.id = wiredProviderId(env);
     pick.env = env;
   }
-  // The key is up: the provider is a place now, and its copy of the image is built behind the save.
+  // The wired provider's copy of the image is kept current behind the save; a place that forks nothing builds none.
   void rt.image.keepCurrent(wiredProviderId(env));
 }
 
