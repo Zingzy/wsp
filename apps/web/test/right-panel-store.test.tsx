@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
 import { selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
+import { clearNotices } from "./notice-text.js";
 
 const KEY = "wsp:right-panel-state:v1";
 const WS = "ws_panel_store";
@@ -100,7 +101,8 @@ describe("rightPanelStore hydrate", () => {
   });
 
   it("the tab strip renders after hydrating a surface of a kind this build no longer has", async () => {
-    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
     await hydrate([{ id: "file:x", kind: "file" }, { id: "diff", kind: "diff" }], "diff");
     const Panel = () => {
       const state = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, WS));

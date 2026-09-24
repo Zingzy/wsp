@@ -16,6 +16,7 @@ import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
 import { harnessMachineToken, startRelayHarness, type RelayHarness } from "./relay-harness.js";
+import { clearNotices } from "./notice-text.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -103,7 +104,8 @@ async function nextGuest(ports: readonly FakeListener[]): Promise<string> {
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, conn: "live" });
+  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, sessions: {}, ready: false, conn: "live" });
+  clearNotices();
 });
 afterEach(async () => {
   unwire?.();

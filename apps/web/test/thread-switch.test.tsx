@@ -14,6 +14,7 @@ import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices } from "./notice-text.js";
 
 const WS = "ws_switch";
 // An hour before the run, not a fixed date: these rows must stay on the idle shelf, and a fixed date walks past the
@@ -84,7 +85,8 @@ beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  clearNotices();
 });
 afterEach(() => cleanup());
 

@@ -15,6 +15,7 @@ import { AppShell } from "../src/shell/AppShell.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { useTerminalViewportConfig } from "../src/terminal/fontSetting.js";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
+import { clearNotices } from "./notice-text.js";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -59,7 +60,8 @@ function press(key: string, code: string, shiftKey = false): boolean {
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true } });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true } });
+  clearNotices();
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
 });
