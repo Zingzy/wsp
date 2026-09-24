@@ -11,5 +11,7 @@ export function downloadUrl(asset: string): string;
 /** The four names one release's job works with, as the assignments it writes into its own environment. */
 export function bundleEnv(version: string): string;
 export const REPO: string;
+/** What a release tag looks like, v1.2.3 carrying 1.2.3. */
+export const RELEASE_TAG: RegExp;
 /** Where every release and its downloads are listed. */
 export const RELEASES: string;

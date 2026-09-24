@@ -72,6 +72,8 @@ import {
   type PlaceAuthRefusal,
   type PlaceDoorView,
   type PortForward,
+  type ReleaseChangedEvent,
+  type ReleaseView,
   type Caller,
   type ThreadScope,
   type WorkspaceOrigin,
@@ -148,6 +150,9 @@ export interface ServeOptions {
   /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
    * op is refused, since the road is the host's own and the runtime holds none of what it reads. */
   doctor?: PlaceDoctor;
+  /** The host's reading of the newest release, for release.get, release.check and the release.changed events;
+   * without it both ops are refused. */
+  release?: ReleaseDoor;
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
@@ -191,6 +196,14 @@ export interface PlaceDoorControl {
 export interface PlaceDoctor {
   run(req: { placeId: string; doctorId: string; project?: string }): Promise<{ code: number }>;
   on(fn: (e: DoctorLineEvent) => void): () => void;
+}
+
+/** How the runtime asks the host for the newest release. The host owns the ask, its cadence and the file it keeps;
+ * `on` is a host source like the init door's, so its events carry no sequence and are not replayed. */
+export interface ReleaseDoor {
+  get(): ReleaseView;
+  check(): Promise<ReleaseView>;
+  on(fn: (e: ReleaseChangedEvent) => void): () => void;
 }
 
 /** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
@@ -260,6 +273,13 @@ function initFrom(opts: ServeOptions): () => InitDoor {
   };
 }
 
+function releaseFrom(opts: ServeOptions): () => ReleaseDoor {
+  return () => {
+    if (opts.release === undefined) throw new Error("this runtime does not read the newest release");
+    return opts.release;
+  };
+}
+
 function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
   return () => {
     if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
@@ -295,6 +315,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const lander = landerFrom(opts);
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
+  const release = releaseFrom(opts);
   const init = initFrom(opts);
   const imageExport = imageExportFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
@@ -951,6 +972,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (opts.forwards) detaches.push(opts.forwards.on(pass));
               if (opts.init) detaches.push(opts.init.on(pass));
               if (opts.doctor) detaches.push(opts.doctor.on(pass));
+              if (opts.release) detaches.push(opts.release.on(pass));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) pass(e);
               return;
@@ -1368,6 +1390,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "preferences.set":
               send({ id: msg.id, ok: true, preferences: await rt.preferences.set(msg.patch) });
+              return;
+            case "release.get":
+              send({ id: msg.id, ok: true, release: release().get() });
+              return;
+            case "release.check":
+              send({ id: msg.id, ok: true, release: await release().check() });
               return;
             case "project.seed.plan":
               send({ id: msg.id, ok: true, plan: await rt.projects.seedPlan(msg.source) });

@@ -6,6 +6,10 @@
 
 export const REPO = "https://github.com/Zingzy/wsp";
 
+/** What a release tag looks like, v1.2.3 carrying 1.2.3: the one rule for what the release workflow answers to
+ * and for what the host takes as the newest release. */
+export const RELEASE_TAG = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+
 /** Where every release and its downloads are listed, which is where anything that has no one asset to point at
  * sends a person: the site's footer, and the app's line about a shell older than the host serving it. */
 export const RELEASES = `${REPO}/releases`;

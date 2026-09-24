@@ -114,6 +114,7 @@ export const WHERE_WORDS = {
    * whole sentence, because it stands after one in the pane's slot and a clause opening in lower case after a
    * full stop reads as a line that broke. */
   cannotDial: "This wsp cannot dial a computer from here.",
+  cannotSaveKey: "This wsp cannot save a key from here.",
 } as const;
 
 /** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the

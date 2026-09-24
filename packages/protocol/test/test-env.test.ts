@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as protocol from "../src/index.js";
 import { ROOT, testFiles } from "./source-files.js";
+import { TEST_ENV } from "../../../vitest.env.js";
 
 /** The gates a person throws to turn a suite on, each read once to decide whether its file runs. Nothing else: a
  * variable that changes what the code under test does is handed in, never read off the process running the suite. */
@@ -83,5 +84,11 @@ describe("a test reads no wsp variable off the process running it", () => {
   it("has no gate in the list nothing gates any more", () => {
     const everyRead = new Set(read.flatMap(f => f.names));
     expect(Object.keys(GATES).filter(n => !everyRead.has(n))).toEqual([]);
+  });
+});
+
+describe("the environment every test runs under", () => {
+  it("turns the release check off, so no host a test starts asks GitHub", () => {
+    expect(TEST_ENV[protocol.UPDATE_CHECK_ENV]).toBe("0");
   });
 });

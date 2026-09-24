@@ -12,6 +12,7 @@ use std::path::Path;
 
 use wsp_frames::{Carried, CopyRoadName};
 
+use super::aside;
 use super::rules::{bytes_word, Walked};
 use super::{Availability, CopyRoad, Settling};
 
@@ -53,11 +54,7 @@ impl CopyRoad for Clonefile {
     }
 
     fn remove(&self, _from: &Path, to: &Path) -> io::Result<()> {
-        match std::fs::remove_dir_all(to) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(io::Error::new(e.kind(), format!("{}: {e}", to.display()))),
-        }
+        aside::set_aside_then(to, aside::remove_later)
     }
 
     fn carried(&self) -> Carried {
