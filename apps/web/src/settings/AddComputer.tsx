@@ -31,8 +31,6 @@ const GUIDES: Record<AddRoad, string> = {
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
-/** Hosts a known_hosts file holds for git, never a computer anybody adds. */
-const GIT_HOSTS = /(^|\.)(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht|ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com)$/i;
 type StepLine = { word: string; state: "waiting" | "running" | "done"; fact?: string };
 
 function planLines(stages: readonly InstallStage[]): StepLine[] {
@@ -251,7 +249,7 @@ function SshRoad({ now }: { now: () => number }) {
   const running = stages !== null;
   const held = api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
   const known = new Set(places.flatMap(p => [p.road?.ssh, p.name].filter((w): w is string => w !== undefined)));
-  const suggested = (hosts ?? []).filter(h => !known.has(h.alias) && !GIT_HOSTS.test(h.hostName ?? h.alias));
+  const suggested = (hosts ?? []).filter(h => !known.has(h.alias));
   const enter = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter") add({ user, host, port });
   };
