@@ -4,7 +4,7 @@
 // callback forward did not land), and the tool's own status command that
 // proves the login. Nothing here reads the tool's output beyond the status
 // lines named below.
-import type { SignInFinish } from "@wsp/protocol";
+import type { SignInFinish, SignInRoad } from "@wsp/protocol";
 import { CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
 
 export interface StatusCheck {
@@ -171,6 +171,16 @@ export function questionsOf(s: SignIn | { kind: "shell" }): readonly Question[] 
  * on the machine, and the hand-off ends its row at the question instead of waiting out the cap. */
 export function asksThePerson(s: SignIn | { kind: "shell" }): boolean {
   return questionsOf(s).some(q => "person" in q);
+}
+
+/** How a person signs this in where it stands, in the agents report's one word: the agent's own terminal where it
+ * asks them to pick, the token or key it takes, a device page where its login or the no-browser variant prints
+ * one, and otherwise the code its page hands back, which is the road a login with a callback takes where no
+ * browser is. */
+export function signInRoadOf(s: SignIn): SignInRoad {
+  if (asksThePerson(s)) return "terminal";
+  if (s.kind === "token" || s.kind === "key" || s.kind === "none" || s.kind === "device") return s.kind;
+  return /device/.test(s.fallback ?? "") ? "device" : "code";
 }
 
 /** The login as a row names it: the command up to the flags that answer its questions, which a row has no room for

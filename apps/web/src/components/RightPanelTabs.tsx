@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import { FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
+import { Bot, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -47,9 +47,11 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddAgents: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
+  agentsAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
@@ -57,13 +59,14 @@ interface RightPanelTabsProps {
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "diff";
+type SurfaceKey = "browser" | "terminal" | "diff" | "agents";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   browser: "Available while the workspace is running.",
   terminal: "Available while the workspace is running.",
   diff: "Review changes once the workspace is running.",
+  agents: "Available when a task is selected.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -160,9 +163,11 @@ function surfaceActions(
     | "onAddBrowser"
     | "onAddTerminal"
     | "onAddDiff"
+    | "onAddAgents"
     | "browserAvailable"
     | "terminalAvailable"
     | "diffAvailable"
+    | "agentsAvailable"
     | "unavailableReasons"
   >,
 ): readonly SurfaceAction[] {
@@ -197,6 +202,16 @@ function surfaceActions(
       available: props.diffAvailable,
       disabledReason: reason("diff"),
       onClick: props.onAddDiff,
+    },
+    {
+      key: "agents",
+      label: "Agents",
+      description: "Agents, skills and servers on this task.",
+      icon: Bot,
+      shortcut: "A",
+      available: props.agentsAvailable,
+      disabledReason: reason("agents"),
+      onClick: props.onAddAgents,
     },
   ];
 }
@@ -382,6 +397,8 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "agents":
+      return "Agents";
     case "terminal":
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
     case "preview": {
@@ -403,6 +420,8 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <Globe2 className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
+    case "agents":
+      return <Bot className="size-3 shrink-0" />;
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
   }
