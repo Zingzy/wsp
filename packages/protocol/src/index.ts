@@ -4945,7 +4945,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */
   z.object({ id: reqId, op: z.literal("places.door") }),
-  /** Puts the agent on a Linux computer over ssh and joins it: the host logs in as the person's own ssh would,
+  /** Puts the agent on a Linux computer over ssh and joins it, `address` naming it as user@host or as an alias
+   * from the person's ssh config, which is dialled through that block: the host logs in as the person's own ssh would,
    * installs node and wsp there, starts the agent under that login's own service manager and waits for it to dial
    * back. Answers `{ addId, place: PlaceView }` once it has dialled; the steps ride place.stage events carrying the
    * same addId. */
@@ -5014,10 +5015,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * workspaces, else naming the places that do. The one gate a create runs, read ahead so the refusal comes in one
    * sentence before any stage is streamed. */
   z.object({ id: reqId, op: z.literal("workspaces.landing"), project: z.string() }),
-  /** Records a machine the person already has, reached over ssh at `address` (user@host), with the port and key
-   * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
-   * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
-   * The name defaults to what the address calls the machine. Replies with { workspace }. */
+  /** Every workspace this caller may drive. Replies with { workspaces }. */
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
    * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a

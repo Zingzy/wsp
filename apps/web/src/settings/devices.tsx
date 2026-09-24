@@ -10,7 +10,6 @@ import { useState } from "react";
 import { offlineFor, type DeviceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
-import { errorText } from "../lib/utils.js";
 import type { Api } from "../protocol/client.js";
 import { DEVICES_WORDS, WHERE_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
@@ -33,7 +32,7 @@ export function deviceDescription(device: DeviceView, now: number, held: string 
 }
 
 /** The one act on a device: asks, then takes its token away and reads the list again. */
-export function RevokeControl({ device, api, onRevoked, toast }: { device: DeviceView; api: Api | null; onRevoked: () => void; toast: (line: string) => void }) {
+export function RevokeControl({ device, api, onRevoked, failed }: { device: DeviceView; api: Api | null; onRevoked: () => void; failed: (e: unknown) => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const revoke = (): void => {
@@ -46,7 +45,7 @@ export function RevokeControl({ device, api, onRevoked, toast }: { device: Devic
           setAsking(false);
           onRevoked();
         },
-        (e: unknown) => toast(errorText(e)),
+        failed,
       )
       .finally(() => setBusy(false));
   };
@@ -90,7 +89,7 @@ export function devicesCards(ctx: SettingsContext): SettingsCardData[] {
         description: deviceDescription(device, ctx.now, held),
         mono: true,
         attrs: { "data-device-row": device.id },
-        control: <RevokeControl device={device} api={ctx.api} onRevoked={ctx.rereadDevices} toast={ctx.toast} />,
+        control: <RevokeControl device={device} api={ctx.api} onRevoked={ctx.rereadDevices} failed={ctx.failed} />,
       })),
     },
   ];

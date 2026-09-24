@@ -8,7 +8,7 @@ import { create } from "zustand";
 import type { ContextMenuItem } from "@wsp/protocol";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import type { ShortcutMatchOptions } from "../keybindings.js";
-import { errorText } from "../lib/utils.js";
+import { noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import type { Point } from "./menuPlacement.js";
 import { toMenuItems, type ResolvedAction } from "./registry.js";
@@ -78,7 +78,7 @@ export interface ContextMenuOptions {
 
 export function runAction(action: ResolvedAction): Promise<void> {
   return action.run().catch((error: unknown) => {
-    useStore.setState({ toast: `${action.title}: ${errorText(error)}` });
+    noticeFailure(error, said => `${action.title}: ${said}`);
   });
 }
 
@@ -95,7 +95,7 @@ export async function openContextMenu(
   const chosen =
     bridge !== undefined
       ? await bridge([...items]).catch((error: unknown) => {
-          useStore.setState({ toast: `Menu: ${errorText(error)}` });
+          noticeFailure(error, said => `Menu: ${said}`);
           return null;
         })
       : await useContextMenuStore.getState().open(items, anchorOf(event), returnTargetOf(event, options.returnTo));

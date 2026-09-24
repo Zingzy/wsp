@@ -3,12 +3,13 @@
 // the release workflow moves last, after npm and both bundles have landed.
 // Asked 30 s after the host starts and every six hours after, and when About
 // opens, never twice in ten minutes. The last answer lives in release.json
-// beside the state file, so a host that starts offline still shows it.
+// beside the state file, so a host that starts offline still shows it, and
+// wsp status and wsp doctor read it without asking any host.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeOwn } from "@wsp/own-file";
-import { RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
+import { RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, releaseAbove, releaseWord, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
 import type { ReleaseDoor } from "@wsp/runtime";
 import { RELEASES, REPO, RELEASE_TAG } from "../../wspx/scripts/bundles.mjs";
 import { keyIn, savedEnv } from "./env-keys.js";
@@ -23,7 +24,9 @@ export const RELEASE_TIMEOUT_MS = 5_000;
 export const RELEASE_BODY_MAX_BYTES = 1024 * 1024;
 const RELEASE_FILE = "release.json";
 
-export const releaseUrl = (env: Readonly<Record<string, string | undefined>>): string =>
+type Env = Readonly<Record<string, string | undefined>>;
+
+export const releaseUrl = (env: Env): string =>
   `${(keyIn(env, RELEASE_API_ENV) ?? RELEASE_API).replace(/\/+$/, "")}/repos${new URL(REPO).pathname}/releases/latest`;
 
 export const releaseFileFor = (statePath: string): string => join(dirname(statePath), RELEASE_FILE);
@@ -69,6 +72,23 @@ function readKept(path: string): Kept {
   }
 }
 
+const checksOff = (statePath: string, env: Env): boolean => env[UPDATE_CHECK_ENV] === "0" || savedEnv(statePath)[UPDATE_CHECK_ENV] === "0";
+
+/** What a line that asks no host reads: the switch, then release.json. Nothing where no ask was ever kept. */
+export type ReleaseReading = Pick<ReleaseView, "state" | "latest">;
+export function releaseReading(statePath: string, env: Env = process.env): ReleaseReading | undefined {
+  if (checksOff(statePath, env)) return { state: "off" };
+  const kept = readKept(releaseFileFor(statePath));
+  if (kept.latest !== undefined) return { state: "read", latest: kept.latest };
+  return kept.triedAt === undefined ? undefined : { state: "unreached" };
+}
+
+/** The command line's words for a reading: the road to the release beside the number where this wsp is behind it. */
+export function latestWords(reading: ReleaseReading, running: string, fix: (version: string) => string): string {
+  const word = releaseWord(reading);
+  return releaseAbove(reading, running) ? `${word}; this is ${running}, ${fix(word)} gets it` : word;
+}
+
 export interface ReleaseWatchOptions {
   statePath: string;
   shape: HostShape;
@@ -76,7 +96,7 @@ export interface ReleaseWatchOptions {
   running: string;
   /** The version the files it was started from carry now. */
   installed: () => string;
-  env?: Readonly<Record<string, string | undefined>>;
+  env?: Env;
   fetch?: typeof fetch;
   now?: () => number;
   /** Where a timer's check that failed is said, since nothing awaits it. */
@@ -110,7 +130,7 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   let every: ReturnType<typeof setInterval> | undefined;
   const closer = new AbortController();
 
-  const off = (): boolean => env[UPDATE_CHECK_ENV] === "0" || savedEnv(opts.statePath)[UPDATE_CHECK_ENV] === "0";
+  const off = (): boolean => checksOff(opts.statePath, env);
 
   const view = (): ReleaseView => {
     const own = { shape: opts.shape, restartReturns: false, ...(installed !== opts.running ? { installed } : {}) };

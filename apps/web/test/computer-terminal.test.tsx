@@ -21,6 +21,7 @@ import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { clearNotices } from "./notice-text.js";
 
 vi.mock("../src/components/ui/popover.js", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -66,7 +67,8 @@ afterAll(() => restoreLayout());
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0, settingsOpen: false });
+  clearNotices();
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useHeldPanelStore.setState({ open: false });

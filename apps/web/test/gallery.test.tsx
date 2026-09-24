@@ -24,14 +24,6 @@ describe("gallery", () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
-  it("fires a toast from the gallery button", async () => {
-    render(<Gallery />);
-    await act(async () => {
-      screen.getByRole("button", { name: "Toast" }).click();
-    });
-    expect(await screen.findByText("Preview token refreshed")).toBeTruthy();
-  });
-
   it("Root shows the gallery under #gallery and leaves it when the hash changes", () => {
     vi.stubGlobal("WebSocket", class { close() {} });
     window.location.hash = "#gallery";

@@ -586,7 +586,7 @@ describe("the Add a computer sheet", () => {
   it("asks one thing: an ssh login, focused, with no second road, no code and no address to type anywhere", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     const field = document.querySelector<HTMLInputElement>("#add-computer-login")!;
-    expect(field.getAttribute("placeholder")).toBe("root@host");
+    expect(field.getAttribute("placeholder")).toBe("root@host or an ssh alias");
     expect(document.querySelector("[data-k='login-field'] label")?.textContent).toBe(ADD_COMPUTER_WORDS.login);
     expect(document.activeElement).toBe(field);
     expect(document.querySelectorAll("[data-k='add-computer'] input")).toHaveLength(1);

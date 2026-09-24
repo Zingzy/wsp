@@ -40,4 +40,7 @@ export type ReleaseChangedEvent = z.infer<typeof ReleaseChangedEvent>;
 
 /** Whether the newest release is above any of the versions that run, the app's and the host's: a build ahead of it,
  * a prerelease or a checkout's, reads level. */
-export const releaseAbove = (view: ReleaseView, ...running: string[]): boolean => view.latest !== undefined && running.some(version => compareVersions(view.latest!.version, version) > 0);
+export const releaseAbove = (view: Pick<ReleaseView, "latest">, ...running: string[]): boolean => view.latest !== undefined && running.some(version => compareVersions(view.latest!.version, version) > 0);
+
+/** The one word a reading says wherever it is shown: the number whenever one was read, else the state. */
+export const releaseWord = (view: Pick<ReleaseView, "state" | "latest">): string => view.latest?.version ?? view.state;
