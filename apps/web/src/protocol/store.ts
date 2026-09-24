@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -14,6 +14,7 @@ import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.j
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
+import { useSettingsStore } from "../settings/settingsStore.js";
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
@@ -221,6 +222,9 @@ interface State {
   /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
   openAddComputer(): void;
   closeAddComputer(): void;
+  /** Saves keys on the host and answers with its setup after the save. A provider key makes that provider a
+   * computer, so the places and the setup Settings reads are taken again here rather than at the next reload. */
+  saveKeys(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   /** Asks the host to dial one computer once and takes the row it answers with, so every surface reading that row
    * says the same thing about it. Answers the whole of what came back for the slot that asked. */
   dialPlace(placeId: string): Promise<PlaceDial>;
@@ -753,6 +757,14 @@ export const useStore = create<State>((set, get) => {
     closeConnect() { set({ connectOpen: false }); },
     openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },
     closeAddComputer() { set({ addComputerOpen: false }); },
+    async saveKeys(keys) {
+      const api = get().api;
+      if (api?.initKeys === undefined) throw new Error(WHERE_WORDS.cannotSaveKey);
+      const setup = await api.initKeys(keys);
+      useSettingsStore.getState().setReads({ setup });
+      void api.placesList?.().then(places => set({ places }), () => {});
+      return setup;
+    },
     async dialPlace(placeId) {
       const api = get().api;
       if (api?.dialPlace === undefined) throw new Error(WHERE_WORDS.cannotDial);

@@ -168,6 +168,31 @@ describe("the Computers list", () => {
     expect(document.body.textContent?.match(/this month/g)?.length).toBe(1);
   });
 
+  it("draws a cloud row as soon as its key is saved, with no reload: the places and the setup are read again", async () => {
+    let keys: Record<string, boolean> = { box: false, solari: false };
+    let places: PlaceView[] = [here];
+    const saved: unknown[] = [];
+    const api = computersApi({
+      initGet: async () => setupOf({ keys }),
+      placesList: async () => places,
+      initKeys: async (asked: unknown) => {
+        saved.push(asked);
+        keys = { ...keys, box: true };
+        places = [here, ascii];
+        return setupOf({ keys });
+      },
+    } as Partial<Api>).api;
+    useStore.setState({ places });
+    await mountComputers(api);
+    expect(listIds()).toEqual(["here"]);
+    await act(async () => {
+      await useStore.getState().saveKeys({ provider: "box", key: "ascii_live_fake" });
+    });
+    await settle();
+    expect(saved).toEqual([{ provider: "box", key: "ascii_live_fake" }]);
+    expect(listIds()).toEqual(["here", "box"]);
+  });
+
   it("reads the state slot in one order: the computer that is not answering, then the recipe on it, then the daemon behind", async () => {
     const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
     const failed: PlaceProvision = {
