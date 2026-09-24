@@ -2679,7 +2679,7 @@ async function agentsReport(client: HostClient, workspace: string | undefined, o
 }
 
 /** What every one of the three lists answers beside its own rows. */
-const AGENTS_FRAME = { target: AgentsTarget, home: z.string(), user: z.string(), readAt: z.string(), stale: z.literal("napping").optional(), refused: z.array(z.string()) };
+const AGENTS_FRAME = AgentsReport.omit({ agents: true, skills: true, servers: true }).shape;
 
 /** The report's own facts, beside the rows one list prints. */
 function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "user" | "readAt" | "stale" | "refused"> {
