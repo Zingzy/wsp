@@ -58,6 +58,7 @@
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer the Add a computer sheet over Computers
+//   settings-add-computer-failed  the same, the add refused while the reach step ran
 //   settings-remove-computer  the Remove dialog over the box's page
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
@@ -298,6 +299,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
+  "settings-add-computer-failed": { kind: "group", group: "computers" },
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
 };
 const settingsAt = SETTINGS_SCREENS[screen];
@@ -405,6 +407,10 @@ const api = {
   addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
     onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
     onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+    if (screen === "settings-add-computer-failed") {
+      onStage({ step: "reach", word: placeAddSheetWord("reach", "running"), state: "running" });
+      throw new Error("spoo cannot reach this computer at any of its addresses");
+    }
     onStage({ step: "reach", word: placeAddSheetWord("reach", "done"), state: "done" });
     onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
     return new Promise<never>(() => {});
@@ -444,7 +450,7 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: screen === "settings-add-computer",
+  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed",
   release:
     screen === "settings-about-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
