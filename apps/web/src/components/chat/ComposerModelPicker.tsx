@@ -17,7 +17,7 @@
 // keystroke takes the list away again.
 import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { catalogSourceLine, noModelsLine } from "@wsp/protocol";
+import { noModelsLine } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessModel } from "@wsp/protocol";
 import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -230,7 +230,6 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                           <span className={cn("truncate text-xs font-medium", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
                           {m.isDefault ? <span className="rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground">default</span> : null}
                         </div>
-                        <div className="truncate font-mono text-[10px] text-muted-foreground/70">{m.description ?? m.value}</div>
                       </div>
                       {chip !== null ? <Kbd className="h-4 min-w-0 rounded-sm px-1 font-mono text-[10px]">{chip}</Kbd> : null}
                       <button
@@ -251,16 +250,13 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                 })
               )}
             </div>
-            <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
-              <div
-                className="truncate font-mono text-[10px] text-muted-foreground/70"
-                data-composer-catalog-source={catalog.source}
-                role={notice !== null ? "status" : undefined}
-                title={notice ?? catalogSourceLine(catalog, where)}
-              >
-                {notice ?? catalogSourceLine(catalog, where)}
+            {notice === null ? null : (
+              <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
+                <div className="truncate font-mono text-[10px] text-muted-foreground/70" role="status" title={notice}>
+                  {notice}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </PopoverPopup>

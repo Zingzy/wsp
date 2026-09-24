@@ -63,7 +63,8 @@ import { NEW_THREAD_TITLE, compactTimeLabel, placeNames, projectComputerWord, wh
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
-const SETTLED_COLLAPSED_KEY = "wsp:sidebar-settled-collapsed";
+/** The projects whose idle workspaces the person opened; a fold starts shut. */
+const IDLE_OPEN_KEY = "wsp:sidebar-idle-open";
 /** The archive is the other way about: it holds the rows a person has stopped looking at, so it is shut until this
  * workspace's own chevron opens it, and the list remembers the ones that were opened. */
 const ARCHIVED_OPEN_KEY = "wsp:sidebar-archived-open";
@@ -109,13 +110,8 @@ interface VisibleProject {
   readonly rows: { readonly active: ReadonlyArray<string>; readonly settled: ReadonlyArray<string>; readonly archived: ReadonlyArray<string> };
 }
 
-/** Which folds one workspace's shelf draws: the Idle row only while it has rows of its own, since an open shelf
- * over nothing is a label for nothing; the archive's row under it while the shelf is open, or on its own where
- * there is no shelf to hang from. */
-function shelfFolds(settled: number, archived: number, settledOpen: boolean): { idle: boolean; archive: boolean } {
-  const idle = settled > 0;
-  return { idle, archive: archived > 0 && (!idle || settledOpen) };
-}
+/** How many idle workspaces a project shows before it folds them under one Idle row: a few read at a glance. */
+const IDLE_FOLD_AFTER = 3;
 
 /** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
  * enough to archive, each side a tree of openers and the threads they opened. The archive is a reading of the
@@ -189,7 +185,7 @@ export function WorkspaceSidebar() {
   // One clock sample per minute tick so every idle countdown reads the same now.
   const nowMs = useMemo(() => Date.now(), [nowMinute]);
 
-  const [settledCollapsed, setSettledCollapsed] = useLocalStorage(SETTLED_COLLAPSED_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
+  const [openIdle, setOpenIdle] = useLocalStorage(IDLE_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [archivedOpenIds, setArchivedOpenIds] = useLocalStorage(ARCHIVED_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [pickStored, setPickStored] = useLocalStorage<string | null>(PROJECT_PICK_KEY, null, projectPickCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -231,16 +227,14 @@ export function WorkspaceSidebar() {
   const shown = useMemo(
     () =>
       visible.map(({ project, rows }) => {
-        const settledOpen = !settledCollapsed.includes(project.id);
         const archivedOpen = archivedOpenIds.includes(project.id);
         const hidden = shutProjects.has(project.workspace.project.id) || collapsed.has(project.id);
-        const folds = shelfFolds(rows.settled.length, rows.archived.length, settledOpen);
         return {
           workspace: project.id,
-          threads: hidden ? [] : [...rows.active, ...(settledOpen ? rows.settled : []), ...(folds.archive && archivedOpen ? rows.archived : [])],
+          threads: hidden ? [] : [...rows.active, ...rows.settled, ...(rows.archived.length > 0 && archivedOpen ? rows.archived : [])],
         };
       }),
-    [visible, settledCollapsed, archivedOpenIds, shutProjects, collapsed],
+    [visible, archivedOpenIds, shutProjects, collapsed],
   );
   const nested = useMemo(() => nestedWorkspaces(projects, shown), [projects, shown]);
   const groups = useMemo(() => projectGroups(recorded, projects, nested), [recorded, projects, nested]);
@@ -329,8 +323,8 @@ export function WorkspaceSidebar() {
     });
   };
 
-  const toggleSettled = (id: string): void => {
-    setSettledCollapsed(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
+  const toggleIdle = (id: string): void => {
+    setOpenIdle(prev => (prev.includes(id) ? prev.filter(other => other !== id) : [...prev, id]));
   };
 
   const toggleArchived = (id: string): void => {
@@ -402,7 +396,6 @@ export function WorkspaceSidebar() {
   /** The rows under one workspace: the send in flight, the working rows, then the idle shelf under its own fold
    * with the archive nested inside it; nothing at all while the workspace is collapsed or has nothing to draw. */
   const threadsOf = ({ project, active, settled, archived }: VisibleProject, shut: boolean, depth: number) => {
-    const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
      * count on a shut shelf is what it took away, not only the rows it draws itself. */
@@ -411,7 +404,6 @@ export function WorkspaceSidebar() {
      * thread's: a workspace running a person's first message may not read that it has no threads. */
     const launch = launches[project.id];
     if (shut || (launch === undefined && active.length + shelved === 0)) return null;
-    const folds = shelfFolds(settled.length, archived.length, settledOpen);
     const started = (thread: SidebarThreadSnapshot): string => compactTimeLabel(thread.startedAt);
     const ended = (thread: SidebarThreadSnapshot): string => compactTimeLabel(resolveSettledTimestamp(thread));
     return (
@@ -422,14 +414,11 @@ export function WorkspaceSidebar() {
           </li>
         )}
         {active.map(node => threadItem(node, started, project, depth))}
-        {folds.idle ? (
-          <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} depth={depth} onToggle={() => toggleSettled(project.id)} />
-        ) : null}
-        {settledOpen ? settled.map(node => threadItem(node, ended, project, depth)) : null}
-        {folds.archive ? (
+        {settled.map(node => threadItem(node, ended, project, depth))}
+        {archived.length > 0 ? (
           <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} depth={depth} onToggle={() => toggleArchived(project.id)} />
         ) : null}
-        {folds.archive && archivedOpen ? archived.map(node => threadItem(node, ended, project, depth)) : null}
+        {archived.length > 0 && archivedOpen ? archived.map(node => threadItem(node, ended, project, depth)) : null}
       </ul>
     );
   };
@@ -483,10 +472,18 @@ export function WorkspaceSidebar() {
     const made = creations.filter(creation => creation.project === group.project.id);
     return (
       <>
-        {group.workspaces.map(workspace => {
-          const pane = visible.find(v => v.project.id === workspace.id);
-          return pane === undefined ? null : workspaceItem(pane, depth, rail);
-        })}
+        {(() => {
+          const panes = group.workspaces.flatMap(workspace => visible.filter(v => v.project.id === workspace.id));
+          // Idle is a workspace with nothing running and no send in flight; past a few, they fold under one row.
+          const idle = panes.filter(pane => pane.active.length === 0 && launches[pane.project.id] === undefined);
+          if (idle.length <= IDLE_FOLD_AFTER) return panes.map(pane => workspaceItem(pane, depth, rail));
+          const open = openIdle.includes(group.project.id);
+          return [
+            ...panes.filter(pane => !idle.includes(pane)).map(pane => workspaceItem(pane, depth, rail)),
+            <ThreadGroupRow key="idle" rowId={groupRowId("settled", group.project.id)} label="Idle" count={idle.length} open={open} depth={depth} onToggle={() => toggleIdle(group.project.id)} />,
+            ...(open ? idle.map(pane => workspaceItem(pane, depth, rail)) : []),
+          ];
+        })()}
         {made.map(creation => creationItem(creation, depth, rail))}
         {group.workspaces.length === 0 && made.length === 0 ? (
           <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
@@ -750,10 +747,20 @@ export function WorkspaceSidebar() {
  * under it are one row, so neither can drift from the other. The label says the two words with the space the face
  * draws as a gap. */
 function ThreadGroupRow({ rowId, label, count, open, depth, onToggle }: { rowId: string; label: string; count: number; open: boolean; depth: number; onToggle: () => void }) {
+  // A fold is a label over rows, not a row of its own: no fill on hover, only its words step up.
   return (
     <li data-thread-selection-safe className={RAIL_ITEM_CLASS}>
-      <SidebarMenuButton size="sm" data-sidebar-row data-row-id={rowId} data-depth={depth} aria-expanded={open} aria-label={open ? label : `${label} ${count}`} onClick={onToggle} className={cn(ONE_LINE_ROW_CLASS, "w-full")}>
-        <span data-group-word className={cn(ROW_PROSE_CLASS, "shrink-0")}>
+      <button
+        type="button"
+        data-sidebar-row
+        data-row-id={rowId}
+        data-depth={depth}
+        aria-expanded={open}
+        aria-label={open ? label : `${label} ${count}`}
+        onClick={onToggle}
+        className="group/fold flex h-7 w-full items-center gap-1.5 px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span data-group-word className={cn(ROW_PROSE_CLASS, "shrink-0 transition-colors duration-150 group-hover/fold:text-sidebar-foreground")}>
           {label}
         </span>
         {open ? null : (
@@ -761,9 +768,8 @@ function ThreadGroupRow({ rowId, label, count, open, depth, onToggle }: { rowId:
             {count}
           </span>
         )}
-        <span aria-hidden className="min-w-0 flex-1" />
-        <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
-      </SidebarMenuButton>
+        <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-sidebar-foreground/45 transition-transform duration-150", !open && "-rotate-90")} />
+      </button>
     </li>
   );
 }
