@@ -8,6 +8,7 @@
 // the ssh client, which is the only thing here that knows the machine is not
 // in this process.
 
+import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
@@ -172,6 +173,197 @@ export function sshDialArgs(reach: SshReach): string[] {
     String(reach.port),
     ...(reach.keyPath !== undefined ? ["-i", reach.keyPath, "-o", "IdentitiesOnly=yes"] : []),
   ];
+}
+
+/** The keys of the person's config a forward child carries, by the name `ssh -G` prints and the option that sets it:
+ * who it logs in as and with what, how it gets there, and where and under what name the machine's key is checked. */
+const CARRIED_SSH_OPTIONS: readonly (readonly [string, string])[] = [
+  ["identityfile", "IdentityFile"],
+  ["identitiesonly", "IdentitiesOnly"],
+  ["certificatefile", "CertificateFile"],
+  ["proxycommand", "ProxyCommand"],
+  ["userknownhostsfile", "UserKnownHostsFile"],
+  ["globalknownhostsfile", "GlobalKnownHostsFile"],
+  ["hostkeyalias", "HostKeyAlias"],
+  ["checkhostip", "CheckHostIP"],
+  ["hostkeyalgorithms", "HostKeyAlgorithms"],
+  ["pubkeyacceptedalgorithms", "PubkeyAcceptedAlgorithms"],
+  ["identityagent", "IdentityAgent"],
+  ["addkeystoagent", "AddKeysToAgent"],
+  ["usekeychain", "UseKeychain"],
+];
+
+/** A dial with the person's config already read into it: the machine it lands on and the options that got it there,
+ * so a child started under `-F /dev/null` reaches the same machine the same way with none of the config's forwards. */
+export interface SshCarried {
+  reach: SshReach;
+  options: readonly string[];
+}
+
+/** Every value `ssh -G` printed, a key that repeats (identityfile) keeping each in order. */
+function configLists(stdout: string): Map<string, string[]> {
+  const lists = new Map<string, string[]>();
+  for (const line of stdout.split("\n")) {
+    const space = line.indexOf(" ");
+    if (space <= 0) continue;
+    const key = line.slice(0, space);
+    lists.set(key, [...(lists.get(key) ?? []), line.slice(space + 1).trim()]);
+  }
+  return lists;
+}
+
+/** A ProxyJump as the ProxyCommand ssh builds for it, less the `-F` it would pass on: under `-F /dev/null` a jump named
+ * by an alias would lose its own block, so the jump keeps the person's config and only the last hop is ours. */
+function jumpCommand(spec: string): string {
+  const hops = spec.split(",");
+  const last = hops.pop()!;
+  return ["ssh", "-o", "BatchMode=yes", ...(hops.length > 0 ? ["-J", shellQuote(hops.join(","))] : []), "-W", "'[%h]:%p'", shellQuote(`ssh://${last}`)].join(" ");
+}
+
+/** The person's config for one dial, read twice by `ssh -G`: with it and without it. A value the config leaves at the
+ * client's own default is not carried, since the child gets that default anyway, and a default spelled out changes
+ * it: an explicit HostKeyAlgorithms stops the client preferring the key type known_hosts already holds. `%` tokens
+ * and `~` pass verbatim for the child to expand at connect. Throws ssh's own line on a config it cannot read. */
+export async function carriedSshValues(reach: SshReach, run: SshLocalRun = localRun): Promise<SshCarried> {
+  const target = `${reach.user}@${reach.host}`;
+  const read = async (bare: boolean): Promise<Map<string, string[]>> => {
+    const said = await run("ssh", ["-G", ...(bare ? ["-F", "/dev/null"] : []), ...sshDialArgs(reach), target], SSH_LOCAL_READ_MS);
+    if (said.exitCode !== 0) throw new Error(sshRefusalLine(said, reach));
+    return configLists(said.stdout);
+  };
+  const config = await read(false);
+  const defaults = await read(true);
+  const first = (key: string): string => config.get(key)?.[0] ?? "";
+  const options: string[] = [];
+  for (const [key, option] of CARRIED_SSH_OPTIONS) {
+    const values = config.get(key) ?? [];
+    if (values.join("\n") === (defaults.get(key) ?? []).join("\n")) continue;
+    options.push(...values.filter(value => value !== "").map(value => `${option}=${value}`));
+  }
+  const jump = first("proxyjump");
+  if (first("proxycommand") === "" && jump !== "" && jump !== "none") options.push(`ProxyCommand=${jumpCommand(jump)}`);
+  const port = Number(first("port")) || reach.port;
+  return { reach: { ...reach, user: first("user") || reach.user, host: first("hostname") || reach.host, port }, options };
+}
+
+/** What the forward child runs on the box. Forwards stand before a session's command runs, so the line is the forward
+ * being up; cat holds the session on the host's stdin pipe, so the forward ends when the host does, by any road. */
+export const SSH_BACK_UP = "WSP_BACK_UP";
+const BACK_COMMAND = `echo ${SSH_BACK_UP}; exec cat`;
+
+/** The forward child's argv: the carried dial under no config, then one remote forward from the box's loopback to
+ * this computer's door. Port 0 asks sshd for a free one. No ClearAllForwardings: it clears the command line's -R as
+ * well (measured, OpenSSH 10.2p1), and under `-F /dev/null` there is no other forward to clear. */
+export function sshBackArgs(carried: SshCarried, boxPort: number, doorPort: number): string[] {
+  return [
+    "-F",
+    "/dev/null",
+    ...sshDialArgs(carried.reach),
+    ...carried.options.flatMap(option => ["-o", option]),
+    "-T",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-o",
+    "ControlPath=none",
+    "-R",
+    `127.0.0.1:${boxPort}:127.0.0.1:${doorPort}`,
+    `${carried.reach.user}@${carried.reach.host}`,
+    BACK_COMMAND,
+  ];
+}
+
+/** The part of a started child the holder reads; a test hands its own. */
+export interface HeldChild {
+  stdin: { end(): unknown; on(event: "error", fn: (error: Error) => void): unknown };
+  stdout: NodeJS.ReadableStream;
+  stderr: NodeJS.ReadableStream;
+  kill(signal?: NodeJS.Signals): boolean;
+  once(event: "exit", fn: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  once(event: "error", fn: (error: Error) => void): unknown;
+}
+
+export type SshSpawn = (file: string, args: readonly string[]) => HeldChild;
+
+const spawnSsh: SshSpawn = (file, args) => spawn(file, [...args], { env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+
+/** One held forward: up answers the box's port once the forward stands and rejects with ssh's line when the child
+ * ends first; ended answers that line whenever the child ends; release ends it. */
+export interface BackForward {
+  up: Promise<number>;
+  ended: Promise<string>;
+  release(): void;
+}
+
+/** What ssh prints on stderr for a remote forward asked at port 0 (ssh(1), -R). */
+const ALLOCATED_PORT = /^Allocated port (\d+) for remote forward to /;
+
+/** Each line a stream writes, the last partial one held until its newline. */
+function eachLine(stream: NodeJS.ReadableStream, fn: (line: string) => void): void {
+  let pending = "";
+  stream.on("data", (chunk: Buffer | string) => {
+    pending += chunk.toString();
+    let nl: number;
+    while ((nl = pending.indexOf("\n")) !== -1) {
+      fn(pending.slice(0, nl).replace(/\r$/, ""));
+      pending = pending.slice(nl + 1);
+    }
+  });
+}
+
+/** Starts the forward child and holds it. The host keeps its stdin pipe open and writes nothing to it. */
+export function holdBackForward(carried: SshCarried, boxPort: number, doorPort: number, spawnChild: SshSpawn = spawnSsh): BackForward {
+  const child = spawnChild("ssh", sshBackArgs(carried, boxPort, doorPort));
+  const said: string[] = [];
+  let upSeen = false;
+  let port = boxPort === 0 ? undefined : boxPort;
+  let settleUp!: { resolve: (port: number) => void; reject: (error: Error) => void };
+  const up = new Promise<number>((resolve, reject) => (settleUp = { resolve, reject }));
+  // A caller that only waits on ended must not see an unhandled rejection from up.
+  up.catch(() => {});
+  const tryUp = (): void => {
+    if (upSeen && port !== undefined) settleUp.resolve(port);
+  };
+  eachLine(child.stdout, line => {
+    if (line.trim() !== SSH_BACK_UP) return;
+    upSeen = true;
+    tryUp();
+  });
+  eachLine(child.stderr, line => {
+    const allocated = ALLOCATED_PORT.exec(line);
+    if (allocated !== null) {
+      port ??= Number(allocated[1]);
+      tryUp();
+      return;
+    }
+    said.push(line);
+    if (said.length > 50) said.shift();
+  });
+  child.stdin.on("error", () => {});
+  let released = false;
+  const ended = new Promise<string>(resolve => {
+    const end = (fallback: string): void => {
+      const line = clientWords(said.join("\n")).split("\n").at(-1) ?? "";
+      const words = (line === "" ? fallback : line).slice(0, 300);
+      settleUp.reject(new Error(words));
+      resolve(words);
+    };
+    child.once("exit", (code, signal) => end(code === null && signal !== null ? `ssh ended on ${signal}` : `ssh exited with ${code}`));
+    child.once("error", error => end(error.message));
+  });
+  return {
+    up,
+    ended,
+    release: () => {
+      if (released) return;
+      released = true;
+      child.stdin.end();
+      child.kill("SIGTERM");
+    },
+  };
 }
 
 /** The ssh client on this computer, carrying one script to the machine. The folder its master socket lives in is
