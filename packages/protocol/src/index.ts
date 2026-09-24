@@ -2046,6 +2046,9 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
+/** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is. */
+export type BundleOutcome = { ok: true } | { ok: false; error: string };
+
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
@@ -2105,6 +2108,12 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
+  /** Downloads this release's bundle for this computer from the repo's release and keeps it only where its sha256
+   * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself. */
+  getBundle(ask: { version: string }): Promise<BundleOutcome>;
+  /** Opens the bundle the last getBundle kept and quits the app, so the new one is never swapped in under a
+   * running host. */
+  quitAndOpen(): Promise<BundleOutcome>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

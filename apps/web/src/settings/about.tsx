@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > About: the two halves of one release that can run apart, one
 // line each, the newest release as the host last read it, the computers whose
-// daemon is behind, and the road to the next release under them. A browser
-// tab has no shell half and shows the host's line alone.
-import { placeDaemonBehind, releaseAbove, releaseWord, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+// daemon is behind, and the road to the next release under them: in the app
+// on its own host the shell downloads and opens it, anywhere else Get is a
+// link. A browser tab has no shell half and shows the host's line alone.
+import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
+import { desktopBridge } from "../lib/desktopShell.js";
+import { errorText, isMacPlatform } from "../lib/utils.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { ABOUT_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
@@ -30,6 +34,63 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
 
+type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen">;
+
+/** The shell's bundle road where this page is the app's own host's, else nothing: a page a host somewhere else
+ * serves, a browser tab and a shell from before the road all take the link form. */
+function useBundleRoad(): Bundle | undefined {
+  const bridge = desktopBridge();
+  const [here, setHere] = useState<boolean | undefined>(bridge?.hosts === undefined ? true : undefined);
+  useEffect(() => {
+    let live = true;
+    bridge?.hosts?.().then(
+      view => live && setHere(view.current === null),
+      () => live && setHere(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
+  const { getBundle, quitAndOpen } = bridge ?? {};
+  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen } : undefined;
+}
+
+function GetRelease({ latest, mac, toast }: { latest: ReleaseLatest; mac: boolean; toast: (line: string) => void }) {
+  const road = useBundleRoad();
+  const [phase, setPhase] = useState<"get" | "downloading" | "kept">("get");
+  const said = (outcome: BundleOutcome): boolean => {
+    if (!outcome.ok) toast(outcome.error);
+    return outcome.ok;
+  };
+  if (road === undefined)
+    return (
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(latest.url)}>
+        {ABOUT_WORDS.get(latest.version)}
+      </Button>
+    );
+  if (phase === "kept")
+    return (
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => void road.quitAndOpen().then(said, (e: unknown) => toast(errorText(e)))}>
+        {ABOUT_WORDS.quitAndOpen}
+      </Button>
+    );
+  const get = (): void => {
+    setPhase("downloading");
+    road.getBundle({ version: latest.version }).then(
+      outcome => setPhase(said(outcome) ? "kept" : "get"),
+      (e: unknown) => {
+        toast(errorText(e));
+        setPhase("get");
+      },
+    );
+  };
+  return (
+    <Button size="xs" variant="outline" data-k="get-release" title={ABOUT_WORDS.getHover(mac)} disabled={phase === "downloading"} onClick={get}>
+      {phase === "downloading" ? ABOUT_WORDS.downloading : ABOUT_WORDS.get(latest.version)}
+    </Button>
+  );
+}
+
 export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
   const { inShell, app, host } = ctx.shell;
   const { release } = ctx;
@@ -48,11 +109,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
       items: lines,
       under: (
         <>
-          {behind === undefined ? null : (
-            <Button size="xs" variant="outline" data-k="get-release" onClick={() => openPage(behind.url)}>
-              {ABOUT_WORDS.get(behind.version)}
-            </Button>
-          )}
+          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} mac={isMacPlatform(ctx.platform)} toast={ctx.toast} />}
           <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>

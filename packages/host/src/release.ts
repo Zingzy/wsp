@@ -26,8 +26,15 @@ const RELEASE_FILE = "release.json";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-export const releaseUrl = (env: Env): string =>
-  `${(keyIn(env, RELEASE_API_ENV) ?? RELEASE_API).replace(/\/+$/, "")}/repos${new URL(REPO).pathname}/releases/latest`;
+const repoPath = new URL(REPO).pathname;
+const apiBase = (env: Env): string => (keyIn(env, RELEASE_API_ENV) ?? RELEASE_API).replace(/\/+$/, "");
+
+export const releaseUrl = (env: Env): string => `${apiBase(env)}/repos${repoPath}/releases/latest`;
+
+/** One release's answer and one of its downloads. The override moves both, so a smoke serves the two from one place. */
+export const releaseTagUrl = (env: Env, tag: string): string => `${apiBase(env)}/repos${repoPath}/releases/tags/${tag}`;
+export const releaseAssetUrl = (env: Env, tag: string, asset: string): string =>
+  `${keyIn(env, RELEASE_API_ENV) === undefined ? REPO : `${apiBase(env)}${repoPath}`}/releases/download/${tag}/${asset}`;
 
 export const releaseFileFor = (statePath: string): string => join(dirname(statePath), RELEASE_FILE);
 
@@ -43,7 +50,7 @@ export function parseRelease(body: unknown): ReleaseLatest {
 }
 
 /** The body as text, the stream cancelled once it passes the cap. */
-async function cappedText(res: Response, max: number): Promise<string> {
+export async function cappedText(res: Response, max: number): Promise<string> {
   const reader = res.body?.getReader();
   if (reader === undefined) return "";
   const chunks: Uint8Array[] = [];
