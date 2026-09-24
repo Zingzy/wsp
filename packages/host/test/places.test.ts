@@ -163,7 +163,7 @@ interface FakeHost {
   frames: Record<string, unknown>[];
 }
 
-async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
+async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[]; unreadable?: boolean } = {}): Promise<FakeHost> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
   const other = generateKeyPairSync("ed25519");
@@ -181,6 +181,10 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
         if (opts.refuse !== undefined) {
           ws.send(JSON.stringify({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" }));
           ws.close(4401, "unauthorized");
+          return;
+        }
+        if (opts.unreadable === true) {
+          ws.send(JSON.stringify({ id: frame["id"], ok: true }));
           return;
         }
         const placeId = "p_ab12cd34ab12cd34";
@@ -685,6 +689,15 @@ describe("a computer joining a wsp", () => {
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
     expect(existsSync(join(home, ".config", "systemd", "user"))).toBe(false);
+  });
+
+  it("says a join answer it cannot read on one line, since the add reads the box's last line as its sentence", async () => {
+    const home = tmp("join-unreadable");
+    const host = await fakeHost({ unreadable: true });
+    const said = await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run)).catch((e: unknown) => (e as Error).message);
+    expect(String(said)).toContain(`${host.url} answered the join with something this computer cannot read: `);
+    expect(String(said)).not.toContain("\n");
+    expect(String(said)).toContain("placeId");
   });
 
   it("joins the host whose key the line named, as it did before", async () => {

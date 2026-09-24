@@ -925,30 +925,54 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * the machine's hello announces from then on. */
 export const DAEMON_DEPLOYED_LINE = `daemon v${DAEMON_VERSION}`;
 
-/** A joined computer's deploy echoes `WSP_STEP <step>` before each step; WSP_READY opens the join. */
+/** A joined computer's deploy echoes `WSP_STEP <step>` before each step; WSP_READY opens the join and the join's
+ * own joinedLine opens the service. */
 const PLACE_DEPLOY_STEPS = {
   files: "did not take wsp's files",
   login: "did not take wsp's login files",
   agent: "did not set up wsp's agent",
   join: "took wsp but could not connect back",
+  service: "connected back but its agent did not start",
 } as const;
 type PlaceDeployStep = keyof typeof PLACE_DEPLOY_STEPS;
 const WSP_STEP_LINE = "WSP_STEP";
+const isDeployStep = (word: string): word is PlaceDeployStep => Object.hasOwn(PLACE_DEPLOY_STEPS, word);
 
 /** A joined computer's deploy alone: a fork's script is hashed into the daemon's content. */
-const stepMark = (place: DaemonPlace, step: Exclude<PlaceDeployStep, "join">): string[] => (place.join === undefined ? [] : [`echo ${WSP_STEP_LINE} ${step}`]);
+const stepMark = (place: DaemonPlace, step: "files" | "login" | "agent"): string[] => (place.join === undefined ? [] : [`echo ${WSP_STEP_LINE} ${step}`]);
 
-export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => `${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`;
+/** What `wsp join` prints once the place file is written, before it installs the service. */
+export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
+
+/** The engine's readers of a box's words bound them at this length. */
+const SAID_MAX = 300;
+
+export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => {
+  const line = `${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`;
+  return line.length <= SAID_MAX ? line : `${line.slice(0, SAID_MAX - 1)}…`;
+};
+
+/** A tool's closing line after the one that said why, which is not the box's reason. */
+const TOOL_TRAILER = /^tar: (Exiting with failure status due to previous errors|Error is not recoverable: exiting now)$/;
 
 /** Under set -e the line that ended the script is the last the box wrote on stderr. */
-function joinedFailureLine(name: string, res: { stdout: string; stderr: string; exitCode: number }): string {
+function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
   let step: PlaceDeployStep = "files";
-  for (const line of res.stdout.split("\n")) {
-    if (line.startsWith(`${WSP_STEP_LINE} `)) step = line.slice(WSP_STEP_LINE.length + 1).trim() as PlaceDeployStep;
-    else if (line.includes(WSP_READY_LINE)) step = "join";
+  // Whichever address answered: the join may spell it as it normalised it.
+  const [joinedHead, joinedTail] = joinedLine(join.name, "\0").split("\0") as [string, string];
+  for (const raw of res.stdout.split("\n")) {
+    const line = raw.trim();
+    const word = line.startsWith(`${WSP_STEP_LINE} `) ? line.slice(WSP_STEP_LINE.length + 1) : undefined;
+    if (word !== undefined && isDeployStep(word)) step = word;
+    else if (line === WSP_READY_LINE) step = "join";
+    else if (line.startsWith(joinedHead) && line.endsWith(joinedTail)) step = "service";
   }
-  const said = clientWords(res.stderr).split("\n").filter(line => line.trim() !== "").at(-1)?.trim();
-  return placeInstallFailedLine(name, step, said ?? `it said nothing about why (exit ${res.exitCode})`);
+  const said = clientWords(res.stderr.replace(/\r/g, ""))
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line !== "" && !TOOL_TRAILER.test(line))
+    .at(-1);
+  return placeInstallFailedLine(join.name, step, said ?? `it said nothing about why (exit ${res.exitCode})`);
 }
 
 /** Everything a deploy that would not come up printed: the machine's own last words, then the commands the deploy
@@ -962,7 +986,7 @@ function deployFailureDetail(place: DaemonPlace, res: { stdout: string; stderr: 
 
 /** A fork's failure is the whole detail; a joined computer's is one sentence, its detail going to the host's log. */
 export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string; exitCode: number }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
-  return place.join === undefined ? deployFailureDetail(place, res, previewHostSuffix, targets) : joinedFailureLine(place.join.name, res);
+  return place.join === undefined ? deployFailureDetail(place, res, previewHostSuffix, targets) : joinedFailureLine(place.join, res);
 }
 
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts

@@ -80,7 +80,7 @@ import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, 
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -313,9 +313,6 @@ async function onePlace(client: HostClient, typed: string, ref: string): Promise
   if (found.length > 1) return { refusal: twoPlacesLine(typed, found.map(p => p.id)) };
   return { place: found[0]!, joined };
 }
-
-/** The line a join prints once the computer is in. */
-export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
 
 /** The refusal a join gets on a computer whose manager wsp writes no unit for: nothing there would keep the daemon
  * up, so nothing is written. */
@@ -1480,7 +1477,7 @@ async function handshake(
         if (frame["id"] === 1) {
           const reply = PlaceJoinReply.safeParse(frame);
           if (!reply.success) {
-            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
+            end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message.replace(/\s+/g, " ").trim()}`));
             return;
           }
           const { placeId, hostPublicKey, nonce: hostNonce, signature, ephemeral, hostName } = reply.data;

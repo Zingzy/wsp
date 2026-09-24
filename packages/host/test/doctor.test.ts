@@ -1137,12 +1137,36 @@ describe("what a deploy that would not come up says", () => {
 
   it("names the step the last marker opened, with the box's last line and not ssh's own", () => {
     const tar = deployFailureLine(SPOO, { exitCode: 2, stdout: "WSP_STEP files\n", stderr: "tar: /root/.wsp/daemon.tgz: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now\n" });
-    expect(tar).toBe("spoo did not take wsp's files: tar: Error is not recoverable: exiting now");
+    expect(tar).toBe("spoo did not take wsp's files: tar: /root/.wsp/daemon.tgz: Cannot open: No such file or directory");
     const chip = deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\n", stderr: "unsupported arch: riscv64\n" });
     expect(chip).toBe("spoo did not set up wsp's agent: unsupported arch: riscv64");
     // A box that wrote nothing of its own on stderr: ssh's forward warnings are not its words.
     const quiet = deployFailureLine(SPOO, { exitCode: 0, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\nPLACE_JOINED\nDAEMON_DOWN\n", stderr: `${SSH_FORWARD_NOISE.join("\n")}\n` });
     expect(quiet).toBe("spoo took wsp but could not connect back: it said nothing about why (exit 0)");
+  });
+
+  it("reads the line that says why, not tar's closing line, on a full disk", () => {
+    const full = deployFailureLine(SPOO, { exitCode: 2, stdout: "WSP_STEP files\n", stderr: "tar: ./daemon/x86_64/wsp-daemon: Cannot write: No space left on device\ntar: Exiting with failure status due to previous errors\n" });
+    expect(full).toBe("spoo did not take wsp's files: tar: ./daemon/x86_64/wsp-daemon: Cannot write: No space left on device");
+  });
+
+  it("names the agent's start once the box printed that it joined, since it did connect back", () => {
+    const said = deployFailureLine(SPOO, {
+      exitCode: 1,
+      stdout: ["WSP_STEP files", "WSP_STEP login", "WSP_STEP agent", "WSP_READY", "spoo joined the wsp at http://100.129.166.28:4640; it dials that host on its own from now on.", ""].join("\n"),
+      stderr: "systemctl enable --now wsp-place-abc exited 1 and said: Job for wsp-place-abc.service failed\n",
+    });
+    expect(said).toBe("spoo connected back but its agent did not start: systemctl enable --now wsp-place-abc exited 1 and said: Job for wsp-place-abc.service failed");
+  });
+
+  it("takes a marker only when it is one of the steps, word for word", () => {
+    const stray = deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP whatever\nsomething mentions WSP_READY here\n", stderr: "boom\r\n" });
+    expect(stray).toBe("spoo did not take wsp's login files: boom");
+  });
+
+  it("holds the sentence to 300 characters and keeps a box's own line that merely mentions a port", () => {
+    expect(deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_READY\n", stderr: `${"x".repeat(3000)}\n` }).length).toBeLessThanOrEqual(300);
+    expect(deployFailureLine(SPOO, { exitCode: 1, stdout: "WSP_READY\n", stderr: "wsp: cannot listen to port: 4400\n" })).toBe("spoo took wsp but could not connect back: wsp: cannot listen to port: 4400");
   });
 
   it("marks each step of a joined computer's deploy and no step of a fork's, so the daemon's content stands", async () => {
