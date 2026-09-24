@@ -113,6 +113,7 @@ pub fn make_on(roads: &[&dyn CopyRoad], ask: &CopyAsk) -> Result<CopyReport, Str
     if to.exists() {
         return Err(already_there(to));
     }
+    sweep_beside(from);
     let walked = rules::walk(from);
     let branch = ask.base.clone().unwrap_or_else(|| rules::default_branch(from));
     // The branch as the folder holds it, else as the remote holds it: a folder cloned with one branch checked out
@@ -198,7 +199,38 @@ pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> 
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
     let taking = road_named(road).ok_or_else(|| no_such_road(road))?;
+    if !copy_of(from, to) {
+        return Err(not_a_copy(from, to));
+    }
+    sweep_beside(from);
     taking.remove(from, to).map_err(|e| e.to_string())
+}
+
+/// Whether `to` has the shape every copy of `from` is made at: beside it, under its name with the work's on the end.
+fn copy_of(from: &Path, to: &Path) -> bool {
+    let (Some(name), Some(copy)) = (from.file_name(), to.file_name()) else { return false };
+    let (name, copy) = (name.to_string_lossy(), copy.to_string_lossy());
+    to.parent() == from.parent() && copy.len() > name.len() + 1 && copy.starts_with(&format!("{name}-"))
+}
+
+/// Why a path that is not a copy of the folder is not taken away.
+pub fn not_a_copy(from: &Path, to: &Path) -> String {
+    let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let beside = from.parent().unwrap_or(from).join(format!("{name}-<work>"));
+    format!(
+        "{} is not a copy of {}, so nothing was removed; a copy sits beside its project as {}, and --to names that path",
+        to.display(),
+        from.display(),
+        beside.display()
+    )
+}
+
+/// The removals a stop cut short beside this project, handed to their own process so the verb answers at once.
+fn sweep_beside(from: &Path) {
+    let project = [from.to_path_buf()];
+    for failed in aside::sweep(aside::beside(&project), aside::remove_later) {
+        eprintln!("{failed}");
+    }
 }
 
 #[cfg(test)]

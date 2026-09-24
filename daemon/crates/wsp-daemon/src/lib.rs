@@ -517,12 +517,14 @@ impl Daemon {
             tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
         tokio::spawn(auth::watch(Arc::clone(&self.ctx)));
-        let root = PathBuf::from(&self.ctx.root);
-        let roots_path = self.ctx.roots_path();
+        let ctx = Arc::clone(&self.ctx);
         // A copy sits beside its project folder, so a removal a stop cut short is left in the folder a root sits in.
         std::thread::spawn(move || {
-            if let Ok(roots) = paths::roots_now(&root, &roots_path) {
-                wsp_runtime::copy_road::aside::sweep(wsp_runtime::copy_road::aside::beside(&roots[1..]));
+            if let Ok(roots) = paths::roots_now(Path::new(&ctx.root), &ctx.roots_path()) {
+                let beside = wsp_runtime::copy_road::aside::beside(&roots[1..]);
+                for failed in wsp_runtime::copy_road::aside::sweep(beside, |p| std::fs::remove_dir_all(p)) {
+                    ctx.log(&failed.to_string());
+                }
             }
         });
         loop {
