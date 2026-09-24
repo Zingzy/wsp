@@ -27,7 +27,7 @@ export function landsBytes(capabilities: { signedUrls: boolean }, machine: Pick<
 
 /** Puts one file on the machine, and answers what the road it took counted. The backend's own road goes first: it
  * is one call to the provider where the signed URL is two, and it is the only road on a backend that mints none. */
-export async function landBytes(machine: Machine, path: string, bytes: Uint8Array, opts: LandBytesOptions = {}): Promise<BytesLanded | undefined> {
+export async function landBytes(machine: Pick<Machine, "id" | "putBytes" | "uploadUrl">, path: string, bytes: Uint8Array, opts: LandBytesOptions = {}): Promise<BytesLanded | undefined> {
   if (machine.putBytes !== undefined) {
     return (await machine.putBytes(path, bytes, opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {})) ?? undefined;
   }

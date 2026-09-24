@@ -1370,6 +1370,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               send({ id: msg.id, ok: true, report: await rt.agents.read(msg.target, origin) });
               return;
+            case "servers.tools":
+              // Starting a server on one of the person's computers is theirs alone, as every places act is.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, answer: await rt.agents.tools(msg.target, { agent: msg.agent, name: msg.name, ...(msg.refresh !== undefined ? { refresh: msg.refresh } : {}) }, origin) });
+              return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;

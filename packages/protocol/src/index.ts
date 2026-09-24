@@ -5257,6 +5257,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * while it ran, marked stale, or refuses where there is none. A cloud account's row is refused, since nothing stands
    * there between forks. */
   z.object({ id: reqId, op: z.literal("agents.read"), target: AgentsTarget }),
+  /** Replies with { answer: ServerToolsAnswer }: one MCP server of one agent's config there, started once as that
+   * login with its own command and variables, or asked once over its address, for its tools and its sign-in. Only on
+   * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
+   * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
+  z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
