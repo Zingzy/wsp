@@ -2579,17 +2579,19 @@ function printTable(ctx: VerbContext, value: unknown, lines: (depth: number) => 
   ctx.io.log(next);
 }
 
-/** One level of one computer's folders over the protocol: the folder picker a browser tab has, and the same answer
- * here, so a line or an agent can look before it names a folder to import. `on` is a computer by the name or id the
- * places list carries, absent for this one; a folder on this computer is read by `here`, and one on another computer
- * is taken as given, absolute, since only that computer can resolve it. */
-async function hostFolders(client: HostClient, folder: string | undefined, hidden: boolean | undefined, on: string | undefined, here: (folder: string) => string): Promise<HostFolderListing> {
+/** One level of one computer's folders over the protocol, or every repo under its roots: the folder picker a browser
+ * tab has, and the same answer here, so a line or an agent can look before it names a folder to import. `on` is a
+ * computer by the name or id the places list carries, absent for this one; a folder on this computer is read by
+ * `here`, and one on another computer is taken as given, absolute, since only that computer can resolve it. */
+async function hostFolders(client: HostClient, asked: { folder?: string | undefined; hidden?: boolean | undefined; repos?: boolean | undefined; on?: string | undefined }, here: (folder: string) => string): Promise<HostFolderListing> {
+  const { folder, hidden, repos, on } = asked;
   const place = on === undefined ? undefined : await placeNamed(client, on);
   const elsewhere = place !== undefined && place.id !== HERE_PLACE_ID ? place : undefined;
   const dir = folder === undefined ? undefined : elsewhere === undefined ? here(folder) : absolutePath(`folder is a path on ${elsewhere.name}`, folder);
   const { listing } = await client.request<{ listing: HostFolderListing }>("host.folders", {
     ...(dir !== undefined ? { dir } : {}),
     ...(hidden === true ? { hidden } : {}),
+    ...(repos === true ? { repos } : {}),
     ...(elsewhere !== undefined ? { on: elsewhere.id } : {}),
   });
   return listing;
@@ -2605,7 +2607,7 @@ async function initSetup(client: HostClient): Promise<InitSetup> {
  * outside those is refused. The app's own browser draws the roots as crumbs instead. */
 function folderLines(listing: HostFolderListing): string[] {
   return [
-    ...table([["FOLDER", "GIT"], ...listing.folders.map(f => [f.path, f.repo ? "git" : ""])]),
+    ...table([["FOLDER", "GIT"], ...listing.folders.map(f => [f.path, f.repo ? (f.branch ?? "git") : ""])]),
     `${folderLevelLine(listing)} Browsable: ${listing.roots.join(", ")}.`,
   ];
 }
@@ -3643,15 +3645,15 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "folders",
-    usage: "wsp folders [<folder>] [--hidden] [--on <computer>]",
-    about: "the folders inside one folder on this computer, or on a box you added with --on, for naming one to import; the home folder and every project on that computer are the roots and nothing outside them is listed",
+    usage: "wsp folders [<folder>] [--hidden] [--repos] [--on <computer>]",
+    about: "the folders inside one folder on this computer or on a box you added with --on, or with --repos every git repo under the home folder, most recently used first, for naming one to record",
     page: "app",
-    options: { hidden: { type: "boolean" }, on: { type: "string" } },
+    options: { hidden: { type: "boolean" }, repos: { type: "boolean" }, on: { type: "string" } },
     run: async ctx => {
       const [folder] = ctx.args;
       if (ctx.args.length > 1) throw usageRefusal("wsp folders takes one folder on this computer at most.", usageIs(ctx));
       const on = typeof ctx.flags["on"] === "string" ? ctx.flags["on"] : undefined;
-      const listing = await hostFolders(await ctx.client(), folder, ctx.flags["hidden"] === true, on, f => resolve(f));
+      const listing = await hostFolders(await ctx.client(), { folder, hidden: ctx.flags["hidden"] === true, repos: ctx.flags["repos"] === true, on }, f => resolve(f));
       ctx.out.emit(listing, folderLines(listing).join("\n"));
       return 0;
     },
@@ -3661,11 +3663,12 @@ export const VERBS: readonly Verb[] = [
       input: {
         folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
         hidden: z.boolean().optional().describe("true lists the hidden folders too, which are otherwise only counted"),
+        repos: z.boolean().optional().describe("true answers every git repo under the home folder and the recorded projects instead of one level, each with its branch and when git last wrote to it, most recent first; folder is ignored"),
         on: z.string().optional().describe("the computer whose folders to list, by the name computers lists; absent is the computer the app runs on"),
       },
       output: HostFolderListing.shape,
-      call: async ({ folder, hidden, on }, deps) => {
-        const listing = await hostFolders(await deps.client(), folder, hidden, on, f => absolutePath("folder is a path on this computer", f));
+      call: async ({ folder, hidden, repos, on }, deps) => {
+        const listing = await hostFolders(await deps.client(), { folder, hidden, repos, on }, f => absolutePath("folder is a path on this computer", f));
         return asText(folderLines(listing).join("\n"), listing);
       },
     }),
@@ -3807,6 +3810,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "folders on": "the computer whose folders to list, by the name wsp computers shows; a box you added answers from its own disk, and this computer is listed without it",
+  repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
   "max-depth": "how many levels of threads may stand under the root thread; needs --spawn on, and defaults to 1",

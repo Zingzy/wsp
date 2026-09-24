@@ -3865,7 +3865,7 @@ describe("the folders of a computer you own", () => {
   });
 
   it("are this computer's own when the ask names this computer or none, and a computer of yours is the host's own road alone", async () => {
-    const seen: { dir?: string; hidden?: boolean }[] = [];
+    const seen: { dir?: string; hidden?: boolean; wide?: boolean }[] = [];
     const here: HostFolderListing = { dir: "/Users/dev", roots: ["/Users/dev"], folders: [], hidden: 0 };
     const { hostKey } = await serving({ folders: { list: async req => (seen.push(req), here) } });
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: listsFolders([]) });
@@ -3873,7 +3873,7 @@ describe("the folders of a computer you own", () => {
     const c = await mine();
     expect((await c.request("host.folders", { on: HERE_PLACE_ID, hidden: true }))["listing"]).toEqual(here);
     expect((await c.request("host.folders", {}))["listing"]).toEqual(here);
-    expect(seen).toEqual([{ hidden: true }, {}]);
+    expect(seen).toEqual([{ hidden: true, wide: false }, { wide: false }]);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
     const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);

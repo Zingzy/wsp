@@ -555,7 +555,8 @@ export interface LandRequest {
 /** This computer's own folders as a browser tab's picker walks them, one level at a time; the runtime never touches
  * the disk itself, the host that owns it does. The desktop shell has the system dialog and never asks for this. */
 export interface HostFolders {
-  list(req: { dir?: string; hidden?: boolean }): Promise<HostFolderListing>;
+  /** `wide` is this computer's own window, which is not held to the home root; `repos` asks for every repo under the roots. */
+  list(req: { dir?: string; hidden?: boolean; repos?: boolean; wide?: boolean }): Promise<HostFolderListing>;
 }
 
 /** The person's terminal config on the computer running the host, read again on every ask; the runtime never reads

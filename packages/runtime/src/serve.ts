@@ -297,7 +297,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   /** One level of folders on a computer this host holds, read by that computer's own daemon over the link it opened,
    * with the folder of every project recorded there beside its login's home as the roots. A provider keeps no
    * computer to browse and is refused before anything is asked. */
-  const placeFolders = async (placeId: string, asked: { dir?: string; hidden?: boolean }, origin: Caller | undefined): Promise<HostFolderListing> => {
+  const placeFolders = async (placeId: string, asked: { dir?: string; hidden?: boolean; repos?: boolean }, origin: Caller | undefined): Promise<HostFolderListing> => {
     const rows = await places().list(now());
     const row = rows.find(place => place.id === placeId);
     if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, rows.map(place => place.name))), { kind: "usage" });
@@ -1291,9 +1291,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "host.folders": {
-              const asked = { ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}) };
+              const asked = { ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}), ...(msg.repos === true ? { repos: true } : {}) };
               if (msg.on === undefined || msg.on === HERE_PLACE_ID) {
-                send({ id: msg.id, ok: true, listing: await folders().list(asked) });
+                // Only this computer's own window walks the whole disk: a paired or relayed device, or a thread on any
+                // machine, stays inside the home folder and the projects.
+                send({ id: msg.id, ok: true, listing: await folders().list({ ...asked, wide: road === "here" && by === undefined }) });
                 return;
               }
               // Another computer's disk is read over the link it holds, which is the places road: the host's own.
