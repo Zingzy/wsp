@@ -6,7 +6,7 @@
 // folder linked into three agents, a plugin's and a project's; stdio and
 // http servers in every state, the wsp server among them; two readers that
 // could not answer. Shared by the render tests and the wireframe.
-import type { AgentsReport } from "@wsp/protocol";
+import type { AgentsReport, ServerToolsAnswer } from "@wsp/protocol";
 
 export const AGENTS_REPORT: AgentsReport = {
   target: { placeId: "p_spoo" },
@@ -53,4 +53,19 @@ export const AGENTS_REPORT: AgentsReport = {
     { agent: "claude", name: "wsp", scope: "user", file: "~/.claude.json", transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true },
   ],
   refused: ["skills: the answer was cut short, so the list is not whole", "~/.hermes/config.yaml is over 1 MB and was not read"],
+};
+
+/** What List tools answers per server in the wireframe: airtable's tools, one description long enough to clamp;
+ * github that did not answer in time. */
+export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
+  airtable: {
+    auth: "open",
+    readAt: "2026-09-24T12:00:00.000Z",
+    tools: [
+      { name: "list_records", description: "List records in a table, filtered by a formula and sorted by any field, a page of up to one hundred records at a time with the offset for the next page." },
+      { name: "create_record", description: "Create a record in a table." },
+      { name: "list_bases" },
+    ],
+  },
+  github: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-24T12:00:00.000Z" },
 };

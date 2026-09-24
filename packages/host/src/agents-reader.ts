@@ -12,7 +12,8 @@ import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, shellQuote, type AgentRow, type AgentSignInState, type McpRow } from "@wsp/protocol";
 import { vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
-import { machineHost } from "./machine-host.js";
+import { machineHost, type MachineHost } from "./machine-host.js";
+import { serverTools, type KeptTools } from "./server-tools.js";
 
 const READ_MS = 20_000;
 /** How long one agent's own version or status command is given where the computer has a timeout command. */
@@ -177,16 +178,26 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
 }
 
 /** The reader the runtime is wired with: this computer's own Host for this computer and a workspace on it, and
- * machineHost for everything else, after one read of who its lines run as. */
-export function agentsReader(o: { vault: () => Readonly<Record<string, string>>; here?: () => Host }): AgentsReader {
+ * machineHost for everything else, after one read of who its lines run as. A computer you joined hands a command
+ * its stdin, so the variables a started server is given ride there. Each server's tools answer is kept here. */
+export function agentsReader(o: { vault: () => Readonly<Record<string, string>>; here?: () => Host; now?: () => number; toolsMs?: number }): AgentsReader {
+  const kept = new Map<string, KeptTools>();
+  const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string }> => {
+    const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
+    return { host: machineHost(on.machine, login, { envOnStdin: on.kind === "box" }), user: login.user };
+  };
   return {
     read: async (on: AgentsOn) => {
       if (on.kind === "here") return readAgents(o.here?.() ?? nodeHost(), { user: userInfo().username, vault: o.vault(), ...(on.project !== undefined ? { project: on.project } : {}) });
-      const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
-      const host = machineHost(on.machine, login);
+      const { host, user } = await hostOf(on);
       const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
-      const read = await readAgents(host, { user: login.user, vault: o.vault(), ...(on.kind === "machine" && on.project !== undefined ? { project: on.project } : {}), ...(box !== undefined ? { box } : {}) });
+      const read = await readAgents(host, { user, vault: o.vault(), ...(on.kind === "machine" && on.project !== undefined ? { project: on.project } : {}), ...(box !== undefined ? { box } : {}) });
       return { ...read, refused: [...read.refused, ...host.refused] };
+    },
+    tools: async (on, ask) => {
+      const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
+      const project = on.kind === "box" ? undefined : on.project;
+      return serverTools(host, ask, { kept, now: o.now ?? Date.now, ...(project !== undefined ? { project } : {}), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
     },
   };
 }

@@ -86,7 +86,12 @@ function batched<T>(flush: (items: string[]) => Promise<T[]>): (item: string) =>
 
 const decoded = (line: string): string => Buffer.from(line, "base64").toString("utf8");
 
-export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin): MachineHost {
+/** Reads NUL-separated names and values off the line's own stdin into its environment, before anything else runs. */
+const ENV_FROM_STDIN = `while IFS= read -r -d '' k && IFS= read -r -d '' v; do export "$k=$v"; done; `;
+
+/** `envOnStdin`: the road hands a command's stdin to it, as a computer you joined does, so the variables a run is
+ * given ride there rather than on a command line another login on that computer can read. */
+export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin, o: { envOnStdin?: boolean } = {}): MachineHost {
   const refused: string[] = [];
   const refuse = (line: string): void => {
     if (!refused.includes(line)) refused.push(line);
@@ -123,8 +128,13 @@ export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin):
   );
   const list = batched<string[]>(async items => (await answer("list", script.list, items)).map(line => (line === undefined ? [] : decoded(line).split("\n").filter(n => n !== "").sort())));
   const run = async (cmd: string, args: readonly string[], opts: RunOptions = {}): Promise<string | undefined> => {
-    const env = Object.entries(opts.env ?? {}).map(([k, v]) => `export ${k}=${shellQuote(v)}; `).join("");
-    const res = await machine.exec(asLogin(login, `${env}${[cmd, ...args].map(shellQuote).join(" ")} </dev/null`), { timeoutMs: Math.min(opts.timeoutMs ?? 120_000, EXEC_TIMEOUT_MAX_MS) });
+    const vars = Object.entries(opts.env ?? {});
+    const stdin = o.envOnStdin === true && vars.length > 0;
+    const env = stdin ? ENV_FROM_STDIN : vars.map(([k, v]) => `export ${k}=${shellQuote(v)}; `).join("");
+    const res = await machine.exec(asLogin(login, `${env}${[cmd, ...args].map(shellQuote).join(" ")} </dev/null`), {
+      timeoutMs: Math.min(opts.timeoutMs ?? 120_000, EXEC_TIMEOUT_MAX_MS),
+      ...(stdin ? { stdin: Buffer.from(vars.map(([k, v]) => `${k}\0${v}\0`).join("")) } : {}),
+    });
     return res.exitCode === 0 ? res.stdout : undefined;
   };
   const fs: HostFs = {

@@ -3923,6 +3923,13 @@ describe("the agents on a computer you own", () => {
       if (on.kind !== "here") said.push((await on.machine.exec("id -un")).stdout);
       return READ;
     },
+    tools: async (on, ask) => {
+      asked.push(on);
+      // The bytes a run hands its command ride the frame's stdin to the computer, which is the road a server's
+      // variables take there.
+      const out = on.kind === "here" ? "" : (await on.machine.exec("cat", { stdin: Buffer.from("A=1") })).stdout;
+      return { auth: "open", tools: [{ name: `${ask.key} ${ask.agent} ${ask.name} ${ask.refresh === true} ${out}` }], readAt: "2026-09-24T12:00:00.000Z" };
+    },
   });
 
   it("are read over that computer's link with the login, sign-ins and versions its report carries, and answered stamped", async () => {
@@ -3955,6 +3962,37 @@ describe("the agents on a computer you own", () => {
     expect(said).toEqual(["maya"]);
     expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);
     expect(asked.at(-1)).toEqual({ kind: "here" });
+  });
+
+  it("hand one server's tools ask to the reader over that computer's link, its stdin riding the frame, and refuse it on a ticket", async () => {
+    const asked: AgentsOn[] = [];
+    const { hostKey } = await serving({ agentsReader: reading(asked, []), vault: {} });
+    const frames: Record<string, unknown>[] = [];
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c =>
+        c.onFrame(raw => {
+          const frame = raw as unknown as Record<string, unknown>;
+          if (frame["op"] !== "exec") return;
+          frames.push(frame);
+          c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: Buffer.from(String(frame["stdin"] ?? ""), "base64").toString(), stderr: "", truncated: false });
+        }),
+    });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const answered = await c.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable", refresh: true });
+    expect(answered.ok, String(answered["error"])).toBe(true);
+    expect(answered["answer"]).toEqual({ auth: "open", tools: [{ name: `${JSON.stringify({ placeId })} claude airtable true A=1` }], readAt: "2026-09-24T12:00:00.000Z" });
+    expect(asked).toEqual([expect.objectContaining({ kind: "box" })]);
+    expect(frames.map(f => f["cmd"])).toEqual(["cat"]);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    expect(await ticketed.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    expect(asked).toHaveLength(1);
   });
 
   it("are refused on a cloud account, on a place nobody holds, on a socket let in on a ticket, and on a runtime with no reader", async () => {
