@@ -480,7 +480,8 @@ describe("installing, stopping and reading a service", () => {
       "host        not running",
       `state       ${at.statePath}`,
       "service     none; wsp up --service installs a fake service",
-    ]);    // The newest release rides last, read off the file the host keeps, whether or not a host is serving.
+    ]);
+    // The newest release rides last, read off the file the host keeps, whether or not a host is serving.
     expect(statusLines(at.statePath, undefined, "none; wsp up --service installs a fake service", now, "0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it").at(-1)).toBe("latest      0.3.0; this is 0.2.0, npm i -g @zingzy/wsp@0.3.0 gets it");
     expect(statusLines(at.statePath, { lock, answering: true }, "fake service x, loaded", now, "off").at(-1)).toBe("latest      off");
   });

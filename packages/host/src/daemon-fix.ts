@@ -22,13 +22,15 @@ function roadOf(run: Pick<RunningWsp, "argv" | "shim">): Road {
   return "checkout";
 }
 
-/** The line that puts the right daemon beside this wsp: the npm install again, the app's own update, or in a
- * checkout a cargo build placed by the script that stages it. */
-export function daemonFixLine(run: Pick<RunningWsp, "argv" | "shim">): string {
-  return { npm: `npm i -g ${NPM_PACKAGE}`, app: "updating the wsp app", checkout: "a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary" }[roadOf(run)];
-}
+/** What each road says: the line that puts the right daemon beside this wsp (the npm install again, the app's own
+ * update, or in a checkout a cargo build placed by the script that stages it), and the line that moves this wsp onto
+ * a newer release. */
+const ROAD_LINES: Readonly<Record<Road, { daemon: string; release: (version: string) => string }>> = {
+  npm: { daemon: `npm i -g ${NPM_PACKAGE}`, release: version => `npm i -g ${NPM_PACKAGE}@${version}` },
+  app: { daemon: "updating the wsp app", release: () => "updating the wsp app" },
+  checkout: { daemon: "a cargo build of the daemon and node packages/wspx/scripts/daemon-binary.mjs --from its binary", release: () => "a pull of the checkout and a build" },
+};
 
-/** The line that moves this wsp onto a newer release, by the same road. */
-export function releaseUpdateLine(run: Pick<RunningWsp, "argv" | "shim">, version: string): string {
-  return { npm: `npm i -g ${NPM_PACKAGE}@${version}`, app: "updating the wsp app", checkout: "a pull of the checkout and a build" }[roadOf(run)];
-}
+export const daemonFixLine = (run: Pick<RunningWsp, "argv" | "shim">): string => ROAD_LINES[roadOf(run)].daemon;
+
+export const releaseUpdateLine = (run: Pick<RunningWsp, "argv" | "shim">, version: string): string => ROAD_LINES[roadOf(run)].release(version);
