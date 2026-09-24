@@ -12,9 +12,10 @@ import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
-import { errorText } from "../lib/utils.js";
 import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
+import { PROJECT_WORDS } from "../sidebar/words.js";
+import { RefusalSlot } from "./sheetParts.js";
 import { PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
 import { isProviderPlace, placeName } from "./places.js";
@@ -58,6 +59,10 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
       {PROJECTS_WORDS.add}
     </Button>
   );
+  if (ctx.projectsRefused !== null) {
+    const { said, fix } = ctx.projectsRefused;
+    return [{ id: "projects", items: [], under: <><RefusalSlot k="projects-refused" said={PROJECT_WORDS.notRead(said)} {...(fix === undefined ? {} : { fix })} />{under}</> }];
+  }
   if (ctx.projects.length === 0) {
     return [{ id: "projects", items: [{ kind: "row", id: "none", title: PROJECTS_WORDS.none, description: PROJECTS_WORDS.noneDescription, attrs: { "data-k": "projects-none" } }], under }];
   }
@@ -90,7 +95,7 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
 
 /** Remove a project: refused in the runtime's own sentence while a workspace stands on it, else asked once, then
  * the runtime's answer as the toast and the list again. */
-function RemoveProjectControl({ project, refusal, line, api, onRemoved, toast }: { project: ProjectView; refusal: string | null; line: string; api: Api | null; onRemoved: () => void; toast: (line: string) => void }) {
+function RemoveProjectControl({ project, refusal, line, api, onRemoved, failed, done }: { project: ProjectView; refusal: string | null; line: string; api: Api | null; onRemoved: () => void; failed: (e: unknown) => void; done: (line: string) => void }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const remove = (): void => {
@@ -101,10 +106,10 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, toast }:
       .then(
         ({ said }) => {
           setAsking(false);
-          if (said !== undefined) toast(said);
+          if (said !== undefined) done(said);
           onRemoved();
         },
-        (e: unknown) => toast(errorText(e)),
+        failed,
       )
       .finally(() => setBusy(false));
   };
@@ -174,7 +179,7 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
           id: "remove",
           title: PROJECTS_WORDS.removeTitle(project.name),
           description: refusal ?? line,
-          control: <RemoveProjectControl project={project} refusal={refusal} line={line} api={ctx.api} onRemoved={() => void setTimeout(() => ctx.go({ kind: "group", group: "projects" }), 0)} toast={ctx.toast} />,
+          control: <RemoveProjectControl project={project} refusal={refusal} line={line} api={ctx.api} onRemoved={() => void setTimeout(() => ctx.go({ kind: "group", group: "projects" }), 0)} failed={ctx.failed} done={ctx.done} />,
         },
       ],
     },

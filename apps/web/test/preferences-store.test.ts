@@ -10,6 +10,7 @@ import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from ".
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const view = (id: string): WorkspaceView => ({ id, name: id, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 const CAPS = caps();
@@ -61,7 +62,8 @@ const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  clearNotices();
 });
 
 afterEach(() => {
@@ -93,7 +95,7 @@ describe("the preferences record in the store", () => {
     await done;
     expect(sets).toEqual([{ theme: "dark" }]);
     expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, theme: "dark" });
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 
   it("while a set is on its way, an earlier record from the host does not paint over the person's pick", async () => {
@@ -113,14 +115,15 @@ describe("the preferences record in the store", () => {
     await flush();
     await useStore.getState().setPreferences({ theme: "dark" });
     await flush();
-    expect(useStore.getState().toast).toBe("settings: state file unreadable");
+    expect(lastNotice()).toBe("That setting was not saved: state file unreadable. It shows the host's value again.");
     expect(reads.count).toBe(2);
     expect(useStore.getState().preferences.theme).toBe("light");
 
     const dropped = fakeApi({ ...DEFAULT_PREFERENCES, labs: true }, () => new DisconnectedError("lost"));
-    useStore.setState({ api: dropped.api, toast: null });
+    useStore.setState({ api: dropped.api });
+    clearNotices();
     await useStore.getState().setPreferences({ theme: "dark" });
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 
   it("without the verb on the client the pick still paints and nothing is sent", async () => {

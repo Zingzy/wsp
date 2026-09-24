@@ -8,6 +8,7 @@ import { makeApi, ProtocolClient, type ConnStatus, type ProtocolEvent } from "..
 import { useStore } from "../src/protocol/store.js";
 import { createOn, stubBackend } from "../../../packages/runtime/test/stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
+import { clearNotices } from "./notice-text.js";
 
 const TOKEN = "runtime-token";
 
@@ -37,7 +38,8 @@ describe("runtime socket reconnect", () => {
     const rt: Runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     srv = await serveRuntime(rt, { port: 0, authToken: TOKEN });
     proxy = await startTcpProxy(srv.port);
-    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, toast: null, gaps: 0 });
+    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, gaps: 0 });
+    clearNotices();
 
     const statuses: ConnStatus[] = [];
     client = new ProtocolClient({
@@ -90,7 +92,8 @@ describe("runtime socket reconnect", () => {
     const rt: Runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude } });
     srv = await serveRuntime(rt, { port: 0, authToken: TOKEN });
     proxy = await startTcpProxy(srv.port);
-    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, toast: null, gaps: 0 });
+    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, gaps: 0 });
+    clearNotices();
     client = new ProtocolClient({
       url: `ws://127.0.0.1:${proxy.port}`,
       token: TOKEN,
@@ -124,7 +127,8 @@ describe("runtime socket reconnect", () => {
     srv = await serveRuntime(rtA, { port: 0, authToken: TOKEN });
     const port = srv.port;
     proxy = await startTcpProxy(port);
-    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, toast: null, gaps: 0 });
+    useStore.setState({ api: null, conn: "connecting", workspaces: [], statuses: {}, sessions: {}, selectedId: null, ready: false, gaps: 0 });
+    clearNotices();
     client = new ProtocolClient({
       url: `ws://127.0.0.1:${proxy.port}`,
       token: TOKEN,
