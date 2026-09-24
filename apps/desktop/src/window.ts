@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { DESKTOP_MAC_CLASS } from "@wsp/protocol";
 import type { BrowserWindowConstructorOptions } from "electron";
+import { bundleHover } from "./get-bundle.js";
 import { shellArg } from "./shell-args.js";
 
 /** How one platform frames the app window: the BrowserWindow options beyond the size and title every
@@ -30,6 +31,7 @@ const FRAMES: Partial<Record<NodeJS.Platform, WindowFrame>> = { darwin: MAC };
 
 export function windowOptions(platform: NodeJS.Platform, version: string, preload?: string): BrowserWindowConstructorOptions {
   const frame = FRAMES[platform] ?? STOCK;
+  const hover = bundleHover(platform);
   return {
     width: 1280,
     height: 800,
@@ -40,7 +42,7 @@ export function windowOptions(platform: NodeJS.Platform, version: string, preloa
       contextIsolation: true,
       sandbox: true,
       ...(preload !== undefined ? { preload } : {}),
-      additionalArguments: [shellArg("version", version), ...(frame.htmlClass !== undefined ? [shellArg("html-class", frame.htmlClass)] : [])],
+      additionalArguments: [shellArg("version", version), ...(frame.htmlClass !== undefined ? [shellArg("html-class", frame.htmlClass)] : []), ...(hover !== undefined ? [shellArg("bundle-hover", hover)] : [])],
     },
   };
 }

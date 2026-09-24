@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -16,6 +16,7 @@ export interface OnboardingBridge {
 
 const bridge: DesktopBridge & OnboardingBridge = {
   version: shellArgFrom(process.argv, "version"),
+  bundleHover: shellArgFrom(process.argv, "bundle-hover"),
   agents: () => ipcRenderer.invoke("onboarding:agents"),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
   finish: () => ipcRenderer.invoke("onboarding:finish"),
@@ -29,6 +30,8 @@ const bridge: DesktopBridge & OnboardingBridge = {
     ipcRenderer.on("hosts:connect-open", listen);
     return () => ipcRenderer.off("hosts:connect-open", listen);
   },
+  getBundle: (ask: { version: string }): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:get", ask),
+  quitAndOpen: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:open"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
   // Answered here rather than over a handler, since only the preload can read the path off a dropped file; the

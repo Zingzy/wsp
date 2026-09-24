@@ -2223,9 +2223,6 @@ export const NEEDS_YOU = "wsp needs you";
 /** The one line the toast and a system notification say for a need. */
 export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
 
-/** Whether a sentence standing in the toast is a need's, so a need ending takes its own line away and no other. */
-export const isNeedsYouLine = (line: string): boolean => line.startsWith(`${NEEDS_YOU}: `);
-
 /** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
 export const NEEDS_YOU_MARK = "• ";
 

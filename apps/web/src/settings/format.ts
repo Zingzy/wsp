@@ -238,6 +238,8 @@ export const ABOUT_WORDS = {
   computersBehind: "Computers behind",
   behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
   get: (version: string): string => `Get ${version}`,
+  downloading: "Downloading",
+  quitAndOpen: "Quit and open",
 } as const;
 
 /** What one row of the recipe on a computer came to, in the words the terminal's own lines say it in. The note a
