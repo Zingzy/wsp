@@ -119,7 +119,7 @@ describe("daemon-fs over a real daemon link through the host", () => {
     const statuses: string[] = [];
     link = connectDaemonLink({
       daemon: relay.api.daemon,
-      workspaceId: relay.workspaceId,
+      target: { workspaceId: relay.workspaceId },
       onEvent: () => {},
       onStatus: s => statuses.push(s),
     });

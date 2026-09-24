@@ -370,14 +370,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 }
 
 @utility dropdown-glass {
-  background: color-mix(
-    in srgb,
-    var(--popover) 18%,
-    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
-  );
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  /* Near solid, so the rows under a menu never read through it; the blur only softens what little shows. */
+  background: color-mix(in srgb, var(--popover) 96%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   border: 1px solid color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 25%);
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     background: var(--popover) !important;

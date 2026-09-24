@@ -8,6 +8,7 @@
 // replace the group list in the sheet, a tap opening the row's page and
 // shutting the sheet. ArrowUp and ArrowDown walk the rows in visual order, as
 // the workspace sidebar's do.
+import { ProjectGlyph } from "../projects/look.js";
 import { ArrowLeftIcon, SearchIcon } from "lucide-react";
 import { useRef, type KeyboardEvent } from "react";
 import { Input } from "../components/ui/input.js";
@@ -146,7 +147,7 @@ export function SettingsSidebar() {
           // for the typed text stands back by DIMMED, never by another ink.
           className={cn(ONE_LINE_ROW_CLASS, open && !sameAt(at, groupAt) && "text-sidebar-foreground", dimmed && DIMMED)}
         >
-          <Glyph className="size-3.5" />
+          <Glyph className="size-4" />
           <span className="min-w-0 flex-1 truncate">{group.name}</span>
         </SidebarMenuButton>
         {under.length === 0 ? null : (
@@ -155,6 +156,7 @@ export function SettingsSidebar() {
               <li key={atId(sub.at)}>
                 {/* A sub-row dims with its group: lit under a dimmed head it reads as the one thing that matched. */}
                 <SidebarMenuButton size="sm" isActive={lifting && sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && DIMMED)}>
+                  {sub.at.kind === "project" ? <ProjectGlyph projectId={sub.at.id} /> : null}
                   <span className="min-w-0 flex-1 truncate">{sub.name}</span>
                 </SidebarMenuButton>
               </li>

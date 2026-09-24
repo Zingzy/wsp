@@ -33,6 +33,7 @@ import {
   DEVICE_REVOKED_REFUSAL,
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
+  HERE_PLACE_ID,
   DAEMON_OPEN_ONE_OF,
   PLACE_CODE_REFUSAL,
   PLACE_DOOR_REFUSAL,
@@ -1020,32 +1021,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (queued !== null) queued.push(event);
                 else send({ type: "daemon.event", channel, event });
               };
+              let ch: DaemonChannel;
               if (msg.placeId !== undefined) {
                 // A computer the person owns is driven from this host's own terminal and its own window, the same
-                // gate every other places op reads; the channel rides the link that computer opened.
+                // gate every other places op reads; the channel rides the link that computer opened, or dials this
+                // computer's own daemon where the place is this one.
                 if (msg.workspaceId !== undefined) throw new Error(DAEMON_OPEN_ONE_OF);
                 if (!ownRoad()) {
                   send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
                   return;
                 }
-                const onLink = places().channel(msg.placeId, onEvent);
-                if (onLink === undefined) throw new Error(absentComputer(places().nameOf(msg.placeId), null).sentence);
-                channels.set(channel, onLink);
-                void onLink.closed.then(({ code, reason }) => {
-                  if (channels.get(channel) !== onLink) return;
-                  channels.delete(channel);
-                  send({ type: "daemon.closed", channel, code, reason });
-                });
-                send({ id: msg.id, ok: true, channel });
-                const held = queued;
-                queued = null;
-                for (const event of held) send({ type: "daemon.event", channel, event });
-                return;
+                if (msg.placeId === HERE_PLACE_ID) ch = await rt.hereChannel(onEvent);
+                else {
+                  const onLink = places().channel(msg.placeId, onEvent);
+                  if (onLink === undefined) throw new Error(absentComputer(places().nameOf(msg.placeId), null).sentence);
+                  ch = onLink;
+                }
+              } else {
+                if (msg.workspaceId === undefined) throw new Error(DAEMON_OPEN_ONE_OF);
+                // The same gate every workspace verb reads: a socket that may not drive this workspace is refused
+                // here. Which road the frames take is the runtime's own reading, dial or link, and not this door's.
+                ch = await rt.workspaces.daemonChannel(msg.workspaceId, onEvent, origin);
               }
-              if (msg.workspaceId === undefined) throw new Error(DAEMON_OPEN_ONE_OF);
-              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused
-              // here. Which road the frames take is the runtime's own reading, dial or link, and not this door's.
-              const ch = await rt.workspaces.daemonChannel(msg.workspaceId, onEvent, origin);
               // The page left while the dial was in flight; the machine keeps no socket for a tab that is gone.
               if (ws.readyState !== ws.OPEN) {
                 ch.close();
@@ -1263,7 +1260,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "host.folders":
-              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}) }) });
+              // Only this computer's own window walks the whole disk: a paired or relayed device, or a thread on any
+              // machine, stays inside the home folder and the projects.
+              send({ id: msg.id, ok: true, listing: await folders().list({ ...(msg.dir !== undefined ? { dir: msg.dir } : {}), ...(msg.hidden !== undefined ? { hidden: msg.hidden } : {}), ...(msg.repos === true ? { repos: true } : {}), wide: road === "here" && by === undefined }) });
               return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });

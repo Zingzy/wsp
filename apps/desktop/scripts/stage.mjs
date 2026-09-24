@@ -5,7 +5,7 @@
 // where the host's asset table reads them back from for the window and for
 // the wsp command alike). Nothing native rides beside the bundles: the daemon
 // is a static binary among the assets.
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,15 @@ const webCss = readdirSync(webAssets).find(f => /^index-.*\.css$/.test(f));
 if (webCss === undefined) throw new Error(`web stylesheet not found under ${webAssets}`);
 const page = readFileSync(join(root, "src", "onboarding.html"), "utf8");
 if (!page.includes("__WEB_CSS__")) throw new Error("onboarding.html has no __WEB_CSS__ to write the stylesheet into");
-writeFileSync(join(app, "main", "onboarding.html"), page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`));
+if (!page.includes("__AGENT_GLYPHS__")) throw new Error("onboarding.html has no __AGENT_GLYPHS__ to write the agents' glyphs into");
+// The agents screen draws each agent's glyph from the web app's own copies, laid beside the page.
+const glyphs = join(root, "..", "web", "src", "assets", "agents");
+cpSync(glyphs, join(app, "main", "agents"), { recursive: true });
+const glyphIds = readdirSync(glyphs).filter(f => f.endsWith(".svg")).map(f => f.slice(0, -4));
+writeFileSync(
+  join(app, "main", "onboarding.html"),
+  page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`).replace("__AGENT_GLYPHS__", JSON.stringify(glyphIds)),
+);
 
 rmSync(join(app, "node_modules"), { recursive: true, force: true });
 

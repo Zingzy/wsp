@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The composer's row of pickers: the agent and its model, one quiet button for
-// the agent's defaults, and the folder. Base UI's menu and popover never settle
+// The composer's row of pickers: the agent and its model, the reasoning, the
+// access, and the folder. Base UI's menu and popover never settle
 // under jsdom, so both are stood in by a plain open/closed context.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessCatalog, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -65,8 +65,7 @@ vi.mock("../ui/popover", () => {
       </button>
     );
   };
-  const PopoverPopup = ({ children, initialFocus }: { children: ReactNode; initialFocus?: unknown }) =>
-    useContext(Ctx).open ? <div role="dialog" data-initial-focus={String(initialFocus)}>{children}</div> : null;
+  const PopoverPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="dialog">{children}</div> : null);
   return { Popover, PopoverTrigger, PopoverPopup };
 });
 
@@ -170,32 +169,47 @@ function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectView; sessio
   return render(<ComposerOptionPickers workspaceId={WS} thread={opts.thread ?? thread} onPickAccess={() => {}} onOtherFolder={() => {}} />);
 }
 
-const defaults = () => document.querySelector<HTMLElement>('[data-composer-picker="defaults"]')!;
+const reasoning = () => document.querySelector<HTMLElement>('[data-composer-picker="reasoning"]')!;
+const access = () => document.querySelector<HTMLElement>('[data-composer-picker="access"]')!;
 const model = () => document.querySelector<HTMLElement>('[data-composer-picker="model"]')!;
 
 afterEach(() => {
   cleanup();
   useComposerDraftStore.setState({ drafts: {} });
-  useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {}, railOffered: {} });
+  useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {} });
 });
 
-describe("the composer's one defaults button", () => {
-  it("reads the picked effort and the picked access, and nothing else stands in the row", () => {
+describe("the composer's reasoning and access buttons", () => {
+  it("read the picked effort with its window, and the picked access, each its own button after the model with a rule between", () => {
     draw();
-    expect(defaults().textContent).toBe("high · bypass");
-    expect(defaults().getAttribute("aria-label")).toBe("Defaults: high · bypass");
-    expect([...document.querySelectorAll("[data-composer-picker]")].map(el => el.getAttribute("data-composer-picker"))).toEqual(["model", "defaults", "project"]);
+    expect(reasoning().textContent).toBe("High 1M");
+    expect(reasoning().getAttribute("aria-label")).toBe("Reasoning: High 1M");
+    expect(access().textContent).toBe("Bypass");
+    expect(access().getAttribute("aria-label")).toBe("Access: Bypass");
+    expect([...document.querySelectorAll("[data-composer-picker]")].map(el => el.getAttribute("data-composer-picker"))).toEqual(["model", "reasoning", "access", "project"]);
+    // A hairline stands before each of the two, so every picker reads as its own control.
+    for (const picker of [reasoning(), access()]) expect(picker.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("holds Reasoning, Context window and Access in one menu, each with the agent's default marked", () => {
+  it("holds Reasoning and Context window in one menu and Access in the other, each with the agent's default marked", () => {
     draw();
-    fireEvent.click(defaults());
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Reasoning", "Context window", "Access"]);
-    const checked = within(menu).getAllByRole("menuitemradio", { checked: true }).map(el => el.getAttribute("data-composer-option"));
-    expect(checked).toEqual(["high", "1m", "bypassPermissions"]);
-    expect(within(menu).getAllByText("default").length).toBe(3);
+    fireEvent.click(reasoning());
+    const first = screen.getByRole("menu");
+    expect(within(first).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Reasoning", "Context window"]);
+    expect(within(first).getAllByRole("menuitemradio", { checked: true }).map(el => el.getAttribute("data-composer-option"))).toEqual(["high", "1m"]);
+    fireEvent.click(reasoning());
+    fireEvent.click(access());
+    const second = screen.getByRole("menu");
+    expect(within(second).getAllByText(/^(Reasoning|Context window|Access)$/).map(el => el.textContent)).toEqual(["Access"]);
+    expect(within(second).getAllByRole("menuitemradio", { checked: true }).map(el => el.getAttribute("data-composer-option"))).toEqual(["bypassPermissions"]);
+    expect(within(second).getAllByText("default").length).toBe(1);
+  });
+
+  it("leaves the reasoning button out for a model with no effort and no window, and keeps the access button", () => {
+    draw({ catalogs: [{ ...CLAUDE, efforts: [], contextWindows: [], models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }] }] });
+    expect(document.querySelector('[data-composer-picker="reasoning"]')).toBeNull();
+    expect(access().textContent).toBe("Bypass");
   });
 });
 
@@ -209,13 +223,13 @@ describe("the agent a thread that has run keeps", () => {
     draw({ catalogs: [CLAUDE, CODEX], sessions: [onCodex, onClaude], thread: ran("t1", "gpt-6-astra") });
     expect(model().dataset["harness"]).toBe("codex");
     expect(model().textContent).toContain("GPT-6 Astra");
-    expect(defaults().dataset["access"]).toBe("read-only");
+    expect(access().dataset["access"]).toBe("read-only");
   });
 
   it("is Claude's on the Claude thread beside it, read off that thread's own row", () => {
     draw({ catalogs: [CLAUDE, CODEX], sessions: [onCodex, onClaude], thread: ran("t9", "claude-opus-5") });
     expect(model().dataset["harness"]).toBe("claude");
-    expect(defaults().dataset["access"]).toBe("bypassPermissions");
+    expect(access().dataset["access"]).toBe("bypassPermissions");
   });
 
   it("is its own record's where no row of it is left, past the runtime's cap on rows", () => {
@@ -224,7 +238,7 @@ describe("the agent a thread that has run keeps", () => {
     draw({ catalogs: [CLAUDE, CODEX], sessions: [onClaude], thread: ran("t1", "gpt-6-astra", { agent: "codex", permissionMode: "read-only" }) });
     expect(model().dataset["harness"]).toBe("codex");
     expect(model().textContent).toContain("GPT-6 Astra");
-    expect(defaults().dataset["access"]).toBe("read-only");
+    expect(access().dataset["access"]).toBe("read-only");
   });
 });
 
@@ -234,42 +248,20 @@ describe("the agent a fresh thread opens on", () => {
     expect(model().dataset["harness"]).toBe("codex");
   });
 
-  it("is the catalog's first where the project remembers none, and the rail is opened once for the pick", () => {
+  it("is the catalog's first where the project remembers none, and the menu stays shut until the person opens it", () => {
     draw({ catalogs: [CLAUDE, CODEX], project: record() });
     expect(model().dataset["harness"]).toBe("claude");
-    const rail = screen.getByRole("dialog");
-    expect(within(rail).getByRole("tab", { selected: true }).getAttribute("data-composer-harness")).toBe("claude");
-    // The box under the rail is where the ask is typed, so the rail takes no focus of its own.
-    expect(rail.dataset["initialFocus"]).toBe("false");
-  });
-
-  it("leaves the rail shut where the project remembers an agent", () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("takes the offer back on the first keystroke, so the list never stands over the box", async () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-
-  it("is made once: emptying the box again leaves the rail shut", async () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "m", cursor: 1 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    // And not on the next composer for this workspace either: the offer was made and is not made again.
-    cleanup();
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+  it("leaves the menu shut where the project remembers an agent", () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("stays open on the agent tab the person picks, so its models can be read", async () => {
     draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    fireEvent.click(model());
     const rail = screen.getByRole("dialog");
     fireEvent.click(within(rail).getByRole("tab", { name: "Codex" }));
     // The pick is a reason to read that agent's list, not to take the list away.

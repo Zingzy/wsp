@@ -20,14 +20,9 @@ export const WORK_GHOST = "pricing page";
 /** The screen a person meets on a wsp that holds no project: one folder, one question, one key. Its button says
  * Start, since the screen has one act and its title says what that act starts. */
 export const FIRST_RUN_WORDS = {
-  title: "Your first workspace",
-  folder: "Folder",
-  work: WORK_QUESTION,
-  workGhost: WORK_GHOST,
-  start: "Start",
-  /** The quiet second door for the person who came for a box: it opens Settings with the Add a computer sheet. */
-  addComputer: "Add a computer instead",
-  noAgent: `No agent found on ${THIS_COMPUTER_WORD}. Install one, then come back.`,
+  title: "Add a project to get started",
+  sentence: `A project is a git repo on ${THIS_COMPUTER_WORD}. Every piece of work on it gets its own copy.`,
+  add: "Add a project",
 } as const;
 
 /** The project's own rows in the sidebar: its menu, the leaf under a project nobody has started work on, the
@@ -36,6 +31,7 @@ export const FIRST_RUN_WORDS = {
 export const PROJECT_WORDS = {
   add: "Add a project",
   new: "New project",
+  settings: "Project settings",
   remove: "Remove project",
   noWorkspaces: "No workspaces yet.",
 } as const;
@@ -44,6 +40,7 @@ export const PROJECT_WORDS = {
 export const SWITCHER_WORDS = {
   all: "All projects",
   search: "Search projects",
+  settingsOf: (name: string) => `${name} settings`,
 } as const;
 
 /** Why Create waits on the one question the dialog asks. */
@@ -54,8 +51,24 @@ export const SAY_THE_WORK = "say what you are working on";
  * the source takes; there is no sentence under the field saying it. */
 export const ADD_PROJECT_WORDS = {
   title: PROJECT_WORDS.add,
-  source: "Folder or repository address",
-  computer: "Computer",
+  search: "Search your repos, or type a path",
+  addressOnly: "Paste a repository address",
+  choose: "Choose",
   add: "Add",
-  cancel: "Cancel",
+  computers: "Computers",
+  addComputer: "Add a computer",
+  look: "Look",
+  navigate: "Navigate",
+  open: "Open",
+  complete: "Complete",
+  byPath: "Type a path",
+  reposOn: (name: string) => `Repos on ${name}`,
+  noRepos: "No git repos found under your home folder. Type a path to one.",
+  noFolders: "No folders here.",
+  noMatch: "No repo matches.",
+  added: "added",
+  noCloneHere: `A repository address is cloned on a box, Solari or ASCII. ${THIS_COMPUTER_WORD}'s projects are folders you already have.`,
+  cloneLine: (url: string, on: string) => `Clone ${url} on ${on}`,
+  boxSays: (name: string) => `Repos on ${name} show here soon. Paste a repository address above to clone it there.`,
+  providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,
 } as const;

@@ -4,6 +4,7 @@
 // project's page, back to its list; and the page itself in the foreground ink
 // at medium weight, as the thread crumb is. While the field holds text the
 // page is Search. The left crumbs give way first when the line is short.
+import { ProjectGlyph } from "../projects/look.js";
 import { HERE_PLACE_ID } from "@wsp/protocol";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
@@ -51,8 +52,9 @@ export function SettingsCrumbs() {
             {group.name}
           </button>
           <Slash />
-          <span data-breadcrumb-page className="min-w-0 max-w-[70%] shrink-0 truncate font-medium text-foreground">
-            {page}
+          <span data-breadcrumb-page className="flex min-w-0 max-w-[70%] shrink-0 items-center gap-2 font-medium text-foreground">
+            {project !== undefined ? <ProjectGlyph projectId={project.id} /> : null}
+            <span className="truncate">{page}</span>
           </span>
         </>
       )}

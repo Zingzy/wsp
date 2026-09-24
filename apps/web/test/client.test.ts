@@ -82,7 +82,7 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     expect(await api.preferences!()).toEqual(record);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
@@ -169,7 +169,7 @@ describe("makeApi wrappers", () => {
   it("the daemon api opens, sends and closes a channel, and never puts a route or a token on the wire", async () => {
     const { api, sock, lastSent } = await connect();
     ScriptedSocket.reply = f => (f["op"] === "daemon.open" ? { id: f["id"], ok: true, channel: "ch_1" } : { id: f["id"], ok: true, reply: { id: 3, ok: true, ptyId: "p1" } });
-    expect(await api.daemon.open("ws_1")).toEqual({ channel: "ch_1" });
+    expect(await api.daemon.open({ workspaceId: "ws_1" })).toEqual({ channel: "ch_1" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "daemon.open", workspaceId: "ws_1" });
 
     expect(await api.daemon.send("ch_1", { op: "pty.write", ptyId: "p1", data: "ls\r" })).toEqual({ id: 3, ok: true, ptyId: "p1" });

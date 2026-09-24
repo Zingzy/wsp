@@ -56,12 +56,13 @@
 // model, its window and the effort, so a change mid-thread applies at the
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
+import { cn } from "../../lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
-import { ImageIcon } from "lucide-react";
+import { PaperclipIcon } from "lucide-react";
 import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
@@ -69,20 +70,21 @@ import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
-import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
+import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { composerCommandGroups, type ComposerCommandGroup } from "./composerCommandGroups";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
-import { ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
+import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
 import { slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
 import { ComposerSurface } from "./ComposerSurface";
+import { useAnimatedHeight, useFlip, useTallDraft } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
@@ -148,7 +150,9 @@ interface SteerAttempt {
   readonly error: string | null;
 }
 
-export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
+/** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
+ * makes one. */
+export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => void }) {
   const api = useStore(s => s.api);
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
@@ -222,8 +226,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // rather than about a machine to wait for; a window on another computer whose wsp has gone quiet says which
   // computer is asleep rather than that wsp is not running, nothing there being broken.
   const heldForAnswer = blocked === "unreachable";
+  // A home's composer has no workspace to be blocked by: its send is what makes one.
   const unavailable =
-    blocked === null || wakesFirst
+    onStart !== undefined || blocked === null || wakesFirst
       ? null
       : heldForAnswer
         ? composerHeldLine(computer)
@@ -432,6 +437,10 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       return;
     }
     setDraft(workspaceId, EMPTY_DRAFT);
+    if (onStart !== undefined) {
+      onStart(prompt);
+      return;
+    }
     if (!busy) {
       start(prompt, () => {
         const current = useComposerDraftStore.getState().drafts[workspaceId];
@@ -446,7 +455,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, harnessCatalog, held, images, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
+  }, [busy, draft, enqueue, harnessCatalog, held, images, onStart, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -556,12 +565,73 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     [activeItemId, highlight, items, menuOpen, searchKey, selectItem, send],
   );
 
+  // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
+  const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
+  const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
+  const heightRef = useRef<HTMLDivElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const tall = useTallDraft(mirrorRef, draft.prompt, compact);
+  useAnimatedHeight(heightRef, surfaceRef);
+  useFlip(surfaceRef, compact ? (tall ? "tall" : "line") : "full");
+  const commandMenu = menuOpen ? (
+    <ComposerCommandMenuLayer anchor={menuAnchor}>
+      <ComposerCommandMenu groups={groups} triggerKind={trigger?.kind ?? null} activeItemId={activeItemId} onHighlightedItemChange={highlight} onSelect={selectItem} />
+    </ComposerCommandMenuLayer>
+  ) : null;
+  const actions = (
+    <div data-flip="actions" className="flex shrink-0 flex-nowrap items-center gap-2">
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost-muted"
+        aria-label="Attach"
+        title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
+        disabled={shut}
+        onClick={() => pickerRef.current?.click()}
+        data-composer-image-picker="true"
+      >
+        <PaperclipIcon />
+      </Button>
+      <input
+        ref={pickerRef}
+        type="file"
+        accept={IMAGE_ACCEPT}
+        multiple
+        hidden
+        aria-hidden="true"
+        data-composer-image-input="true"
+        onChange={event => {
+          take([...(event.target.files ?? [])]);
+          event.target.value = "";
+        }}
+      />
+      <ComposerPrimaryActions
+        compact={false}
+        pendingAction={null}
+        isRunning={canStop}
+        isInterruptPending={stopAttempt?.pending ?? false}
+        showPlanFollowUpPrompt={false}
+        promptHasText={hasText}
+        isSendBusy={thread.busy}
+        wakesFirst={wakesFirst}
+        sendDisabledReason={sendDisabledReason}
+        isConnecting={false}
+        isEnvironmentUnavailable={false}
+        isPreparingWorktree={false}
+        hasSendableContent={hasText}
+        onPreviousPendingQuestion={noop}
+        onInterrupt={interrupt}
+        onImplementPlanInNewThread={noop}
+      />
+    </div>
+  );
+
   return (
     <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
-      {/* The refusal slot stands at two lines whether or not it holds one, so nothing under it moves when a
-          sentence lands, and the sentence wraps: at the smallest window with the right panel open the slot is
-          narrower than the sentence, and a cut there drops the half that says what happens next. */}
-      <div className="mx-auto flex h-9 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-refusal>
+      {/* The refusal takes room only while it holds a sentence, which wraps to two lines at most: at the smallest
+          window with the right panel open a cut would drop the half that says what happens next. */}
+      <div className={cn("mx-auto flex w-full max-w-3xl items-center px-3", line !== null && "min-h-9 pb-1")} aria-live="polite" data-composer-refusal>
         {line !== null ? (
           <span role="status" className="min-w-0 text-pretty font-mono text-[11px] leading-[18px] text-muted-foreground line-clamp-2" title={line}>
             {line}
@@ -589,101 +659,78 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             <div className="relative">
               <ComposerSurface.Main>
                 <div
-                  data-chat-composer-surface="true"
-                  className="rounded-[20px] transition-[background-color] duration-200"
-                  onPaste={onPaste}
-                  onDrop={onDrop}
-                  onDragOver={event => event.preventDefault()}
+                  ref={heightRef}
+                  className="overflow-hidden rounded-[20px] data-armed:transition-[height] data-armed:duration-180 data-armed:ease-out motion-reduce:transition-none!"
                 >
-                  {images.length > 0 ? (
-                    <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
-                      {images.map((image, at) => (
-                        <li key={image.id}>
-                          <ChatImageThumb
-                            image={image}
-                            at={at + 1}
-                            onRemove={() => {
-                              removeImage(workspaceId, image.id);
-                              setImageRefusal(null);
-                            }}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <div ref={setMenuAnchor} className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
-                    {menuOpen ? (
-                      <ComposerCommandMenuLayer anchor={menuAnchor}>
-                        <ComposerCommandMenu
-                          groups={groups}
-                          triggerKind={trigger?.kind ?? null}
-                          activeItemId={activeItemId}
-                          onHighlightedItemChange={highlight}
-                          onSelect={selectItem}
-                        />
-                      </ComposerCommandMenuLayer>
-                    ) : null}
-                    <ComposerPromptEditor
-                      editorRef={editorRef}
-                      value={draft.prompt}
-                      cursor={draft.cursor}
-                      disabled={shut}
-                      placeholder={composerPlaceholder(catalog)}
-                      onChange={onChange}
-                      onCommandKeyDown={onCommandKeyDown}
-                    />
-                  </div>
                   <div
-                    data-chat-composer-footer="true"
-                    className="flex min-w-0 flex-nowrap items-end justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
+                    ref={surfaceRef}
+                    data-chat-composer-surface="true"
+                    data-compact={compact || undefined}
+                    data-tall={tall || undefined}
+                    className="rounded-[20px] transition-[background-color] duration-200"
+                    onPaste={onPaste}
+                    onDrop={onDrop}
+                    onDragOver={event => event.preventDefault()}
                   >
-                    <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1 ps-3.5">
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost-muted"
-                        aria-label="Add an image"
-                        title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
-                        disabled={shut}
-                        onClick={() => pickerRef.current?.click()}
-                        data-composer-image-picker="true"
+                    {images.length > 0 ? (
+                      <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
+                        {images.map((image, at) => (
+                          <li key={image.id}>
+                            <ChatImageThumb
+                              image={image}
+                              at={at + 1}
+                              onRemove={() => {
+                                removeImage(workspaceId, image.id);
+                                setImageRefusal(null);
+                              }}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <div
+                      data-chat-composer-compact={compact || undefined}
+                      className={cn(
+                        "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center",
+                        compact ? "gap-x-1 ps-4 pe-2 sm:ps-5" : "gap-x-2 gap-y-2 px-3 pt-3.5 pb-3 sm:px-4 sm:pt-4 sm:pb-4",
+                        compact && (tall ? "gap-y-1 pt-3.5 pb-2" : "py-2"),
+                      )}
+                    >
+                      <div aria-hidden className="relative col-start-1 row-start-1 h-0 self-start">
+                        <div
+                          ref={mirrorRef}
+                          className="invisible absolute inset-x-0 top-0 whitespace-pre-wrap wrap-break-word leading-relaxed [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
+                        >
+                          {compact ? `${draft.prompt}\u200b` : null}
+                        </div>
+                      </div>
+                      <div ref={setMenuAnchor} className={cn("relative col-start-1 row-start-1 min-w-0", (!compact || tall) && "col-end-4", !compact && "pb-1")}>
+                        {commandMenu}
+                        <ComposerPromptEditor
+                          editorRef={editorRef}
+                          value={draft.prompt}
+                          cursor={draft.cursor}
+                          disabled={shut}
+                          placeholder={composerPlaceholder(catalog)}
+                          onChange={onChange}
+                          onCommandKeyDown={onCommandKeyDown}
+                          {...(compact ? { className: "min-h-[1lh] max-h-[8lh]" } : {})}
+                        />
+                      </div>
+                      <div
+                        data-flip="pickers"
+                        data-chat-composer-footer={compact ? undefined : "true"}
+                        className={cn(
+                          "flex min-w-0 items-center",
+                          compact ? "col-start-2" : "-m-1 -ms-3.5 col-start-1 flex-wrap gap-1 p-1 ps-3.5",
+                          compact && !tall ? "row-start-1" : "row-start-2",
+                        )}
                       >
-                        <ImageIcon />
-                      </Button>
-                      <input
-                        ref={pickerRef}
-                        type="file"
-                        accept={IMAGE_ACCEPT}
-                        multiple
-                        hidden
-                        aria-hidden="true"
-                        data-composer-image-input="true"
-                        onChange={event => {
-                          take([...(event.target.files ?? [])]);
-                          event.target.value = "";
-                        }}
-                      />
-                      <ComposerOptionPickers workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
-                    </div>
-                    <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
-                      <ComposerPrimaryActions
-                        compact={false}
-                        pendingAction={null}
-                        isRunning={canStop}
-                        isInterruptPending={stopAttempt?.pending ?? false}
-                        showPlanFollowUpPrompt={false}
-                        promptHasText={hasText}
-                        isSendBusy={thread.busy}
-                        wakesFirst={wakesFirst}
-                        sendDisabledReason={sendDisabledReason}
-                        isConnecting={false}
-                        isEnvironmentUnavailable={false}
-                        isPreparingWorktree={false}
-                        hasSendableContent={hasText}
-                        onPreviousPendingQuestion={noop}
-                        onInterrupt={interrupt}
-                        onImplementPlanInNewThread={noop}
-                      />
+                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
+                      </div>
+                      <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
+                        {actions}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -691,7 +738,17 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             </div>
           </form>
         </ComposerSurface.Host>
-        <ComposerCheckoutRow workspaceId={workspaceId} thread={thread} pickerOpen={folderPicker && pickable} onPickerOpenChange={setFolderPicker} />
+        {home !== undefined ? (
+          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} />
+        ) : (
+          <ComposerCheckoutRow
+          workspaceId={workspaceId}
+          thread={thread}
+          pickerOpen={folderPicker && pickable}
+          onPickerOpenChange={setFolderPicker}
+          access={compact ? <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} /> : null}
+          />
+        )}
       </ComposerSurface.Shell>
     </div>
   );

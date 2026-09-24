@@ -12,6 +12,7 @@
 // join and leave touch this computer's own files and dial nobody's host but
 // the one the person typed.
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -191,9 +192,25 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
 /** What this computer is, as a row of the list of everywhere work can run: read off the same report a place sends
  * about itself. The one reading, so the row a host keeps for the computer it runs on and the facts a computer is
  * shown right after it joined somebody else's wsp cannot describe the same computer differently. */
+/** The name the person gave this Mac in System Settings, read once; elsewhere a computer keeps none worth drawing. */
+let labelHere: string | undefined | null = null;
+export function placeLabelHere(): string | undefined {
+  if (labelHere !== null) return labelHere;
+  labelHere = undefined;
+  if (platform() !== "darwin") return labelHere;
+  try {
+    const said = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 }).trim();
+    if (said !== "") labelHere = said;
+  } catch {
+    labelHere = undefined;
+  }
+  return labelHere;
+}
+
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeReport({ name });
-  return { name: report.name, os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
+  const label = placeLabelHere();
+  return { name: report.name, ...(label !== undefined ? { label } : {}), os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not

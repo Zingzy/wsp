@@ -6,14 +6,18 @@
 // re-attaches its ptys. The same link is the browser's only source of ports:
 // the daemon pushes port events only to sockets that asked with ports.watch,
 // and a subscription dies with the channel, so every live transition asks again.
-import { daemonVersionOf, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
+// This computer's own terminal rides a link of its own, to its daemon by place.
+import { daemonVersionOf, HERE_PLACE_ID, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
 import { getLive } from "../machine/live.js";
+import type { Api } from "../protocol/client.js";
 import type { useStore } from "../protocol/store.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
+import { HERE_KEY } from "./computer.js";
+import { selectTerminalUiState, useTerminalDrawerStore } from "./drawerStore.js";
 import { NOT_OPENED_YET, provideTerminals, WorkspaceTerminals, type TerminalWire } from "./link.js";
 
 export interface WiringOptions extends Pick<DaemonLinkOptions, "heartbeatMs" | "backoffMs"> {
@@ -32,9 +36,33 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   const wired = new Map<string, Wired>();
   const { touchMinMs = 30_000, ...linkOpts } = opts;
 
-  const unlink = (entry: Wired): void => {
+  const unlink = (entry: Pick<Wired, "link">): void => {
     entry.link?.close();
     entry.link = null;
+  };
+
+  // This computer's own terminal: its model is there from the start so the drawer has one to read, and its daemon
+  // is dialled only once that drawer has been opened, since the host starts the daemon on the first dial.
+  const here: Pick<Wired, "link" | "wt"> = { link: null, wt: new WorkspaceTerminals({ request: (op, params) => (here.link ? here.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))) }) };
+  provideTerminals(HERE_KEY, here.wt);
+  let hereWanted = false;
+  const syncHere = (api: Api, hostUp: boolean): void => {
+    hereWanted ||= selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, HERE_KEY).terminalOpen;
+    if (hostUp && hereWanted && !here.link) {
+      here.link = connectDaemonLink({
+        ...linkOpts,
+        daemon: api.daemon,
+        target: { placeId: HERE_PLACE_ID },
+        wasLive: here.wt.everLive(),
+        onEvent: e => here.wt.feedEvent(e),
+        onStatus: (s, refusal) => {
+          if (s !== "dead") here.wt.feedStatus(s, refusal);
+        },
+      });
+    } else if (!hostUp && here.link) {
+      unlink(here);
+      here.wt.feedStatus(here.wt.everLive() ? "connecting" : NOT_OPENED_YET);
+    }
   };
 
   const sync = (): void => {
@@ -75,7 +103,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         const link = connectDaemonLink({
           ...linkOpts,
           daemon: api.daemon,
-          workspaceId: w.id,
+          target: { workspaceId: w.id },
           wasLive: wt.everLive(),
           onEvent: e => {
             if (e.type === "port.open" || e.type === "port.close") {
@@ -113,6 +141,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         if (sysFromDaemon) getLive(w.id).feedStatus(parked);
       }
     }
+    syncHere(api, hostUp);
     for (const [id, entry] of wired) {
       if (seen.has(id)) continue;
       unlink(entry);
@@ -125,9 +154,13 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   };
 
   const unsubscribe = store.subscribe(sync);
+  const unsubscribeDrawer = useTerminalDrawerStore.subscribe(sync);
   sync();
   return () => {
     unsubscribe();
+    unsubscribeDrawer();
+    unlink(here);
+    provideTerminals(HERE_KEY, null);
     for (const [id, entry] of wired) {
       unlink(entry);
       provideTerminals(id, null);
