@@ -8986,6 +8986,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
+  const agentsRead = agentsReads<Caller>({
+    reader: opts.agentsReader,
+    places: () => placeDoor,
+    workspace: async (id, origin) => {
+      const entry = await entryOf(id, origin);
+      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: checkoutOf(entry.record) };
+    },
+    now: () => clock.now(),
+  });
+  bus.on("workspace.deleted", e => {
+    if (e.type === "workspace.deleted") agentsRead.forget(e.workspaceId);
+  });
+
   return {
     events: bus,
     backend,
@@ -8995,15 +9008,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     hereChannel: async onEvent => channelOver(await localRoad(), THIS_COMPUTER, onEvent),
-    agents: agentsReads<Caller>({
-      reader: opts.agentsReader,
-      places: () => placeDoor,
-      workspace: async (id, origin) => {
-        const entry = await entryOf(id, origin);
-        return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: checkoutOf(entry.record) };
-      },
-      now: () => clock.now(),
-    }),
+    agents: agentsRead,
     preferences,
     status: {
       ...status,

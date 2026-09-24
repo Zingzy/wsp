@@ -100,7 +100,7 @@ const TWO_LINES_NARROW = "max-sm:line-clamp-2 max-sm:min-h-[2lh] max-sm:whitespa
 /** Three of them, for a description that has kept the slot beside it and so has a narrower box to say itself in. */
 const THREE_LINES_NARROW = "max-sm:line-clamp-3 max-sm:min-h-[3lh] max-sm:whitespace-normal";
 
-const CARD_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
+export const CARD_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
 const TITLE_CLASS = "text-sm leading-5 text-foreground";
 const DESCRIPTION_CLASS = "text-xs leading-4 text-muted-foreground";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */

@@ -29,7 +29,7 @@
 // defaults, the region right of the sidebar whole with the panel back on the
 // chord, and the one-field sheet's geometry over Computers. A computer's page
 // is photographed to its foot at both widths, in a window tall enough to hold
-// it, since its acts are under six agent rows. Vite serves test/wireframe to Playwright's
+// it, since its acts are under its agent rows. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -490,9 +490,9 @@ const SETTINGS_SCREENS = [
   ["settings-restore", "[data-k=restore-defaults]"],
   ["settings-light-picked", "[data-settings-at=appearance]"],
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
-  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-k=agent]"],
-  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=recipe-row]"],
-  ["settings-this-mac", "[data-settings-at='computer:here'] [data-k=agent]"],
+  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-agents-row]"],
+  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-agents-refused]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-agents-row]"],
   ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=image-copy]"],
   ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
   ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=seeded]"],
