@@ -18,6 +18,7 @@
 // stands at 64. A description gets the room the slot leaves it: two lines of
 // the whole width where the slot has moved under it, three of the narrower
 // box where it stands beside it. One height per card either way, nothing cut.
+import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
@@ -47,6 +48,8 @@ export interface SettingsRowData {
   readonly mark?: string;
   /** One sentence, or machine words in the mono fact class where `mono` is set. */
   readonly description: string;
+  /** The facts as chips in place of the description line, which stays the words a search reads. */
+  readonly chips?: readonly ChipItem[];
   readonly mono?: boolean;
   /** The one mono word in the slot, before the control, and the id a door or a list reaches it by. */
   readonly word?: string;
@@ -124,7 +127,7 @@ export function Card({ id, head, under, body, children }: { id: string; head?: R
  * 640 px the slot stands on a line of its own under the description, the word at its left and the control at its
  * right, and the description holds two lines of the whole width; where it does not, the slot keeps its place and
  * the description holds three of the narrower box. Either way nothing is cut where no hover can read it. */
-export function Row({ id, title, lead, mark, description, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
+export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, drops = false, attrs }: Omit<SettingsRowData, "kind"> & { /** Whether every slot in this row's card moves under its description below 640 px, because one of them holds a value. */ drops?: boolean }) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className={cn("flex min-w-0 max-w-[60%] shrink items-center gap-3", drops && (word === undefined ? "max-sm:w-full max-sm:max-w-full max-sm:justify-end" : "max-sm:w-full max-sm:max-w-full max-sm:justify-between"))}>
@@ -151,14 +154,18 @@ export function Row({ id, title, lead, mark, description, mono = false, word, wo
             </span>
           )}
         </span>
-        <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", drops ? TWO_LINES_NARROW : THREE_LINES_NARROW)} title={description}>
-          {description}
-        </span>
+        {chips === undefined ? (
+          <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", drops ? TWO_LINES_NARROW : THREE_LINES_NARROW)} title={description}>
+            {description}
+          </span>
+        ) : (
+          <Chips items={chips} className="mt-1.5" />
+        )}
       </div>
       {slot}
     </>
   );
-  const rowClass = cn("flex items-center gap-6 px-5", ROW_CLASS, drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
+  const rowClass = cn("flex items-center gap-6 px-5", chips === undefined ? ROW_CLASS : "min-h-24 gap-5 px-6 py-5", drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
   // Marked, so the height a row stands at below 640 px is read off the row rather than worked out a second time.
   const dropMark = drops ? { "data-settings-drops": "" } : {};
   if (open !== undefined) {

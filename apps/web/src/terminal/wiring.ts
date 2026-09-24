@@ -59,7 +59,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   const syncHere = (api: Api, hostUp: boolean): void => {
     hereWanted ||=
       selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, HERE_KEY).terminalOpen ||
-      (useRightPanelStore.getState().byWorkspaceId[HERE_KEY]?.surfaces.some(s => s.kind === "machine" || s.kind === "processes") ?? false);
+      ((panel => panel?.isOpen === true && panel.surfaces.some(s => s.id === panel.activeSurfaceId && (s.kind === "machine" || s.kind === "processes")))(useRightPanelStore.getState().byWorkspaceId[HERE_KEY]));
     if (hostUp && hereWanted && !here.link) {
       const link = connectDaemonLink({
         ...linkOpts,

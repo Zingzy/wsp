@@ -12,12 +12,16 @@
 // host holds its key or a workspace stands on it. A list that named an
 // account nobody had bought, with an hourly price beside it, read as a bill.
 import { HarnessMark } from "../components/chat/HarnessMark.js";
+import { CloudIcon, CpuIcon, GaugeIcon, HardDriveIcon, LayersIcon, MemoryStickIcon, ReceiptIcon } from "lucide-react";
+import type { ChipItem } from "../components/ui/chips.js";
 import { useState } from "react";
-import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_WORDS, fmtMemGb, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
-import { AGENTS_WORDS, WHERE_WORDS } from "./format.js";
+import { ADD_COMPUTER_WORDS, AGENTS_WORDS, WHERE_WORDS } from "./format.js";
+import { AddComputer } from "./AddComputer.js";
+import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, computerRows, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
@@ -50,6 +54,27 @@ export function computerFacts(place: PlaceView, count: number, spend: PlaceSpend
   return [place.shape === undefined ? undefined : fmtSize(place.shape, placeCpuWord(place)), place.diskFreeBytes === undefined ? undefined : fmtBytes(place.diskFreeBytes), count === 0 ? undefined : plural(count, "workspace")].filter((word): word is string => word !== undefined).join(" · ");
 }
 
+/** The same facts as chips, each with its glyph. */
+export function computerChips(place: PlaceView, count: number, spend: PlaceSpend | undefined): ChipItem[] {
+  const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "workspace"), icon: LayersIcon };
+  if (isProviderPlace(place)) {
+    const cloud: (ChipItem | null)[] = [
+      { text: WHERE_WORDS.cloud, icon: CloudIcon },
+      place.rateUsdPerHour === undefined ? null : { text: fmtRate(place.rateUsdPerHour), icon: GaugeIcon },
+      workspaces,
+      spend === undefined ? null : { text: spentThisMonth(spend.monthUsd), icon: ReceiptIcon },
+    ];
+    return cloud.filter((c): c is ChipItem => c !== null);
+  }
+  const own: (ChipItem | null)[] = [
+    place.shape === undefined ? null : { text: `${place.shape.cpu} ${placeCpuWord(place)}`, icon: CpuIcon },
+    place.shape === undefined ? null : { text: fmtMemGb(place.shape.memMb), icon: MemoryStickIcon },
+    place.diskFreeBytes === undefined ? null : { text: `${fmtBytes(place.diskFreeBytes)} free`, icon: HardDriveIcon },
+    workspaces,
+  ];
+  return own.filter((c): c is ChipItem => c !== null);
+}
+
 /** One computer's row: the name a person reads it as with the default mark, the facts it has reported, and the
  * state word while there is one, then the chevron where the row opens a page. */
 export function computerRowData(place: PlaceView, o: { here: boolean; count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
@@ -58,8 +83,14 @@ export function computerRowData(place: PlaceView, o: { here: boolean; count: num
     kind: "row",
     id: place.id,
     title: placeName(place, o.here),
+    lead: (
+      <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-foreground/[0.04]">
+        <ComputerGlyph place={place} className="size-5 text-foreground/80" />
+      </span>
+    ),
     ...(place.default ? { mark: WHERE_WORDS.default } : {}),
     description: computerFacts(place, o.count, o.spend),
+    chips: computerChips(place, o.count, o.spend),
     mono: true,
     ...(state === "" ? {} : { word: state, wordClass: "fact" }),
     ...(o.open === undefined ? {} : { open: o.open }),
@@ -99,12 +130,8 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
           open: () => ctx.go({ kind: "computer", id: place.id }),
         });
       }),
-      under: (
-        <Button size="xs" variant="outline" data-k="add-computer-button" onClick={ctx.openAddComputer}>
-          {PLACES_WORDS.addComputer}
-        </Button>
-      ),
     },
+    { id: "add-computer", head: ADD_COMPUTER_WORDS.title, items: [], body: <AddComputer setup={ctx.reads.setup} /> },
   ];
 }
 
@@ -295,6 +322,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const spend = ctx.reads.spend.find(row => row.place === place.id);
 
   const facts: SettingsItem[] = [
+    { kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> },
     // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
     // two screens is stale is the whole of what this line was reported for.
     ...(place.os === undefined ? [] : [{ kind: "line" as const, id: "system", label: WHERE_WORDS.system, value: lastKnown(place.engine !== undefined && place.engine !== "none" ? `${place.os} · ${place.engine}` : place.os, away), hover: WHERE_WORDS.systemHover, attrs: { "data-k": "system" } }]),

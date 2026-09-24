@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Words the Workspace and Processes panes put next to wire values.
 
-/** A time of day in the person's zone, hours and minutes. */
-export const clockLabel = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
 const UNITS = ["", "K", "M", "G", "T"];
 
 /** rss as a process table column with a three-digit budget fmtBytes does not fit, so its own rule: 900, 12K, 1.5M, 123M, 2.3G. */

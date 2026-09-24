@@ -670,7 +670,7 @@ describe("rows from the fixture wire", () => {
     api.watchStatuses = vi.fn(async () => { throw new Error("runtime unreachable"); });
     useStore.getState().bind(api);
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    await waitFor(() => expect(screen.getByText(/No workspaces yet/)).toBeDefined());
+    await waitFor(() => expect(screen.getByText(/No tasks yet/)).toBeDefined());
     const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
     fireEvent.click(toast);
     expect(useStore.getState().toast).toBeNull();
@@ -698,7 +698,7 @@ describe("rows from the fixture wire", () => {
     const api = fakeApi([], []);
     useStore.getState().bind(api);
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    await waitFor(() => expect(screen.getByText(/No workspaces yet/)).toBeDefined());
+    await waitFor(() => expect(screen.getByText(/No tasks yet/)).toBeDefined());
     act(() => useStore.getState().applyEvent({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } }));
     const toast = await screen.findByRole("status", { name: "wsp needs you: sign in to GitHub CLI login" });
     expect(toast.textContent).toContain("wsp needs you: sign in to GitHub CLI login");
@@ -841,7 +841,7 @@ describe("search", () => {
 describe("the body before the first list has arrived, and on a wsp with no project", () => {
   it("says nothing at all while the store is not ready: no rows, no bars, not even the road to a project, and the head held", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(rowIds()).toEqual([]);
     expect(document.querySelectorAll("[data-slot=skeleton]").length).toBe(0);
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
@@ -862,7 +862,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(menu()).toBeNull();
     // The empty line belongs to a project with no workspace; with no project at all the centre is the first run,
     // whose title says what is being made, so no second sentence stands here.
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(screen.queryByText(/No projects yet/)).toBeNull();
     expect(screen.queryByText(/A project is a folder/)).toBeNull();
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
@@ -879,7 +879,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(screen.getByText("beta")).toBeDefined();
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(screen.queryByText(PROJECT_WORDS.new)).toBeNull();
   });
 });

@@ -34,10 +34,24 @@ export const THEME_WORDS: Record<ThemePreference, string> = {
   dark: "Dark",
 };
 
+/** The sentence under each settings page's name: what the page is for, before any row. */
+export const GROUP_BLURBS = {
+  general: "How wsp behaves on this Mac.",
+  appearance: "How wsp looks, on every screen that opens it.",
+  computers: "The computers your workspaces run on. This Mac is the first one.",
+  projects: "The repos wsp makes workspaces from, each on one computer.",
+  devices: "The phones and other computers paired with this wsp.",
+  account: "Your sign-in, which lets your other devices find this wsp.",
+  keybindings: "The keys wsp answers to.",
+  about: "Which wsp this is.",
+} as const;
+
 /** What the Computers pages say beyond the words the wire already carries in PLACES_WORDS: the list row, a
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
+  icon: "Icon",
+  iconDescription: "How this computer shows in the sidebar and here.",
   /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
   copies: "Copies",
   copiesDescription: "How a workspace's copy of a project is made there.",
@@ -97,7 +111,49 @@ export const WHERE_WORDS = {
 
 /** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
  * joined screen says. One road, so no word here names one. */
+export type AddRoad = "ssh" | "cloud" | "code";
+
+/** The three roads as the Computers page draws them, each under its picture. */
+export const ADD_ROADS: Record<AddRoad, { title: string; line: string }> = {
+  ssh: { title: "Your own server", line: "over ssh" },
+  cloud: { title: "A cloud", line: "Solari or Box by ASCII" },
+  code: { title: "A computer running wsp", line: "a Mac or PC you sit at" },
+};
+
 export const ADD_COMPUTER_WORDS = {
+  title: "Add a computer",
+  guide: "Read the guide",
+  user: "User",
+  host: "Host",
+  hostPlaceholder: "box.example.com or an ssh alias",
+  port: "Port",
+  addComputer: "Add computer",
+  whatHappens: "What happens",
+  replace: "Replace",
+  adding: "Adding",
+  another: "Add another",
+  suggested: "From your ssh config",
+  copy: "Copy",
+  copied: "Copied",
+  keyLabel: "API key",
+  keyPlaceholder: "Paste the API key",
+  replaceKey: "Paste a new key to replace it",
+  keySaved: "key saved",
+  noKey: "no key",
+  getKey: "Get a key",
+  save: "Save",
+  checking: "Checking",
+  keyRefused: "The provider did not take that key.",
+  installThere: "On that computer, install wsp",
+  joinThere: "Then run",
+  minting: "making a code",
+  codeLeft: (ms: number): string => {
+    const seconds = Math.ceil(ms / 1000);
+    return `code works for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  },
+  expired: "code expired",
+  newCode: "New code",
+  noMint: "this wsp cannot make a join line from the app yet",
   login: "ssh login",
   loginPlaceholder: "root@host",
   add: "Add",
