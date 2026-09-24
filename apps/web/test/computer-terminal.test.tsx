@@ -17,6 +17,9 @@ import { runShellCommand } from "../src/shell/shellCommands.js";
 import { HERE_KEY } from "../src/terminal/computer.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { getTerminals, provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
+import { getLive, resetLive } from "../src/machine/live.js";
+import { getProcs, resetProcs } from "../src/machine/procs.js";
+import type { DaemonApi } from "../src/protocol/client.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -97,7 +100,7 @@ describe("the terminal chord", () => {
 });
 
 describe("the right panel chord with no workspace", () => {
-  it("opens this computer's panel: browser and terminal open here, the diff waits for a project", async () => {
+  it("opens this computer's panel: browser, terminal, workspace and processes open here, the diff waits for a project", async () => {
     useStore.getState().bind(fakeApi([]));
     render(<Shell />);
     await waitFor(() => expect(useStore.getState().ready).toBe(true));
@@ -106,8 +109,8 @@ describe("the right panel chord with no workspace", () => {
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
-    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff"]);
-    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV"]);
+    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
+    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "BUTTON", "BUTTON"]);
     screen.getByText("Pick a project to review its changes.");
 
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
@@ -166,6 +169,41 @@ describe("the wiring", () => {
       expect(asked).toEqual([]);
       act(() => useTerminalDrawerStore.getState().setOpen(HERE_KEY, true));
       await waitFor(() => expect(asked).toEqual([{ placeId: HERE_PLACE_ID }]));
+    } finally {
+      unwire();
+    }
+  });
+
+  it.each(["machine", "processes"] as const)("dials this computer's daemon once its %s pane opens, and files what it pushes under this computer", async kind => {
+    resetLive();
+    resetProcs();
+    const asked: DaemonTarget[] = [];
+    const ops: string[] = [];
+    let push: ((e: Parameters<Parameters<DaemonApi["onFrame"]>[1]>[0]) => void) | null = null;
+    const daemon: DaemonApi = {
+      open: async to => (asked.push(to), { channel: "c1" }),
+      send: async (_channel, frame) => (ops.push(String((frame as { op: string }).op)), { id: 1, ok: true } as never),
+      close: async () => {},
+      onFrame: (_channel, fn) => ((push = fn), () => {}),
+    };
+    const unwire = wireTerminals(useStore, { backoffMs: () => 60_000 });
+    try {
+      useStore.getState().bind(fakeApi([], daemon));
+      await waitFor(() => expect(getTerminals(HERE_KEY)).not.toBeNull());
+      expect(asked).toEqual([]);
+      act(() => useRightPanelStore.getState().open(HERE_KEY, kind));
+      await waitFor(() => expect(asked).toEqual([{ placeId: HERE_PLACE_ID }]));
+      await waitFor(() => expect(ops).toContain("sys.watch"));
+      expect(ops).not.toContain("proc.watch");
+      const release = getProcs(HERE_KEY).watch();
+      await waitFor(() => expect(ops).toContain("proc.watch"));
+      const event = (e: Record<string, unknown>) => act(() => push!({ type: "daemon.event", channel: "c1", event: e as { type: string } }));
+      event({ type: "proc.snapshot", at: 1, daemon: 9, total: 1, procs: [{ pid: 9, ppid: 1, user: "dev", state: "S", comm: "wspd", cmdline: "wspd", cpu: 0, rss: 0, startedAt: 0 }] });
+      event({ type: "sys.sample", cpu: 5, load1: 1.5, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 }, at: 1 });
+      await waitFor(() => expect(getProcs(HERE_KEY).snapshot().snapshot?.procs.map(p => p.pid)).toEqual([9]));
+      expect(getLive(HERE_KEY).snapshot().samples.map(s => s.load1)).toEqual([1.5]);
+      expect(getLive(HERE_KEY).snapshot().reach).toBe("live");
+      release();
     } finally {
       unwire();
     }

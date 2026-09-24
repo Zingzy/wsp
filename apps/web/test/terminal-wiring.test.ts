@@ -9,6 +9,7 @@ import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { getDaemonRoot, getDaemonVersion } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
+import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { terminalEmptyLine, terminalPaneState, terminalPaneTitle } from "../src/adapt/index.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
@@ -79,6 +80,7 @@ let unwire: (() => void) | undefined;
 beforeEach(async () => {
   useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, conn: "live" });
   resetLive();
+  resetProcs();
   relay = await startRelayHarness({
     procs: [{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }],
     sys: { load1: 0.1, memTotalKb: 8_000, memAvailableKb: 6_000 },
@@ -108,6 +110,11 @@ describe("wireTerminals", () => {
     // The numbers are the fake machine's own: its loadavg and its meminfo, in the bytes the daemon reports.
     expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 2_000 * 1024, total: 8_000 * 1024 } });
     expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
+    // Processes stream only while a pane holds a watch; the hold outlives the socket and asks again when it is back.
+    expect(getProcs("ws_run").snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: null });
+    const release = getProcs("ws_run").watch();
+    await until(() => getProcs("ws_run").snapshot().snapshot !== null);
+    expect(getProcs("ws_run").snapshot().snapshot!.procs.map(p => p.pid)).toEqual([1, 2]);
     expect(getDaemonRoot("ws_nap")).toBeNull();
     const napping = getTerminals("ws_nap");
     expect(napping).not.toBeNull();
@@ -123,12 +130,16 @@ describe("wireTerminals", () => {
     expect(getTerminals("ws_run")!.tabs()).toHaveLength(1);
     expect(getLive("ws_run").snapshot().reach).toBe("unreachable");
     expect(getLive("ws_run").snapshot().samples.length).toBeGreaterThan(0);
+    expect(getProcs("ws_run").snapshot().reach).toBe("unreachable");
 
     emit({ type: "workspace.woken", workspaceId: "ws_run", machineId: "m_ws_run", resurrected: false });
     await until(() => getTerminals("ws_run")!.status() === "live");
     // The new socket was asked to watch again: a sample newer than the last one before the nap arrives.
     const beforeWake = getLive("ws_run").snapshot().samples.length;
     await until(() => getLive("ws_run").snapshot().samples.length > beforeWake);
+    const procsBeforeWake = getProcs("ws_run").snapshot().snapshot!.at;
+    await until(() => getProcs("ws_run").snapshot().snapshot!.at > procsBeforeWake);
+    release();
 
     emit({ type: "workspace.deleted", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run") === null);
@@ -211,6 +222,7 @@ describe("wireTerminals", () => {
     useStore.getState().setConn("reconnecting");
     await until(() => getTerminals("ws_a")!.status() === "connecting");
     expect(getLive("ws_a").snapshot().reach).toBe("unreachable");
+    expect(getProcs("ws_a").snapshot().reach).toBe("unreachable");
     // The model is kept across the park, as it is across a nap: the tab and its scrollback are still there.
     expect(getTerminals("ws_a")!.tabs().map(t => t.ptyId)).toEqual([tab.ptyId]);
     // And the person reads the word for that: a terminal they had open is coming back, not one being started. The

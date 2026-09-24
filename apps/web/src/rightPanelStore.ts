@@ -5,8 +5,8 @@
  * This is intentionally a shallow model: it owns an ordered set of surface
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, and the diff is a
- * singleton surface.
+ * terminal surfaces point at terminal session ids, and the diff, the
+ * workspace's own readings and its processes are singleton surfaces.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here belongs to the machine, not to one conversation on it.
@@ -15,7 +15,7 @@ import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal"] as const;
+export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "machine", "processes"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -29,7 +29,9 @@ export type RightPanelSurface =
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
     }
-  | { id: "diff"; kind: "diff" };
+  | { id: "diff"; kind: "diff" }
+  | { id: "machine"; kind: "machine" }
+  | { id: "processes"; kind: "processes" };
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
 const RIGHT_PANEL_STORAGE_VERSION = 1;
@@ -84,7 +86,12 @@ const EMPTY_WORKSPACE_STATE: WorkspaceRightPanelState = {
 const EMPTY_HERE_STATE: WorkspaceRightPanelState = { ...EMPTY_WORKSPACE_STATE, isOpen: false };
 const emptyFor = (key: string): WorkspaceRightPanelState => (key === HERE_KEY ? EMPTY_HERE_STATE : EMPTY_WORKSPACE_STATE);
 
-const singletonSurface = (kind: SingletonKind): RightPanelSurface => ({ id: kind, kind });
+const SINGLETONS: { [K in SingletonKind]: Extract<RightPanelSurface, { kind: K }> } = {
+  diff: { id: "diff", kind: "diff" },
+  machine: { id: "machine", kind: "machine" },
+  processes: { id: "processes", kind: "processes" },
+};
+const singletonSurface = (kind: SingletonKind): RightPanelSurface => SINGLETONS[kind];
 
 const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
@@ -150,6 +157,8 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   if (!isKnownKind(kind)) return null;
   switch (kind) {
     case "diff":
+    case "machine":
+    case "processes":
       return singletonSurface(kind);
     case "preview": {
       const resourceId = surface["resourceId"];

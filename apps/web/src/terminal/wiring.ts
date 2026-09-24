@@ -6,14 +6,17 @@
 // re-attaches its ptys. The same link is the browser's only source of ports:
 // the daemon pushes port events only to sockets that asked with ports.watch,
 // and a subscription dies with the channel, so every live transition asks again.
-// This computer's own terminal rides a link of its own, to its daemon by place.
+// This computer's own terminal, readings and processes ride a link of their
+// own, to its daemon by place.
 import { daemonVersionOf, HERE_PLACE_ID, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
 import { getLive } from "../machine/live.js";
+import { getProcs } from "../machine/procs.js";
 import type { Api } from "../protocol/client.js";
 import type { useStore } from "../protocol/store.js";
+import { useRightPanelStore } from "../rightPanelStore.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
 import { HERE_KEY } from "./computer.js";
@@ -42,26 +45,50 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   };
 
   // This computer's own terminal: its model is there from the start so the drawer has one to read, and its daemon
-  // is dialled only once that drawer has been opened, since the host starts the daemon on the first dial.
-  const here: Pick<Wired, "link" | "wt"> = { link: null, wt: new WorkspaceTerminals({ request: (op, params) => (here.link ? here.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))) }) };
+  // is dialled only once that drawer or a pane that reads it has been opened, since the host starts the daemon on
+  // the first dial.
+  const hereWire: TerminalWire = { request: (op, params) => (here.link ? here.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))) };
+  const here: Pick<Wired, "link" | "wt"> = { link: null, wt: new WorkspaceTerminals(hereWire) };
   provideTerminals(HERE_KEY, here.wt);
+  provideDaemonWire(HERE_KEY, hereWire);
   let hereWanted = false;
+  const hereStatus = (s: DaemonLinkStatus): void => {
+    getLive(HERE_KEY).feedStatus(s);
+    getProcs(HERE_KEY).feedStatus(s);
+  };
   const syncHere = (api: Api, hostUp: boolean): void => {
-    hereWanted ||= selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, HERE_KEY).terminalOpen;
+    hereWanted ||=
+      selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, HERE_KEY).terminalOpen ||
+      (useRightPanelStore.getState().byWorkspaceId[HERE_KEY]?.surfaces.some(s => s.kind === "machine" || s.kind === "processes") ?? false);
     if (hostUp && hereWanted && !here.link) {
-      here.link = connectDaemonLink({
+      const link = connectDaemonLink({
         ...linkOpts,
         daemon: api.daemon,
         target: { placeId: HERE_PLACE_ID },
         wasLive: here.wt.everLive(),
-        onEvent: e => here.wt.feedEvent(e),
+        onEvent: e => {
+          if (e.type === "sys.sample") getLive(HERE_KEY).feedSample(e);
+          else if (e.type === "proc.snapshot") getProcs(HERE_KEY).feedSnapshot(e);
+          else here.wt.feedEvent(e);
+        },
         onStatus: (s, refusal) => {
-          if (s !== "dead") here.wt.feedStatus(s, refusal);
+          if (s === "live")
+            link.request("sys.watch").then(
+              () => getLive(HERE_KEY).feedUnavailable(null),
+              (e: unknown) => getLive(HERE_KEY).feedUnavailable(errorText(e)),
+            );
+          if (s !== "dead") {
+            here.wt.feedStatus(s, refusal);
+            hereStatus(s);
+          }
         },
       });
+      here.link = link;
     } else if (!hostUp && here.link) {
       unlink(here);
-      here.wt.feedStatus(here.wt.everLive() ? "connecting" : NOT_OPENED_YET);
+      const parked: DaemonLinkStatus = here.wt.everLive() ? "connecting" : NOT_OPENED_YET;
+      here.wt.feedStatus(parked);
+      hereStatus(parked);
     }
   };
 
@@ -112,6 +139,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
             else if (e.type === "daemon.hello") provideDaemonHello(w.id, { root: e.root, version: daemonVersionOf(e) });
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
+            else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model keeps the word it had instead.
@@ -127,6 +155,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             if (s !== "dead") {
               wt.feedStatus(s, refusal);
               if (sysFromDaemon) getLive(w.id).feedStatus(s);
+              getProcs(w.id).feedStatus(s);
             }
           },
         });
@@ -139,6 +168,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         unlink(entry);
         wt.feedStatus(parked);
         if (sysFromDaemon) getLive(w.id).feedStatus(parked);
+        getProcs(w.id).feedStatus(parked);
       }
     }
     syncHere(api, hostUp);
@@ -155,12 +185,15 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
 
   const unsubscribe = store.subscribe(sync);
   const unsubscribeDrawer = useTerminalDrawerStore.subscribe(sync);
+  const unsubscribePanel = useRightPanelStore.subscribe(sync);
   sync();
   return () => {
     unsubscribe();
     unsubscribeDrawer();
+    unsubscribePanel();
     unlink(here);
     provideTerminals(HERE_KEY, null);
+    provideDaemonWire(HERE_KEY, null);
     for (const [id, entry] of wired) {
       unlink(entry);
       provideTerminals(id, null);
