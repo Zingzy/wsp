@@ -10,7 +10,7 @@ import { THIS_COMPUTER_WORD } from "../settings/places.js";
 
 /** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
  * surfaces offering one act, so none of them can name it differently. */
-export const NEW_WORKSPACE = "New workspace";
+export const NEW_WORKSPACE = "New task";
 
 /** The one question a workspace is made by, asked on the first run and in the dialog: one question, one wording,
  * and its ghost is a piece of work rather than a name shaped like a machine's. */

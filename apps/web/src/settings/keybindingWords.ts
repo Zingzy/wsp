@@ -5,7 +5,7 @@
 // and the page folds them into one line.
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand, type KeybindingCommand } from "../keybindingTypes.js";
 
-export const JUMP_WORD = "Jump to a workspace";
+export const JUMP_WORD = "Jump to a task";
 
 export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "commandPalette.toggle": "Search",
@@ -15,8 +15,8 @@ export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "rightPanel.toggle": "Toggle the right panel",
   "preview.toggle": "Toggle the preview",
   "chat.new": "New thread",
-  "workspace.next": "Next workspace",
-  "workspace.previous": "Previous workspace",
+  "workspace.next": "Next task",
+  "workspace.previous": "Previous task",
   "thread.next": "Next thread",
   "thread.previous": "Previous thread",
   "terminal.split": "Split the terminal",

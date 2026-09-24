@@ -64,11 +64,11 @@ type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
-  browser: "Available while the workspace is running.",
-  terminal: "Available while the workspace is running.",
-  diff: "Review changes once the workspace is running.",
-  machine: "Available when a workspace is selected.",
-  processes: "Available while the workspace is running.",
+  browser: "Available while the task is running.",
+  terminal: "Available while the task is running.",
+  diff: "Review changes once the task is running.",
+  machine: "Available when a task is selected.",
+  processes: "Available while the task is running.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -190,7 +190,7 @@ function surfaceActions(
     {
       key: "terminal",
       label: "Terminal",
-      description: "Start a shell in this workspace.",
+      description: "Start a shell in this task.",
       icon: TerminalSquare,
       shortcut: "T",
       available: props.terminalAvailable,
@@ -200,7 +200,7 @@ function surfaceActions(
     {
       key: "diff",
       label: "Diff",
-      description: "Review changes in this workspace.",
+      description: "Review changes in this task.",
       icon: FileDiff,
       shortcut: "D",
       available: props.diffAvailable,
@@ -209,7 +209,7 @@ function surfaceActions(
     },
     {
       key: "machine",
-      label: "Workspace",
+      label: "Task",
       description: "Load, memory and disk.",
       icon: Cpu,
       shortcut: "M",
@@ -338,7 +338,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
-            A browser, a terminal, the diff, the workspace or what runs on it.
+            A browser, a terminal, the diff, the task or what runs on it.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -406,7 +406,7 @@ function surfaceTitle(
     case "diff":
       return "Diff";
     case "machine":
-      return "Workspace";
+      return "Task";
     case "processes":
       return "Processes";
     case "terminal":

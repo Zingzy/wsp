@@ -1096,7 +1096,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const row = await box("[data-row-id='ws:ws_a']");
       await page!.mouse.click(row.x + 40, row.y + row.height / 4, { button: "right" });
       await page!.waitForSelector("[data-context-menu]");
-      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename workspace" }).click();
+      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename task" }).click();
       await page!.waitForSelector("[data-row-name-input]");
 
       // The field takes the name's place: the row keeps its height, the name starts where it started, the state slot

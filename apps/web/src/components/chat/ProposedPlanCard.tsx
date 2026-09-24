@@ -81,8 +81,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Workspace path is unavailable",
-          description: "This thread does not have a workspace path to save into.",
+          title: "Task path is unavailable",
+          description: "This thread does not have a task path to save into.",
         }),
       );
       return;
@@ -99,7 +99,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!relativePath) {
       toastManager.add({
         type: "warning",
-        title: "Enter a workspace path",
+        title: "Enter a task path",
       });
       return;
     }
@@ -112,7 +112,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         setIsSaveDialogOpen(false);
         toastManager.add({
           type: "success",
-          title: "Plan saved to workspace",
+          title: "Plan saved to task",
           description: relativePath,
         });
       } catch (error) {
@@ -148,7 +148,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             {onSavePlan ? (
               <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
-                Save to workspace
+                Save to task
               </MenuItem>
             ) : null}
           </MenuPopup>
@@ -200,14 +200,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         >
           <DialogPopup className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Save plan to workspace</DialogTitle>
+              <DialogTitle>Save plan to task</DialogTitle>
               <DialogDescription>
-                Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+                Enter a path relative to <code>{workspaceRoot ?? "the task"}</code>.
               </DialogDescription>
             </DialogHeader>
             <DialogPanel className="space-y-3">
               <label htmlFor={savePathInputId} className="grid gap-1.5">
-                <span className="text-xs font-medium text-foreground">Workspace path</span>
+                <span className="text-xs font-medium text-foreground">Task path</span>
                 <Input
                   id={savePathInputId}
                   value={savePath}

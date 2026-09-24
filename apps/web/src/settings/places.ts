@@ -59,16 +59,16 @@ export const threadWord = (n: number): string => `${n} ${n === 1 ? "thread" : "t
 export function removeSentence(place: PlaceView, holding: PlaceHolding, imageBytes?: number): string {
   const count = holding.workspaces.length;
   const threads = heldThreads(holding);
-  const held = count === 1 ? "its workspace" : `its ${count} workspaces`;
+  const held = count === 1 ? "its task" : `its ${count} tasks`;
   const name = placeName(place);
   const lines: string[] = [];
   if (isProviderPlace(place)) {
-    lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "workspace is" : `${count} workspaces are`} deleted at ${name} and the key is forgotten on this Mac.`);
+    lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "task is" : `${count} tasks are`} deleted at ${name} and the key is forgotten on this Mac.`);
     if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave this Mac.`);
   } else {
     const stays = `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}`;
     lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
-    if (count > 0) lines.push(`${count === 1 ? "The workspace's record" : "The workspaces' records"} and ${threadWord(threads)} leave this Mac.`);
+    if (count > 0) lines.push(`${count === 1 ? "The task's record" : "The tasks' records"} and ${threadWord(threads)} leave this Mac.`);
   }
   // A computer that is not answering cannot be swept now, and the sentence says when it will be.
   if (placeIsOffline(place)) lines.push("It is offline; what is on it is swept the next time it connects.");
@@ -187,7 +187,7 @@ export const whereSegments = (places: readonly PlaceView[]): PlaceView[] => plac
  * two notes say so and what records one, in the command line's own words. */
 export const PROJECT_PICK_WORDS = {
   label: "Project",
-  noneYet: "No projects yet, and a workspace is a copy of one.",
+  noneYet: "No projects yet, and a task is a copy of one.",
   addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
 } as const;
 

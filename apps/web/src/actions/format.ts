@@ -8,22 +8,22 @@ import { actionRefusal, type BringBackResult, goneRefusal, isBilling, keepsRenam
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
-  pause: "Pause workspace",
-  wake: "Wake workspace",
+  pause: "Pause task",
+  wake: "Wake task",
   stopWake: "Stop waking",
-  rebuild: "Rebuild workspace",
+  rebuild: "Rebuild task",
   newThread: "New thread",
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
   bringBack: "Bring back",
   exportProject: "Export project",
-  rename: "Rename workspace",
+  rename: "Rename task",
   theme: "Edit theme colour",
   icon: "Change icon",
   fork: "Run a copy",
   copyId: "Copy computer id",
-  delete: "Delete workspace",
-  forget: "Forget workspace",
+  delete: "Delete task",
+  forget: "Forget task",
   startDaemon: "Start the daemon",
 } as const;
 
@@ -77,9 +77,9 @@ export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[sta
 export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
 export const phaseHint = (state: WorkspaceState): string =>
-  state === "waking" ? "Stop asking the provider to wake this workspace" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
-export const FORGET_HINT = "Its computer is gone; forget the workspace to drop it from this computer";
-export const REBUILD_HINT = "The workspace answers nothing; rebuild it from your image";
+  state === "waking" ? "Stop asking the provider to wake this task" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
+export const FORGET_HINT = "Its computer is gone; forget the task to drop it from this computer";
+export const REBUILD_HINT = "The task answers nothing; rebuild it from your image";
 
 /** What a rebuild the host refused says, wherever it was asked from. The host's own reason is not quoted: it ends
  * in whatever threw, and the line used to begin with the workspace's name and a colon. */
@@ -92,7 +92,7 @@ export function phaseRefusal(state: WorkspaceState): string | null {
     case "paused":
       return null;
     case "pausing":
-      return "Workspace is pausing; it can be woken once it is paused";
+      return "Task is pausing; it can be woken once it is paused";
     // A wake the host keeps asking the provider for is the one moving state with something to offer: its own stop.
     case "waking":
       return null;
@@ -105,14 +105,14 @@ export function phaseRefusal(state: WorkspaceState): string | null {
   }
 }
 
-export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild workspaces";
-export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
+export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild tasks";
+export const CLIENT_CANNOT_FORGET = "This client cannot forget tasks";
 export const CLIENT_CANNOT_START_DAEMON = "This client cannot start a daemon";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
-export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
-export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
+export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename tasks";
+export const CLIENT_CANNOT_LOOK = "This client cannot set a task's theme or icon";
 /** What Bring back does, on the button's hover text: the agent's branch is what leaves, and it leaves through git. */
 export const BRING_BACK_HINT = "Pushes the agent's branch and opens a pull request";
 
@@ -125,12 +125,12 @@ export function broughtBackRowLine(back: Pick<BringBackResult, "branch" | "pr" |
   return back.note === undefined ? `${back.branch} · pushed` : `${back.branch} · pushed, no pull request`;
 }
 
-export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; make a second workspace of the same project from the plus on its row";
+export const NO_WORKSPACE_FORK = "Running a copy of a task is not in the runtime yet; make a second task of the same project from the plus on its row";
 
 /** What Delete takes, on the menu row's hover: the machine half in the kind's own words, which is the half a
  * person cannot undo. The dialog says the same half and the record and the threads with it. */
 export const DELETE_HINT = (kind: WorkspaceKind): string => `Its ${kindWords(kind).onDelete.asked}`;
-export const CLIENT_CANNOT_DELETE = "This client cannot delete workspaces";
+export const CLIENT_CANNOT_DELETE = "This client cannot delete tasks";
 
 /** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in
  * for this and the sentence says what did not happen and what is left to try. The link's own words are not
@@ -177,9 +177,9 @@ export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRena
     case "unsupported":
       return notKeptLine(harness);
     case "no-session":
-      return `${agentName(harness)} on the workspace has no session for this thread yet`;
+      return `${agentName(harness)} on the task has no session for this thread yet`;
     case "failed":
-      return error ?? "The workspace said nothing about the write";
+      return error ?? "The task said nothing about the write";
     case "not-found":
       return "The runtime has no such thread any more";
     default: {
@@ -199,7 +199,7 @@ export const SPLIT_LIMIT = `max ${MAX_TERMINALS_PER_GROUP} per group`;
 
 /** A thread link named a thread the workspace's list does not carry; the workspace opened instead. The thread is
  * not named: the link carried an id, and an id names no thread to the person who followed it. */
-export const noSuchThreadLine = (): string => "That thread is not in this workspace; opened the workspace instead";
+export const noSuchThreadLine = (): string => "That thread is not in this task; opened the task instead";
 
 /** Show in diff asked for a file the diff does not touch. */
 export const noDiffLine = (fileName: string, scopeLabel: string): string => `${fileName} has no diff in ${scopeLabel.toLowerCase()}`;

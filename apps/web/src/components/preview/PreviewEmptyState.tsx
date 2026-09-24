@@ -28,7 +28,7 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
         </EmptyMedia>
         <EmptyTitle>No preview yet</EmptyTitle>
         <EmptyDescription>
-          Type a port above, or run a dev script. Servers listening on this workspace will show up
+          Type a port above, or run a dev script. Servers listening on this task will show up
           here automatically.
         </EmptyDescription>
       </Empty>

@@ -185,7 +185,7 @@ describe("workspace creation view", () => {
     expect(lines[1]!.className).toContain("text-destructive-foreground");
     expect(lines[0]!.className).not.toContain("text-destructive-foreground");
     // The runtime's words are the refusal: they appear once, on the failing line, and no second wording follows the title.
-    const lead = within(view).getByText("The provider refused: no more workspaces can run there now");
+    const lead = within(view).getByText("The provider refused: no more tasks can run there now");
     expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 

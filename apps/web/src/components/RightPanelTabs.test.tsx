@@ -44,7 +44,7 @@ describe("the right panel's launcher", () => {
   it("offers Browser, Terminal, Diff, Workspace and Processes and nothing else", () => {
     draw();
     expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
-    for (const label of ["Browser", "Terminal", "Diff", "Workspace", "Processes"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Browser", "Terminal", "Diff", "Task", "Processes"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDMP");
@@ -60,21 +60,21 @@ describe("the right panel's launcher", () => {
     expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
-    expect(diff.textContent).toContain("Review changes once the workspace is running.");
+    expect(diff.textContent).toContain("Review changes once the task is running.");
   });
 
   it("holds Processes with the line that says why", () => {
     draw({ processesAvailable: false });
     const procs = document.querySelector<HTMLElement>('[data-surface-launch="processes"]')!;
     expect(procs.dataset["available"]).toBe("false");
-    expect(procs.textContent).toContain("Available while the workspace is running.");
+    expect(procs.textContent).toContain("Available while the task is running.");
   });
 
   it("names the open panes on the tab strip", () => {
     draw({ surfaces: [{ id: "diff", kind: "diff" }, { id: "machine", kind: "machine" }, { id: "processes", kind: "processes" }], activeSurfaceId: "diff" });
     const strip = document.querySelector("[data-right-panel-tab-list]")?.textContent;
     expect(strip).toContain("Diff");
-    expect(strip).toContain("Workspace");
+    expect(strip).toContain("Task");
     expect(strip).toContain("Processes");
     expect(document.querySelector("[data-pane]")).not.toBeNull();
   });

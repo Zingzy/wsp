@@ -177,7 +177,7 @@ const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]"
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
 const branch = () => branchSlot()?.dataset["composerBranch"];
-const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
+const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
 const SLOT_HEIGHT = ["h-7", "sm:h-6"];
 /** The folder's own item in either form: it is the one that gives its width up, and it keeps what it cannot hold inside its box. */

@@ -288,7 +288,7 @@ describe("the cloud setup sheet", () => {
     expect(where.getAttribute("href")).toBe("https://console.getsolari.com");
     expect(where.getAttribute("target")).toBe("_blank");
     expect(where.querySelector("svg")).not.toBeNull();
-    expect(k(dialog, "sentence").textContent).toBe("Solari runs the computers your workspaces sit on. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB workspace costs about $0.11 an hour while it runs and naps when idle");
+    expect(k(dialog, "sentence").textContent).toBe("Solari runs the computers your tasks sit on. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB task costs about $0.11 an hour while it runs and naps when idle");
     expect(dialog.querySelector("input")!.getAttribute("placeholder")).toBe(CLOUD_SETUP_WORDS.keys.placeholder);
     expect(dialog.querySelectorAll('[data-k="keys"] [data-k=content] [class*=rounded-\\[10px\\]]'), "no card around one field").toHaveLength(0);
     expect((k(dialog, "primary") as HTMLButtonElement).disabled).toBe(true);
@@ -645,7 +645,7 @@ describe("the cloud setup sheet", () => {
     t.emit({ ...JOB, step: 4 });
     const { dialog, api } = t;
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
-    expect(k(dialog, "title").textContent).toBe("Your first cloud workspace");
+    expect(k(dialog, "title").textContent).toBe("Your first cloud task");
     expect(k(dialog, "sentence").textContent).toBe("Forked from the image as soon as the build finishes, on a 2 vCPU · 4 GB machine");
     expect((within(dialog).getByLabelText("Name") as HTMLInputElement).value).toBe("first");
     const folder = within(dialog).getByLabelText(/Project folder/) as HTMLInputElement;

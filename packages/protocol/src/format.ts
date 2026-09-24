@@ -1516,7 +1516,7 @@ export function memoryNearFull(mem: { used: number; total: number }): boolean {
 /** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
  * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
 export function outOfMemoryLine(r: MemoryReading): string {
-  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on`;
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the task last answered; the work on it took the memory, not a fault of the computer it runs on`;
 }
 
 /** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
@@ -1537,8 +1537,8 @@ export function outOfMemoryRowLine(r: MemoryReading): string {
  * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
 export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
   const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
-  if (bigger === undefined) return "No size with more memory is offered; run less in the workspace at once";
-  return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
+  if (bigger === undefined) return "No size with more memory is offered; run less in the task at once";
+  return `A task on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
 }
 
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
@@ -1748,7 +1748,7 @@ export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: 
 export const CLOUD_SETUP_WORDS = {
   choice: {
     headline: "What goes on your image",
-    top: "What your agents need goes on one image, built once and copied for every workspace",
+    top: "What your agents need goes on one image, built once and copied for every task",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1760,7 +1760,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   keys: {
     headline: "Your Solari key",
-    top: "Solari runs the computers your workspaces sit on",
+    top: "Solari runs the computers your tasks sit on",
     solari: "API key",
     /** The empty field's ghost: the start every Solari key has, and no more. */
     placeholder: "slr_live_...",
@@ -1806,11 +1806,11 @@ export const CLOUD_SETUP_WORDS = {
     choose: "Choose",
     /** Why the build keycap is held while the name field is empty: without a name nothing is forked, so a folder
      * typed beside it would have nowhere to land. */
-    needsName: "give the workspace a name",
+    needsName: "give the task a name",
   },
   build: {
     headline: "Building your image",
-    top: "The computer starts, installs what you ticked and is saved as the image every workspace starts from",
+    top: "The computer starts, installs what you ticked and is saved as the image every task starts from",
     /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
     signingIn: "Signing in on the computer",
     /** The slide the build becomes while that stage runs: room to act on each sign-in. */
@@ -1829,11 +1829,11 @@ export const CLOUD_SETUP_WORDS = {
     cancelKeep: "Keep building",
     done: "Your image is ready",
     /** The sentence under that title: the running one would say the machine is still being saved. */
-    doneTop: "Your image is built; every workspace starts from it",
+    doneTop: "Your image is built; every task starts from it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
-    keycap: "Open workspace",
+    keycap: "Open task",
     again: "Start over",
   },
   agent: {
@@ -3261,7 +3261,7 @@ export type LineageMark = keyof typeof LINEAGE_MARKS;
 export const REPO_STATE_WORDS = {
   unknown: { word: "", note: "", pane: "" },
   none: { word: "", note: "", pane: "This folder is not inside a git repository, so there is nothing to diff." },
-  refused: { word: "git unread", note: "The workspace could not read this folder's git state, so no branch is shown.", pane: "" },
+  refused: { word: "git unread", note: "The task could not read this folder's git state, so no branch is shown.", pane: "" },
 } as const;
 export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
@@ -3440,7 +3440,7 @@ export function exportFromLine(workspaceName: string): string {
 }
 
 /** What the ticks on the export dialog's agent rows do. */
-export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the workspace.";
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the task.";
 
 /** The export dialog's agent section when the workspace has no threads to make rows of. */
 export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";

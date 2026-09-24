@@ -84,7 +84,7 @@ const folderPathClass = "min-w-0 truncate font-mono [direction:rtl]";
 const labelClass = cn(slotClass, folderItemClass, BUTTON_GLYPH_INSET);
 
 const LOCKED_FOLDER_NOTE = "The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.";
-const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
+const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The branch slot keeps the label's height while empty, so the row does not move when a branch arrives. */
 const branchSlotClass = cn(slotClass, "shrink-0 font-mono");
 
