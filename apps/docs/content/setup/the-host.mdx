@@ -45,6 +45,8 @@ After loading, `wsp up --service` waits up to twenty seconds until the lock exis
 
 `wsp down` stops the service and takes the unit away. `wsp status` prints whether a host is serving this state file, its ports, its token file, what keeps it there and the latest release off `release.json`, with a non-zero exit code when none does.
 
+An install of a newer wsp under a running host changes its files, not the process. Settings > About then says which version the files carry and, where a restart brings the host back, offers Restart host: the service exits and its manager starts it on the new files, a host a command started for itself starts its successor on the same ports, and the app relaunches. A host `wsp up` holds in a terminal is restarted from that terminal. A restart drops every open terminal pane on this computer, every open localhost forward and any sign-in in progress; a forward comes back when the workspace prints its URL again, and running turns continue.
+
 ## What it keeps
 
 Everything is beside the state file, `~/.wsp/` by default:

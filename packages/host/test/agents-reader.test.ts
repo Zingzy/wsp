@@ -27,10 +27,12 @@ function fixture(): AgentHome & { root: string } {
 
 /** A computer's road that runs every line in bash with the fixture's home and PATH, keeping each line it ran. A root
  * daemon's probe is answered as a Linux box running as root would answer it, the home owned by ada. */
-function road(at: AgentHome, o: { root?: boolean } = {}): { machine: Pick<Machine, "exec">; lines: string[] } {
+function road(at: AgentHome, o: { root?: boolean } = {}): { machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; lines: string[] } {
   const lines: string[] = [];
   const env = { PATH: `${at.bin}:/usr/bin:/bin`, HOME: at.home };
   const machine = {
+    id: "m_road",
+    uploadUrl: () => Promise.reject(new Error("this backend mints no signed urls")),
     exec: (cmd: string): Promise<ExecResult> => {
       lines.push(cmd);
       if (o.root === true && cmd.startsWith("uname -s;")) return Promise.resolve({ exitCode: 0, stdout: ["Linux", "0", "root", "ada", "1", "/root", "/usr/bin:/bin", ""].join("\n"), stderr: "" });

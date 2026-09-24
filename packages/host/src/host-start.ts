@@ -11,9 +11,10 @@ import { hostLogPath, servingHost, STARTED_BY_ENV, type HostLock } from "./host-
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { httpProbe, logSince, logSize, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
-/** Starts a host serving this state file on this computer and answers with its lock once it answers on its port. */
+/** Starts a host serving this state file on this computer and answers with its lock once it answers on its port.
+ * Free ports unless `ports` names the ones a host that is restarting itself held. */
 export interface HostStarter {
-  (statePath: string, say: (line: string) => void): Promise<HostLock>;
+  (statePath: string, say: (line: string) => void, ports?: { port: number; wsPort: number }): Promise<HostLock>;
 }
 
 export interface StartDeps {
@@ -61,7 +62,7 @@ export function serviceServesState(
 }
 
 export function hostStarter(deps: StartDeps): HostStarter {
-  return async (statePath, say) => {
+  return async (statePath, say, ports) => {
     // Before anything is spawned: a state file the service owns is served by the service or by nothing.
     const owned = serviceServesState(statePath, deps.registered);
     if (owned !== undefined) throw new Error(owned);
@@ -75,7 +76,7 @@ export function hostStarter(deps: StartDeps): HostStarter {
     try {
       // Free ports on purpose: another host, the app's or a service, often holds the default on this computer, and
       // every client dials the address the lock records rather than a number written down anywhere.
-      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", "0", "--ws-port", "0"], {
+      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", String(ports?.port ?? 0), "--ws-port", String(ports?.wsPort ?? 0)], {
         detached: true,
         stdio: ["ignore", log, log],
         env: { ...deps.env, [STARTED_BY_ENV]: "verb" },

@@ -9,14 +9,17 @@
 // the hover over the whole row. The slot is a sibling that lets the pointer
 // through to the trigger except on its one button, so a button is never
 // inside a button.
-import { BotIcon, ChevronDownIcon, FolderIcon, GlobeIcon, KeyRoundIcon, ListChecksIcon, PlugIcon, ScrollTextIcon, TagIcon, TerminalIcon, WrenchIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, ChevronDownIcon, FolderIcon, GlobeIcon, KeyRoundIcon, ListChecksIcon, PlugIcon, RefreshCwIcon, ScrollTextIcon, TagIcon, TerminalIcon, WrenchIcon, type LucideIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { cn } from "../../lib/utils.js";
+import { offlineFor } from "@wsp/protocol";
 import { FACT, VALUE } from "../../settings/format.js";
+import { RefusalSlot } from "../../settings/sheetParts.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button, DANGER_BUTTON } from "../ui/button.js";
 import { CHIP } from "../ui/chips.js";
-import type { AgentsRowData, ChipGlyph, OpenLineData, RowAct, RowChip } from "./agentsRows.js";
+import { Spinner } from "../ui/spinner.js";
+import { AGENTS_LIST_WORDS, type AgentsRowData, type ChipGlyph, type OpenLineData, type RowAct, type RowChip, type ToolsView } from "./agentsRows.js";
 
 const CHIP_GLYPHS: Record<ChipGlyph, LucideIcon> = {
   tag: TagIcon,
@@ -57,6 +60,7 @@ export function ActButton({ act, className }: { act: RowAct; className?: string 
   const boxed = act.run === undefined || act.hover !== undefined;
   const button = (
     <Button data-k={`act-${act.id}`} size="xs" variant="outline" held={act.run === undefined} className={cn(act.destructive === true && DANGER_BUTTON, !boxed && className)} {...(act.run === undefined ? {} : { onClick: act.run })}>
+      {act.busy === true ? <Spinner className="size-3" /> : null}
       {act.label}
     </Button>
   );
@@ -88,7 +92,47 @@ export function OpenLine({ line, fact = false, className }: { line: OpenLineData
   );
 }
 
-export function ChipRow({ row, dim = false }: { row: AgentsRowData; dim?: boolean }) {
+/** A server's tools under the open row's acts: the micro label, the count and Read again with how long ago the
+ * answer was read, then each tool's name over its description; why nothing came back in the refusal slot. */
+function ToolsBlock({ view, now }: { view: ToolsView; now: number }) {
+  const readAgo = view.readAt === undefined ? undefined : AGENTS_LIST_WORDS.readAgo(offlineFor(now - Date.parse(view.readAt)));
+  return (
+    <div data-k="server-tools" className="flex flex-col gap-3">
+      <div className="flex h-6 items-center gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{AGENTS_LIST_WORDS.tools}</span>
+        {view.tools === undefined ? null : (
+          <span data-k="server-tools-count" className={FACT}>
+            {AGENTS_LIST_WORDS.toolsCount(view.tools.length)}
+          </span>
+        )}
+        {view.listing ? (
+          <span className="ml-auto flex size-6 items-center justify-center">
+            <Spinner className="size-3.5 text-muted-foreground" />
+          </span>
+        ) : (
+          <span className="ml-auto inline-flex" {...(readAgo === undefined ? {} : { title: readAgo })}>
+            <Button data-k="server-tools-again" aria-label={AGENTS_LIST_WORDS.readAgain} size="icon-xs" variant="ghost" held={view.refresh === undefined} {...(view.refresh === undefined ? {} : { onClick: view.refresh })}>
+              <RefreshCwIcon className="size-3.5" />
+            </Button>
+          </span>
+        )}
+      </div>
+      {view.tools === undefined || view.tools.length === 0 ? null : (
+        <ul className="flex flex-col gap-3">
+          {view.tools.map(tool => (
+            <li key={tool.name} data-tool={tool.name} className="flex flex-col gap-0.5">
+              <span className="font-mono text-xs text-foreground">{tool.name}</span>
+              {tool.description === undefined ? null : <span className="line-clamp-2 text-xs leading-4 text-muted-foreground">{tool.description}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {view.refused === undefined ? null : <RefusalSlot k="server-tools-refused" said={view.refused} />}
+    </div>
+  );
+}
+
+export function ChipRow({ row, dim = false, now }: { row: AgentsRowData; dim?: boolean; now: number }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const titleId = `${id}-title`;
@@ -155,6 +199,7 @@ export function ChipRow({ row, dim = false }: { row: AgentsRowData; dim?: boolea
               ))}
             </div>
           )}
+          {row.tools === undefined ? null : <ToolsBlock view={row.tools} now={now} />}
         </div>
       ) : null}
     </div>

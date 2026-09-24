@@ -2614,6 +2614,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** On a recipe job's done step, how many of its rows failed: the job is done once every row has an outcome. */
+  failed: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -2902,7 +2904,8 @@ export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" 
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
 export const PlacePresentEvent = z.object({ type: z.literal("place.present"), placeId: z.string(), from: z.string() });
-export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string() });
+/** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
+export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
 /** The four as one type, so the host's door and the app's fold read one shape. */
 export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
@@ -5264,6 +5267,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * while it ran, marked stale, or refuses where there is none. A cloud account's row is refused, since nothing stands
    * there between forks. */
   z.object({ id: reqId, op: z.literal("agents.read"), target: AgentsTarget }),
+  /** Replies with { answer: ServerToolsAnswer }: one MCP server of one agent's config there, started once as that
+   * login with its own command and variables, or asked once over its address, for its tools and its sign-in. Only on
+   * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
+   * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
+  z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
@@ -5311,6 +5319,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Asks GitHub again unless the last ask was under ten minutes ago and replies with { release: ReleaseView }; a
    * changed view is pushed to every socket as release.changed. */
   z.object({ id: reqId, op: z.literal("release.check") }),
+  /** Replies { ok } and then restarts this host on the files it was installed from, by the road it came up on;
+   * refused where that road would not bring it back. The socket closes on the host's stopping code. */
+  z.object({ id: reqId, op: z.literal("host.restart") }),
   /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
    * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
    * none of them, and refused naming the project when that source is already recorded on that computer. */

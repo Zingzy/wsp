@@ -37,6 +37,8 @@ import {
   DEVICE_REVOKED_REFUSAL,
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
+  HOST_RESTART_TICKET_REFUSAL,
+  HOST_NO_RESTART_LINE,
   HERE_PLACE_ID,
   DAEMON_OPEN_ONE_OF,
   PLACE_CODE_REFUSAL,
@@ -157,6 +159,8 @@ export interface ServeOptions {
   /** The host's reading of the newest release, for release.get, release.check and the release.changed events;
    * without it both ops are refused. */
   release?: ReleaseDoor;
+  /** How this host restarts itself on the files it was installed from, for host.restart; without it the op is refused. */
+  restart?: RestartDoor;
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
@@ -209,6 +213,13 @@ export interface ReleaseDoor {
   get(): ReleaseView;
   check(): Promise<ReleaseView>;
   on(fn: (e: ReleaseChangedEvent) => void): () => void;
+}
+
+/** How the runtime asks the host to restart. The host owns how, by the road it came up on; `refusal` is why that
+ * road would not bring it back, and nothing where it does. `restart` is called once the reply is sent. */
+export interface RestartDoor {
+  refusal?: string;
+  restart(): Promise<void>;
 }
 
 /** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
@@ -337,6 +348,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   /** The computers a doctor's road is running on right now, so a second one on the same computer is refused rather
    * than making a second workspace there. One set for this host, since the road is the host's and not a socket's. */
   const doctoring = new Set<string>();
+  /** The restart this host is already going through, so asks that overlap start one. */
+  let restarting: Promise<void> | undefined;
   const devices = (): DeviceDoor => {
     if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
     return opts.devices;
@@ -1374,6 +1387,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               send({ id: msg.id, ok: true, report: await rt.agents.read(msg.target, origin) });
               return;
+            case "servers.tools":
+              // Starting a server on one of the person's computers is theirs alone, as every places act is.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, answer: await rt.agents.tools(msg.target, { agent: msg.agent, name: msg.name, ...(msg.refresh !== undefined ? { refresh: msg.refresh } : {}) }, origin) });
+              return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
@@ -1419,6 +1440,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "release.check":
               send({ id: msg.id, ok: true, release: await release().check() });
               return;
+            case "host.restart": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: HOST_RESTART_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (opts.restart === undefined) throw new Error(HOST_NO_RESTART_LINE);
+              if (opts.restart.refusal !== undefined) throw new Error(opts.restart.refusal);
+              send({ id: msg.id, ok: true });
+              // A second ask while the first is closing the host would close it twice and start two successors.
+              // A restart that failed leaves this host serving, so the next ask may try again.
+              restarting ??= opts.restart.restart().catch((e: unknown) => {
+                restarting = undefined;
+                opts.log?.(`host.restart failed: ${e instanceof Error ? e.message : String(e)}`);
+              });
+              return;
+            }
             case "project.seed.plan":
               send({ id: msg.id, ok: true, plan: await rt.projects.seedPlan(msg.source) });
               return;

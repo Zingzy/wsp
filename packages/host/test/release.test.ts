@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RELEASE_API_ENV, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
+import { HOST_NO_RESTART_LINE, RELEASE_API_ENV, UP_RESTART_LINE, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
 import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, latestWords, parseRelease, releaseFileFor, releaseAssetUrl, releaseReading, releaseTagUrl, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
@@ -90,7 +90,7 @@ describe("the host's reading of the newest release", () => {
     const { watch } = watchOn(statePath, { fetch: github.fetch });
     const heard: ReleaseChangedEvent[] = [];
     watch.on(e => heard.push(e));
-    expect(watch.get()).toEqual({ state: "checking", shape: "service", restartReturns: false });
+    expect(watch.get()).toEqual({ state: "checking", shape: "service", restartRefusal: HOST_NO_RESTART_LINE });
 
     const view = await watch.check();
     expect(github.asked).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("the host's reading of the newest release", () => {
       checkedAt: "2026-09-24T12:00:00.000Z",
       triedAt: "2026-09-24T12:00:00.000Z",
       shape: "service",
-      restartReturns: false,
+      restartRefusal: HOST_NO_RESTART_LINE,
     });
     expect(heard).toEqual([{ type: "release.changed", release: view }]);
     expect(JSON.parse(readFileSync(releaseFileFor(statePath), "utf8"))).toMatchObject({ latest: parseRelease(ANSWER), etag: ETAG });
@@ -178,8 +178,8 @@ describe("the host's reading of the newest release", () => {
 
     const github = fakeGithub([]);
     const fromEnv = watchOn(statePath, { fetch: github.fetch, env: { [UPDATE_CHECK_ENV]: "0" } }).watch;
-    expect(await fromEnv.check()).toEqual({ state: "off", shape: "service", restartReturns: false });
-    expect(fromEnv.get()).toEqual({ state: "off", shape: "service", restartReturns: false });
+    expect(await fromEnv.check()).toEqual({ state: "off", shape: "service", restartRefusal: HOST_NO_RESTART_LINE });
+    expect(fromEnv.get()).toEqual({ state: "off", shape: "service", restartRefusal: HOST_NO_RESTART_LINE });
 
     writeFileSync(join(statePath, "..", ".env"), `${UPDATE_CHECK_ENV}=0\n`);
     const fromFile = watchOn(statePath, { fetch: github.fetch }).watch;
@@ -200,6 +200,29 @@ describe("the host's reading of the newest release", () => {
     tick(1);
     expect((await watch.check()).installed).toBe("0.3.1");
     expect(github.asked).toHaveLength(2);
+  });
+
+  it("carries the restart road's own refusal, nothing where the road brings the host back, and one line where no road exists", async () => {
+    const github = fakeGithub([]);
+    expect(watchOn(stateIn(), { fetch: github.fetch, restart: { refusal: UP_RESTART_LINE } }).watch.get().restartRefusal).toBe(UP_RESTART_LINE);
+    expect(watchOn(stateIn(), { fetch: github.fetch, restart: {} }).watch.get()).not.toHaveProperty("restartRefusal");
+    expect(watchOn(stateIn(), { fetch: github.fetch }).watch.get().restartRefusal).toBe(HOST_NO_RESTART_LINE);
+  });
+
+  it("carries the line that moves this host onto the release only while the release is above it, and none under the switch", async () => {
+    const lines: string[] = [];
+    const update = (version: string): string => {
+      lines.push(version);
+      return `npm i -g @zingzy/wsp@${version}`;
+    };
+    const statePath = stateIn();
+    const behind = watchOn(statePath, { fetch: fakeGithub([ok()]).fetch, running: "0.1.9", update });
+    expect(behind.watch.get().update).toBeUndefined();
+    expect((await behind.watch.check()).update).toBe("npm i -g @zingzy/wsp@0.2.0");
+    expect(lines).toEqual(["0.2.0"]);
+    expect((await watchOn(stateIn(), { fetch: fakeGithub([ok()]).fetch, update }).watch.check()).update).toBeUndefined();
+    writeFileSync(join(statePath, "..", ".env"), `${UPDATE_CHECK_ENV}=0\n`);
+    expect(behind.watch.get().update).toBeUndefined();
   });
 
   it("keeps its last reading of the installed files while a reinstall has them half written", async () => {

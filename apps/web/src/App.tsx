@@ -6,7 +6,7 @@ import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/Wo
 import { SettingsPage } from "./settings/SettingsPage.js";
 import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
-import { useNeedsYouEffect } from "./shell/needsYou.js";
+import { useHostNotices } from "./notices/hostNotices.js";
 import { useShellVersionEffect } from "./shell/shellVersion.js";
 import { FirstRun } from "./shell/FirstRun.js";
 import { ProjectHome } from "./shell/ProjectHome.js";
@@ -55,7 +55,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   useEffect(() => wireTerminals(useStore), []);
   useEffect(() => wireHostLive(useStore), []);
   useThemeEffect();
-  useNeedsYouEffect();
+  useHostNotices();
   useShellVersionEffect();
   return <Shell />;
 }

@@ -122,6 +122,19 @@ describe("a verb starts the host when none serves", () => {
     expect(said).toEqual([`starting the host for ${statePath}; its log is ${hostLogPath(statePath)}, and wsp down stops it`]);
   });
 
+  it("a host that restarts itself on the verb's road starts its child on the ports it held, so a tab on them reconnects", async () => {
+    const calls: { args: readonly string[] }[] = [];
+    const lock: HostLock = { pid: process.pid, port: 7101, wsPort: 7102, startedAt: new Date().toISOString() };
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const fake = fakeSpawn(call => {
+      calls.push(call);
+      writeFileSync(lockPathFor(statePath), JSON.stringify(lock));
+    });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 2_000, answers: () => Promise.resolve(true), registered: () => undefined });
+    expect(await start(statePath, () => undefined, { port: 7101, wsPort: 7102 })).toEqual(lock);
+    expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "7101", "--ws-port", "7102"]);
+  });
+
   it("a child that never serves is one refusal naming the state file, the log's last lines under it, of the provider class", async () => {
     mkdirSync(join(dir, "state"), { recursive: true });
     writeFileSync(hostLogPath(statePath), "Error: EADDRINUSE 4400\n");

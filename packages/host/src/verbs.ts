@@ -31,6 +31,8 @@ import {
   AgentsReport,
   AgentsTarget,
   McpRow,
+  McpTool,
+  ServerToolsAnswer,
   SkillRow,
   agentSignInWord,
   InitSetup,
@@ -2709,6 +2711,22 @@ function serverRowLines(r: AgentsReport): string[] {
   return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), reach(s), s.file, state(s)])])), ...reportTail(r)];
 }
 
+/** One server's tools as lines: its sign-in as the connect found it, then each tool, or why none came back. */
+function toolLines(name: string, a: ServerToolsAnswer): string[] {
+  const head = `${name}: ${a.auth}${a.holder !== undefined ? `, ${agentName(a.holder)} holds the sign-in` : ""}`;
+  if (a.refused !== undefined) return [head, `refused: ${a.refused}`];
+  if (a.tools === undefined) return [head];
+  return [head, ...(a.tools.length === 0 ? ["no tools"] : table([["TOOL", "DESCRIPTION"], ...a.tools.map((t: McpTool) => [t.name, (t.description ?? "-").split("\n")[0]!])]))];
+}
+
+async function serverToolsOf(client: HostClient, name: string, agent: string, workspace: string | undefined, on: string | undefined, refresh: boolean, usage: string): Promise<ServerToolsAnswer> {
+  const target = await agentsTarget(client, workspace, on, usage);
+  return ServerToolsAnswer.parse((await client.request<{ answer: unknown }>("servers.tools", { target, agent, name, ...(refresh ? { refresh } : {}) })).answer);
+}
+
+const SERVER_TOOLS_WORDS =
+  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
+
 const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
@@ -2798,6 +2816,37 @@ export const VERBS: readonly Verb[] = [
       call: async ({ workspace, on }, deps) => {
         const report = await agentsReport(await deps.client(), workspace, on, "servers takes a workspace or on, not both");
         return asText(serverRowLines(report).join("\n"), { ...reportFacts(report), servers: report.servers });
+      },
+    }),
+  },
+  {
+    name: "servers tools",
+    usage: "wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>] [--refresh]",
+    about: "starts one MCP server once where it is set up and lists its tools with their descriptions, and says whether it needs a sign-in",
+    page: "agent",
+    options: { agent: { type: "string" }, on: { type: "string" }, refresh: { type: "boolean" } },
+    run: async ctx => {
+      const [name, workspace, ...rest] = ctx.args;
+      const agent = flag(ctx.flags, "agent");
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers tools takes one server's name and one workspace at most.", usageIs(ctx));
+      if (agent === undefined) throw usageRefusal("wsp servers tools needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
+      const answer = await serverToolsOf(await ctx.client(), name, agent, workspace, flag(ctx.flags, "on"), ctx.flags["refresh"] === true, usageIs(ctx));
+      ctx.out.emit(answer, toolLines(name, answer).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. ${SERVER_TOOLS_WORDS}`,
+      input: {
+        name: z.string().describe("the server's name, as servers lists it"),
+        agent: z.string().describe("the catalog id of the agent whose config names it, as servers lists it"),
+        workspace: AgentsWorkspaceIn,
+        on: AgentsOnIn,
+        refresh: z.boolean().optional().describe("start it again even where an answer from the last hour stands"),
+      },
+      output: ServerToolsAnswer.shape,
+      call: async ({ name, agent, workspace, on, refresh }, deps) => {
+        const answer = await serverToolsOf(await deps.client(), name, agent, workspace, on, refresh === true, "servers_tools takes a workspace or on, not both");
+        return asText(toolLines(name, answer).join("\n"), answer);
       },
     }),
   },
@@ -3937,6 +3986,9 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "agents on": AGENTS_ON_WORDS,
   "skills on": AGENTS_ON_WORDS,
   "servers on": AGENTS_ON_WORDS,
+  "servers tools on": AGENTS_ON_WORDS,
+  "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
+  "servers tools refresh": "start the server again even where an answer from the last hour stands",
   repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",

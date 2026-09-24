@@ -54,6 +54,7 @@
 //   settings-about        the two halves of the release, in a desktop shell
 //   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
 //                         shell holds the bundle's download until the test lets it go
+//   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer the Add a computer sheet over Computers
@@ -74,8 +75,9 @@ import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startin
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsList, type AgentsShell } from "../../src/components/agents/AgentsList";
+import { useServerTools } from "../../src/components/agents/useServerTools";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT } from "../fixtures/agents-report";
+import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -292,6 +294,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-keybindings": { kind: "group", group: "keybindings" },
   "settings-about": { kind: "group", group: "about" },
   "settings-about-behind": { kind: "group", group: "about" },
+  "settings-about-restart": { kind: "group", group: "about" },
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
@@ -387,6 +390,7 @@ const api = {
   image: async () => (settings ? { image: IMAGE, copies: IMAGE_COPIES, projects: [] } : { image: null, copies: [], projects: [] }),
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
+  serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},
@@ -413,7 +417,7 @@ const api = {
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
 }
-if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind") {
+if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
   window.wsp = { version: "0.2.0" };
   (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.2.0" };
 }
@@ -443,8 +447,10 @@ useStore.setState({
   addComputerOpen: screen === "settings-add-computer",
   release:
     screen === "settings-about-behind"
-      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app", restartReturns: false }
-      : null,
+      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
+      : screen === "settings-about-restart"
+        ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
+        : null,
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},
@@ -473,11 +479,12 @@ const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
   { shell: "panel", width: 360 },
 ];
 function AgentsWidths() {
+  const tools = useServerTools(AGENTS_REPORT.target);
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
         <div key={w.width} data-agents-width={w.width} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
-          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box" }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
+          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box", ...(tools === undefined ? {} : { tools }) }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
         </div>
       ))}
     </div>
