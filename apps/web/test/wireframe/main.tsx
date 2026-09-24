@@ -75,8 +75,9 @@ import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startin
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsList, type AgentsShell } from "../../src/components/agents/AgentsList";
+import { useServerTools } from "../../src/components/agents/useServerTools";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT } from "../fixtures/agents-report";
+import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -389,6 +390,7 @@ const api = {
   image: async () => (settings ? { image: IMAGE, copies: IMAGE_COPIES, projects: [] } : { image: null, copies: [], projects: [] }),
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
+  serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},
@@ -477,11 +479,12 @@ const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
   { shell: "panel", width: 360 },
 ];
 function AgentsWidths() {
+  const tools = useServerTools(AGENTS_REPORT.target);
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
         <div key={w.width} data-agents-width={w.width} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
-          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box" }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
+          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box", ...(tools === undefined ? {} : { tools }) }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
         </div>
       ))}
     </div>

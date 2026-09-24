@@ -196,6 +196,45 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
     }
   });
 
+  it("lists a server's tools under its open row on the page and at the panel's floor, the lines held to two, and photographs both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
+      const card = page!.locator("[data-settings-card='agents']");
+      await card.locator("[data-agents-row]").first().waitFor();
+      await card.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
+      for (const name of ["airtable", "github"]) {
+        const row = card.locator(`[data-agents-row$="-${name}"]`);
+        await row.locator("[data-row-trigger]").click();
+        await row.locator("[data-k=act-list-tools]").click();
+        await row.locator("[data-k=server-tools]").waitFor();
+      }
+      const airtable = card.locator('[data-agents-row$="-airtable"]');
+      expect(await airtable.locator("[data-k=server-tools-count]").textContent()).toBe("3 tools");
+      // A description clamps at two 16 px lines; a name stands on one.
+      const heights = await airtable.locator("[data-tool] > span").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      expect(Math.max(...heights)).toBeLessThanOrEqual(32);
+      expect(await card.locator('[data-agents-row$="-github"] [data-k=server-tools-refused]').textContent()).toBe("Did not answer in 20 s.");
+      expect(await card.locator('[data-agents-row$="-github"] [data-row-word]').textContent()).toBe("failed");
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      await card.screenshot({ path: join(SHOTS_DIR, `agents-tools-page-${theme}.png`) });
+      // The panel's floor: the tools stand inside the row at 360.
+      await open(`screen=agents-widths&theme=${theme}`);
+      const panel = page!.locator('[data-agents-width="360"]');
+      await panel.locator("[data-agents-row]").first().waitFor();
+      await panel.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
+      const row = panel.locator('[data-agents-row$="-airtable"]');
+      await row.locator("[data-row-trigger]").click();
+      await row.locator("[data-k=act-list-tools]").click();
+      await row.locator("[data-tool]").first().waitFor();
+      const within = await row.evaluate(el => {
+        const r = el.getBoundingClientRect();
+        return [...el.querySelectorAll("[data-tool] span")].every(s => s.getBoundingClientRect().right <= r.right + 0.5);
+      });
+      expect(within).toBe(true);
+      await panel.screenshot({ path: join(SHOTS_DIR, `agents-tools-panel-${theme}.png`) });
+    }
+  }, 120_000);
+
   it("photographs the list at every width and the task's panel on Agents, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);

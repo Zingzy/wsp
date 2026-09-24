@@ -7,7 +7,7 @@
 // refusal named on the host rather than a file that seems not to be there.
 import type { Host, HostExec, HostFs, RunOptions, Stat } from "@wsp/collect";
 import { EXEC_TIMEOUT_MAX_MS, shellQuote } from "@wsp/protocol";
-import { asLogin, type Machine, type TargetLogin } from "@wsp/engine";
+import { asLogin, stageAsLogin, type Machine, type TargetLogin } from "@wsp/engine";
 
 /** A Host whose reads may have been refused: one line per read that could not answer whole. */
 export interface MachineHost extends Host {
@@ -85,8 +85,22 @@ function batched<T>(flush: (items: string[]) => Promise<T[]>): (item: string) =>
 }
 
 const decoded = (line: string): string => Buffer.from(line, "base64").toString("utf8");
+const ok = (res: { exitCode: number; stdout: string }): string | undefined => (res.exitCode === 0 ? res.stdout : undefined);
 
-export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin): MachineHost {
+/** Reads NUL-separated names and values off the line's own stdin into its environment, before anything else runs. */
+const ENV_FROM_STDIN = `while IFS= read -r -d '' k && IFS= read -r -d '' v; do export "$k=$v"; done; `;
+
+/** Opens the file of names and values at $1, removes its folder $2, reads the pairs into its environment as data, then
+ * becomes the command after them. */
+const ENV_FROM_FILE = `bash -c ${shellQuote(`exec 4< "$1" || exit 1; rm -rf -- "$2"; while IFS= read -r -d '' k <&4 && IFS= read -r -d '' v <&4; do export "$k=$v"; done; exec 4<&-; shift 2; exec "$@"`)} bash`;
+const STAGE_MS = 20_000;
+
+/** How the variables a run is given reach it, never on a command line another login on that computer can read: over
+ * the command's stdin where the road hands it over, as a computer you joined does, else in a file landed by the
+ * machine's own byte road into a folder only that login can read, gone before the command runs. */
+export type EnvRoad = { stdin: true } | { land: Pick<Machine, "id" | "putBytes" | "uploadUrl"> };
+
+export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin, envRoad: EnvRoad): MachineHost {
   const refused: string[] = [];
   const refuse = (line: string): void => {
     if (!refused.includes(line)) refused.push(line);
@@ -123,9 +137,13 @@ export function machineHost(machine: Pick<Machine, "exec">, login: TargetLogin):
   );
   const list = batched<string[]>(async items => (await answer("list", script.list, items)).map(line => (line === undefined ? [] : decoded(line).split("\n").filter(n => n !== "").sort())));
   const run = async (cmd: string, args: readonly string[], opts: RunOptions = {}): Promise<string | undefined> => {
-    const env = Object.entries(opts.env ?? {}).map(([k, v]) => `export ${k}=${shellQuote(v)}; `).join("");
-    const res = await machine.exec(asLogin(login, `${env}${[cmd, ...args].map(shellQuote).join(" ")} </dev/null`), { timeoutMs: Math.min(opts.timeoutMs ?? 120_000, EXEC_TIMEOUT_MAX_MS) });
-    return res.exitCode === 0 ? res.stdout : undefined;
+    const vars = Object.entries(opts.env ?? {});
+    const line = [cmd, ...args].map(shellQuote).join(" ");
+    const bound = { timeoutMs: Math.min(opts.timeoutMs ?? 120_000, EXEC_TIMEOUT_MAX_MS) };
+    const pairs = Buffer.from(vars.map(([k, v]) => `${k}\0${v}\0`).join(""));
+    if (vars.length === 0) return ok(await machine.exec(asLogin(login, `${line} </dev/null`), bound));
+    if ("stdin" in envRoad) return ok(await machine.exec(asLogin(login, `${ENV_FROM_STDIN}${line} </dev/null`), { ...bound, stdin: pairs }));
+    return ok(await stageAsLogin(machine, envRoad.land, login, "the command's variables", pairs, (file, folder) => machine.exec(asLogin(login, `${ENV_FROM_FILE} ${shellQuote(file)} ${shellQuote(folder)} ${line} </dev/null`), bound), { timeoutMs: STAGE_MS }));
   };
   const fs: HostFs = {
     stat,

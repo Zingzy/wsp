@@ -241,6 +241,8 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("agents", "agents");
     await last("skills", "skills", "--on", HERE_PLACE_ID);
     await last("servers", "servers");
+    // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
+    expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
     expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });
     // A second project, recorded and dropped, so the verb that takes one out is run under --json too.
     await rt.projects.add({ source: "https://github.com/dev/spare.git", on: "default" });

@@ -7,6 +7,7 @@
 // nothing here reads or writes a file.
 import type { McpServerSpec } from "@wsp/protocol";
 import { readJsonc, type Jsonc } from "./jsonc.js";
+import type { McpCheck } from "./mcp-check.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
@@ -132,6 +133,8 @@ export interface McpConfig {
   scope: string;
   /** Where an http server's sign-in lives when the agent keeps it beside its own login, for the row; absent, nothing is said. */
   httpAuth?: string;
+  /** How the harness answers for one server's sign-in; absent where no harness's words were measured. */
+  check?: McpCheck;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

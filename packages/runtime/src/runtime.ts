@@ -121,7 +121,7 @@ import {
   DiskSyncError,
   syncDisk,
 } from "@wsp/engine";
-import type { AgentsReport, AgentsTarget, DaemonFrame, DaemonResponse, PlaceReport } from "@wsp/protocol";
+import type { AgentsReport, AgentsTarget, DaemonFrame, DaemonResponse, PlaceReport, ServerToolsAnswer } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -1254,7 +1254,11 @@ export interface Runtime {
   hereChannel(onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel>;
   /** The agents, skills and MCP servers on one computer or workspace, read as that computer's login. A napping
    * workspace answers the last report read while it ran and is never woken for this. */
-  readonly agents: { read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport> };
+  readonly agents: {
+    read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport>;
+    /** One MCP server there, started or asked once for its tools on the person's ask; a napping workspace is refused. */
+    tools(target: AgentsTarget, ask: { agent: string; name: string; refresh?: boolean }, origin?: Caller): Promise<ServerToolsAnswer>;
+  };
   /** Every verb takes where the request reached the host from as its last argument: here, this computer's own app,
    * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
    * refuses one with the one sentence, and the lists that serve workspaces leave it out for that caller. */

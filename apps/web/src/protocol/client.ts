@@ -8,6 +8,7 @@
 import {
   AccountView,
   AgentsReport,
+  ServerToolsAnswer,
   type AgentsTarget,
   BringBackResult,
   CLOUD_SETUP_WORDS,
@@ -415,6 +416,9 @@ export interface Api {
   /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
    * wakes a napping machine. A client without it draws no report. */
   agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
+  /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
+   * answer an hour unless `refresh`. A client without it holds List tools. */
+  serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -762,6 +766,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
+    serversTools: async (target, agent, name, refresh) =>
+      ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>
