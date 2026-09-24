@@ -15,7 +15,7 @@ const DROPPED = "/Users/me/Projects/spoo";
 vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld }, ipcRenderer: { invoke, send, sendSync, on, off }, webUtils: { getPathForFile: () => DROPPED } }));
 
 // The preload reads the renderer's argv as its module body runs, which is the first import below.
-process.argv.push("--wsp-version=0.1.7");
+process.argv.push("--wsp-version=0.1.7", "--wsp-bundle-hover=Downloads the AppImage.");
 
 async function bridge(): Promise<DesktopBridge> {
   await import("../src/preload.js");
@@ -28,6 +28,10 @@ async function bridge(): Promise<DesktopBridge> {
 describe("the preload's bridge", () => {
   it("carries the release this shell is, so a page from a host of another one can say which half is behind", async () => {
     expect((await bridge()).version).toBe("0.1.7");
+  });
+
+  it("carries the words over Get that the shell's platform row gives", async () => {
+    expect((await bridge()).bundleHover).toBe("Downloads the AppImage.");
   });
 
   it("carries the picture calls the switcher's cards need, each on its own channel", async () => {
