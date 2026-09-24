@@ -9,19 +9,13 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
+import { releaseAhead } from "../shell/shellVersion.js";
 import { ABOUT_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
 import type { SettingsCardData, SettingsLineData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
-/** The release this page's app or host is behind, or nothing: what the Latest ink, the buttons and the sidebar's
- * word all read, so the three cannot disagree. */
-function releaseBehind(ctx: SettingsContext): ReleaseLatest | undefined {
-  const { release, shell } = ctx;
-  if (release === null) return undefined;
-  const running = [shell.host, shell.inShell ? shell.app : undefined].filter((version): version is string => version !== undefined);
-  return releaseAbove(release, ...running) ? release.latest : undefined;
-}
+const releaseBehind = (ctx: SettingsContext): ReleaseLatest | undefined => releaseAhead(ctx.release, ctx.shell);
 
 function latestHover(release: ReleaseView, now: number): string | undefined {
   if (release.state === "off") return ABOUT_WORDS.offHover;

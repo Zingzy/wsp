@@ -2614,6 +2614,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** On a recipe job's done step, how many of its rows failed: the job is done once every row has an outcome. */
+  failed: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -2892,7 +2894,8 @@ export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" 
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
 export const PlacePresentEvent = z.object({ type: z.literal("place.present"), placeId: z.string(), from: z.string() });
-export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string() });
+/** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
+export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
 /** The four as one type, so the host's door and the app's fold read one shape. */
 export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;

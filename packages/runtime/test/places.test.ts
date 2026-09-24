@@ -421,6 +421,8 @@ describe("a computer joining", () => {
     sockets.push(joined.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
+    const absences: Record<string, unknown>[] = [];
+    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
     const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
     expect(again.proved).toMatchObject({ ok: false });
@@ -435,6 +437,8 @@ describe("a computer joining", () => {
     const row = (await placesOf()).find(p => p.id === joined.placeId)!;
     expect(row.dialled).toMatchObject({ answered: false, said: placeCannotBootLine("old-macbook", BLOCKED) });
     expect(row.takesForks).toBe(true);
+    // The absence carries the same sentence, so a client says why rather than that the box stopped answering.
+    expect(absences).toContainEqual(expect.objectContaining({ placeId: joined.placeId, said: placeCannotBootLine("old-macbook", BLOCKED) }));
   });
 
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
@@ -1638,6 +1642,8 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
     // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
     expect(stages.at(-1)?.note).toBe("engine none");
+    // The computer is held by the time its join is done, so that step names the row a reader acts on.
+    expect(stages.at(-1)?.placeId).toBe(added.place.id);
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -3593,6 +3599,18 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(provision.length).toBeGreaterThan(0);
     expect(provision.every(s => s.placeId === placeId)).toBe(true);
     expect(provision.filter(s => s.state === "done").map(s => s.placeId)).toEqual([placeId]);
+  });
+
+  it("counts the rows that failed on the job's last step and on no other", async () => {
+    const failing = provisioner({ rows: [...ROWS, { id: "agents/uv", label: "uv", outcome: "failed", note: "exit 2" }, { id: "agents/go", label: "Go", outcome: "failed" }], hold: true });
+    const stages: PlaceStageEvent[] = [];
+    const { placeId } = await joined({ provision: failing.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    failing.release();
+    await until(async () => stages.some(s => s.step === "provision" && s.state === "done"));
+    const done = stages.find(s => s.step === "provision" && s.state === "done")!;
+    expect(done.failed).toBe(2);
+    expect(stages.filter(s => s.state !== "done").every(s => s.failed === undefined)).toBe(true);
   });
 
   it("says nothing about the image while the job runs, and reads the image again once the job ends", async () => {

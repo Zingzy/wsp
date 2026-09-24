@@ -431,9 +431,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, at every width, in both themes", async () => {
+  it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, its where-and-when one line, at every width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
-    const toast = encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`);
+    const toast = `${encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`)}&where=${"spoo-".repeat(40)}`;
     for (const theme of ["dark", "light"] as const) {
       for (const width of [1200, 390]) {
         await page!.setViewportSize({ width, height: 800 });
@@ -448,6 +448,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(b.y).toBeGreaterThanOrEqual(header.y + header.height);
         expect(await notice.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
         expect(await notice.evaluate(el => el.closest("[data-app-sidebar]"))).toBeNull();
+        const when = notice.locator("[data-notice-when]");
+        expect((await when.boundingBox())!.height).toBeLessThan(20);
+        expect(await when.textContent()).toMatch(/\d{2}:\d{2}$/);
         const path = join(SHOTS_DIR, `notice-${theme}-${width}.png`);
         await page!.screenshot({ path });
         console.info(`notice screenshot: ${path}`);
@@ -455,6 +458,23 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
     await page!.setViewportSize({ width: 1200, height: 800 });
   }, 60_000);
+
+  it("a prompt and a dead thread on a workspace not open stand as a waiting and an error notice, each with an Open, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&host=1`);
+      await page!.locator("[data-notice]").nth(1).waitFor();
+      const notices = await page!.locator("[data-notice]").evaluateAll(els => els.map(el => el.textContent ?? ""));
+      console.info(`host notices at ${theme}: ${JSON.stringify(notices)}`);
+      expect(notices).toHaveLength(2);
+      expect(notices[0]).toMatch(/^waiting/);
+      expect(notices[1]).toMatch(/^error/);
+      expect(notices[1]).toContain("stopped before it replied: exit 1");
+      expect(await page!.locator("[data-notice-action]").allTextContents()).toEqual(["Open", "Open"]);
+      const path = join(SHOTS_DIR, `notice-host-${theme}.png`);
+      await page!.locator("[data-notices]").screenshot({ path });
+      console.info(`host notices screenshot: ${path}`);
+    }
+  }, 30_000);
 
   it("a shell older than the host that served the page says so in a toast, with the releases page behind its button, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
