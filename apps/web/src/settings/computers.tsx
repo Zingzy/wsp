@@ -11,6 +11,7 @@
 // and every computer joined to it always, and a cloud account only once this
 // host holds its key or a workspace stands on it. A list that named an
 // account nobody had bought, with an hourly price beside it, read as a bill.
+import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { useState } from "react";
 import { HERE_PLACE_ID, PLACES_WORDS, PROVISION_KIND_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
@@ -178,6 +179,7 @@ function agentRows(agents: readonly AgentLine[], here: boolean, computer: string
       kind: "row" as const,
       id: `agent-${agent.id}`,
       title: agent.name,
+      lead: <HarnessMark harness={agent.id} label={agent.name} className="size-4" />,
       description,
       mono: true,
       attrs: { "data-k": "agent", "data-agent": agent.id },

@@ -4,7 +4,7 @@
 // running) stays greyed out in the picker with a reason. Terminal
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
 // link. The diff runs in its own worker pool, themed for the side the page is
-// drawing. With no workspace selected every pane is held until one is.
+// drawing. With no workspace selected the panel is this computer's own.
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
@@ -18,48 +18,14 @@ import { DiffSurface } from "../diffs/DiffSurface.js";
 import { useAbsentComputer, useWorkspace } from "../protocol/store.js";
 import { useAppDark } from "../settings/theme.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
+import { HERE_KEY } from "../terminal/computer.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 const NO_SESSIONS = {};
 const NO_LABELS: ReadonlyMap<string, string> = new Map();
-const NOTHING = (): void => {};
-const HELD_PANELS_LINE = "These open once a workspace does.";
-
-/** The panel with no workspace on screen: every panel shown and held, and one line saying why. */
-export function HeldRightPanel({ mode, layoutControls, onClose }: { mode: PreviewPanelMode; layoutControls?: ReactNode; onClose: () => void }) {
-  const tabs = (
-    <RightPanelTabs
-      mode={mode}
-      {...(layoutControls !== undefined ? { layoutControls } : {})}
-      surfaces={[]}
-      activeSurfaceId={null}
-      pendingSurfaceIds={NO_PENDING}
-      previewSessions={NO_SESSIONS}
-      terminalLabelsById={NO_LABELS}
-      onActivate={NOTHING}
-      onCloseSurface={NOTHING}
-      onAddBrowser={NOTHING}
-      onAddTerminal={NOTHING}
-      onAddDiff={NOTHING}
-      browserAvailable={false}
-      terminalAvailable={false}
-      diffAvailable={false}
-      heldLine={HELD_PANELS_LINE}
-    >
-      {null}
-    </RightPanelTabs>
-  );
-  return mode === "sheet" ? (
-    <RightPanelSheet open onClose={onClose}>
-      {tabs}
-    </RightPanelSheet>
-  ) : (
-    tabs
-  );
-}
-
+const NO_PROJECT_HERE = "Pick a project to review its changes.";
 export function RightPanel({
   workspaceId,
   state,
@@ -72,6 +38,7 @@ export function RightPanel({
   layoutControls?: ReactNode;
 }) {
   const workspace = useWorkspace(workspaceId);
+  const here = workspaceId === HERE_KEY;
   const absent = useAbsentComputer(workspaceId);
   // The code views take a side as a prop and colour their tokens from it. It has to be the side the page is
   // drawing: a diff themed for the other side draws its lines in an ink the row tints were never measured against.
@@ -108,12 +75,12 @@ export function RightPanel({
       onAddBrowser={() => open(workspaceId, "preview")}
       onAddTerminal={() => void openPanelTerminal(workspaceId)}
       onAddDiff={() => open(workspaceId, "diff")}
-      browserAvailable={workspace?.phase === "running"}
-      terminalAvailable={workspace?.phase === "running" && absent === null}
+      browserAvailable={here || workspace?.phase === "running"}
+      terminalAvailable={here || (workspace?.phase === "running" && absent === null)}
       diffAvailable={workspace?.phase === "running"}
       // A panel terminal cannot open at all without a pty, so its tab keeps the computer's own sentence as the
       // reason it is held, and the drawer under the chat is where that sentence carries the button.
-      {...(absent === null ? {} : { unavailableReasons: { terminal: absent.sentence } })}
+      {...(here ? { unavailableReasons: { diff: NO_PROJECT_HERE } } : absent === null ? {} : { unavailableReasons: { terminal: absent.sentence } })}
     >
       {active?.kind === "terminal" ? (
         <WorkspaceTerminalPanel workspaceId={workspaceId} surface={active} />

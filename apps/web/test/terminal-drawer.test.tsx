@@ -157,7 +157,7 @@ describe("WorkspaceTerminalDrawer", () => {
     expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalOpen ?? false).toBe(false);
 
     act(() => useTerminalDrawerStore.getState().setOpen(WS, true));
-    await screen.findByText(/No terminals for this workspace yet/);
+    await screen.findByText(/No terminals open/);
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(1);
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
@@ -440,7 +440,7 @@ describe("drawer resilience", () => {
     act(() => useStore.setState({ workspaces: [PANE_WS], statuses: {}, toast: null }));
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText(/No terminals for this workspace yet/);
+    await screen.findByText(/No terminals open/);
     await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
     expect(count("pty.create")).toBe(1);
     // The link is up and this one shell was refused: no pane stands in for that, so the sentence is the app's own

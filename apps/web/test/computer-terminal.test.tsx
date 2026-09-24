@@ -12,7 +12,7 @@ import { Shell } from "../src/App.js";
 import { ComputerTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import type { Api, DaemonTarget } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { useHeldPanelStore, useRightPanelStore } from "../src/rightPanelStore.js";
+import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { HERE_KEY } from "../src/terminal/computer.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
@@ -69,7 +69,6 @@ beforeEach(() => {
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0, settingsOpen: false });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
-  useHeldPanelStore.setState({ open: false });
 });
 afterEach(() => {
   cleanup();
@@ -98,7 +97,7 @@ describe("the terminal chord", () => {
 });
 
 describe("the right panel chord with no workspace", () => {
-  it("opens the panel with every panel held and one muted line saying they open once a workspace does", async () => {
+  it("opens this computer's panel: browser and terminal open here, the diff waits for a project", async () => {
     useStore.getState().bind(fakeApi([]));
     render(<Shell />);
     await waitFor(() => expect(useStore.getState().ready).toBe(true));
@@ -108,14 +107,8 @@ describe("the right panel chord with no workspace", () => {
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
     expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["browser", "terminal", "diff"]);
-    // Shown and not clickable: no card is a button.
-    for (const card of cards) {
-      expect(card.getAttribute("data-available")).toBe("false");
-      expect(card.tagName).not.toBe("BUTTON");
-    }
-    const held = screen.getByText("These open once a workspace does.");
-    expect(held.className).toContain("text-muted-foreground");
-    expect(held.className).toContain("font-mono");
+    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV"]);
+    screen.getByText("Pick a project to review its changes.");
 
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).toBeNull());
@@ -139,15 +132,13 @@ describe("this computer's drawer", () => {
     return ops;
   }
 
-  it("names where it runs in the header's mono and opens its first shell with no folder, which is the home folder", async () => {
+  it("opens its first shell with no folder, which is the home folder, and no header over it", async () => {
     const ops = fakeWire();
     useTerminalDrawerStore.getState().setOpen(HERE_KEY, true);
     render(<ComputerTerminalDrawer />);
     await waitFor(() => expect(ops.filter(o => o.op === "pty.create")).toHaveLength(1));
     expect(ops.find(o => o.op === "pty.create")!.params["cwd"]).toBeUndefined();
-    const where = await screen.findByText("This Mac, ~");
-    expect(where.className).toContain("font-mono");
-    expect(where.className).toContain("text-muted-foreground");
+    expect(document.querySelector("[data-terminal-where]")).toBeNull();
   });
 
   it.each([
@@ -158,9 +149,9 @@ describe("this computer's drawer", () => {
     useStore.getState().bind({ ...fakeApi([]), projectsList: async () => projects });
     render(<Shell />);
     await waitFor(() => expect(document.querySelector(centre)).not.toBeNull());
-    expect(screen.queryByText("This Mac, ~")).toBeNull();
+    expect(document.querySelector(".thread-terminal-drawer")).toBeNull();
     act(() => runShellCommand("terminal.toggle", target(null), []));
-    expect(await screen.findByText("This Mac, ~")).toBeTruthy();
+    await waitFor(() => expect(document.querySelector(".thread-terminal-drawer")).not.toBeNull());
   });
 });
 
