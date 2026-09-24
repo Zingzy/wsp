@@ -4791,7 +4791,7 @@ export const PlaceDoorView = z.object({
   /** The fingerprint of the key this host proves at a join, for the token the join line carries: what tells the
    * computer being joined that the host answering at one of those addresses is the one that printed the line. */
   hostKey: z.string().min(1).max(200),
-  /** The relay hostname as an https address, when the host is linked and its connector is running. */
+  /** The relay hostname as an https address, when the host is linked to a relay. */
   relay: z.string().url().optional(),
 });
 export type PlaceDoorView = z.infer<typeof PlaceDoorView>;
@@ -4807,7 +4807,8 @@ export const JoinMint = z.object({ joins: z.array(JoinRoad).min(1), expiresAt: z
 export type JoinMint = z.infer<typeof JoinMint>;
 
 /** A computer the person's own ssh already knows, offered where a computer is added over ssh: a Host block of their
- * ssh config, or a name their known_hosts holds. Read off those two files alone; no key is ever read. */
+ * ssh config, or a name their known_hosts holds. Only host, hostname, user and port words are taken from what those
+ * files name, so a key file an Include reaches yields nothing. */
 export const SshHostSuggestion = z.object({
   alias: z.string().min(1).max(300),
   hostName: z.string().max(300).optional(),
@@ -4816,6 +4817,20 @@ export const SshHostSuggestion = z.object({
   from: z.enum(["config", "known_hosts"]),
 });
 export type SshHostSuggestion = z.infer<typeof SshHostSuggestion>;
+
+/** The git hosts a person's ssh knows for pushing, never a computer to add: hidden from the ssh hosts offered, with
+ * every subdomain of each. */
+export const GIT_FORGE_HOSTS: readonly string[] = ["github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "sr.ht", "ssh.dev.azure.com", "vs-ssh.visualstudio.com"];
+
+/** Whether a host name is one of GIT_FORGE_HOSTS or under one. */
+export function isGitForge(host: string): boolean {
+  const name = host.toLowerCase();
+  return GIT_FORGE_HOSTS.some(forge => name === forge || name.endsWith(`.${forge}`));
+}
+
+/** The refusal a socket that is not the host's own gets for minting a join code: the code lets a computer in, so
+ * only this computer's own window may ask, as wsp add on its terminal does. */
+export const MINT_JOIN_REFUSAL = "only a socket holding this host's own token may mint a join code; run wsp add on the computer the host runs on";
 
 /** The refusal for reading the person's ssh hosts on any socket but this computer's own window: which computers
  * they reach is theirs, and a paired device, a relayed socket or a thread learns none of it. */

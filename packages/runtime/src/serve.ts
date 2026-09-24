@@ -59,6 +59,7 @@ import {
   isObjectFrame,
   joinRoads,
   joinToken,
+  MINT_JOIN_REFUSAL,
   SSH_HOSTS_REFUSAL,
   type AccountDevice,
   type AccountView,
@@ -826,7 +827,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "places.mint": {
               if (!ownRoad() || me?.kind !== "host") {
-                send({ id: msg.id, ok: false, error: PAIR_ISSUE_REFUSAL });
+                send({ id: msg.id, ok: false, error: MINT_JOIN_REFUSAL });
                 return;
               }
               if (opts.door === undefined) {
