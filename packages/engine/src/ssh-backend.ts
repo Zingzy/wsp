@@ -485,6 +485,28 @@ export async function offeredHostKey(reach: SshReach, run: SshLocalRun = localRu
   return key === undefined ? {} : { key };
 }
 
+/** What a word that is neither a login nor an alias is refused with, wherever it was typed. */
+export const SSH_WORD_REFUSAL = (word: string): string => `${word} is neither a login like root@host nor an alias your ssh config gives a HostName`;
+
+/** The dial one typed word names: a login is read as parseSshAddress reads it, and a bare word is an alias when the
+ * person's ssh config renames it. The alias stays the host, so every later dial still goes through its block; the
+ * user comes off that block and the port too unless one was typed, since sshDialArgs always passes -p and a 22 there
+ * would override the block's Port. ssh prints the hostname lowercased when nothing renamed it, so a word that comes
+ * back only lowercased is none; ssh matches a Host line with its case, so that word never met a block. */
+export async function sshWordReach(word: string, opts: { port?: number; keyPath?: string } = {}, run: SshLocalRun = localRun): Promise<SshReach> {
+  if (word.includes("@")) return parseSshAddress(word, opts);
+  // The word is handed to the client as an argument, so one that reads as an option never gets there.
+  if (!/^\w[\w.-]*$/.test(word)) throw new Error(SSH_WORD_REFUSAL(word));
+  // The resolver rewrites a numeric word into an address (123 prints 0.0.0.123), which would read as a rename.
+  if (/^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+)){0,3}$/i.test(word)) throw new Error(SSH_WORD_REFUSAL(word));
+  const config = await run("ssh", ["-G", word], SSH_LOCAL_READ_MS);
+  const values = config.exitCode === 0 ? readValues(config.stdout) : {};
+  const host = values["hostname"] ?? "";
+  const user = values["user"] ?? "";
+  if (host === "" || user === "" || host.toLowerCase() === word.toLowerCase()) throw new Error(SSH_WORD_REFUSAL(word));
+  return parseSshAddress(`${user}@${word}`, { port: opts.port ?? (Number(values["port"]) || SSH_DEFAULT_PORT), ...(opts.keyPath !== undefined ? { keyPath: opts.keyPath } : {}) });
+}
+
 /** The key this machine is known by, as one string whoever asks. `ssh -G` answers where the client looks and what
  * it prefers there with the person's own config applied, and `ssh-keygen -F` reads the entry out, hashed or not.
  * That much is read on this computer with nothing dialled, which is the road that survives a warm master: the

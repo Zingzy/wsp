@@ -11,7 +11,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { PLACES_TICKET_REFUSAL } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
-import { useSettingsStore } from "./settingsStore.js";
+import { useSettingsAt } from "./settingsContext.js";
+import { groupOf, useSettingsStore } from "./settingsStore.js";
 
 export function useSettingsReads(): void {
   const api = useStore(s => s.api);
@@ -19,6 +20,7 @@ export function useSettingsReads(): void {
   const addComputerOpen = useStore(s => s.addComputerOpen);
   const devicesAsked = useSettingsStore(s => s.devicesAsked);
   const setReads = useSettingsStore(s => s.setReads);
+  const onAbout = groupOf(useSettingsAt()) === "about";
   const asking = useRef(false);
   /** Set when this window may not read the money at all, so it stops asking at every tick. Only that refusal sets
    * it: a read dropped while the socket reconnects is asked again at the next tick. */
@@ -74,6 +76,11 @@ export function useSettingsReads(): void {
       live = false;
     };
   }, [api, devicesAsked, setReads]);
+
+  // Each opening of About asks the host to read the newest release again; the host's floor keeps that to one ask.
+  useEffect(() => {
+    if (onAbout) void api?.releaseCheck?.().then(release => useStore.setState({ release }), () => {});
+  }, [api, onAbout]);
 
   // Read again when the image sheet shuts, since a build that ran behind it changes every fact about the image.
   useEffect(() => {

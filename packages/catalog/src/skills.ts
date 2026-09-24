@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Where each agent loads skills from. An agent entry names its own folders
+// here; the reader lists every folder of every entry, so an agent the catalog
+// gains needs nothing in the reader.
+
+/** One folder an agent loads skills from, one folder per skill with a SKILL.md inside: `~/`-relative for the
+ * person's own, project-relative for a project's. `lands` is how an install puts a skill there: its files, or a
+ * link to the one copy in the shared folder. */
+export interface SkillRoot {
+  dir: string;
+  lands: "copy" | "link";
+}
+
+/** The folder several agents read as their own and the skills CLI keeps the one copy of a skill in. */
+export const SHARED_SKILLS = "~/.agents/skills";
+
+/** The same folder inside a project. */
+export const PROJECT_SHARED_SKILLS = ".agents/skills";
+
+/** An agent's skill folders: its own first, which is where the wsp skill goes with the MCP server, then the ones it
+ * also reads; and the folders it reads inside a project. */
+export interface SkillRoots {
+  user: readonly [SkillRoot, ...SkillRoot[]];
+  project: readonly SkillRoot[];
+}
+
+/** Skills a plugin brings: the index file that names each installed plugin's folder, and the skill folders that
+ * index names. Read, never written: a plugin's skills come and go with the plugin. */
+export interface PluginSkills {
+  index: string;
+  roots(text: string): string[];
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Claude Code's installed_plugins.json, version 2 (read 2026-09-24 on 2.1.281): `plugins.<name@marketplace>` is a
+ * list of installs, each with its scope and installPath; a user-scoped install's skills are under
+ * `<installPath>/skills`. A project-scoped one belongs to that project and is left out. */
+export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
+  index: "~/.claude/plugins/installed_plugins.json",
+  roots: text => {
+    let root: unknown;
+    try {
+      root = JSON.parse(text);
+    } catch {
+      return [];
+    }
+    const plugins = isObject(root) && isObject(root.plugins) ? root.plugins : {};
+    const out = new Set<string>();
+    for (const installs of Object.values(plugins)) {
+      if (!Array.isArray(installs)) continue;
+      for (const i of installs) if (isObject(i) && i.scope === "user" && typeof i.installPath === "string" && i.installPath.startsWith("/")) out.add(`${i.installPath.replace(/\/+$/, "")}/skills`);
+    }
+    return [...out];
+  },
+};
+
+/** The folder the agent's own skills go in, where the wsp skill is written. */
+export const skillsDirOf = (a: { skillRoots: SkillRoots }): string => a.skillRoots.user[0].dir;

@@ -33,8 +33,8 @@ import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFA
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
-import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
-import { daemonFixLine } from "./daemon-fix.js";
+import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
+import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedEnv, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
@@ -94,13 +94,14 @@ import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnor
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { agentsReader } from "./agents-reader.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
-import { releaseWatch } from "./release.js";
+import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -121,8 +122,8 @@ usage: wsp <verb> ...
 
   wsp init                        set this computer up: your tools and sign-ins,
                                   copied so a workspace starts ready
-  wsp add <user@host|folder|url>  a computer of yours over ssh; or a project: a
-                                  folder here, or a repo a computer clones
+  wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
+                                  or a project: a folder here or a repo cloned
                                   with --on <computer>
   wsp computers                   your computers: this one, each box you added,
                                   each cloud account
@@ -772,6 +773,8 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
+    // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
+    agentsReader: agentsReader({ vault: () => vaultNow(statePath) }),
     // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),
@@ -1634,6 +1637,12 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
   return 0;
 }
 
+/** The latest row's words off the file the host keeps, asking no host; nothing where no ask was ever kept. */
+function latestHere(statePath: string, env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const reading = releaseReading(statePath, env);
+  return reading === undefined ? undefined : latestWords(reading, VERSION, version => releaseUpdateLine(runningWsp(), version));
+}
+
 export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string; watch?: boolean } & HostPick, deps: ServiceDeps): Promise<number> {
   // The one line that leaves this computer only when a person named a host: --host or WSP_HOST and nothing else.
   // A verb has a host to speak to whatever the line said, so it follows the fallbacks under those two, the default
@@ -1679,7 +1688,7 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
   const reading = await serviceReading(deps.manager, serviceAddressHere(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
   const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
-  for (const line of statusLines(opts.statePath, host, reading)) io.log(line);
+  for (const line of statusLines(opts.statePath, host, reading, Date.now(), latestHere(opts.statePath, opts.env ?? process.env))) io.log(line);
   return host?.answering === true ? 0 : 1;
 }
 
@@ -1919,7 +1928,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   status: {
     page: "front",
     usage: "wsp status [--watch]",
-    about: "whether a host serves this state file, on which ports and what keeps it there, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer",
+    about: "whether a host serves this state file, on which ports, what keeps it there and the newest release the host last read, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer",
     json: false,
     host: "aimed",
     cliOnly: "reads this computer's lock and service manager, the agent on a computer that joined somebody's wsp, or dials the host named beside it; a tool that answers at all is proof a host is up",
@@ -2046,9 +2055,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      "wsp add [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
+      "wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
     about:
-      "a computer of yours over ssh, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
+      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
@@ -2114,6 +2123,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // Read once, and printed at the end of every road: what is still open after a road closed what it opened is
       // what would hold this process after its last line.
       const showHandles = opts.env[DOCTOR_HANDLES_ENV] === "1";
+      const latest = latestHere(opts.statePath, opts.env);
       const handles = (road: string): void => {
         if (showHandles) io.error(`${road} left open: ${process.getActiveResourcesInfo().join(", ") || "nothing"}`);
       };
@@ -2124,7 +2134,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         const { keys, env } = await loadKeys(io, keySources(opts.providerEnv, opts.statePath), NO_CLOUD_KEY);
         const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local);
         try {
-          return await localDoctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}) });
+          return await doctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}), ...(latest !== undefined ? { latest } : {}) });
         } finally {
           await rt.close();
           handles("the local road");
@@ -2151,6 +2161,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
             ...(computer !== undefined ? { computer } : {}),
             ...project,
             ...(hereDaemon !== undefined ? { hereDaemon } : {}),
+            ...(latest !== undefined ? { latest } : {}),
             vault: () => vaultNow(opts.statePath),
             ...(provision !== undefined ? { plan: () => provision.plan({ home: GUEST_HOME }) } : {}),
             statePath: opts.statePath,

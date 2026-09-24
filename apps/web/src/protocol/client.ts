@@ -7,6 +7,8 @@
 // to live.
 import {
   AccountView,
+  AgentsReport,
+  type AgentsTarget,
   BringBackResult,
   CLOUD_SETUP_WORDS,
   DeviceView,
@@ -52,6 +54,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  ReleaseView,
   SealedImageView,
   type SessionEvent,
   type SessionView,
@@ -409,6 +412,9 @@ export interface Api {
    * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
    * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
+  /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
+   * wakes a napping machine. A client without it draws no report. */
+  agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -508,6 +514,10 @@ export interface Api {
   preferences?(): Promise<Preferences>;
   /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
   setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
+  /** The newest release as the host last read it, asking nobody. Optional so fixtures without About need not fake it. */
+  releaseGet?(): Promise<ReleaseView>;
+  /** Asks the host to read the newest release again; the host keeps asks ten minutes apart and answers its reading. */
+  releaseCheck?(): Promise<ReleaseView>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
@@ -727,6 +737,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
+    releaseGet: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.get")).release),
+    releaseCheck: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check")).release),
     // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.
@@ -746,6 +758,7 @@ export function makeApi(c: ProtocolClient): Api {
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
+    agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

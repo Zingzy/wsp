@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELEASE_API_ENV, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
-import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, parseRelease, releaseFileFor, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
+import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, latestWords, parseRelease, releaseFileFor, releaseReading, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const ETAG = 'W/"405c3ada"';
@@ -286,5 +286,32 @@ describe("the host's reading of the newest release", () => {
     const { watch } = watchOn(statePath, { fetch: fakeGithub([]).fetch, env: { [UPDATE_CHECK_ENV]: "0" } });
     await watch.check();
     expect(existsSync(releaseFileFor(statePath))).toBe(false);
+  });
+});
+
+describe("what the command line reads off release.json, with no host asked", () => {
+  it("is nothing before any ask, the number once one was read, unreached where every ask failed, and off under either switch", async () => {
+    const statePath = stateIn();
+    expect(releaseReading(statePath, {})).toBeUndefined();
+    await watchOn(statePath, { fetch: fakeGithub([ok()]).fetch }).watch.check();
+    expect(releaseReading(statePath, {})).toEqual({ state: "read", latest: parseRelease(ANSWER) });
+    expect(releaseReading(statePath, { [UPDATE_CHECK_ENV]: "0" })).toEqual({ state: "off" });
+    writeFileSync(join(statePath, "..", ".env"), `${UPDATE_CHECK_ENV}=0\n`);
+    expect(releaseReading(statePath, {})).toEqual({ state: "off" });
+    const failed = stateIn();
+    await watchOn(failed, { fetch: fakeGithub([new Error("offline")]).fetch }).watch.check();
+    expect(releaseReading(failed, {})).toEqual({ state: "unreached" });
+    expect(releaseReading(stateIn(), { [UPDATE_CHECK_ENV]: "0" })).toEqual({ state: "off" });
+  });
+
+  it("words the row: the number alone when this wsp is level or ahead, the road to it when behind, else the state", () => {
+    const latest = parseRelease(ANSWER);
+    const fix = (version: string): string => `npm i -g @zingzy/wsp@${version}`;
+    expect(latestWords({ state: "read", latest }, "0.2.0", fix)).toBe("0.2.0");
+    expect(latestWords({ state: "read", latest }, "0.3.0-rc.1", fix)).toBe("0.2.0");
+    expect(latestWords({ state: "read", latest }, "0.1.9", fix)).toBe("0.2.0; this is 0.1.9, npm i -g @zingzy/wsp@0.2.0 gets it");
+    expect(latestWords({ state: "unreached", latest }, "0.2.0", fix)).toBe("0.2.0");
+    expect(latestWords({ state: "unreached" }, "0.2.0", fix)).toBe("unreached");
+    expect(latestWords({ state: "off" }, "0.2.0", fix)).toBe("off");
   });
 });

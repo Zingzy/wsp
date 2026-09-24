@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The five groups beside Appearance and Computers: Projects with each
 // project's page and its one act, Devices with Revoke, Account's one row,
-// Keybindings as lines per platform, and About's two lines.
+// Keybindings as lines per platform, and About's lines with the newest release.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
-import type { DeviceView, PlaceView, ProjectView, WorkspaceView } from "@wsp/protocol";
-import { DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
+import type { DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
 import { placeName } from "../src/settings/places.js";
@@ -302,5 +303,140 @@ describe("About", () => {
     window.wsp = {};
     await mount({}, "about");
     expect(document.querySelector("[data-k=app-version] [data-settings-word]")?.textContent).toBe(ABOUT_WORDS.unknown);
+  });
+});
+
+describe("About and the newest release", () => {
+  const DAY = 24 * 60 * 60_000;
+  const read = (version: string, over: Partial<ReleaseView> = {}): ReleaseView => ({
+    state: "read",
+    latest: { version, tag: `v${version}`, url: `https://github.com/Zingzy/wsp/releases/tag/v${version}`, publishedAt: AT },
+    // An hour past the day, so the page's minute clock reads the same whole days as this one.
+    checkedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
+    triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
+    shape: "app",
+    restartReturns: false,
+    ...over,
+  });
+  const shell = (app: string | undefined, host: string): void => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
+    if (app === undefined) delete window.wsp;
+    else window.wsp = { version: app };
+  };
+  const latest = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-k=latest-version]");
+  const latestWord = (): string | undefined => latest()?.querySelector("[data-settings-word]")?.textContent ?? undefined;
+  const inks = (): string[] => (latest()?.querySelector("[data-settings-word]")?.className ?? "").split(" ");
+  const show = async (release: ReleaseView | null): Promise<void> => {
+    act(() => useStore.setState({ release }));
+    await settle();
+  };
+  const buttons = (): string[] => [...document.querySelectorAll("[data-settings-card=about] button")].map(b => b.textContent ?? "");
+  const aboutMeta = (): string | undefined => document.querySelector("[data-k=settings-about] [data-settings-meta]")?.textContent ?? undefined;
+
+  it("says the number in the value ink while it is above the app or the host, in the fact ink when level or ahead, and the state word only while nothing was ever read", async () => {
+    shell("0.2.0", "0.2.0");
+    await mount({}, "about");
+    // A host with no reading to give draws no line rather than a word it never said.
+    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
+    await show(read("0.3.0"));
+    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host, ABOUT_WORDS.latest]);
+    expect(latestWord()).toBe("0.3.0");
+    expect(inks()).toContain("text-foreground");
+    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("3 d ago"));
+    // Ahead of the page's minute clock, as a reading the opening itself asked for is.
+    await show(read("0.3.0", { checkedAt: new Date(Date.now() + 5_000).toISOString() }));
+    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("just now"));
+    await show(read("0.2.0"));
+    expect(latestWord()).toBe("0.2.0");
+    expect(inks()).toContain("text-muted-foreground");
+    // A reading kept through a failed ask stands, with the failure in the hover rather than in the slot.
+    const tried = new Date(Date.now() - 5 * 60_000).toISOString();
+    await show(read("0.3.0", { state: "unreached", triedAt: tried }));
+    expect(latestWord()).toBe("0.3.0");
+    expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
+    for (const [state, word] of [["checking", "checking"], ["unreached", "unreached"], ["off", "off"]] as const) {
+      await show({ state, shape: "app", restartReturns: false, ...(state === "unreached" ? { triedAt: tried } : {}) });
+      expect(latestWord()).toBe(word);
+      expect(inks()).toContain("text-muted-foreground");
+    }
+    expect(latest()?.title).toBe(ABOUT_WORDS.offHover);
+  });
+
+  it("reads the app's half as behind too, and a tab with no shell reads the host alone", async () => {
+    shell("0.2.0", "0.3.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    expect(inks()).toContain("text-foreground");
+    expect(buttons()).toContain(ABOUT_WORDS.get("0.3.0"));
+    document.body.innerHTML = "";
+    resetSettings();
+    shell(undefined, "0.3.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    expect(inks()).toContain("text-muted-foreground");
+    expect(buttons()).not.toContain(ABOUT_WORDS.get("0.3.0"));
+  });
+
+  it("offers Get with the release's page while behind, keeps Releases on the releases list, and offers nothing new when level", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    const opened: string[] = [];
+    window.open = ((url: string) => {
+      opened.push(url);
+      return null;
+    }) as typeof window.open;
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases"]);
+    await show(read("0.2.0"));
+    expect(buttons()).toEqual([ABOUT_WORDS.releases]);
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
+    expect(opened.at(-1)).toMatch(/\/releases$/);
+    // Under the switch no number stands, so nothing is offered off a stale one.
+    await show({ state: "off", shape: "app", restartReturns: false });
+    expect(buttons()).toEqual([ABOUT_WORDS.releases]);
+  });
+
+  it("the About row in the sidebar carries the newer version as its one mono word, and nothing while level", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "devices");
+    expect(aboutMeta()).toBe("0.3.0");
+    expect(document.querySelectorAll("[data-slot=sidebar] [data-settings-meta]").length).toBe(1);
+    await show(read("0.2.0"));
+    expect(aboutMeta()).toBeUndefined();
+    await show({ state: "unreached", shape: "app", restartReturns: false });
+    expect(aboutMeta()).toBeUndefined();
+  });
+
+  it("counts the computers whose daemon is behind in one line, naming them on hover, and draws none while every one is current", async () => {
+    shell("0.2.0", "0.2.0");
+    const behind = (id: string, name: string): PlaceView => ({ ...box, id, name, daemonVersion: DAEMON_VERSION - 3 });
+    useStore.setState({ places: [here, behind("p_spoo", "spoo"), behind("p_dev4", "dev4"), solari, { ...box, id: "p_new", name: "new", daemonVersion: DAEMON_VERSION }] });
+    await mount({}, "about");
+    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host, ABOUT_WORDS.computersBehind]);
+    expect(wordOf("computers-behind")).toBe("2");
+    expect(lineOf("computers-behind")?.querySelector("[data-settings-word]")?.className.split(" ")).toContain("text-muted-foreground");
+    expect(lineOf("computers-behind")?.title).toBe("spoo, dev4: wsp add <name> --update");
+    act(() => useStore.setState({ places: [here, behind("p_spoo", "spoo")] }));
+    await settle();
+    expect(wordOf("computers-behind")).toBe("1");
+    expect(lineOf("computers-behind")?.title).toBe("spoo: wsp add spoo --update");
+    act(() => useStore.setState({ places: [here, box, solari] }));
+    await settle();
+    expect(lineOf("computers-behind")).toBeNull();
+  });
+
+  it("opening About asks the host to check, which its floor keeps to one ask, and the answer lands on the page", async () => {
+    shell("0.2.0", "0.2.0");
+    const releaseCheck = vi.fn(async () => read("0.3.0"));
+    await mount({ releaseCheck } as Partial<Api>, "devices");
+    expect(releaseCheck).not.toHaveBeenCalled();
+    act(() => useSettingsStore.getState().go({ kind: "group", group: "about" }));
+    await settle();
+    expect(releaseCheck).toHaveBeenCalledTimes(1);
+    expect(latestWord()).toBe("0.3.0");
   });
 });

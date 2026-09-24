@@ -205,10 +205,14 @@ function readArgs(t: { command: string; args: readonly string[] }, home: string)
 /** The definition in a few words: the command and its arguments as the reading above leaves them, urls shown as
  * host and path, and every value hidden behind a placeholder. */
 function transportLine(t: McpTransport, home: string): string {
-  if (t.kind === "http") return `http: ${shownUrl(t.url)}`;
+  return t.kind === "http" ? `http: ${shownUrl(t.url)}` : `stdio: ${stdioLine(t, home)}`;
+}
+
+/** A stdio definition's command and its first arguments as a person reads them, every value of theirs hidden. */
+export function stdioLine(t: Extract<McpTransport, { kind: "stdio" }>, home: string): string {
   const words = readArgs(t, home).flatMap(r => (r.show === undefined ? [] : [r.show]));
   const cut = words.length > 5 ? [...words.slice(0, 5), "…"] : words;
-  return `stdio: ${[tilde(home, t.command), ...cut].join(" ")}`;
+  return [tilde(home, t.command), ...cut].join(" ");
 }
 
 interface Carried {

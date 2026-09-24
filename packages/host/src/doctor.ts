@@ -1326,6 +1326,8 @@ export interface DoctorOptions {
   plan?: () => Promise<ProvisionPlan | { noRecipe: string }>;
   /** The daemon this host runs for its own computer's workspace, for the line that says it is behind. */
   hereDaemon?: HereDaemon;
+  /** The newest release as the command line read it off the host's file, worded; absent where none was kept. */
+  latest?: string;
 }
 
 /** The repo the doctor's own project clones when nobody names one: a public repo of one commit, small enough that
@@ -1697,6 +1699,7 @@ export async function doctorOverHost(client: DoctorClient, io: CliIO, places: re
  * somebody joined takes neither: its link is held by the host it dials, so that host runs its road and the line
  * prints what it says. */
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
+  if (opts.latest !== undefined) io.log(`latest release ${opts.latest}`);
   // This computer's own row takes the local road, and so does a line that named nothing: a workspace here is a
   // copy of a folder on this computer, so the proof forks no machine and bills nothing.
   return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);

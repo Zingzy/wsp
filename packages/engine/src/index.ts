@@ -7,6 +7,7 @@ export * from "./preview.js";
 export * from "./solari-backend.js";
 export * from "./box-backend.js";
 export * from "./land-bytes.js";
+export * from "./target-line.js";
 export * from "./local-backend.js";
 export * from "./ssh-backend.js";
 export * from "./key-fingerprint.js";
