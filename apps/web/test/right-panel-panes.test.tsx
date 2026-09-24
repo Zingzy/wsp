@@ -29,7 +29,7 @@ afterEach(cleanup);
 describe("the right panel's Workspace and Processes panes", () => {
   it.each([
     ["processes", "[data-procs]", "Processes"],
-    ["machine", "[data-machine]", "Workspace"],
+    ["machine", "[data-machine]", "Task"],
   ] as const)("opens the %s pane for a workspace, named on the tab strip", (kind, pane, title) => {
     act(() => useRightPanelStore.getState().open(WS, kind));
     render(<Panel id={WS} />);
@@ -59,7 +59,7 @@ describe("the right panel's Workspace and Processes panes", () => {
     render(<Panel id={WS} />);
     expect(card("machine").tagName).toBe("BUTTON");
     expect(card("processes").dataset["available"]).toBe("false");
-    expect(card("processes").textContent).toContain("Available while the workspace is running.");
+    expect(card("processes").textContent).toContain("Available while the task is running.");
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
   });

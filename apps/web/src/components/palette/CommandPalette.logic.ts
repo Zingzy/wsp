@@ -138,7 +138,7 @@ export function filterCommandPaletteGroups(input: {
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
-        label: "Workspaces",
+        label: "Tasks",
         items: input.projectSearchItems,
       });
     }
@@ -205,7 +205,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, workspaces, and threads...";
+      return "Search commands, tasks, and threads...";
     case "submenu":
       return "Search...";
   }

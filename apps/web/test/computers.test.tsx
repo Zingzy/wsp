@@ -120,11 +120,11 @@ describe("the Computers list", () => {
     expect(listRow("here").querySelector("[data-settings-title]")?.textContent).toBe("This Mac");
     expect(listRow("here").textContent).not.toContain("zingzy-mbp");
     expect(listRow("here").querySelector("[data-settings-mark]")?.textContent).toBe("default");
-    expect(factsOf("here")).toBe(`${here.shape!.cpu} cores · 16 GB · 210 GB free · 1 workspace`);
+    expect(factsOf("here")).toBe(`${here.shape!.cpu} cores · 16 GB · 210 GB free · 1 task`);
     expect(stateOf("here")).toBeUndefined();
     // The slot holds the one word for the silence, in the words every other surface says it in.
     expect(stateOf("p_1")).toBe("no answer");
-    expect(factsOf("p_1")).toMatch(/ cores · .* GB · 91 GB free · 1 workspace$/);
+    expect(factsOf("p_1")).toMatch(/ cores · .* GB · 91 GB free · 1 task$/);
     // Facts are chips in the mono fact face, each whole on hover.
     const chip = listRow("p_1").querySelector("[data-chip]")!;
     expect(chip.className).toContain("font-mono");
@@ -152,9 +152,9 @@ describe("the Computers list", () => {
     useStore.setState({ places: [here, ascii, solari], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
     await mountComputers(computersApi().api);
     expect(listIds()).toEqual(["here", "box"]);
-    expect(factsOf("here")).toContain("1 workspace");
+    expect(factsOf("here")).toContain("1 task");
     // The cloud a workspace stands on is drawn even with no key held, so a machine is never orphaned.
-    expect(factsOf("box")).toBe("cloud · $0.018/hr · 2 workspaces");
+    expect(factsOf("box")).toBe("cloud · $0.018/hr · 2 tasks");
     expect(document.querySelector("[data-place-row='solari']")).toBeNull();
     expect(screen.queryByText("Where agents run")).toBeNull();
   });
@@ -165,7 +165,7 @@ describe("the Computers list", () => {
     await mountComputers(api);
     expect(listIds()).toEqual(["here", "solari"]);
     expect(listRow("solari").querySelector("[data-settings-title]")?.textContent).toBe("Solari");
-    expect(factsOf("solari")).toBe("cloud · $0.11/hr · 1 workspace · $1.23 this month");
+    expect(factsOf("solari")).toBe("cloud · $0.11/hr · 1 task · $1.23 this month");
     expect(document.querySelector("[data-k='places-spend']")).toBeNull();
     expect(document.body.textContent?.match(/this month/g)?.length).toBe(1);
   });
@@ -475,7 +475,7 @@ describe("a computer's own page", () => {
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeDescription("old-macbook"));
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its workspace come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.");
+    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The task's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.");
     expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
     expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyStaysLine());
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);

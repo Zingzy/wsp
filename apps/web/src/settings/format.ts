@@ -38,8 +38,8 @@ export const THEME_WORDS: Record<ThemePreference, string> = {
 export const GROUP_BLURBS = {
   general: "How wsp behaves on this Mac.",
   appearance: "How wsp looks, on every screen that opens it.",
-  computers: "The computers your workspaces run on. This Mac is the first one.",
-  projects: "The repos wsp makes workspaces from, each on one computer.",
+  computers: "The computers your tasks run on. This Mac is the first one.",
+  projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
   keybindings: "The keys wsp answers to.",
@@ -54,17 +54,17 @@ export const WHERE_WORDS = {
   iconDescription: "How this computer shows in the sidebar and here.",
   /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
   copies: "Copies",
-  copiesDescription: "How a workspace's copy of a project is made there.",
+  copiesDescription: "How a task's copy of a project is made there.",
   copiesNothing: "copies nothing",
   /** What a copy there has for a network, in the protocol's own words off the flags the landing carries. */
   ports: "Ports",
-  portsDescription: "What a workspace there has for a network.",
-  workspaceThere: "A workspace there",
+  portsDescription: "What a task there has for a network.",
+  workspaceThere: "A task there",
   connection: "Connection",
   agents: "Agents",
   recipe: "Skills and MCP servers",
   recipeNone: "None from the recipe yet.",
-  workspaces: "Workspaces",
+  workspaces: "Tasks",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
@@ -75,7 +75,7 @@ export const WHERE_WORDS = {
   default: "default",
   remove: "Remove",
   removeTitle: (computer: string): string => `Remove ${computer}`,
-  removeDescription: (computer: string): string => `wsp comes off ${computer} and its workspaces' records leave this Mac. Your files there stay.`,
+  removeDescription: (computer: string): string => `wsp comes off ${computer} and its tasks' records leave this Mac. Your files there stay.`,
   removeCloudDescription: "Its key is forgotten on this Mac.",
   removing: "Removing…",
   cancel: "Cancel",
@@ -167,7 +167,7 @@ export const ADD_COMPUTER_WORDS = {
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
   running: "closing keeps it going",
   named: "Named after its hostname.",
-  runsWorkspaces: "It runs your workspaces. Your image is built there the first time a workspace is created on it.",
+  runsWorkspaces: "It runs your tasks. Your image is built there the first time a task is created on it.",
 } as const;
 
 /** Each size source as its segment names it: whole at every width, since a cut segment is a defect. */
@@ -227,16 +227,16 @@ export const PROJECTS_WORDS = {
   source: "Source",
   sourceHover: "The folder or repository this project is.",
   computer: "Computer",
-  computerHover: "Where the project lives and where its workspaces run.",
+  computerHover: "Where the project lives and where its tasks run.",
   remote: "Remote",
   remoteHover: "The repository it was cloned from.",
   added: "Added",
   addedHover: "When it was recorded.",
   seeded: "Seeded",
   seededHover: "What the seed carried from this Mac, once.",
-  newWorkspaces: "New workspaces",
+  newWorkspaces: "New tasks",
   branch: "Branch",
-  branchDescription: "Where a new workspace starts.",
+  branchDescription: "Where a new task starts.",
   lastAgent: "Last agent",
   lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",
@@ -251,7 +251,7 @@ export const PROJECTS_WORDS = {
 /** Settings > Keybindings: the four cards' heads and the three keys that are not rules. */
 export const KEYBINDINGS_WORDS = {
   title: "Keybindings",
-  workspacesAndThreads: "Workspaces and threads",
+  workspacesAndThreads: "Tasks and threads",
   terminal: "Terminal, while it has focus",
   fixed: "Fixed",
   sendMessage: "Send the message",

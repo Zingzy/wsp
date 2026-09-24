@@ -76,7 +76,7 @@ export function WorkspaceSwitcher() {
   return (
     <div className="dialog-backdrop fixed inset-0 z-[140] flex items-center justify-center">
       <div
-        aria-label="Workspace switcher"
+        aria-label="Task switcher"
         className="dropdown-glass popover-shadow grid max-h-[70vh] max-w-[calc(100vw-4rem)] grid-cols-[repeat(auto-fit,minmax(14rem,14rem))] gap-2 overflow-y-auto rounded-lg p-2"
         data-workspace-switcher
         role="listbox"

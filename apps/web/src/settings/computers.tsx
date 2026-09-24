@@ -49,14 +49,14 @@ export function holdingsFor(
 /** The facts a computer's list row says under its name, dots between, none of them where none has arrived. */
 export function computerFacts(place: PlaceView, count: number, spend: PlaceSpend | undefined): string {
   if (isProviderPlace(place)) {
-    return [WHERE_WORDS.cloud, place.rateUsdPerHour === undefined ? undefined : fmtRate(place.rateUsdPerHour), count === 0 ? undefined : plural(count, "workspace"), spend === undefined ? undefined : spentThisMonth(spend.monthUsd)].filter((word): word is string => word !== undefined).join(" · ");
+    return [WHERE_WORDS.cloud, place.rateUsdPerHour === undefined ? undefined : fmtRate(place.rateUsdPerHour), count === 0 ? undefined : plural(count, "task"), spend === undefined ? undefined : spentThisMonth(spend.monthUsd)].filter((word): word is string => word !== undefined).join(" · ");
   }
-  return [place.shape === undefined ? undefined : fmtSize(place.shape, placeCpuWord(place)), place.diskFreeBytes === undefined ? undefined : fmtBytes(place.diskFreeBytes), count === 0 ? undefined : plural(count, "workspace")].filter((word): word is string => word !== undefined).join(" · ");
+  return [place.shape === undefined ? undefined : fmtSize(place.shape, placeCpuWord(place)), place.diskFreeBytes === undefined ? undefined : fmtBytes(place.diskFreeBytes), count === 0 ? undefined : plural(count, "task")].filter((word): word is string => word !== undefined).join(" · ");
 }
 
 /** The same facts as chips, each with its glyph. */
 export function computerChips(place: PlaceView, count: number, spend: PlaceSpend | undefined): ChipItem[] {
-  const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "workspace"), icon: LayersIcon };
+  const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "task"), icon: LayersIcon };
   if (isProviderPlace(place)) {
     const cloud: (ChipItem | null)[] = [
       { text: WHERE_WORDS.cloud, icon: CloudIcon },

@@ -194,7 +194,7 @@ describe("the workspace the address opens on", () => {
     hash("#w/ws_b/t/thr_nope");
     await useStore.getState().refresh();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
-    expect(useStore.getState().toast).toBe("That thread is not in this workspace; opened the workspace instead");
+    expect(useStore.getState().toast).toBe("That thread is not in this task; opened the task instead");
   });
 });
 
@@ -388,7 +388,7 @@ describe("store creations", () => {
     await flush();
     expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
-    expect(failed.failed?.title).toBe("The provider refused: no more workspaces can run there now");
+    expect(failed.failed?.title).toBe("The provider refused: no more tasks can run there now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
@@ -401,7 +401,7 @@ describe("store creations", () => {
     api.createWorkspace = async () => { throw new Error("no golden image yet"); };
     await useStore.getState().createWorkspace("pr_1", "gamma");
     const again = useStore.getState().creations[0]!;
-    expect(again.failed).toEqual({ title: "Could not create the workspace", detail: "no golden image yet" });
+    expect(again.failed).toEqual({ title: "Could not create the task", detail: "no golden image yet" });
     // No failed stage arrived, so the refusal is the failing line.
     expect(again.lines.map(l => [l.stage, l.message])).toEqual([["failed", "no golden image yet"]]);
     useStore.getState().dismissCreation(again.key);
@@ -440,7 +440,7 @@ describe("store creations", () => {
     expect(useStore.getState().creations).toEqual([expect.objectContaining({ key: "creating:ws_far", name: "far", workspaceId: "ws_far", failed: null })]);
     expect(useStore.getState().creations[0]!.lines).toHaveLength(2);
     emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "boom" }));
-    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not create the workspace", detail: "boom" });
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not create the task", detail: "boom" });
     emit({ type: "workspace.created", workspace: view("ws_far") });
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_a");
@@ -660,7 +660,7 @@ describe("store sessions", () => {
     listCalls.length = 0;
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("Claude Code on the workspace has no session for this thread yet");
+    expect(useStore.getState().toast).toBe("Claude Code on the task has no session for this thread yet");
     expect(listCalls).toEqual([]);
   });
 
