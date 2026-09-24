@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { authority, fmtDuration, LABS_ENV, shellQuote } from "@wsp/protocol";
+import { authority, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -129,9 +129,10 @@ const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
   const home = homeNamed(env["WSP_HOME"]);
   // Every variable the installing shell holds that the service would be without: the provider ones, since a host
-  // that picks its provider out of an environment naming none forks nothing, and labs, since a service installed
-  // from a shell holding it would come up without the rows that shell was using. One list, copied by one rule.
-  const carried = [LABS_ENV, ...providerEnvNames()];
+  // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
+  // from a shell holding it would come up without the rows that shell was using, and the release check's switch,
+  // which that shell turned off. One list, copied by one rule.
+  const carried = [LABS_ENV, UPDATE_CHECK_ENV, ...providerEnvNames()];
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),

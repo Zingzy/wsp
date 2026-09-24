@@ -54,3 +54,12 @@ export const FAKE_ROOT_ENV = "WSP_FAKE_ROOT";
  * that names a folder above needs none of this, since the records go in that folder. Unset everywhere else, where
  * the stand-in holds its machines for one process. */
 export const FAKE_RECORDS_ENV = "WSP_FAKE_RECORDS";
+
+/** The switch that stops the host asking GitHub for the newest release: `0` here, or on a line of the .env beside
+ * the state file, which is the one place the desktop app's host reads it from, since that app's environment is the
+ * login's and not a shell's. */
+export const UPDATE_CHECK_ENV = "WSP_UPDATE_CHECK";
+
+/** The base the host asks for the newest release instead of GitHub's API, for a smoke serving a release of its
+ * own. Unset everywhere else. */
+export const RELEASE_API_ENV = "WSP_RELEASE_API";
