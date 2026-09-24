@@ -81,8 +81,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Task path is unavailable",
-          description: "This thread does not have a task path to save into.",
+          title: "No folder to save into",
+          description: "This thread has no folder to save the plan into.",
         }),
       );
       return;
@@ -99,7 +99,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!relativePath) {
       toastManager.add({
         type: "warning",
-        title: "Enter a task path",
+        title: "Enter a folder",
       });
       return;
     }
