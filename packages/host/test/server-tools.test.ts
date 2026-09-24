@@ -249,6 +249,16 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(JSON.stringify(answer)).not.toContain(SECRET);
   });
 
+  it("cuts a user and password out of a URL in curl's last words", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://ada:${SECRET}@mcp.example.test/sse port 443" >&2\nprintf 000\nexit 7\n`);
+    chmodSync(join(f.bin, "curl"), 0o755);
+    f.config({ notion: { type: "http", url: `https://ada:${SECRET}@mcp.example.test/sse` } });
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
+    expect(answer).toMatchObject({ auth: "failed", refused: "curl: (7) Failed to connect to https://mcp.example.test/sse port 443" });
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
+  });
+
   it("on a computer whose daemon runs as root, runs as the home's owner and hands the variables over stdin, never on a line", async () => {
     const f = fixture();
     const { url } = await remote();

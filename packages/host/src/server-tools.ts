@@ -99,8 +99,11 @@ const httpScript = (seconds: number): string =>
     'tail -c 2000 "$d/e" 2>/dev/null',
   ].join("\n");
 
-/** curl's last words, with any URL's query string cut off, since a token can ride there. */
-const curlSaid = (err: string): string | undefined => lastLine(err)?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
+/** curl's last words, with any URL's user, password and query string cut off, since a token can ride in each. */
+const curlSaid = (err: string): string | undefined =>
+  lastLine(err)
+    ?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/gi, "$1")
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
 
 /** The tools off a JSON-RPC answer to tools/list, or why there are none: the server's own error, or a list past the
  * cap. An SSE body carries the answer on its `data:` lines. */
