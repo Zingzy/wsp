@@ -89,7 +89,7 @@ interface Published {
   size: number;
 }
 
-/** The hex sha256 and the byte size GitHub publishes for this asset of the release, or nothing where it lists either not. */
+/** The hex sha256 and the byte size GitHub publishes for this asset of the release, or nothing when it lists neither. */
 async function published(tag: string, asset: string, deps: BundleDeps): Promise<Published | undefined> {
   const res = await deps.fetch(releaseTagUrl(deps.env, tag), { headers: { accept: "application/vnd.github+json", "user-agent": deps.userAgent }, signal: AbortSignal.timeout(RELEASE_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
