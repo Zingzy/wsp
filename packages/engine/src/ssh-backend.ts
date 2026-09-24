@@ -479,10 +479,15 @@ export async function offeredHostKey(reach: SshReach, run: SshLocalRun = localRu
   const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
   if (config.exitCode !== 0) return {};
   const values = readValues(config.stdout);
-  const stoppedBy = (values["proxyjump"] ?? "") !== "" ? "ProxyJump" : (values["proxycommand"] ?? "") !== "" ? "ProxyCommand" : undefined;
+  const stoppedBy = proxiedBy(values);
   if (stoppedBy !== undefined) return { stoppedBy };
   const key = hostKeyFound(await offeredHostKeys(values, run), values["hostkeyalgorithms"] ?? "");
   return key === undefined ? {} : { key };
+}
+
+/** The option that carries a dial through another computer, off one `ssh -G` reading: ssh prints neither when unset. */
+function proxiedBy(values: Record<string, string>): "ProxyJump" | "ProxyCommand" | undefined {
+  return (values["proxyjump"] ?? "") !== "" ? "ProxyJump" : (values["proxycommand"] ?? "") !== "" ? "ProxyCommand" : undefined;
 }
 
 /** What a word that is neither a login nor an alias is refused with, wherever it was typed. */
@@ -508,10 +513,13 @@ export async function sshWordReach(word: string, opts: { port?: number; keyPath?
 }
 
 /** The address ssh dials for a login, read off the person's config with nothing dialled: an alias's HostName, and
- * the host as it was given where no block renames it or the client cannot say. */
-export async function sshHostName(reach: SshReach, run: SshLocalRun = localRun): Promise<string> {
+ * the host as it was given where no block renames it or the client cannot say. Nothing where a jump or a command
+ * carries the dial, since the HostName is then resolved on the far side and names no address this computer dials. */
+export async function sshHostName(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
   const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
-  const host = config.exitCode === 0 ? (readValues(config.stdout)["hostname"] ?? "") : "";
+  const values = config.exitCode === 0 ? readValues(config.stdout) : {};
+  if (proxiedBy(values) !== undefined) return undefined;
+  const host = values["hostname"] ?? "";
   return host === "" ? reach.host : host;
 }
 
@@ -825,7 +833,7 @@ export interface SshBackendOptions {
   /** What the machine itself answers a scan with; the read above unless a test hands its own. */
   offeredKey?: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
   /** The address the client dials for a login; the person's config unless a test hands its own. */
-  hostName?: (reach: SshReach) => Promise<string>;
+  hostName?: (reach: SshReach) => Promise<string | undefined>;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -863,7 +871,7 @@ export class SshBackend implements MachineBackend {
   private readonly hostKey: SshHostKeyReader;
   private readonly knownHosts: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
   private readonly offered: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
-  private readonly hostName: (reach: SshReach) => Promise<string>;
+  private readonly hostName: (reach: SshReach) => Promise<string | undefined>;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
@@ -923,8 +931,9 @@ export class SshBackend implements MachineBackend {
     return this.offered(reach);
   }
 
-  /** The address a dial of this login reaches, which is what tells an alias for this computer from a box elsewhere. */
-  async hostNameFor(reach: SshReach): Promise<string> {
+  /** The address a dial of this login reaches, which is what tells an alias for this computer from a box elsewhere;
+   * nothing where the dial goes through another computer. */
+  async hostNameFor(reach: SshReach): Promise<string | undefined> {
     return this.hostName(reach);
   }
 }

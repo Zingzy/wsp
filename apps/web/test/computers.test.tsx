@@ -7,9 +7,9 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL } from "@wsp/protocol";
+import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL } from "@wsp/protocol";
 import { render } from "@testing-library/react";
-import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
+import { makeApi, ProtocolClient, RequestError, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "../src/settings/format.js";
@@ -705,12 +705,65 @@ describe("the Add a computer sheet", () => {
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await act(async () => {
-      refuse?.(new Error("ssh refused the login (publickey)."));
+      refuse?.(new RequestError("ssh refused the login (publickey).", PLACE_LOGIN_REFUSED_KIND));
       await Promise.resolve();
     });
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain("ssh refused the login (publickey).");
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.refusedFix);
     expect((document.querySelector("#add-computer-login") as HTMLInputElement).value).toBe("root@65.21.4.12");
+  });
+
+  it("carries the login fix off the refusal's own kind on the wire, and a refusal without it gets none", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.reply = (f: Frame) => (f["op"] === "places.add" ? undefined : { id: f["id"], ok: true });
+    const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
+    await client.connect();
+    const sock = ScriptedSocket.instances[0]!;
+    useStore.setState({ api: makeApi(client), places: [here] });
+    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
+    const refuseWith = async (reply: Record<string, unknown>): Promise<string> => {
+      const before = sock.frames("places.add").length;
+      fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "spoo" } });
+      fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+      await waitFor(() => expect(sock.frames("places.add").length).toBe(before + 1));
+      const asked = sock.frames("places.add").at(-1)!;
+      await act(async () => {
+        sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: false, ...reply }) });
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(String(reply["error"])));
+      return document.querySelector("[data-k='ssh-refusal']")?.textContent ?? "";
+    };
+    expect(await refuseWith({ error: "spoo is neither a login like root@host nor an alias your ssh config gives a HostName", kind: PLACE_LOGIN_REFUSED_KIND })).toContain(ADD_COMPUTER_WORDS.refusedFix);
+    expect(await refuseWith({ error: "wsp add refuses a loopback address" })).not.toContain(ADD_COMPUTER_WORDS.refusedFix);
+  });
+
+  // Each is thrown with the connect step still running, as the host throws them: the login stood and the box said no.
+  it.each([
+    ["the box already in another wsp", "root@spoo already belongs to the wsp on studio at http://10.0.0.2:4640; wsp leave on it frees it"],
+    ["root's shell", "root@spoo runs zsh as root's shell, and wsp runs only under bash or sh there"],
+    ["the chip", "root@spoo runs on riscv64, and wsp builds no daemon for that chip"],
+    ["the host key mismatch", "root@spoo answered with a key other than the one you pinned"],
+  ])("says a refusal after the login stood (%s) with no login fix", async (_what, sentence) => {
+    let report: ((stage: InstallStage) => void) | undefined;
+    let refuse: ((e: Error) => void) | undefined;
+    await openSheet({
+      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
+        new Promise<PlaceView>((_ok, no) => {
+          report = onStage;
+          refuse = no;
+        }),
+    } as unknown as Partial<Api>);
+    fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@spoo" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await act(async () => {
+      report?.({ step: "connect", word: placeAddSheetWord("connect", "running"), state: "running" });
+      report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+      refuse?.(new RequestError(sentence));
+      await Promise.resolve();
+    });
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(sentence);
   });
 
   it("says a box that took wsp and did not connect back in the box's one sentence, with no ssh login fix and no script", async () => {

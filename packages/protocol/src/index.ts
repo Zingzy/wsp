@@ -2588,6 +2588,10 @@ export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done")
   return (state === "done" ? said?.done : undefined) ?? said?.word ?? PLACE_ADD_WORDS[step];
 }
 
+/** The kind a places.add refusal carries when the ssh login itself did not stand or the word typed names no login:
+ * the one case where checking the user, the address or the key is the fix. */
+export const PLACE_LOGIN_REFUSED_KIND = "login";
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({

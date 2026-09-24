@@ -711,4 +711,14 @@ describe("the address a login dials", () => {
     expect(await sshHostName({ user: "root", host: "spoo", port: 22 }, broken)).toBe("spoo");
     expect(await new SshBackend({ hostName: async () => "10.0.0.9" }).hostNameFor({ user: "root", host: "spoo", port: 22 })).toBe("10.0.0.9");
   });
+
+  it("is no address of this computer's own where a ProxyJump or a ProxyCommand carries the dial", async () => {
+    const said: Record<string, string> = {
+      "root@inner": "user root\nhostname 127.0.0.1\nproxyjump bastion\n",
+      "root@piped": "user root\nhostname 127.0.0.1\nproxycommand nc %h %p\n",
+    };
+    const run: SshLocalRun = async (_file, args) => ({ exitCode: 0, stdout: said[String(args.at(-1))] ?? "", stderr: "" });
+    expect(await sshHostName({ user: "root", host: "inner", port: 22 }, run)).toBeUndefined();
+    expect(await sshHostName({ user: "root", host: "piped", port: 22 }, run)).toBeUndefined();
+  });
 });

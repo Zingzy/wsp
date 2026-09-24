@@ -52,6 +52,7 @@ import {
   type DaemonResponse,
   type MachineSizeOffer,
   type PlaceAddStep,
+  PLACE_LOGIN_REFUSED_KIND,
   type PlaceStageEvent,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
@@ -476,7 +477,9 @@ export const placeSweptOverLinkLine = (name: string, at: string, said?: string):
 /** The refusal the login itself got, as against anything the computer at the end of it said: ssh would not take
  * the login, so nothing ran there at all. The roads that log in throw this one for that case alone, and the lines
  * a person reads about them turn on it. */
-export class PlaceLoginRefusedError extends Error {}
+export class PlaceLoginRefusedError extends Error {
+  readonly kind = PLACE_LOGIN_REFUSED_KIND;
+}
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -1595,7 +1598,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note) => {
-        step = which;
+        if (state === "running") step = which;
         opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });

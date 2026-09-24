@@ -16,10 +16,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { OWN_MARK, SshBackend, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
+import { OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -1405,7 +1405,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1428,7 +1428,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       },
     };
     const backend = {
-      hostNameFor: async (reach: SshReach) => box.dials ?? reach.host,
+      hostNameFor: async (reach: SshReach) => (box.proxied === true ? undefined : (box.dials ?? reach.host)),
       adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) }),
       // A computer this computer's ssh client has already met: every case below is about what the install does
       // after that, so none of them stands on the first dial of a stranger.
@@ -1533,7 +1533,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     );
     expect(elsewhere.landed).toEqual([]);
     expect(elsewhere.ran).toEqual([heldPlaceScript("/home/maya")]);
-    expect(elsewhere.stages).toEqual(["connect running"]);
+    expect(elsewhere.stages).toEqual(["connect running", "host-key done (ssh-ed25519 SHA256:abc)"]);
     // The same file pinned to this host's own key is this wsp's own place, said as that.
     const mine = fakeBox("x86_64", "bash", { holds: studio.replace("c3R1ZGlv", "dGhpcyBob3N0") });
     await expect(placeInstaller({ backend: mine.backend as never, ...assets(tmp("held-here"), [X86]) })({ address: "root@spoo", code: own, hostUrls: ["http://192.168.1.20:4720"] }, mine.stage)).rejects.toThrow(
@@ -1556,6 +1556,10 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const away = fakeBox("x86_64", "bash", { dials: "178.156.161.168" });
     await placeInstaller({ backend: away.backend as never, ...assets(tmp("alias-away"), [X86]) })({ address: "maya@me", code: "7QK3M2VD", hostUrls: urls }, away.stage);
     expect(away.ran).toContain(reachScript(["http://192.168.1.20:4720"]));
+    // Host inner / HostName 127.0.0.1 / ProxyJump bastion: the HostName is resolved past the jump, so it is not here.
+    const jumped = fakeBox("x86_64", "bash", { proxied: true });
+    await placeInstaller({ backend: jumped.backend as never, ...assets(tmp("alias-jumped"), [X86]) })({ address: "root@inner", code: "7QK3M2VD", hostUrls: urls }, jumped.stage);
+    expect(jumped.ran).toContain(reachScript(["http://192.168.1.20:4720"]));
   });
 
   it("refuses the advertised address by name where it is this computer's own loopback, rather than dropping it behind a card", async () => {
@@ -1899,6 +1903,75 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // Nothing was written, so nothing says it was: the line stands waiting, which is what happened.
     expect(stages).toEqual(["connect running"]);
   });
+
+  it("marks a refused login and a word naming no login as the login's own refusal, and no other refusal", async () => {
+    const urls = ["http://192.168.1.20:4400"];
+    const kept = "host-key done (ssh-ed25519 SHA256:abc)";
+    const kindOf = async (install: Promise<unknown>): Promise<unknown> => (await install.then(() => expect.unreachable(), (e: unknown) => e as { kind?: unknown }))!.kind;
+
+    const refused = fakeBox("x86_64");
+    const denied = { ...(refused.backend as Record<string, unknown>), adopt: async () => Promise.reject(new Error("maya@box: Permission denied (publickey).")) };
+    const login = placeInstaller({ backend: denied as never, ...assets(tmp("kind-login"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: urls }, refused.stage);
+    await expect(login).rejects.toBeInstanceOf(PlaceLoginRefusedError);
+    expect(await kindOf(login)).toBe(PLACE_LOGIN_REFUSED_KIND);
+    expect(refused.stages).toEqual(["connect running", kept]);
+
+    const word = fakeBox("x86_64");
+    const sshWord = (w: string, o: { port?: number; keyPath?: string }) => sshWordReach(w, o, spooConfig(2222));
+    expect(await kindOf(placeInstaller({ backend: word.backend as never, sshWord, ...assets(tmp("kind-word"), [X86]) })({ address: "nonsense", code: "7QK3M2VD", hostUrls: urls }, word.stage))).toBe(PLACE_LOGIN_REFUSED_KIND);
+
+    // Refused after the login stood: each says the key the dial wrote here, and none carries the login's kind.
+    const studio = placeFileText({ placeId: "p_studio", name: "spoo", hostName: "studio", hostUrls: ["http://192.168.1.5:4640"], hostPublicKey: "c3R1ZGlv", keyPath: "/root/.wsp/place.key", joinedAt: "2026-09-20T10:00:00Z" });
+    const pinnedOther = fakeBox("x86_64");
+    const after: [string, ReturnType<typeof fakeBox>, Record<string, unknown>, string?][] = [
+      ["held", fakeBox("x86_64", "bash", { holds: studio }), {}],
+      ["shell", fakeBox("x86_64", "zsh"), {}],
+      ["chip", fakeBox("riscv64"), {}],
+      ["unsaid chip", fakeBox(undefined), {}],
+      ["mismatch", pinnedOther, { adopt: async () => ({ ...(await (pinnedOther.backend as { adopt: () => Promise<object> }).adopt()), hostKey: "ssh-ed25519 SHA256:somebody-else" }) }, BOX_KEY],
+    ];
+    for (const [what, box, over, hostKey] of after) {
+      const install = placeInstaller({ backend: { ...(box.backend as Record<string, unknown>), ...over } as never, ...assets(tmp(`kind-${what.replace(" ", "-")}`), [X86]) });
+      expect(await kindOf(install({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, ...(hostKey === undefined ? {} : { hostKey }) }, box.stage)), what).toBeUndefined();
+      expect(box.stages, what).toEqual(["connect running", kept]);
+      expect(box.landed, what).toEqual([]);
+    }
+
+    // Refused before any dial: not a login problem either.
+    const loop = fakeBox("x86_64");
+    expect(await kindOf(placeInstaller({ backend: loop.backend as never, ...assets(tmp("kind-loop"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4400"] }, loop.stage))).toBeUndefined();
+    const stranger = fakeBox("x86_64");
+    const unmet = { ...(stranger.backend as Record<string, unknown>), keyFor: async () => undefined };
+    expect(await kindOf(placeInstaller({ backend: unmet as never, ...assets(tmp("kind-unmet"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls }, stranger.stage))).toBeUndefined();
+  });
+});
+
+describe("the place file an add reads off a box before anything lands", () => {
+  it("reads at most 64 KiB of it, whatever the box holds there", async () => {
+    const home = tmp("held-home");
+    const file = placeDaemonPaths(home).placeFile;
+    mkdirSync(dirname(file), { recursive: true });
+    const run = async (): Promise<string> => (await promisify(execFile)("/bin/bash", ["-c", heldPlaceScript(home)], { timeout: 10_000, maxBuffer: 1 << 24 })).stdout;
+    writeFileSync(file, "x".repeat(200_000));
+    expect((await run()).length).toBe(65_536);
+    rmSync(file);
+    symlinkSync("/dev/zero", file);
+    expect((await run()).length).toBe(65_536);
+    rmSync(file);
+    expect(await run()).toBe("");
+  });
+
+  it("names another wsp's host in one bounded line with nothing the box wrote to move the terminal, and a url only where it is one", () => {
+    const held = { placeId: "p_x", name: "spoo\x1b]0;owned\x07", hostName: `studio\x1b[2J\n${"h".repeat(5000)}`, hostUrls: ["/etc/passwd"], hostPublicKey: "c3R1ZGlv", keyPath: "/root/.wsp/place.key", joinedAt: "2026-09-20T10:00:00Z" };
+    const line = placeHeldRefusal("root@spoo", held, undefined);
+    expect(line.length).toBeLessThanOrEqual(SSH_LINE_CAP);
+    expect(line).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(line).not.toContain("/etc/passwd");
+    expect(line.startsWith("root@spoo already belongs to the wsp on studio[2J")).toBe(true);
+    expect(placeHeldRefusal("root@spoo", { ...held, hostName: "studio", hostUrls: ["http://192.168.1.5:4640"] }, undefined)).toContain("studio at http://192.168.1.5:4640;");
+    expect(placeHeldRefusal("root@spoo", { ...held, hostUrls: [`http://h/${"a".repeat(9000)}`] }, undefined)).not.toContain("http://h/");
+    expect(placeHeldRefusal("root@spoo", { ...held, hostPublicKey: "dGhpcyBob3N0" }, keyFingerprint("dGhpcyBob3N0"))).toBe("root@spoo is already a place in this wsp as spoo]0;owned");
+  });
 });
 
 describe("the check a box runs for whether it can reach this host", () => {
@@ -1929,6 +2002,30 @@ describe("the check a box runs for whether it can reach this host", () => {
     } finally {
       await new Promise<void>(done => listening.close(() => done()));
     }
+  });
+
+  it("reaches an address directly under a proxy in the box's environment, as the join and the daemon dial it", async () => {
+    const listening = createHttpServer((_req, res) => res.end("ok"));
+    await new Promise<void>(done => listening.listen(0, "127.0.0.1", done));
+    const urls = [`http://127.0.0.1:${(listening.address() as { port: number }).port}`];
+    const dead = "http://127.0.0.1:9";
+    try {
+      const said = (await promisify(execFile)("/bin/bash", ["-c", reachScript(urls)], { env: { PATH: boxPath("reach-proxy", { curl: true }), http_proxy: dead, HTTP_PROXY: dead, all_proxy: dead }, timeout: 20_000 })).stdout;
+      expect(reachedUrls(said, urls)).toEqual(urls);
+    } finally {
+      await new Promise<void>(done => listening.close(() => done()));
+    }
+  });
+
+  it("says every address it cannot reach while they fit the line, and how many more past that, keeping the fix", () => {
+    const urls = Array.from({ length: 12 }, (_, i) => `http://100.64.${i}.${i + 10}:4640`);
+    const line = unreachedLine("root@spoo", urls);
+    expect(line.length).toBeLessThanOrEqual(SSH_LINE_CAP);
+    expect(line).toContain(urls[0]);
+    expect(line).toMatch(/ and \d+ more, so nothing of wsp's went onto it; link this host to your relay/);
+    expect(unreachedLine("root@spoo", urls.slice(0, 2))).toBe(
+      `root@spoo cannot reach this computer at ${urls[0]}, ${urls[1]}, so nothing of wsp's went onto it; link this host to your relay, or start it with --advertise naming an address root@spoo can reach`,
+    );
   });
 
   it("keeps the order the addresses were handed in and ignores a line naming one it was not handed", () => {
