@@ -507,6 +507,14 @@ export async function sshWordReach(word: string, opts: { port?: number; keyPath?
   return parseSshAddress(`${user}@${word}`, { port: opts.port ?? (Number(values["port"]) || SSH_DEFAULT_PORT), ...(opts.keyPath !== undefined ? { keyPath: opts.keyPath } : {}) });
 }
 
+/** The address ssh dials for a login, read off the person's config with nothing dialled: an alias's HostName, and
+ * the host as it was given where no block renames it or the client cannot say. */
+export async function sshHostName(reach: SshReach, run: SshLocalRun = localRun): Promise<string> {
+  const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
+  const host = config.exitCode === 0 ? (readValues(config.stdout)["hostname"] ?? "") : "";
+  return host === "" ? reach.host : host;
+}
+
 /** The key this machine is known by, as one string whoever asks. `ssh -G` answers where the client looks and what
  * it prefers there with the person's own config applied, and `ssh-keygen -F` reads the entry out, hashed or not.
  * That much is read on this computer with nothing dialled, which is the road that survives a warm master: the
@@ -816,6 +824,8 @@ export interface SshBackendOptions {
   knownHosts?: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
   /** What the machine itself answers a scan with; the read above unless a test hands its own. */
   offeredKey?: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
+  /** The address the client dials for a login; the person's config unless a test hands its own. */
+  hostName?: (reach: SshReach) => Promise<string>;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -853,12 +863,14 @@ export class SshBackend implements MachineBackend {
   private readonly hostKey: SshHostKeyReader;
   private readonly knownHosts: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
   private readonly offered: (reach: SshReach) => Promise<{ key?: string; stoppedBy?: string }>;
+  private readonly hostName: (reach: SshReach) => Promise<string>;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
     this.hostKey = opts.hostKey ?? knownHostKey;
     this.knownHosts = opts.knownHosts ?? knownHostsWritten;
     this.offered = opts.offeredKey ?? offeredHostKey;
+    this.hostName = opts.hostName ?? sshHostName;
   }
 
   async create(): Promise<Machine> {
@@ -909,5 +921,10 @@ export class SshBackend implements MachineBackend {
    * a road has before the first dial of a computer nobody here has met. */
   async offeredKeyFor(reach: SshReach): Promise<{ key?: string; stoppedBy?: string }> {
     return this.offered(reach);
+  }
+
+  /** The address a dial of this login reaches, which is what tells an alias for this computer from a box elsewhere. */
+  async hostNameFor(reach: SshReach): Promise<string> {
+    return this.hostName(reach);
   }
 }

@@ -1652,6 +1652,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
         stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
+        // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
+        await devices.spend(code, at).catch(() => false);
         throw e;
       } finally {
         awaiting.delete(code);

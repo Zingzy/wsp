@@ -625,6 +625,7 @@ describe("the Add a computer sheet", () => {
   const WAITING: [string, string][] = [
     [placeAddSheetWord("connect", "running"), "waiting"],
     [placeAddSheetWord("host-key", "running"), "waiting"],
+    [placeAddSheetWord("reach", "running"), "waiting"],
     [`${placeAddSheetWord("wsp", "running")}${PLACE_INSTALL.weight}`, "waiting"],
     [placeAddSheetWord("service", "running"), "waiting"],
     [placeAddSheetWord("join", "running"), "waiting"],
@@ -645,9 +646,9 @@ describe("the Add a computer sheet", () => {
       report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "running" });
     });
     expect(plan()[0]).toEqual(["connected · Ubuntu 24.04", "done"]);
-    expect(plan()[2]).toEqual([`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"]);
+    expect(plan()[PlaceAddStep.options.indexOf("wsp")]).toEqual([`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"]);
     act(() => report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "done", fact: "9 s" }));
-    expect(plan()[2]).toEqual(["installing wsp 0.2.09 s", "done"]);
+    expect(plan()[PlaceAddStep.options.indexOf("wsp")]).toEqual(["installing wsp 0.2.09 s", "done"]);
     expect(plan()).toHaveLength(PlaceAddStep.options.length);
   });
 
@@ -688,7 +689,7 @@ describe("the Add a computer sheet", () => {
       await Promise.resolve();
     });
     expect(plan()[0]).toEqual([`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"]);
-    expect(plan()[4]).toEqual([placeAddSheetWord("join", "running"), "running"]);
+    expect(plan()[PlaceAddStep.options.indexOf("join")]).toEqual([placeAddSheetWord("join", "running"), "running"]);
     await act(async () => {
       stage("join", "done", "workspaces yes · engine none");
       sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: true, addId, place: box }) });

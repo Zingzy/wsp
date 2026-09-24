@@ -22,6 +22,8 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   LOOPBACK,
   PLACE_CODE_REFUSAL,
   PLACE_LEAVE_VERB,
+  PLACE_LEAVE_LINE,
+  parsePlaceFile,
   fmtPrice,
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
@@ -76,7 +78,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { PlaceMachine, SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
@@ -410,6 +412,56 @@ export function addFlags(
   };
 }
 
+/** The place file on the box, read before anything of wsp's lands: empty where it holds none. */
+export const heldPlaceScript = (home: string): string => `cat ${shellQuote(placeFilePath(home))} 2>/dev/null || true`;
+
+/** What an add is refused with on a box that already belongs to a wsp: this one, where a second install would be
+ * a second record of one box, or another, whose agent and link a second join would stand beside. */
+export function placeHeldRefusal(address: string, file: PlaceFile, ownKey: string | undefined): string {
+  if (ownKey !== undefined && keyFingerprint(file.hostPublicKey) === ownKey) return `${address} is already a place in this wsp as ${file.name}`;
+  const at = file.hostUrls[0] === undefined ? "" : ` at ${file.hostUrls[0]}`;
+  return `${address} already belongs to the wsp on ${file.hostName}${at}; ${PLACE_LEAVE_LINE} on it frees it, or wsp add ${file.name} --update from that wsp updates it there`;
+}
+
+/** The word the box prints before each address it was asked to try, with ok or no. */
+const REACH_LINE = "WSP_REACH";
+
+/** How long the box gets to try every address at once: each try gives up after three seconds of connecting. */
+const REACH_MS = 20_000;
+
+/** The check the box runs before anything of wsp's lands on it: one try of each address its join would be handed,
+ * all at once, with curl where the box has it and bash's /dev/tcp under timeout where it does not. A box with
+ * neither reads as reaching nothing. */
+export function reachScript(urls: readonly string[]): string {
+  const q = shellQuote;
+  const tries = urls.map(url => {
+    const u = new URL(url);
+    return `reach ${q(url)} ${q(u.hostname.replace(/^\[|\]$/g, ""))} ${u.port === "" ? (u.protocol === "https:" ? "443" : "80") : u.port} &`;
+  });
+  return [
+    "reach() {",
+    "  if command -v curl >/dev/null 2>&1; then curl -s -o /dev/null --connect-timeout 3 --max-time 5 \"$1\"",
+    "  elif command -v timeout >/dev/null 2>&1; then timeout 3 bash -c 'exec 3<>\"/dev/tcp/$0/$1\"' \"$2\" \"$3\" 2>/dev/null",
+    `  else false; fi && echo "${REACH_LINE} ok $1" || echo "${REACH_LINE} no $1"`,
+    "}",
+    ...tries,
+    "wait",
+  ].join("\n");
+}
+
+/** The addresses the box said it reached, in the order they were handed to it. */
+export function reachedUrls(said: string, urls: readonly string[]): string[] {
+  const ok = new Set(said.split("\n").flatMap(line => /^WSP_REACH ok (\S+)$/.exec(line.trim())?.[1] ?? []));
+  return urls.filter(url => ok.has(url));
+}
+
+/** What an add says when the box tried every address this host answers on and reached none. */
+export const unreachedLine = (address: string, urls: readonly string[]): string =>
+  `${address} cannot reach this computer at ${urls.join(", ")}, so nothing of wsp's went onto it; link this host to your relay, or start it with --advertise naming an address ${address} can reach`;
+
+/** What an add says when the box did not run the check at all. */
+export const reachUnsaidLine = (address: string, said: string): string => `${address} did not run the check for whether it can reach this computer: ${said.slice(-SSH_LINE_CAP)}`;
+
 /** How a typed word becomes a dial: the engine's one reading unless a test hands its own. */
 type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) => Promise<SshReach>;
 
@@ -427,10 +479,12 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       ...(req.sshPort !== undefined ? { port: req.sshPort } : {}),
       ...(req.keyPath !== undefined ? { keyPath: req.keyPath } : {}),
     });
+    const backend = deps.backend ?? new SshBackend();
     // A computer somewhere else cannot dial this computer's own loopback, so an install that would leave the agent
     // there with no address to come back on is refused before anything lands on it. The computer being joined is
-    // sometimes this one under another name, and there loopback is the address that works.
-    const here = sshDialsThisComputer(reach, [hostname()]);
+    // sometimes this one under another name, and there loopback is the address that works. Read off the address
+    // the client dials, since an alias names nothing about where it lands.
+    const here = sshDialsThisComputer({ ...reach, host: await backend.hostNameFor(reach).catch(() => reach.host) }, [hostname()]);
     // Read off the word itself and not off what is left after the filter: a host bound to this computer alone
     // behind a relay also carries a loopback address in that list, and nobody typed that one.
     const named = joinAddressOf(advertiseWord(deps.advertise) ?? "");
@@ -438,7 +492,6 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const hostUrls = here ? req.hostUrls : req.hostUrls.filter(at => !isLoopback(new URL(at).hostname));
     if (hostUrls.length === 0) throw new Error(ADD_LOOPBACK_REFUSAL);
     stage("connect", "running");
-    const backend = deps.backend ?? new SshBackend();
     // A computer this computer's ssh client has never met is dialled only once somebody has seen its key: the dial
     // writes whatever answers into this computer's known_hosts and every later dial of that computer trusts it, so
     // a stranger who controls the route or the name during this one would be recorded as the person's own box. The
@@ -498,11 +551,21 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
     const target = arch === undefined ? undefined : guestDaemonTarget(arch);
     if (target === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
+    // The join on the box refuses a computer that already holds a place file, and only after the bundle landed; read
+    // by the same rule here so a box in another wsp is refused with nothing of this one's sent.
+    const held = parsePlaceFile((await machine.run(heldPlaceScript(login.HOME), { deadlineMs: SSH_DIAL_MS })).stdout);
+    if (held !== undefined) throw new Error(placeHeldRefusal(req.address, held, readJoinToken(req.code).hostKey));
     const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
-    const at = placeDaemonPaths(login.HOME);
-    const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls, codeFile: `${at.wsp}/join-code`, name });
     stage("connect", "done", await osSaid(machine));
     await sayKey(hostKey);
+    stage("reach", "running");
+    const probed = await machine.run(reachScript(hostUrls), { deadlineMs: REACH_MS });
+    if (!probed.stdout.includes(REACH_LINE)) throw new Error(reachUnsaidLine(req.address, clientWords(probed.stderr) || `exit ${probed.exitCode}`));
+    const reached = reachedUrls(probed.stdout, hostUrls);
+    if (reached.length === 0) throw new Error(unreachedLine(req.address, hostUrls));
+    stage("reach", "done", reached.join(", "));
+    const at = placeDaemonPaths(login.HOME);
+    const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls: reached, codeFile: `${at.wsp}/join-code`, name });
     stage("wsp", "running", target.uname);
     await deployDaemon(machine, {
       place,
@@ -516,7 +579,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
           // The addresses the box is about to dial, said as its join starts rather than after the wait it ends in:
           // a wrong one is twenty seconds of silence followed by a sentence naming it, and this is the same fact
           // read while it can still be stopped.
-          stage("service", "running", dialsBackLine(hostUrls));
+          stage("service", "running", dialsBackLine(reached));
         } else if (line.includes(PLACE_JOINED_LINE)) {
           stage("service", "done");
         }

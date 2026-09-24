@@ -1687,8 +1687,8 @@ describe("putting the agent on a computer over ssh", () => {
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
-    // An install that never reached a join leaves its code unspent, and the person's next add mints another.
-    expect(await runtime.devices.spend(minted, 1)).toBe(true);
+    // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
+    expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
   });
 
   it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {
