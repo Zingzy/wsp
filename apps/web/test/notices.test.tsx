@@ -13,6 +13,7 @@ import { DEFAULT_PREFERENCES, type InitJob, type WorkspaceView } from "@wsp/prot
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AppShell } from "../src/shell/AppShell.js";
+import { Shell } from "../src/App.js";
 import { CLOSE_NOTICE_LABEL } from "../src/notices/Notice.js";
 import { addNotice, NOTICE_MS, useNotices } from "../src/notices/store.js";
 import { caps } from "./caps.js";
@@ -55,7 +56,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
 
 /** The toasts a person can see: not on their way out, not held back past the limit. */
 const showing = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-notice]")].filter(el => !el.hasAttribute("data-ending-style") && !el.hasAttribute("data-limited"));
-const texts = (): string[] => showing().map(el => el.querySelector("p")?.textContent ?? "");
+const texts = (): string[] => showing().map(el => el.querySelector("h2")?.textContent ?? "");
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -160,6 +161,53 @@ describe("the toast", () => {
   });
 });
 
+describe("the notice itself", () => {
+  it("a keyed notice said again replaces the first and counts as one unread", () => {
+    addNotice({ kind: "waiting", text: "a prompt", key: "perm" });
+    addNotice({ kind: "waiting", text: "the prompt again", key: "perm" });
+    expect([useNotices.getState().notices.map(n => n.text), useNotices.getState().unread]).toEqual([["the prompt again"], 1]);
+  });
+
+  it("keeps 400 characters of a sentence, since a refusal can echo what it was sent", () => {
+    addNotice({ kind: "error", text: "x".repeat(1000) });
+    expect(useNotices.getState().notices[0]!.text).toBe(`${"x".repeat(400)}…`);
+  });
+
+  it("is named by its sentence", async () => {
+    mountShell();
+    act(() => void addNotice({ kind: "error", text: "spoo was not woken: no answer" }));
+    await waitFor(() => expect(showing()).toHaveLength(1));
+    const label = showing()[0]!.getAttribute("aria-labelledby");
+    expect(label === null ? null : document.getElementById(label)?.textContent).toBe("spoo was not woken: no answer");
+  });
+
+  it("Escape with the focus in an older toast takes that one only", async () => {
+    mountShell();
+    act(() => {
+      addNotice({ kind: "note", text: "older" });
+      addNotice({ kind: "note", text: "newer" });
+    });
+    await waitFor(() => expect(texts()).toEqual(["newer", "older"]));
+    const older = showing()[1]!;
+    act(() => older.focus());
+    fireEvent.keyDown(older, { key: "Escape" });
+    await waitFor(() => expect(texts()).toEqual(["newer"]));
+  });
+});
+
+describe("the centre while projects are refused", () => {
+  it("says the refusal in one centred line when no task is picked", async () => {
+    useStore.setState({ ready: true, projectsRead: true, projects: [], workspaces: [], selectedId: null, projectHome: null, projectsRefused: { said: "projects.json is not valid JSON", fix: undefined, kind: undefined, disconnected: false } });
+    render(<Shell />);
+    const line = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-shell-center] [data-k='centre-refused']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(line.textContent).toBe("Projects not read: projects.json is not valid JSON");
+  });
+});
+
 describe("the store's refusals", () => {
   const bindWith = async (over: Partial<Api>) => {
     useStore.getState().bind(fakeApi(over));
@@ -173,11 +221,14 @@ describe("the store's refusals", () => {
   });
 
   it("a refused place or project list is a fault, never an empty list", async () => {
+    useStore.setState({ places: [{ id: "p_old", kind: "computer", name: "old", default: false, present: true, takesForks: true }], projects: [{ id: "pr_old", name: "old", computer: "here", source: { kind: "folder", path: "/old" }, path: "/old", remote: "", defaultBranch: "main", memoryKey: "-old", memoryDir: "/m", createdAt: "2026-09-01T00:00:00Z" }] });
     await bindWith({
       placesList: async () => { throw new RequestError("places file unreadable"); },
       projectsList: async () => { throw new RequestError("projects file unreadable"); },
     });
     const s = useStore.getState();
+    // Rows read before the refusal are not today's list, so they go, as a refused forwards read's do.
+    expect([s.places, s.projects]).toEqual([[], []]);
     expect([s.placesRead, s.placesRefused?.said, s.projectsRead, s.projectsRefused?.said]).toEqual([true, "places file unreadable", true, "projects file unreadable"]);
     expect(said()).toEqual(expect.arrayContaining(["Computers not read: places file unreadable", "Projects not read: projects file unreadable"]));
   });

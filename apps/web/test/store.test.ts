@@ -11,6 +11,7 @@ import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
+import { useNotices } from "../src/notices/store.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -197,6 +198,7 @@ describe("the workspace the address opens on", () => {
     await useStore.getState().refresh();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
     expect(lastNotice()).toBe("That thread is not in this workspace; opened the workspace instead");
+    expect(useNotices.getState().notices[0]?.kind).toBe("error");
   });
 });
 

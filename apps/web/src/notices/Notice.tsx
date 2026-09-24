@@ -15,9 +15,9 @@ const clock = (at: number): string => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-/** Escape belongs to whatever holds the focus first: a field, a dialog, a menu. */
+/** Escape belongs to whatever holds the focus first: a field, a dialog, a menu, or a toast, which base-ui closes itself. */
 const ownsEscape = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [role=dialog]:not([data-notice]), [role=alertdialog], [role=menu], [role=listbox]") !== null);
+  target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [data-notices], [role=dialog], [role=alertdialog], [role=menu], [role=listbox]") !== null);
 
 function Notice({ toast }: { toast: Toast.Root.ToastObject<{ notice: NoticeRecord }> }) {
   const notice = toast.data?.notice;
@@ -39,10 +39,10 @@ function Notice({ toast }: { toast: Toast.Root.ToastObject<{ notice: NoticeRecor
       <div className="flex items-start gap-3 px-3 py-2.5">
         <span className={cn("w-12 shrink-0 font-mono text-[11px] leading-5", notice.kind === "error" ? "text-destructive-foreground" : "text-muted-foreground")}>{notice.kind}</span>
         <div className="min-w-0 flex-1">
-          <Toast.Description className="line-clamp-2 break-words text-[13px] leading-5 text-foreground">{notice.text}</Toast.Description>
-          <p className="font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
+          <Toast.Title className="line-clamp-2 break-words text-[13px] leading-5 font-normal text-foreground">{notice.text}</Toast.Title>
+          <Toast.Description className="font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
             {notice.where === undefined ? clock(notice.at) : `${notice.where} · ${clock(notice.at)}`}
-          </p>
+          </Toast.Description>
         </div>
         {action !== undefined ? (
           <Toast.Action

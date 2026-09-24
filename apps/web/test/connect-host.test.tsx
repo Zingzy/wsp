@@ -199,6 +199,8 @@ describe("the sidebar's host foot", () => {
     fakeBridge({ hosts: vi.fn(async () => { throw new Error("hosts.json unreadable"); }) });
     render(<HostFoot />);
     await waitFor(() => expect(document.querySelector("[data-host-label]")?.textContent).toBe("hosts not read"));
+    // Nothing opens from a list that was not read, so the row carries no menu glyph.
+    expect(document.querySelector("[data-host-foot] svg")).toBeNull();
     cleanup();
     clearNotices();
     fakeBridge({ contextMenu: vi.fn(async () => "switch:"), switchHost: vi.fn(async () => ({ ok: false as const, error: "that host is not answering", at: "address" as const })) });

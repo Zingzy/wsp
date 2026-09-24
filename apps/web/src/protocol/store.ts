@@ -379,7 +379,8 @@ export const useStore = create<State>((set, get) => {
   };
 
   /** What a refused list reads as: undefined for a lost socket, which the banner says and the next pull asks again;
-   * null for a socket that may not see it, an empty list that says nothing; else the fault, said once as a notice. */
+   * null for a socket that may not see it, an empty list that says nothing; else the fault, said once as a notice.
+   * Either answer clears the rows, as a refused forwards read does: rows read before it are not today's list. */
   const listRefusal = (e: unknown, what: string): Failure | null | undefined => {
     const failure = failureOf(e);
     if (failure.disconnected) return undefined;
@@ -437,7 +438,7 @@ export const useStore = create<State>((set, get) => {
         places => set({ places, placesRead: true, placesRefused: null }),
         (e: unknown) => {
           const refused = listRefusal(e, "Computers");
-          if (refused !== undefined) set({ placesRead: true, placesRefused: refused });
+          if (refused !== undefined) set({ places: [], placesRead: true, placesRefused: refused });
         },
       );
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
@@ -450,7 +451,7 @@ export const useStore = create<State>((set, get) => {
         projects => set({ projects, projectsRead: true, projectsRefused: null }),
         (e: unknown) => {
           const refused = listRefusal(e, "Projects");
-          if (refused !== undefined) set({ projectsRead: true, projectsRefused: refused });
+          if (refused !== undefined) set({ projects: [], projectsRead: true, projectsRefused: refused });
         },
       );
     void api
@@ -653,7 +654,7 @@ export const useStore = create<State>((set, get) => {
         // row of its own. A list it refused says nothing, and the sends in flight stand until a start or an end.
         ...(answered === null ? {} : { launches: {} }),
       });
-      if (open.toast !== undefined) addNotice({ kind: "note", text: open.toast });
+      if (open.toast !== undefined) addNotice({ kind: "error", text: open.toast });
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
       // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
       if (open.fresh && !s.freshThread) requestNewThread({ workspaceId: selectedId });

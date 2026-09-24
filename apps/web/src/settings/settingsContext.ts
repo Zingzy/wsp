@@ -9,7 +9,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { isDesktopShell } from "../lib/desktopShell.js";
 import type { Api } from "../protocol/client.js";
 import type { Failure } from "../protocol/failure.js";
-import { addNotice } from "../notices/store.js";
+import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
 import { CLOUD_NAMES } from "./providers.js";
@@ -20,6 +20,8 @@ export interface SettingsContext {
   readonly places: ReadonlyArray<PlaceView>;
   /** Why the host refused the place list, while it does: the Computers page says so rather than drawing it empty. */
   readonly placesRefused: Failure | null;
+  /** The same for the project list and the Projects page. */
+  readonly projectsRefused: Failure | null;
   readonly projects: ReadonlyArray<ProjectView>;
   readonly workspaces: ReadonlyArray<WorkspaceView>;
   readonly sessions: Readonly<Record<string, SessionView[]>>;
@@ -37,7 +39,10 @@ export interface SettingsContext {
   readonly openSetup: () => void;
   readonly openAddProject: () => void;
   readonly rereadDevices: () => void;
-  readonly toast: (line: string) => void;
+  /** A rejection the page's act met, as an error notice in the host's words with its fix; a lost socket says nothing. */
+  readonly failed: (e: unknown) => void;
+  /** What the host said about an act that went through. */
+  readonly done: (line: string) => void;
 }
 
 /** The account read as the row reads it: the record, or null before an answer and after a refusal alike. */
@@ -47,6 +52,7 @@ export function useSettingsContext(): SettingsContext {
   const preferences = useStore(s => s.preferences);
   const places = useStore(s => s.places);
   const placesRefused = useStore(s => s.placesRefused);
+  const projectsRefused = useStore(s => s.projectsRefused);
   const projects = useStore(s => s.projects);
   const workspaces = useStore(s => s.workspaces);
   const sessions = useStore(s => s.sessions);
@@ -60,6 +66,7 @@ export function useSettingsContext(): SettingsContext {
     preferences,
     places,
     placesRefused,
+    projectsRefused,
     projects,
     workspaces,
     sessions,
@@ -77,7 +84,8 @@ export function useSettingsContext(): SettingsContext {
     openSetup: () => useStore.getState().openSetup(),
     openAddProject: () => useSettingsStore.getState().openAddProject(),
     rereadDevices: () => useSettingsStore.getState().rereadDevices(),
-    toast: line => void addNotice({ kind: "error", text: line }),
+    failed: e => noticeFailure(e),
+    done: line => void addNotice({ kind: "done", text: line }),
   };
 }
 

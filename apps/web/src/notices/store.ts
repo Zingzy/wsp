@@ -29,6 +29,8 @@ export type NoticeInput = Omit<Notice, "id" | "at">;
 export const NOTICE_MS = 8_000;
 export const NOTICE_WITH_ACTION_MS = 12_000;
 export const NOTICE_CAP = 50;
+/** As much of a sentence as a notice keeps; a refusal can echo the frame it was sent, as the host's log line cuts it. */
+export const NOTICE_CHARS = 400;
 /** Toasts on screen at once; a fourth sends the oldest to the list only. */
 export const NOTICE_LIMIT = 3;
 
@@ -69,12 +71,14 @@ export const useNotices = create<NoticesState>((set, get) => ({
   unread: 0,
   add(input) {
     const id = `notice:${++seq}`;
-    const notice: Notice = { ...input, id, at: Date.now() };
+    const text = input.text.length > NOTICE_CHARS ? `${input.text.slice(0, NOTICE_CHARS)}…` : input.text;
+    const notice: Notice = { ...input, text, id, at: Date.now() };
+    const replaces = input.key !== undefined && get().notices.some(n => n.key === input.key);
     if (input.key !== undefined) get().end(input.key);
     set(s => {
       const notices = [notice, ...s.notices].slice(0, NOTICE_CAP);
       const keyed = new Set(notices.filter(n => n.key !== undefined).map(n => n.id));
-      return { notices, toasts: trimmed([...s.toasts, id], keyed), unread: s.unread + 1 };
+      return { notices, toasts: trimmed([...s.toasts, id], keyed), unread: replaces ? s.unread : s.unread + 1 };
     });
     return id;
   },

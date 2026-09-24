@@ -45,6 +45,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const [pathRefusal, setPathRefusal] = useState<string | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "plan",
     onError: (error) => noticeFailure(error, (said) => `Plan not copied: ${said}`),
@@ -83,7 +84,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       return;
     }
     if (!relativePath) {
-      addNotice({ kind: "error", text: "Type a path in the workspace to save the plan to." });
+      setPathRefusal("Type a path in the workspace to save the plan to.");
       return;
     }
 
@@ -93,7 +94,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         await onSavePlan({ path: relativePath, contents: saveContents });
         setIsSavingToWorkspace(false);
         setIsSaveDialogOpen(false);
-        addNotice({ kind: "done", text: `Plan saved to ${relativePath}` });
       } catch (error) {
         setIsSavingToWorkspace(false);
         noticeFailure(error, (said) => `Plan not saved: ${said}`);
@@ -184,12 +184,18 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                 <Input
                   id={savePathInputId}
                   value={savePath}
-                  onChange={(event) => setSavePath(event.target.value)}
+                  onChange={(event) => {
+                    setSavePath(event.target.value);
+                    setPathRefusal(null);
+                  }}
                   placeholder={downloadFilename}
                   spellCheck={false}
                   disabled={isSavingToWorkspace}
                 />
               </label>
+              <p data-k="plan-path-refusal" className="min-h-4 font-mono text-xs text-destructive-foreground">
+                {pathRefusal ?? ""}
+              </p>
             </DialogPanel>
             <DialogFooter>
               <Button
