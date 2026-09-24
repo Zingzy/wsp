@@ -7,6 +7,8 @@
 // to live.
 import {
   AccountView,
+  AgentsReport,
+  type AgentsTarget,
   BringBackResult,
   CLOUD_SETUP_WORDS,
   DeviceView,
@@ -403,6 +405,9 @@ export interface Api {
    * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
    * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
+  /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
+   * wakes a napping machine. A client without it draws no report. */
+  agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -740,6 +745,7 @@ export function makeApi(c: ProtocolClient): Api {
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
+    agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>
