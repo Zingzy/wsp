@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, skillsDirOf, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
 import { commentsDroppedLine } from "@wsp/engine";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
@@ -127,7 +127,7 @@ export function mcpConfigFile(agent: McpAgent, home: string): { tilde: string; a
 
 /** The skill's file under `home`, in the agent's skills folder. */
 export function skillFile(agent: AgentEntry, home: string): { tilde: string; abs: string } {
-  const tilde = `${agent.skills}/${SKILL_NAME}/SKILL.md`;
+  const tilde = `${skillsDirOf(agent)}/${SKILL_NAME}/SKILL.md`;
   return { tilde, abs: join(home, tilde.slice(2)) };
 }
 

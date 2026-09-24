@@ -1362,6 +1362,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, listing: await placeFolders(msg.on, asked, origin) });
               return;
             }
+            case "agents.read":
+              // What stands on the person's computers is a places read: never a machine's or a relayed ticket's to take.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, report: await rt.agents.read(msg.target, origin) });
+              return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
