@@ -2725,7 +2725,7 @@ async function serverToolsOf(client: HostClient, name: string, agent: string, wo
 }
 
 const SERVER_TOOLS_WORDS =
-  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds is asked of that agent for its word alone, with no list, since no login file is read. A napping workspace is not woken.";
+  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
 
 const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");

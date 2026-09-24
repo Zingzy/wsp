@@ -6,17 +6,16 @@
 // reachable only from there. The deadline stops the server's process group
 // and every process of the login still carrying the run's marker in its
 // environment, which reaches a child that left the group but not one that
-// cleared its environment, nor, on a Mac, an Apple binary whose environment
-// ps does not show. A server behind a sign-in the harness holds is asked of
-// the harness for its word, and no login file is read. Values reach the child
-// through its environment or a private file, never a command line another
-// login can read.
+// cleared its environment. A server behind a sign-in the harness holds is
+// asked of the harness for its word, and no login file is read. Values reach
+// the child through its environment or a private file, never a command line
+// another login can read.
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { MCP_AGENTS, MCP_AGENT_IDS, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
 import { expand, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
-import { serverToolsLateRefusal, shellQuote, type McpTool, type ServerToolsAnswer } from "@wsp/protocol";
+import { lastLine, serverToolsLateRefusal, shellQuote, type McpTool, type ServerToolsAnswer } from "@wsp/protocol";
 
 export const TOOLS_DEADLINE_MS = 20_000;
 /** How long one server's answer stands before a click starts it again. */
@@ -46,7 +45,7 @@ const stdioScript = (seconds: number): string =>
     'mkfifo "$d/in" "$d/o" "$d/e" || exit 1',
     "m=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
     '[ -n "$m" ] || exit 1',
-    // Linux names a process's environment in /proc; a Mac's ps shows it after the command.
+    // Apple's own binaries show no environment to a Mac's ps, so there only the group kill covers them.
     'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzx -- "WSP_TOOLS_RUN=$m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
       'else l=$(ps eww -U "$(id -u)" -o pid=,command= | M="WSP_TOOLS_RUN=$m" awk \'index($0 " ", " " ENVIRON["M"] " ") { print $1 }\'); fi; [ -n "$l" ] && kill "-$1" $l 2>/dev/null; }',
     "set -m",
@@ -100,13 +99,8 @@ const httpScript = (seconds: number): string =>
     'tail -c 2000 "$d/e" 2>/dev/null',
   ].join("\n");
 
-/** The last line a process said that is not blank. */
-const lastLine = (text: string): string | undefined =>
-  text
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => l !== "")
-    .at(-1);
+/** curl's last words, with any URL's query string cut off, since a token can ride there. */
+const curlSaid = (err: string): string | undefined => lastLine(err)?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
 
 /** The tools off a JSON-RPC answer to tools/list, or why there are none: the server's own error, or a list past the
  * cap. An SSE body carries the answer on its `data:` lines. */
@@ -170,7 +164,7 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
   if (status === "nocurl") return { auth: "unknown", refused: "curl is not there to ask its address with" };
   const [first = "", listed = ""] = status.trim().split(" ");
   if (first === "401" || first === "403") return { unauthorized: true };
-  if (first === "000") return { auth: "failed", refused: /timed out/i.test(err) ? serverToolsLateRefusal(deadlineMs) : (lastLine(err) ?? "its address did not answer") };
+  if (first === "000") return { auth: "failed", refused: /timed out/i.test(err) ? serverToolsLateRefusal(deadlineMs) : (curlSaid(err) ?? "its address did not answer") };
   if (first !== "200") return { auth: "failed", refused: `its address answered initialize with ${first}` };
   if (listed !== "200") return { auth: "failed", refused: `its address answered tools/list with ${listed === "" ? "nothing" : listed}` };
   const read = toolsOf(rest.join("\n"));
@@ -182,7 +176,7 @@ async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string
   const check = agent.mcp.check;
   if (check === undefined) return { auth: "unknown", holder: agent.id };
   const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs + RUN_MARGIN_MS });
-  return { auth: (out === undefined ? undefined : check.auth(out, name)) ?? "unknown", holder: agent.id };
+  return { auth: (out === undefined ? undefined : check.auth(out)) ?? "unknown", holder: agent.id };
 }
 
 /** One server as its agent's file defines it there: the agent's own file first, then the project's. */

@@ -43,8 +43,6 @@ const FLOOD = `#!/bin/bash\nhead -c 8000000 /dev/zero | tr '\\0' x\nsleep 60 & w
 /** Claude Code's single-server check as its words read, for a server whose sign-in it holds. */
 const CLAUDE = `#!/bin/bash\n[ "$1 $2 $3" = "mcp get linear" ] || exit 9\necho asked >> "$HOME/claude-asks"\nprintf 'linear:\\n  Scope: User config (available in all your projects)\\n  Status: ⚠ Needs authentication\\n'\n`;
 
-/** Codex's list as its words read, the config's own values in it, for a server whose sign-in it holds. */
-const CODEX = `#!/bin/bash\n[ "$1 $2 $3" = "mcp list --json" ] || exit 9\necho asked >> "$HOME/codex-asks"\ncat <<'J'\n[\n  {\n    "name": "linear",\n    "transport": {\n      "type": "streamable_http",\n      "http_headers": {\n        "X-Key": "${SECRET}"\n      }\n    },\n    "auth_status": "not_logged_in"\n  }\n]\nJ\n`;
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -96,7 +94,7 @@ function fixture(): Fixture {
   mkdirSync(home);
   mkdirSync(bin);
   mkdirSync(join(root, "tmp"));
-  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, codex: CODEX, escape: ESCAPE, flood: FLOOD })) {
+  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, flood: FLOOD })) {
     writeFileSync(join(bin, name), text);
     chmodSync(join(bin, name), 0o755);
   }
@@ -235,8 +233,20 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n")).toHaveLength(2);
     mkdirSync(join(f.home, ".codex"));
     writeFileSync(join(f.home, ".codex", "config.toml"), `[mcp_servers.linear]\nurl = "${url}/oauth"\n`);
-    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "linear" })).toMatchObject({ auth: "needs-sign-in", holder: "codex" });
-    expect(existsSync(join(f.home, "codex-asks"))).toBe(true);
+    writeFileSync(join(f.bin, "codex"), `#!/bin/bash\necho asked >> "$HOME/codex-asks"\n`);
+    chmodSync(join(f.bin, "codex"), 0o755);
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "linear" })).toEqual({ auth: "unknown", holder: "codex", readAt: expect.any(String) });
+    expect(existsSync(join(f.home, "codex-asks")), "Codex was asked for its servers").toBe(false);
+  });
+
+  it("says curl's last words for an address that did not answer, with any query string in a URL cut off", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://mcp.example.test/sse?token=${SECRET}&x=1 port 443" >&2\nprintf 000\nexit 7\n`);
+    chmodSync(join(f.bin, "curl"), 0o755);
+    f.config({ notion: { type: "http", url: `https://mcp.example.test/sse?token=${SECRET}` } });
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
+    expect(answer).toMatchObject({ auth: "failed", refused: "curl: (7) Failed to connect to https://mcp.example.test/sse port 443" });
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
   });
 
   it("on a computer whose daemon runs as root, runs as the home's owner and hands the variables over stdin, never on a line", async () => {
