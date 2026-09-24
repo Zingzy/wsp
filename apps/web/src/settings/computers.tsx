@@ -22,6 +22,7 @@ import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.j
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
+import { RefusalSlot } from "./sheetParts.js";
 import { Card, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
@@ -100,9 +101,12 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
         });
       }),
       under: (
-        <Button size="xs" variant="outline" data-k="add-computer-button" onClick={ctx.openAddComputer}>
-          {PLACES_WORDS.addComputer}
-        </Button>
+        <>
+          {ctx.placesRefused === null ? null : <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} />}
+          <Button size="xs" variant="outline" data-k="add-computer-button" onClick={ctx.openAddComputer}>
+            {PLACES_WORDS.addComputer}
+          </Button>
+        </>
       ),
     },
   ];

@@ -18,6 +18,7 @@ import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices } from "./notice-text.js";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -184,7 +185,8 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, capabilities: null, hasGolden: false, initJob: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, capabilities: null, hasGolden: false, initJob: null, workspaces: [], statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, sessions: {}, ready: false });
+  clearNotices();
 });
 afterEach(() => {
   cleanup();

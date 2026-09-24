@@ -45,6 +45,7 @@ import { fakeWire, LEVELS, resetSurfaces, WS } from "./surface-harness.js";
 import { statusOf } from "./workspace-status.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -168,7 +169,8 @@ beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  clearNotices();
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useDiffRevealStore.setState({ pendingByWorkspaceId: {} });
@@ -254,7 +256,7 @@ describe("a workspace row's menu", () => {
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.copyId));
-    await waitFor(() => expect(useStore.getState().toast).toBe("Copy computer id: The clipboard is not available here"));
+    await waitFor(() => expect(lastNotice()).toBe("Copy computer id: The clipboard is not available here"));
     const writeText = clipboard();
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
@@ -429,7 +431,7 @@ describe("a thread row's menu", () => {
     await waitFor(() => expect(api.wake).toHaveBeenCalledWith("ws_a"));
     expect(api.renameSession).not.toHaveBeenCalled();
     expect((screen.getByRole("textbox", { name: THREAD_WORDS.rename }) as HTMLInputElement).value).toBe("the name he typed");
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
     // A second Enter while it waits sends nothing twice.
     fireEvent.keyDown(screen.getByRole("textbox", { name: THREAD_WORDS.rename }), { key: "Enter" });
 
@@ -451,7 +453,7 @@ describe("a thread row's menu", () => {
     fireEvent.change(input, { target: { value: "the name he typed" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(useStore.getState().toast).toBe("database is locked"));
+    await waitFor(() => expect(lastNotice()).toBe("database is locked"));
     // The name is where the person left it: a toast never eats it.
     const still = screen.getByRole("textbox", { name: THREAD_WORDS.rename }) as HTMLInputElement;
     expect(still.value).toBe("the name he typed");
@@ -607,7 +609,7 @@ describe("a workspace row's name box", () => {
     const input = await openFromMenu();
     fireEvent.change(input, { target: { value: "web" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(useStore.getState().toast).toBe("web is already a workspace; pick another name, or delete it first"));
+    await waitFor(() => expect(lastNotice()).toBe("web is already a workspace; pick another name, or delete it first"));
     // The name is where the person left it: a toast never eats it, and the row still holds the name it had.
     const still = await nameBox();
     expect(still.value).toBe("web");

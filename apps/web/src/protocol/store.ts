@@ -3,12 +3,14 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
+import { failureOf, type Failure } from "./failure.js";
+import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
@@ -102,11 +104,7 @@ interface State {
   spending: Record<string, number>;
   /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
   forwards: PortForward[];
-  toast: string | null;
-  /** The one action on the toast that carries one, keyed by the words it was set with: a later toast whose words are
-   * not those hides it, so a toast set anywhere else can never inherit an action meant for another sentence. */
-  toastAction: { for: string; word: string; run: () => void } | null;
-  /** Whether the cloud setup sheet stands open. Here rather than in the row that opens it, since the toast's Open and
+  /** Whether the cloud setup sheet stands open. Here rather than in the row that opens it, since a notice's Open and
    * a system notification's click open the same sheet. */
   setupOpen: boolean;
   /** Whether the connect sheet stands open: the shell's menu, the sidebar's foot and a first launch all open one sheet. */
@@ -130,6 +128,10 @@ interface State {
   /** The same for the projects: the first run is the whole centre while this wsp holds none, and the workspaces
    * list answers first, so a host with projects and no workspace painted that screen for one round trip. */
   projectsRead: boolean;
+  /** Why the host refused the place list, while it does; a list this socket may not see is not refused, only empty. */
+  placesRefused: Failure | null;
+  /** The same for the projects. */
+  projectsRefused: Failure | null;
   /** Whether the Add a computer sheet stands open over the Settings page. */
   addComputerOpen: boolean;
   /** Whether the Connect a provider sheet stands open over the Settings page. */
@@ -214,7 +216,6 @@ interface State {
    * anything about what is in it. */
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
-  clearToast(): void;
   /** Opens the cloud setup sheet on wherever the job stands, which while a build waits on the person is its build
    * screen: what the sidebar's row, the toast's Open and a system notification's click all call. */
   openSetup(): void;
@@ -232,7 +233,7 @@ interface State {
   dialPlace(placeId: string): Promise<PlaceDial>;
   /** Puts this wsp's daemon on one computer and runs the recipe there again, and writes the job it answers with
    * onto that row, so the word in the row's state slot is the job's own. A refusal is the host's own sentence in
-   * the window's one toast. */
+   * a notice. */
   updatePlace(placeId: string): Promise<void>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
@@ -342,7 +343,7 @@ export const useStore = create<State>((set, get) => {
     if (!api) return null;
     try {
       const { notice, ...workspace } = await api.createWorkspace(project, name, picked);
-      if (notice !== undefined) set({ toast: notice });
+      if (notice !== undefined) addNotice({ kind: "note", text: notice, where: name });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
       finishCreation(key, workspace.id);
@@ -379,17 +380,34 @@ export const useStore = create<State>((set, get) => {
       await (to === "pausing" ? api.nap(id) : api.wake(id));
     } catch (e) {
       setPhase(id, w.phase);
-      if (!(e instanceof DisconnectedError)) set({ toast: `${w.name}: ${e instanceof Error ? e.message : String(e)}` });
+      noticeFailure(e, said => `${w.name} was not ${to === "pausing" ? "paused" : "woken"}: ${said}`);
     }
   };
 
-  /** Takes the standing toast away when it is a need's and that need is no longer the job's: every road that lands a
-   * whole job on the store passes through here, so a toast can never outlive its wait. A toast said anywhere else is
-   * left alone, which its own words are the reading of: another sentence with an action beside it is not a need's. */
-  const clearEndedNeed = (need: InitJob["needsYou"]): void => {
-    const s = get();
-    const line = need === undefined ? null : initNeedsYouLine(need.what);
-    if (s.toast !== null && isNeedsYouLine(s.toast) && s.toast !== line) set({ toast: null, toastAction: null });
+  /** What a refused list reads as: undefined for a lost socket, which the banner says and the next pull asks again;
+   * null for a socket that may not see it, an empty list that says nothing; else the fault, said once as a notice.
+   * Either answer clears the rows, as a refused forwards read does: rows read before it are not today's list. */
+  const listRefusal = (e: unknown, what: string): Failure | null | undefined => {
+    const failure = failureOf(e);
+    if (failure.disconnected) return undefined;
+    if (failure.kind === "ticket") return null;
+    noticeFailure(e, said => `${what} not read: ${said}`);
+    return failure;
+  };
+
+  /** Said once per bind: a host that refuses them refuses every time they are asked. */
+  let capabilitiesSaid = false;
+  /** The workspaces whose refused thread list has been said since the bind. */
+  const sessionsSaid = new Set<string>();
+  const readCapabilities = (api: Api): void => {
+    void api
+      .capabilities()
+      .then(capabilities => set({ capabilities }))
+      .catch((e: unknown) => {
+        if (capabilitiesSaid || failureOf(e).disconnected) return;
+        capabilitiesSaid = true;
+        noticeFailure(e, said => `What the host can do was not read: ${said}`);
+      });
   };
 
   const readPlaces = (api: Api): void => {
@@ -397,36 +415,54 @@ export const useStore = create<State>((set, get) => {
     // waits on a reply that is never coming.
     const placesAsked = api.placesList?.();
     if (placesAsked === undefined) set({ placesRead: true });
-    else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
+    else
+      void placesAsked.then(
+        places => set({ places, placesRead: true, placesRefused: null }),
+        (e: unknown) => {
+          const refused = listRefusal(e, "Computers");
+          if (refused !== undefined) set({ places: [], placesRead: true, placesRefused: refused });
+        },
+      );
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
     set({ landings: {} });
   };
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
-    void get().refresh().catch(() => {});
+    void get().refresh().catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
     void api
       .watchStatuses()
       .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
-      .catch((e: unknown) => set({ toast: `live status unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+      .catch((e: unknown) => noticeFailure(e, said => `Live status is not coming from the host: ${said}`));
     // A refused list clears the rows: a forward that closed while the socket was down must not stay listed.
     void api
       .listForwards?.()
       .then(forwards => set({ forwards }))
-      .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+      .catch((e: unknown) => {
+        set({ forwards: [] });
+        noticeFailure(e, said => `Forwards not read: ${said}`);
+      });
     const initJobsAtAsk = initJobViews;
     void api
       .initGet?.()
       .then(setup => {
         if (initJobViews !== initJobsAtAsk) return;
         set({ initJob: setup.job });
-        clearEndedNeed(setup.job?.needsYou);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (failureOf(e).kind !== "ticket") noticeFailure(e, said => `Setup not read: ${said}`);
+      });
     readPlaces(api);
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
     if (projectsAsked === undefined) set({ projectsRead: true });
-    else void projectsAsked.then(projects => set({ projects, projectsRead: true })).catch(() => set({ projectsRead: true }));
+    else
+      void projectsAsked.then(
+        projects => set({ projects, projectsRead: true, projectsRefused: null }),
+        (e: unknown) => {
+          const refused = listRefusal(e, "Projects");
+          if (refused !== undefined) set({ projects: [], projectsRead: true, projectsRefused: refused });
+        },
+      );
     void api
       .preferences?.()
       .then(preferences => {
@@ -435,7 +471,7 @@ export const useStore = create<State>((set, get) => {
         const legacy = legacyPreferences(window.localStorage);
         if (legacy !== null) void get().setPreferences(legacy).then(() => clearLegacyPreferences(window.localStorage));
       })
-      .catch(() => {});
+      .catch((e: unknown) => noticeFailure(e, said => `Preferences not read: ${said}`));
     // release.changed is never replayed, so a reconnect reads the whole view again.
     void api
       .releaseGet?.()
@@ -456,8 +492,6 @@ export const useStore = create<State>((set, get) => {
     costs: {},
     spending: {},
     forwards: [],
-    toast: null,
-    toastAction: null,
     setupOpen: false,
     connectOpen: false,
     places: [],
@@ -466,6 +500,8 @@ export const useStore = create<State>((set, get) => {
     landings: {},
     projectsRead: false,
     placesRead: false,
+    placesRefused: null,
+    projectsRefused: null,
     addComputerOpen: false,
     selectedId: null,
     projectHome: readProjectHome(),
@@ -482,11 +518,10 @@ export const useStore = create<State>((set, get) => {
     noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
       set({ api });
+      capabilitiesSaid = false;
+      sessionsSaid.clear();
       api.subscribe(e => get().applyEvent(e));
-      void api
-        .capabilities()
-        .then(capabilities => set({ capabilities }))
-        .catch(() => {});
+      readCapabilities(api);
       // A failed lookup reads as sealed: the row is a door, not a gate, and the create's own error says the rest.
       void api
         .getGolden()
@@ -495,7 +530,7 @@ export const useStore = create<State>((set, get) => {
       void api
         .listHarnesses?.()
         .then(harnesses => set({ harnesses }))
-        .catch(() => {});
+        .catch((e: unknown) => noticeFailure(e, said => `Agents not read: ${said}`));
       pull(api);
     },
     setConn(conn) {
@@ -536,7 +571,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         preferenceSetsInFlight--;
         if (e instanceof DisconnectedError) return;
-        set({ toast: `settings: ${e instanceof Error ? e.message : String(e)}` });
+        noticeFailure(e, said => `That setting was not saved: ${said.replace(/\.$/, "")}. It shows the host's value again.`);
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
@@ -579,7 +614,7 @@ export const useStore = create<State>((set, get) => {
       try {
         await api.projectsRemove(projectId);
       } catch (e) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
       }
     },
     async loadLanding(project) {
@@ -633,8 +668,8 @@ export const useStore = create<State>((set, get) => {
         // is that row now, and one it has not is a turn that died while this client was away, so neither may keep a
         // row of its own. A list it refused says nothing, and the sends in flight stand until a start or an end.
         ...(answered === null ? {} : { launches: {} }),
-        ...(open.toast !== undefined ? { toast: open.toast } : {}),
       });
+      if (open.toast !== undefined) addNotice({ kind: "error", text: open.toast });
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
       // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
       if (open.fresh && !s.freshThread) requestNewThread({ workspaceId: selectedId });
@@ -646,8 +681,12 @@ export const useStore = create<State>((set, get) => {
       try {
         const rows = await api.listSessions(workspaceId);
         set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
-      } catch {
-        // the next session event asks again
+      } catch (e) {
+        // Said once per workspace for a refusal; anything else, the next session event asks again.
+        if (e instanceof RequestError && !sessionsSaid.has(workspaceId)) {
+          sessionsSaid.add(workspaceId);
+          noticeFailure(e, said => `Threads not read: ${said}`, { where: get().workspaces.find(w => w.id === workspaceId)?.name ?? workspaceId });
+        }
       }
     },
     launching(workspaceId, launch) {
@@ -671,13 +710,13 @@ export const useStore = create<State>((set, get) => {
         if (workspace !== undefined && workspace.phase !== "running") get().applyWorkspace(await api.wake(workspaceId));
         const { outcome, error } = await api.renameSession(sessionId, title);
         if (outcome !== "renamed") {
-          set({ toast: renameNotTakenLine(harness, outcome, error) });
+          addNotice({ kind: "error", text: renameNotTakenLine(harness, outcome, error) });
           return false;
         }
         await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
-        if (!(e instanceof DisconnectedError)) set({ toast: `${title}: ${e instanceof Error ? e.message : String(e)}` });
+        noticeFailure(e, said => `${title}: ${said}`);
         return false;
       }
     },
@@ -689,7 +728,7 @@ export const useStore = create<State>((set, get) => {
         await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
         return false;
       }
     },
@@ -700,7 +739,7 @@ export const useStore = create<State>((set, get) => {
         get().applyWorkspace(await api.renameWorkspace(workspaceId, name));
         return true;
       } catch (e: unknown) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
         return false;
       }
     },
@@ -714,7 +753,7 @@ export const useStore = create<State>((set, get) => {
         get().applyEvent({ type: "workspace.look", workspaceId, theme: workspace.theme ?? null, glyph: workspace.glyph ?? null });
         return true;
       } catch (e: unknown) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
         return false;
       }
     },
@@ -747,7 +786,7 @@ export const useStore = create<State>((set, get) => {
       try {
         get().applyWorkspace(await api.stopWake(id));
       } catch (e) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
       }
     },
     async stopForward(workspaceId, port) {
@@ -756,12 +795,11 @@ export const useStore = create<State>((set, get) => {
       try {
         await api.stopForward(workspaceId, port);
       } catch (e) {
-        if (!(e instanceof DisconnectedError)) set({ toast: `localhost:${port}: ${e instanceof Error ? e.message : String(e)}` });
+        noticeFailure(e, said => `localhost:${port}: ${said}`);
       }
     },
-    clearToast() { set({ toast: null, toastAction: null }); },
     /** The screens live on the Settings page's image section now, so the road that opens them opens the page under
-     * them: a toast asking for a sign-in is pressed from anywhere in the window. */
+     * them: a notice asking for a sign-in is pressed from anywhere in the window. */
     openSetup() { set({ settingsOpen: true, setupOpen: true }); },
     closeSetup() { set({ setupOpen: false }); },
     openConnect() { set({ connectOpen: true }); },
@@ -791,9 +829,9 @@ export const useStore = create<State>((set, get) => {
         // The job as the reply carries it, onto the row the word is read off: the state slot says what is being
         // put on that computer and then what stands, with no second reading of the same job here.
         if (answer.provision !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, provision: answer.provision } : p)) }));
-        if (answer.said !== undefined) set({ toast: answer.said });
+        if (answer.said !== undefined) addNotice({ kind: "note", text: answer.said });
       } catch (e) {
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+        noticeFailure(e);
       }
     },
     applyWorkspace(workspace) {
@@ -979,36 +1017,20 @@ export const useStore = create<State>((set, get) => {
           if (opens || closes) void get().reloadSessions(e.workspaceId);
           return;
         }
-        case "session.notify":
-          if (e.notify === NOTIFY_ME) set({ toast: e.text });
-          return;
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
           return;
         case "release.changed":
           set({ release: e.release });
           return;
-        case "job.needs-you": {
-          // One event per need, so the toast is said once and stands until the need ends, it is clicked, or another
-          // toast takes its place.
-          const text = initNeedsYouLine(e.needsYou.what);
-          set({ toast: text, toastAction: { for: text, word: CLOUD_SETUP_WORDS.needsYou.open, run: () => get().openSetup() } });
-          return;
-        }
         case "init.job": {
           initJobViews++;
           set({ initJob: e.job });
-          // The need's toast belongs to the need: a view that no longer carries it, because the row moved on or the
-          // job is over, takes the sentence away too, so the toast cannot outlive a wait the keycap and the title
-          // have already dropped. A view of the same standing need leaves it alone.
-          clearEndedNeed(e.job.needsYou);
           // A seal is what the cloud row waits on, and the provider the host wired in is what the sizes come from.
           if (e.job.phase === "done") {
             set({ hasGolden: true });
-            void get()
-              .api?.capabilities()
-              .then(capabilities => set({ capabilities }))
-              .catch(() => {});
+            const api = get().api;
+            if (api !== null) readCapabilities(api);
           }
           return;
         }
@@ -1175,11 +1197,12 @@ export function useProjects(): ProjectView[] { return useStore(s => s.projects);
 /** What the last bring back on this workspace answered, for the row that reads it; undefined until one has. */
 export function useBroughtBack(workspaceId: string): BringBackResult | undefined { return useStore(s => s.broughtBack[workspaceId]); }
 export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
+export function useProjectsRefused(): Failure | null { return useStore(s => s.projectsRefused); }
 export function useProjectsRead(): boolean { return useStore(s => s.projectsRead); }
 /** Whether the first run is the whole centre: this wsp holds no project and no workspace, and the host has
  * answered about both. The centre and the header read it here, so the bar cannot title an emptiness the centre is
  * already titling, and neither paints that screen over a host whose lists are still on their way. */
 export function useFirstRun(): boolean {
-  return useStore(s => s.ready && s.projectsRead && s.projects.length === 0 && s.workspaces.length === 0);
+  return useStore(s => s.ready && s.projectsRead && s.projectsRefused === null && s.projects.length === 0 && s.workspaces.length === 0);
 }
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }

@@ -20,6 +20,7 @@ import { openDrawerTerminal, openPanelTerminal, splitActivePanelTerminal, splitD
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { caps } from "./caps.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 // The toolbar buttons are Base UI popover triggers (tooltip on hover). Under
 // jsdom a click on one opens the popup, whose positioning against zero-size
@@ -175,7 +176,8 @@ function Panel() {
 
 describe("terminal as a right-panel surface", () => {
   beforeEach(() => {
-    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
   });
 
   it("opens its shell in the folder a thread would start in, which is the project's and not the daemon's home", async () => {
@@ -214,7 +216,7 @@ describe("terminal as a right-panel surface", () => {
     fireEvent.click(card("terminal"));
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(0);
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
     expect(document.body.textContent).not.toContain("daemon unreachable");
   });
 
@@ -234,7 +236,7 @@ describe("terminal as a right-panel surface", () => {
     await openPanelTerminal(WS);
     await splitActivePanelTerminal(WS);
     expect(count("pty.create")).toBe(0);
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 
   it("mounts the drawer in panel mode for a terminal surface and labels its tab from the link", async () => {
@@ -272,7 +274,8 @@ describe("terminal as a right-panel surface", () => {
 
 describe("one owner per pty", () => {
   beforeEach(() => {
-    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
   });
 
   it("a pty opened from the right panel is the panel's: the drawer never lists it and only the panel mounts it", async () => {
@@ -338,7 +341,8 @@ describe("one owner per pty", () => {
 
 describe("reload adopts the daemon's ptys", () => {
   beforeEach(() => {
-    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
+    useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
+    clearNotices();
   });
 
   it("two attaches over one daemon make one pty: the second link adopts the first's and the drawer spawns none", async () => {
@@ -437,25 +441,27 @@ describe("drawer resilience", () => {
 
   it("a pty a live link refused is said in the app's own sentence, never in the link's words behind a name and a colon", async () => {
     const { count } = fakeLink({ refuseCreate: true });
-    act(() => useStore.setState({ workspaces: [PANE_WS], statuses: {}, toast: null }));
+    act(() => useStore.setState({ workspaces: [PANE_WS], statuses: {} }));
+    clearNotices();
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await screen.findByText(/No terminals for this workspace yet/);
-    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
     expect(count("pty.create")).toBe(1);
     // The link is up and this one shell was refused: no pane stands in for that, so the sentence is the app's own
     // and says what did not happen. What used to stand here was the link's words behind a name and a colon.
     expect(document.body.textContent).not.toContain("terminal: daemon unreachable");
 
-    useStore.setState({ toast: null });
+    clearNotices();
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
-    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
 
-    useStore.setState({ toast: null });
+    clearNotices();
     await act(() => openPanelTerminal(WS));
-    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
+    await waitFor(() => expect(lastNotice()).toBe(terminalRefusedLine("api")));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
-    act(() => useStore.setState({ workspaces: [], toast: null }));
+    act(() => useStore.setState({ workspaces: [] }));
+    clearNotices();
   });
 });
 
@@ -525,7 +531,7 @@ describe("panes on a workspace that is not running", () => {
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await screen.findByText("this Mac's daemon is not running");
     await act(() => openPanelTerminal(WS));
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 
   it("this computer's own daemon down: the pane says the one sentence and its button asks the host for another", async () => {

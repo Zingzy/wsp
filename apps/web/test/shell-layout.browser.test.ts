@@ -4,7 +4,7 @@
 // one height and start where the workspace rows do, the
 // search row is a plain row that opens the palette without moving a row, a
 // thread row's title keeps its room at the default width with the agent's
-// mark before it and one slot after it, a status toast holds a long token inside its box, the
+// mark before it and one slot after it, a toast holds a long token inside its box off the sidebar, the
 // line for a provider out of reach is one muted mono line under the
 // search row, the line the runtime puts on a machine's row takes that row's second line whole,
 // uncut and without growing the row, collapsing the sidebar leaves the
@@ -431,40 +431,41 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a status toast with a 200-character token stays inside the sidebar's width, in both themes", async () => {
+  it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, at every width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`);
     for (const theme of ["dark", "light"] as const) {
-      await page!.goto(`${base}?theme=${theme}&toast=${toast}`);
-      const status = page!.locator("[data-slot=sidebar-footer] [role=status]").first();
-      await status.waitFor();
-      const sidebar = await box("[data-slot=sidebar]");
-      const b = await box("[data-slot=sidebar-footer] [role=status]");
-      expect(b.x).toBeGreaterThanOrEqual(sidebar.x);
-      expect(b.x + b.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
-      expect(await status.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
-      const path = join(SHOTS_DIR, `sidebar-toast-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
-      console.info(`sidebar toast screenshot: ${path}`);
+      for (const width of [1200, 390]) {
+        await page!.setViewportSize({ width, height: 800 });
+        await page!.goto(`${base}?theme=${theme}&toast=${toast}`);
+        const notice = page!.locator("[data-notice]").first();
+        await notice.waitFor();
+        const centre = await box("[data-shell-center]");
+        const header = await box("[data-shell-center] header");
+        const b = await box("[data-notice]");
+        expect(b.x).toBeGreaterThanOrEqual(centre.x);
+        expect(b.x + b.width).toBeLessThanOrEqual(centre.x + centre.width);
+        expect(b.y).toBeGreaterThanOrEqual(header.y + header.height);
+        expect(await notice.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+        expect(await notice.evaluate(el => el.closest("[data-app-sidebar]"))).toBeNull();
+        const path = join(SHOTS_DIR, `notice-${theme}-${width}.png`);
+        await page!.screenshot({ path });
+        console.info(`notice screenshot: ${path}`);
+      }
     }
-  }, 30_000);
+    await page!.setViewportSize({ width: 1200, height: 800 });
+  }, 60_000);
 
-  it("a shell older than the host that served the page says so in the footer's one sentence, with the releases page behind its button, in both themes", async () => {
+  it("a shell older than the host that served the page says so in a toast, with the releases page behind its button, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&version=behind`);
-      const status = page!.locator("[data-slot=sidebar-footer] [role=status]").first();
-      await status.waitFor();
-      expect(await status.textContent()).toContain("this app is 0.1.3, the host is 0.1.5: get the new app");
-      // One line in the footer's own box, its button beside it, nothing wider than the sidebar and no colour of its own.
-      const sidebar = await box("[data-slot=sidebar]");
-      const b = await box("[data-slot=sidebar-footer] [role=status]");
-      expect(b.x).toBeGreaterThanOrEqual(sidebar.x);
-      expect(b.x + b.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
-      expect(await status.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
-      expect(await page!.locator("[data-toast-action]").textContent()).toBe("Get");
-      const path = join(SHOTS_DIR, `sidebar-version-behind-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
-      console.info(`sidebar version screenshot: ${path}`);
+      const notice = page!.locator("[data-notice]").first();
+      await notice.waitFor();
+      expect(await notice.textContent()).toContain("this app is 0.1.3, the host is 0.1.5: get the new app");
+      expect(await page!.locator("[data-notice-action]").textContent()).toBe("Get");
+      const path = join(SHOTS_DIR, `notice-version-behind-${theme}.png`);
+      await notice.screenshot({ path });
+      console.info(`notice version screenshot: ${path}`);
     }
   }, 30_000);
 

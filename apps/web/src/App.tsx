@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useFirstRun, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
+import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
 import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
 import { useThemeEffect } from "./settings/theme.js";
@@ -15,6 +15,7 @@ import { WorkspaceThread } from "./shell/WorkspaceThread.js";
 import { wireHostLive } from "./machine/hostLive.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Gallery } from "./gallery/Gallery.js";
+import { PROJECT_WORDS } from "./sidebar/words.js";
 
 const subscribeHash = (onChange: () => void) => {
   window.addEventListener("hashchange", onChange);
@@ -69,6 +70,7 @@ function WorkspaceCenter() {
   const settingsOpen = useSettingsOpen();
   const firstRun = useFirstRun();
   const projectsRead = useProjectsRead();
+  const projectsRefused = useProjectsRefused();
   // With nothing picked the centre is a project's home, the one picked or the first, never a screen that asks to pick.
   const projectHome = useStore(s => s.projectHome ?? s.projects[0]?.id ?? null);
   if (settingsOpen) return <SettingsPage />;
@@ -89,6 +91,19 @@ function WorkspaceCenter() {
   // A host that has not yet said what projects it holds says nothing here: the first run may still be the centre,
   // and either sentence painted now is replaced a round trip later.
   if (!workspaceId && !projectsRead) return null;
+  // A refused list is not an empty one: the centre says why there is no project to open, as the sidebar does.
+  if (!workspaceId && projectsRefused !== null) {
+    return (
+      <>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center" data-terminal-beside>
+          <p data-k="centre-refused" className="max-w-md text-sm text-muted-foreground">
+            {PROJECT_WORDS.notRead(projectsRefused.said)}
+          </p>
+        </div>
+        <ComputerTerminalDrawer />
+      </>
+    );
+  }
   if (!workspaceId && projectHome !== null) {
     return (
       <>

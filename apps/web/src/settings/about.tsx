@@ -8,7 +8,7 @@ import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type 
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
-import { errorText, isMacPlatform } from "../lib/utils.js";
+import { isMacPlatform } from "../lib/utils.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { ABOUT_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
@@ -55,11 +55,11 @@ function useBundleRoad(): Bundle | undefined {
   return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen } : undefined;
 }
 
-function GetRelease({ latest, mac, toast }: { latest: ReleaseLatest; mac: boolean; toast: (line: string) => void }) {
+function GetRelease({ latest, mac, failed }: { latest: ReleaseLatest; mac: boolean; failed: (e: unknown) => void }) {
   const road = useBundleRoad();
   const [phase, setPhase] = useState<"get" | "downloading" | "kept">("get");
   const said = (outcome: BundleOutcome): boolean => {
-    if (!outcome.ok) toast(outcome.error);
+    if (!outcome.ok) failed(outcome.error);
     return outcome.ok;
   };
   if (road === undefined)
@@ -70,7 +70,7 @@ function GetRelease({ latest, mac, toast }: { latest: ReleaseLatest; mac: boolea
     );
   if (phase === "kept")
     return (
-      <Button size="xs" variant="outline" data-k="get-release" onClick={() => void road.quitAndOpen().then(said, (e: unknown) => toast(errorText(e)))}>
+      <Button size="xs" variant="outline" data-k="get-release" onClick={() => void road.quitAndOpen().then(said, failed)}>
         {ABOUT_WORDS.quitAndOpen}
       </Button>
     );
@@ -79,7 +79,7 @@ function GetRelease({ latest, mac, toast }: { latest: ReleaseLatest; mac: boolea
     road.getBundle({ version: latest.version }).then(
       outcome => setPhase(said(outcome) ? "kept" : "get"),
       (e: unknown) => {
-        toast(errorText(e));
+        failed(e);
         setPhase("get");
       },
     );
@@ -109,7 +109,7 @@ export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
       items: lines,
       under: (
         <>
-          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} mac={isMacPlatform(ctx.platform)} toast={ctx.toast} />}
+          {behind === undefined ? null : <GetRelease key={behind.version} latest={behind} mac={isMacPlatform(ctx.platform)} failed={ctx.failed} />}
           <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
             {ABOUT_WORDS.releases}
           </Button>

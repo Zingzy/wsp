@@ -19,6 +19,7 @@ import { requestComposerFocus, requestNewThread } from "../src/shell/shellReques
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { lastNotice } from "./notice-text.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -675,7 +676,7 @@ describe("composer while the workspace is not live", () => {
     await press(composerEditor(), "Enter");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("list the files in this repo");
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
     // The slot stands at two lines and the sentence wraps in it. At the smallest window with the right panel open
     // the slot is 296 px, so a slot that cut would drop the half that says what happens next, which is the half the
     // person needs. Measured at 1024 by 700 with the panel open: the slot's own class is what holds, since jsdom

@@ -10,6 +10,8 @@ import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
+import { useNotices } from "../src/notices/store.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -72,7 +74,8 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], places: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  clearNotices();
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -188,13 +191,14 @@ describe("the workspace the address opens on", () => {
     const { api } = fakeApi([view("ws_a"), view("ws_b")], [thread]);
     useStore.setState({ api });
     await useStore.getState().refresh();
-    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId, useStore.getState().toast]).toEqual(["ws_b", "thr_1", null]);
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId, lastNotice()]).toEqual(["ws_b", "thr_1", null]);
 
     useStore.setState({ selectedId: null, selectedThreadId: null });
     hash("#w/ws_b/t/thr_nope");
     await useStore.getState().refresh();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
-    expect(useStore.getState().toast).toBe("That thread is not in this workspace; opened the workspace instead");
+    expect(lastNotice()).toBe("That thread is not in this workspace; opened the workspace instead");
+    expect(useNotices.getState().notices[0]?.kind).toBe("error");
   });
 });
 
@@ -235,7 +239,7 @@ describe("the address is the one record of what the person is reading", () => {
     };
     useStore.setState({ api });
     await useStore.getState().refresh();
-    expect([useStore.getState().selectedThreadId, window.location.hash, useStore.getState().toast]).toEqual(["thr_1", "#w/ws_b/t/thr_1", null]);
+    expect([useStore.getState().selectedThreadId, window.location.hash, lastNotice()]).toEqual(["thr_1", "#w/ws_b/t/thr_1", null]);
   });
 
   it("the screen a next thread is written on has an address of its own, and a reload opens it again", async () => {
@@ -367,7 +371,7 @@ describe("store creations", () => {
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
+    expect(lastNotice()).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
     emit({ type: "workspace.created", workspace: view("ws_new") });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
   });
@@ -459,8 +463,7 @@ describe("store creations", () => {
     expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBe("ws_new");
     expect(asked).toEqual(["beta"]);
     // Nothing is said before the ask: no toast, and no row held back on where an image stands.
-    expect(useStore.getState().toast).toBeNull();
-    expect(useStore.getState().toastAction).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 });
 
@@ -604,7 +607,7 @@ describe("store sessions", () => {
     expect(renames).toEqual([["s1", "the name he typed"]]);
     expect(listCalls).toEqual(["ws_a"]);
     expect(useStore.getState().sessions["ws_a"]![0]!.harnessTitle).toBe("the name he typed");
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 
   it("wakes a napping machine before the name goes, as the command line's own rename does, and paints the row from the reply", async () => {
@@ -625,7 +628,7 @@ describe("store sessions", () => {
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(true);
     expect(order).toEqual(["wake", "rename"]);
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
 
     // A machine already up is not woken again.
     order.length = 0;
@@ -648,7 +651,7 @@ describe("store sessions", () => {
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
     expect(sent).toEqual([]);
-    expect(useStore.getState().toast).toBe("the name: Workspace is pausing; it can be woken once it is paused");
+    expect(lastNotice()).toBe("the name: Workspace is pausing; it can be woken once it is paused");
   });
 
   it("a rename the runtime named nothing for is a toast in the agent's words, and no reload", async () => {
@@ -660,7 +663,7 @@ describe("store sessions", () => {
     listCalls.length = 0;
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("Claude Code on the workspace has no session for this thread yet");
+    expect(lastNotice()).toBe("Claude Code on the workspace has no session for this thread yet");
     expect(listCalls).toEqual([]);
   });
 
@@ -671,7 +674,7 @@ describe("store sessions", () => {
     await flush();
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("database is locked");
+    expect(lastNotice()).toBe("database is locked");
   });
 
   it("a rename the socket refused is a toast under the name, and a dropped socket says nothing", async () => {
@@ -682,71 +685,14 @@ describe("store sessions", () => {
     useStore.getState().bind(api);
     await flush();
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("the name: the runtime refused it");
+    expect(lastNotice()).toBe("the name: the runtime refused it");
 
     api.renameSession = async () => {
       throw new DisconnectedError("lost");
     };
-    useStore.setState({ toast: null });
+    clearNotices();
     await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
-    expect(useStore.getState().toast).toBeNull();
-  });
-
-  it("job.needs-you is a toast in the app's own words with an Open that opens the setup, and dismissing it takes the action too", async () => {
-    const { api, emit } = fakeApi([view("ws_a")], []);
-    useStore.getState().bind(api);
-    await flush();
-    emit({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } });
-    expect(useStore.getState().toast).toBe("wsp needs you: sign in to GitHub CLI login");
-    const action = useStore.getState().toastAction!;
-    expect(action).toMatchObject({ for: "wsp needs you: sign in to GitHub CLI login", word: "Open" });
-    expect(useStore.getState().setupOpen).toBe(false);
-    action.run();
-    expect(useStore.getState().setupOpen).toBe(true);
-    useStore.getState().clearToast();
-    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
-  });
-
-  it("the need's toast goes when the need does: the row moving on, another need, and the job ending each take it away, and a toast said elsewhere is left alone", async () => {
-    const { api, emit } = fakeApi([view("ws_a")], []);
-    useStore.getState().bind(api);
-    await flush();
-    const job = (over: Partial<InitJob> = {}): InitJob => ({ id: "init_1", road: "manual", phase: "signing-in", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 1, total: 2 }, log: [], ...over });
-    const need = { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 };
-    const line = "wsp needs you: sign in to GitHub CLI login";
-
-    // A view of the same standing need leaves the toast where it is.
-    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
-    emit({ type: "init.job", job: job({ needsYou: need }) });
-    expect(useStore.getState().toast).toBe(line);
-
-    // The row moved on: the view carries no need, so the sentence goes with it and the action with the sentence.
-    emit({ type: "init.job", job: job() });
-    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
-
-    // The next need takes the slot, and a view carrying only the older one does not resurrect it.
-    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
-    emit({ type: "init.job", job: job({ needsYou: { what: "sign in to Claude Code login", since: 1_760_000_002_000 } }) });
-    expect(useStore.getState().toast).toBeNull();
-
-    // A job that ends while a need's toast stands takes it away too, the last view being one with no need on it.
-    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
-    expect(useStore.getState().toast).toBe(line);
-    emit({ type: "init.job", job: job({ phase: "done" }) });
-    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
-
-    // A toast from anywhere else is not a need's, so a job view is not allowed to clear it.
-    useStore.setState({ toast: "runtime unreachable" });
-    emit({ type: "init.job", job: job({ needsYou: need }) });
-    expect(useStore.getState().toast).toBe("runtime unreachable");
-
-    // Nor one that carries an action of its own: the version line offers the releases page and outlives any build.
-    const version = "this app is 0.1.3, the host is 0.1.5: get the new app";
-    useStore.setState({ toast: version, toastAction: { for: version, word: "Get", run: () => {} } });
-    emit({ type: "init.job", job: job({ needsYou: need }) });
-    emit({ type: "init.job", job: job({ phase: "done" }) });
-    expect(useStore.getState().toast).toBe(version);
-    expect(useStore.getState().toastAction?.word).toBe("Get");
+    expect(lastNotice()).toBeNull();
   });
 
   it("workspace.deleted drops the workspace's rows", async () => {
@@ -800,7 +746,7 @@ describe("store connection", () => {
     expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     await toggling;
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
-    expect(useStore.getState().toast).toBeNull();
+    expect(lastNotice()).toBeNull();
   });
 });
 
@@ -851,7 +797,7 @@ describe("store workspaces", () => {
     expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     await toggling;
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
-    expect(useStore.getState().toast).toContain("backend said no");
+    expect(lastNotice()).toContain("backend said no");
   });
 
   it("wake paints waking and calls the api; on a running workspace it does nothing; toggle wakes a pausing one after the nap", async () => {
@@ -962,7 +908,7 @@ describe("store workspaces", () => {
     // A refusal is a toast and a false, and the row keeps what it had.
     api.setWorkspaceLook = async () => { throw new Error("the host said no"); };
     expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { theme: null } })).toBe(false);
-    expect(useStore.getState().toast).toBe("the host said no");
+    expect(lastNotice()).toBe("the host said no");
     expect(useStore.getState().workspaces[0]!.theme).toEqual(DEFAULT_THEME);
     // A client without the verb takes no pick at all.
     delete api.setWorkspaceLook;
@@ -1012,7 +958,7 @@ describe("store workspaces", () => {
     };
     useStore.getState().bind(api);
     await flush();
-    expect(useStore.getState().toast).toContain("runtime unreachable");
+    expect(lastNotice()).toContain("runtime unreachable");
   });
 });
 

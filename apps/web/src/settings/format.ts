@@ -57,6 +57,8 @@ export const GROUP_BLURBS = {
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
+  /** A place list the host refused, said where the list would stand. */
+  notRead: (said: string) => `Computers not read: ${said}`,
   /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
   copies: "Copies",
   copiesDescription: "How a workspace's copy of a project is made there.",
