@@ -48,6 +48,7 @@ const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.
 
 export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const api = useStore(s => s.api);
+  const saveKeys = useStore(s => s.saveKeys);
   const job = useStore(s => s.initJob);
   const select = useStore(s => s.select);
   const [setup, setSetup] = useState<InitSetup | null>(null);
@@ -114,7 +115,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     setSaving(true);
     void (async () => {
       try {
-        setSetup(await api.initKeys!({ key: keys.solari }));
+        setSetup(await saveKeys({ key: keys.solari }));
         start();
       } catch (e) {
         const kind = e instanceof RequestError ? e.kind : undefined;
@@ -228,7 +229,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
               }
               void attempt(async () => {
                 const typed = Object.fromEntries(Object.entries(current.keys).filter(([, v]) => v.trim() !== ""));
-                if (Object.keys(typed).length > 0) await api!.initKeys!({ rows: typed });
+                if (Object.keys(typed).length > 0) await saveKeys({ rows: typed });
                 await api!.initAnswer!({ screen: screen.id, ticks: [...current.ticks], answers: current.answers });
                 setDraft(null);
               });

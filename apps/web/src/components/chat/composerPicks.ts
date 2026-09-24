@@ -17,7 +17,7 @@
 // comes out here, a send into a thread that has run carries the model and
 // the effort and leaves the agent and the access behind, those being that
 // thread's own off its rows (sendPicks).
-import { contextWindowsFor, effortsFor, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
+import { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import { THREAD_SCOPED_PICKS, type ComposerOptions, type PickThreads } from "./composerOptionsStore";
 
 export interface ResolvedPicks {
@@ -154,7 +154,8 @@ export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOption
   // which is the price of a send that lands over one that is refused. An effort and an access the thread already
   // runs at ride rather than being left out: absent, every adapter here leaves its CLI's own default in place, which
   // is neither what the thread ran at nor what the pickers show.
-  const modelValue = picked.model ?? listedPick(catalog.models, thread.model) ?? (window !== undefined ? listedPick(catalog.models, model?.value) : undefined);
+  const models = everyModel(catalog);
+  const modelValue = picked.model ?? listedPick(models, thread.model) ?? (window !== undefined ? listedPick(models, model?.value) : undefined);
   // A window rides on the model, never alone: claude builds "<model>[1m]" and refuses a window with no model to
   // ride on, so a frame carrying one without the other fails at the adapter.
   const contextWindow = modelValue === undefined ? undefined : window;

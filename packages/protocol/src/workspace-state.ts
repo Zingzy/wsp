@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -194,8 +194,16 @@ export function machineWord(kind: WorkspaceKind): string {
  * this kind's machine, in that kind's own words, and either way the record and the threads go from here. It sits
  * with the kind table rather than with the other notices, since the machine half is a kind's word and a second
  * copy of it beside the sentence is what let the ssh kind say a delete leaves its machine untouched. */
-export function deleteNotice(threads: number, kind: WorkspaceKind): string {
-  return `Its ${WORKSPACE_KIND_WORDS[kind].onDelete.asked}; its record and ${fmtThreads(threads)} leave this computer.`;
+export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">): string {
+  return `Its ${onDeleteOf(kind, copy).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
+}
+
+/** What a delete does to a workspace that is a copy of a project folder: the copy goes and the folder it was copied
+ * from stays. Every other workspace takes its kind's words. */
+export function onDeleteOf(kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">): MachineOnDelete {
+  if (copy === undefined) return WORKSPACE_KIND_WORDS[kind].onDelete;
+  const removed = `copy at ${copy.path} is removed and the project folder is left as it is`;
+  return { asked: removed, done: () => `its ${removed}` };
 }
 
 export interface WorkspaceStateInput {

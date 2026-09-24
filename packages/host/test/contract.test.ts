@@ -153,7 +153,7 @@ describe("the agent contract on the command line and the tool door", () => {
         // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.
         closed: new Promise(() => {}),
       }),
-      placeLinks: placeWiring(statePath, {}),
+      placeLinks: placeWiring(statePath),
       // What stands on this computer, read off a home six harnesses left and the agents on its own PATH.
       agentsReader: agentsReader({ vault: () => ({}), here: () => fixtureHost(agents) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a

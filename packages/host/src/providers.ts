@@ -177,6 +177,15 @@ export function isPlace(m: ProviderModule, env: ProviderEnv): boolean {
   return m.keyEnv !== undefined && keyIn(env, m.keyEnv) !== undefined;
 }
 
+/** The provider this environment wires, as a place row priced off the backend it forks on; nothing where that row
+ * is nowhere work can stand. The row wears the word its machines wear, so a stand-in shows the cloud it serves. */
+export function wiredPlaceRow(env: ProviderEnv, backend: MachineBackend): { id: string; rateUsdPerHour: number } | undefined {
+  const module = providerModule(env);
+  if (!isPlace(module, env)) return undefined;
+  const { pricing } = backend;
+  return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
+}
+
 /** Every provider this computer is set up for, in the table's own order. These are the places a copy of the image
  * can be built at beyond the one this host forks on. */
 export function placeProviders(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderModule[] {
