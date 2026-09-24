@@ -410,6 +410,9 @@ export function addFlags(
   };
 }
 
+/** How a typed word becomes a dial: the engine's one reading unless a test hands its own. */
+type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) => Promise<SshReach>;
+
 /** How the daemon is put on a computer over ssh, for the host that wires the runtime: the ssh road the workspace
  * kind already had, reused as one function. The dial and the login read are one call (`adopt`), the bundle and
  * the join code go over the same connection, and the join itself is run on that computer by the deploy, so wsp
@@ -780,9 +783,6 @@ interface PlaceDeps {
   /** The dial a typed word names, a login or an alias out of the person's ssh config. */
   sshWord: SshWordReader;
 }
-
-/** How a typed word becomes a dial: the engine's one reading unless a test hands its own. */
-type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) => Promise<SshReach>;
 
 const systemDeps: PlaceDeps = {
   dial: dialHost,

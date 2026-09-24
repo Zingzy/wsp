@@ -667,7 +667,7 @@ describe("an alias out of the person's ssh config", () => {
     expect(await sshWordReach("spoo", { port: 2200, keyPath: "/tmp/k/id" }, run)).toEqual({ user: "root", host: "spoo", port: 2200, keyPath: "/tmp/k/id" });
   });
 
-  it("a word ssh does not rename is refused in one sentence, compared as ssh compares a host, without its case", async () => {
+  it("a word ssh does not rename is refused in one sentence, and a hostname ssh only lowercased is not a rename", async () => {
     const { run } = config();
     await expect(sshWordReach("nonsense", {}, run)).rejects.toThrow(SSH_WORD_REFUSAL("nonsense"));
     expect(SSH_WORD_REFUSAL("nonsense")).not.toMatch(/\.\s+\S/);
@@ -675,6 +675,18 @@ describe("an alias out of the person's ssh config", () => {
     await expect(sshWordReach("BOX", {}, shouting)).rejects.toThrow(SSH_WORD_REFUSAL("BOX"));
     const broken: SshLocalRun = async () => ({ exitCode: 255, stdout: "", stderr: "Bad configuration option\n" });
     await expect(sshWordReach("spoo", {}, broken)).rejects.toThrow(SSH_WORD_REFUSAL("spoo"));
+  });
+
+  it("a numeric word the resolver would rewrite into an address is refused in the same sentence without asking the client", async () => {
+    const asked: string[][] = [];
+    const rewriting: SshLocalRun = async (cmd, args) => {
+      asked.push([cmd, ...args]);
+      return { exitCode: 0, stdout: "user dev\nhostname 127.0.0.1\nport 22\n", stderr: "" };
+    };
+    for (const word of ["123", "1.2.3", "2130706433", "0x7f000001", "0177.1"]) {
+      await expect(sshWordReach(word, {}, rewriting)).rejects.toThrow(SSH_WORD_REFUSAL(word));
+    }
+    expect(asked).toEqual([]);
   });
 
   it("a typed login is read as it always was, and a word that could be an option never reaches the client", async () => {
