@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -155,6 +155,8 @@ interface State {
   /** The person's view preferences, the host's one record; until the host answers, the defaults with what this browser
    * kept of the last record, so the first paint is the side, the width and the body the person picked. */
   preferences: Preferences;
+  /** The newest release as the host last read it; null until it answers, and on a host that reads none. */
+  release: ReleaseView | null;
   /** Whether the centre shows the settings page in place of the selected workspace's thread. */
   settingsOpen: boolean;
   bind(api: Api): void;
@@ -434,6 +436,11 @@ export const useStore = create<State>((set, get) => {
         if (legacy !== null) void get().setPreferences(legacy).then(() => clearLegacyPreferences(window.localStorage));
       })
       .catch(() => {});
+    // release.changed is never replayed, so a reconnect reads the whole view again.
+    void api
+      .releaseGet?.()
+      .then(release => set({ release }))
+      .catch(() => {});
   };
 
   return {
@@ -470,6 +477,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     gaps: 0,
     preferences: bootPreferences(),
+    release: null,
     settingsOpen: false,
     noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
@@ -976,6 +984,9 @@ export const useStore = create<State>((set, get) => {
           return;
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
+          return;
+        case "release.changed":
+          set({ release: e.release });
           return;
         case "job.needs-you": {
           // One event per need, so the toast is said once and stands until the need ends, it is clicked, or another
