@@ -494,10 +494,10 @@ export interface Api {
   pairIssue?(): Promise<{ code: string; expiresAt: number }>;
   /** A fresh join code written into every line a computer you own can join this host by, the same mint wsp add
    * prints, and when it expires. Refused on any socket but this computer's own window. */
-  mintJoin?(): Promise<{ joins: { url: string; line: string; note?: string }[]; expiresAt: string }>;
+  mintJoin?(): Promise<JoinMint>;
   /** The hosts this computer's ssh config and known_hosts name, config first, less the computers already added.
    * Refused on any socket but this computer's own window. */
-  sshHosts?(): Promise<{ alias: string; hostName?: string; user?: string; port?: number; from: "config" | "known_hosts" }[]>;
+  sshHosts?(): Promise<SshHostSuggestion[]>;
   /** Who this wsp is signed in to, as the host reads it off this computer. Optional so a fixture with no Settings
    * page need not fake it; without it the Account row says nothing rather than guessing. */
   account?(): Promise<AccountView>;

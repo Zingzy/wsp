@@ -39,7 +39,7 @@ import {
   readJoinToken,
   JoinMint,
   PAIR_CODE_TTL_MS,
-  PAIR_ISSUE_REFUSAL,
+  MINT_JOIN_REFUSAL,
   PLACES_WORDS,
   SSH_HOSTS_REFUSAL,
   deviceHeldRefusal,
@@ -1966,7 +1966,7 @@ describe("the join line and the ssh hosts the app asks for", () => {
     expect(await paired.request("places.sshHosts")).toMatchObject({ ok: false, error: deviceHeldRefusal("places.sshHosts") });
     paired.close();
     const relayed = await WsClient.connect(srv.port, { ticket });
-    expect(await relayed.request("places.mint")).toMatchObject({ ok: false, error: PAIR_ISSUE_REFUSAL });
+    expect(await relayed.request("places.mint")).toMatchObject({ ok: false, error: MINT_JOIN_REFUSAL });
     expect(await relayed.request("places.sshHosts")).toMatchObject({ ok: false, error: SSH_HOSTS_REFUSAL });
     relayed.close();
     expect(read).toHaveLength(1);

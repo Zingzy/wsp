@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { PlaceView, SshHostSuggestion } from "@wsp/protocol";
+import { isGitForge, type PlaceView, type SshHostSuggestion } from "@wsp/protocol";
 
 /** The two reads the ssh folder needs: a file's text, or the names in a folder; either absent when it is not there. */
 export interface SshFiles {
@@ -36,6 +36,36 @@ const isIp = (word: string): boolean => /^\d{1,3}(\.\d{1,3}){3}$/.test(word) || 
 /** The longest word the wire takes for a name, a login or an address: a longer one is no host anybody typed. */
 const WORD_MAX = 300;
 const fits = (host: ConfigHost): boolean => [host.alias, host.hostName, host.user].every(word => word === undefined || word.length <= WORD_MAX);
+/** A port as either file writes it: digits alone, from 1 to 65535. Anything else is a line ssh would refuse. */
+function portOf(word: string): number | undefined {
+  if (!/^\d{1,5}$/.test(word)) return undefined;
+  const port = Number(word);
+  return port >= 1 && port <= 65535 ? port : undefined;
+}
+
+/** Whether a name matches a glob of `*` and `?`, walking both once and going back only to the last star, so the time
+ * is bounded by the two lengths multiplied whatever the pattern holds. */
+function globMatch(pattern: string, name: string): boolean {
+  let p = 0;
+  let n = 0;
+  let star = -1;
+  let resume = 0;
+  while (n < name.length) {
+    if (p < pattern.length && (pattern[p] === "?" || pattern[p] === name[n])) {
+      p++;
+      n++;
+    } else if (p < pattern.length && pattern[p] === "*") {
+      star = p++;
+      resume = n;
+    } else if (star !== -1) {
+      p = star + 1;
+      n = ++resume;
+    } else return false;
+  }
+  while (p < pattern.length && pattern[p] === "*") p++;
+  return p === pattern.length;
+}
+
 const unquote = (word: string): string => (word.length >= 2 && word.startsWith('"') && word.endsWith('"') ? word.slice(1, -1) : word);
 
 /** A config line's keyword, lowercased, and its arguments, split as ssh splits them: whitespace or one `=`. */
@@ -55,8 +85,7 @@ function includePaths(arg: string, sshDir: string, files: SshFiles): string[] {
   const dir = dirname(path);
   const last = path.slice(dir.length + 1);
   if (!/[*?]/.test(last)) return [path];
-  const glob = new RegExp(`^${last.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
-  return [...(files.list(dir) ?? [])].filter(name => glob.test(name)).sort().map(name => join(dir, name));
+  return [...(files.list(dir) ?? [])].filter(name => globMatch(last, name)).sort().map(name => join(dir, name));
 }
 
 /** Every named host of one config file and what it includes, in file order. A value set twice for one name keeps the
@@ -83,13 +112,17 @@ function configHosts(path: string, sshDir: string, files: SshFiles, seen: Set<st
         const host = into.get(alias)!;
         if (line.key === "hostname" && host.hostName === undefined) host.hostName = value;
         else if (line.key === "user" && host.user === undefined) host.user = value;
-        else if (line.key === "port" && host.port === undefined && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535) host.port = Number(value);
+        else if (line.key === "port" && host.port === undefined) {
+          const port = portOf(value);
+          if (port !== undefined) host.port = port;
+        }
       }
     }
   }
 }
 
-/** Each plain line of known_hosts as the names it holds, the first one the name offered and a bracketed port kept. */
+/** Each plain line of known_hosts as the names it holds, the first one the name offered and a bracketed port kept. A
+ * line whose bracketed port is no port is left out whole. */
 function knownHosts(text: string): { names: string[]; port?: number }[] {
   const rows: { names: string[]; port?: number }[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -98,14 +131,19 @@ function knownHosts(text: string): { names: string[]; port?: number }[] {
     const field = line.split(/\s+/)[0]!;
     let port: number | undefined;
     const names: string[] = [];
+    let bad = false;
     for (const entry of field.split(",")) {
-      const bracketed = /^\[([^\]]+)\]:(\d+)$/.exec(entry);
+      const bracketed = /^\[([^\]]+)\]:(.*)$/.exec(entry);
       const name = bracketed === null ? entry : bracketed[1]!;
       if (name === "" || isPattern(name) || name.startsWith("|")) continue;
-      if (bracketed !== null && port === undefined) port = Number(bracketed[2]);
+      if (bracketed !== null) {
+        const at = portOf(bracketed[2]!);
+        if (at === undefined) bad = true;
+        else port ??= at;
+      }
       names.push(name);
     }
-    if (names.length > 0) rows.push({ names, ...(port === undefined ? {} : { port }) });
+    if (!bad && names.length > 0) rows.push({ names, ...(port === undefined ? {} : { port }) });
   }
   return rows;
 }
@@ -117,8 +155,9 @@ function loginHost(login: string): string {
 }
 
 /** The hosts the person's ssh already knows under `sshDir`, the config's first and then known_hosts, each once, less
- * the computers already added: by the host their ssh login names or the address their link last dialled from. Reads
- * the config, what it includes and known_hosts, and no other file. */
+ * the computers already added (by the host their ssh login names or the address their link last dialled from) and
+ * the git forges. Opens the config, what it includes and known_hosts, and takes only host, hostname, user and port
+ * words from them, so a key file an Include reaches yields nothing. */
 export function sshHostsIn(sshDir: string, places: readonly Pick<PlaceView, "road">[], files: SshFiles = nodeFiles): SshHostSuggestion[] {
   const taken = new Set<string>();
   for (const place of places) {
@@ -132,14 +171,14 @@ export function sshHostsIn(sshDir: string, places: readonly Pick<PlaceView, "roa
   for (const host of config.values()) {
     named.add(host.alias);
     if (host.hostName !== undefined) named.add(host.hostName);
-    if (!fits(host) || taken.has(host.alias) || (host.hostName !== undefined && taken.has(host.hostName))) continue;
+    if (!fits(host) || isGitForge(host.alias) || (host.hostName !== undefined && isGitForge(host.hostName)) || taken.has(host.alias) || (host.hostName !== undefined && taken.has(host.hostName))) continue;
     out.push({ ...host, from: "config" });
   }
   const text = files.read(join(sshDir, "known_hosts"));
   for (const row of text === undefined ? [] : knownHosts(text)) {
     if (row.names.some(name => named.has(name))) continue;
     for (const name of row.names) named.add(name);
-    if (row.names.some(name => taken.has(name))) continue;
+    if (row.names.some(name => taken.has(name) || isGitForge(name))) continue;
     const alias = row.names.find(name => !isIp(name)) ?? row.names[0]!;
     if (!fits({ alias })) continue;
     out.push({ alias, ...(row.port === undefined ? {} : { port: row.port }), from: "known_hosts" });
