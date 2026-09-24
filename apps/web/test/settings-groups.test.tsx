@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
-import type { DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
+import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -447,6 +447,98 @@ describe("About and the newest release", () => {
     // Under the switch no number stands, so nothing is offered off a stale one.
     await show({ state: "off", shape: "app", restartReturns: false });
     expect(buttons()).toEqual([ABOUT_WORDS.releases]);
+  });
+
+  const opens = (): string[] => {
+    const opened: string[] = [];
+    window.open = ((url: string) => {
+      opened.push(url);
+      return null;
+    }) as typeof window.open;
+    return opened;
+  };
+  const HOVER = "Downloads the disk image and checks its sha256.";
+  const shellOn = (current: string | null, bundle: Pick<DesktopBridge, "getBundle" | "quitAndOpen">, app = "0.2.0", host = "0.2.0"): void => {
+    shell(app, host);
+    window.wsp = { version: app, bundleHover: HOVER, hosts: async () => ({ here: "this Mac", current, hosts: [] }), ...bundle };
+  };
+
+  it("in the app on its own host, Get downloads through the shell, says Downloading, then Quit and open, which hands over to the shell", async () => {
+    let done: (outcome: BundleOutcome) => void = () => undefined;
+    const getBundle = vi.fn((_ask: { version: string }) => new Promise<BundleOutcome>(resolve => (done = resolve)));
+    const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    shellOn(null, { getBundle, quitAndOpen });
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    const opened = opens();
+    const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
+    await waitFor(() => expect(get.title).toBe(HOVER));
+    fireEvent.click(get);
+    expect(getBundle).toHaveBeenCalledWith({ version: "0.3.0" });
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.downloading, ABOUT_WORDS.releases]));
+    expect(screen.getByRole("button", { name: ABOUT_WORDS.downloading }).hasAttribute("disabled")).toBe(true);
+    await act(async () => done({ ok: true }));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.quitAndOpen, ABOUT_WORDS.releases]));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.quitAndOpen }));
+    await waitFor(() => expect(quitAndOpen).toHaveBeenCalledTimes(1));
+    expect(opened).toEqual([]);
+  });
+
+  it("a download the shell refuses lands its line as an error notice and puts Get back", async () => {
+    const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted" }));
+    shellOn(null, { getBundle, quitAndOpen: vi.fn() });
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => [n.kind, n.text])).toEqual([["error", "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted"]]));
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+  });
+
+  it("an open the shell refuses lands its line as an error notice and puts Get back", async () => {
+    const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg changed after it was checked and was not opened" }));
+    shellOn(null, { getBundle: vi.fn(async (): Promise<BundleOutcome> => ({ ok: true })), quitAndOpen });
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    fireEvent.click(await screen.findByRole("button", { name: ABOUT_WORDS.quitAndOpen }));
+    await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["wsp-0.3.0-mac.dmg changed after it was checked and was not opened"]));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]));
+  });
+
+  it("where only the host is behind, Get is the link to the release's page and the shell downloads nothing", async () => {
+    const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const hosts = vi.fn(async () => ({ here: "this Mac", current: null, hosts: [] }));
+    shellOn(null, { getBundle, quitAndOpen: vi.fn() }, "0.3.0", "0.2.0");
+    window.wsp = { ...window.wsp, hosts };
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    const opened = opens();
+    await waitFor(() => expect(hosts).toHaveBeenCalled());
+    await settle();
+    const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
+    expect(get.title).toBe("");
+    fireEvent.click(get);
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(getBundle).not.toHaveBeenCalled();
+  });
+
+  it("a remote page gets the link form: Get opens the release's page and asks the shell for nothing", async () => {
+    const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const hosts = vi.fn(async () => ({ here: "this Mac", current: "spoo", hosts: [] }));
+    shellOn("spoo", { getBundle, quitAndOpen: vi.fn() });
+    window.wsp = { ...window.wsp, hosts };
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "about");
+    const opened = opens();
+    await waitFor(() => expect(hosts).toHaveBeenCalled());
+    await settle();
+    const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
+    expect(get.title).toBe("");
+    fireEvent.click(get);
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(getBundle).not.toHaveBeenCalled();
   });
 
   it("the About row in the sidebar carries the newer version as its one mono word, and nothing while level", async () => {

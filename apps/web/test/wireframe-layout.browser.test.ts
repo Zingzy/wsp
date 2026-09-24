@@ -692,6 +692,27 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
+  it("About while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
+    for (const theme of THEMES) {
+      await open("settings-about-behind", theme, "[data-settings-at=about] [data-k=latest-version]");
+      const get = page!.locator("[data-k=get-release]");
+      await page!.waitForFunction(() => document.querySelector<HTMLElement>("[data-k=get-release]")?.title !== "");
+      expect(await get.textContent()).toBe("Get 0.3.0");
+      expect((await read()).cutWords, `words cut at settings-about-behind ${theme}`).toEqual([]);
+      await shot(`settings-about-behind-1280-${theme}`);
+      await get.click();
+      await page!.waitForSelector("[data-k=get-release]:disabled");
+      expect(await get.textContent()).toBe("Downloading");
+      expect((await read()).cutWords, `words cut at settings-about-downloading ${theme}`).toEqual([]);
+      await shot(`settings-about-downloading-1280-${theme}`);
+      await page!.evaluate(() => (window as unknown as { finishBundle: () => void }).finishBundle());
+      await page!.waitForSelector("[data-k=get-release]:not(:disabled)");
+      expect(await get.textContent()).toBe("Quit and open");
+      expect((await read()).cutWords, `words cut at settings-about-kept ${theme}`).toEqual([]);
+      await shot(`settings-about-kept-1280-${theme}`);
+    }
+  }, 120_000);
+
   it("photographs a computer's page to its foot at both widths, so its skills, its workspaces and its two acts are read", async () => {
     for (const theme of THEMES) {
       for (const screen of FOOT_SCREENS) {

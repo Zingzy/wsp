@@ -52,6 +52,8 @@
 //   settings-account      the one Account row, not signed in
 //   settings-keybindings  the chords, in a desktop shell
 //   settings-about        the two halves of the release, in a desktop shell
+//   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
+//                         shell holds the bundle's download until the test lets it go
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer the Add a computer sheet over Computers
@@ -289,6 +291,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-account": { kind: "group", group: "account" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
   "settings-about": { kind: "group", group: "about" },
+  "settings-about-behind": { kind: "group", group: "about" },
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
@@ -410,9 +413,18 @@ const api = {
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
 }
-if (screen === "settings-keybindings" || screen === "settings-about") {
+if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind") {
   window.wsp = { version: "0.2.0" };
   (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.2.0" };
+}
+if (screen === "settings-about-behind") {
+  const held = window as unknown as { finishBundle?: () => void };
+  window.wsp = {
+    ...window.wsp,
+    hosts: async () => ({ here: hereWord(true), current: null, hosts: [] }),
+    getBundle: () => new Promise(resolve => (held.finishBundle = () => resolve({ ok: true }))),
+    quitAndOpen: async () => ({ ok: true }),
+  };
 }
 
 // The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
@@ -429,6 +441,10 @@ useStore.setState({
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer",
+  release:
+    screen === "settings-about-behind"
+      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app", restartReturns: false }
+      : null,
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
   landings: drawsSidebar || screen === "creating" ? landings : {},

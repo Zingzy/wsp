@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELEASE_API_ENV, UPDATE_CHECK_ENV, releaseAbove, type ReleaseChangedEvent } from "@wsp/protocol";
-import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, latestWords, parseRelease, releaseFileFor, releaseReading, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
+import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLOOR_MS, RELEASE_TIMEOUT_MS, latestWords, parseRelease, releaseFileFor, releaseAssetUrl, releaseReading, releaseTagUrl, releaseUrl, releaseWatch, type ReleaseWatchOptions } from "../src/release.js";
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const ETAG = 'W/"405c3ada"';
@@ -72,6 +72,14 @@ describe("the release GitHub names latest", () => {
   it("is asked of GitHub's API unless the smoke's variable moves the base", () => {
     expect(releaseUrl({})).toBe(LATEST);
     expect(releaseUrl({ [RELEASE_API_ENV]: "http://127.0.0.1:9911/" })).toBe("http://127.0.0.1:9911/repos/Zingzy/wsp/releases/latest");
+  });
+
+  it("names one release's answer on the API and its download on the repo, and the smoke's variable moves both", () => {
+    expect(releaseTagUrl({}, "v0.3.0")).toBe("https://api.github.com/repos/Zingzy/wsp/releases/tags/v0.3.0");
+    expect(releaseAssetUrl({}, "v0.3.0", "wsp-0.3.0-mac.dmg")).toBe("https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg");
+    const smoke = { [RELEASE_API_ENV]: "http://127.0.0.1:9911/" };
+    expect(releaseTagUrl(smoke, "v9.9.9")).toBe("http://127.0.0.1:9911/repos/Zingzy/wsp/releases/tags/v9.9.9");
+    expect(releaseAssetUrl(smoke, "v9.9.9", "wsp-9.9.9.AppImage")).toBe("http://127.0.0.1:9911/Zingzy/wsp/releases/download/v9.9.9/wsp-9.9.9.AppImage");
   });
 });
 
