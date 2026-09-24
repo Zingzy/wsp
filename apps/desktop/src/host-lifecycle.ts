@@ -206,9 +206,9 @@ async function accountSession(opts: OpenHostOptions): Promise<HostSession | unde
 /** The io the host inside the app writes through: every line also lands in the host.log a service host writes, since
  * a packaged app's own stdout and stderr go nowhere a person can read. */
 function loggedTo(io: CliIO, logPath: string): CliIO {
-  mkdirSync(dirname(logPath), { recursive: true });
   const kept = (line: string): void => {
     try {
+      mkdirSync(dirname(logPath), { recursive: true });
       appendFileSync(logPath, `${line}\n`);
     } catch {
       // A log that cannot be written never stops the host that writes it.

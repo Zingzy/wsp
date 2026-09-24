@@ -61,6 +61,10 @@ import {
   threadOpRefusal,
   deviceHeldRefusal,
   isObjectFrame,
+  issuesLine,
+  redacted,
+  requestSecrets,
+  RUNTIME_OPS,
   type AccountDevice,
   type AccountView,
   type DeviceView,
@@ -287,22 +291,28 @@ function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
   };
 }
 
-/** The request fields a secret rides in. Their values are cut out of a log line even when a refusal repeats them. */
-const SECRET_FIELDS = ["token", "key", "rows", "code", "passphrase"];
-/** One level down and no deeper: a record of logins is as deep as a secret field goes, and a frame is a stranger's. */
-const leaves = (v: unknown): string[] =>
-  typeof v === "string" ? [v] : typeof v === "object" && v !== null ? Object.values(v).filter((x): x is string => typeof x === "string") : [];
+const DECLARED_OPS = new Set(RUNTIME_OPS);
+/** How much of a refusal's sentence a log line keeps: refusals repeat what they were sent, an id or an op, and a
+ * socket through the door may send frames of many megabytes. */
+const LOGGED_CHARS = 400;
+/** More secret values than any real frame carries (a record of logins, an environment); past it the sentence is not
+ * scanned at all, since each value is one pass over the line on the host's own thread. */
+const SCANNED_SECRETS = 256;
 
-/** The log line of one refused frame. The op is read off a frame nobody has let in yet, so only a name shaped like
- * an op is written, and never a line break a stranger sent. */
-function refusedLine(frame: unknown, payload: Record<string, unknown>): string {
+/** The log line of one refused frame: an op the protocol declares, else `frame`, since the frame may be a stranger's;
+ * the kind; and the sentence's first line with the request's secrets blanked, then cut. Blanked before the cut, since
+ * a cut through a secret would leave its head where the blanking no longer matches it. */
+function refusedLine(frame: unknown, payload: Record<string, unknown>, said?: string): string {
   const asked = isObjectFrame(frame) ? frame["op"] : undefined;
-  const op = typeof asked === "string" && /^[a-z][\w.-]{0,63}$/i.test(asked) ? asked : "frame";
+  const op = typeof asked === "string" && DECLARED_OPS.has(asked) ? asked : "frame";
   const kind = typeof payload["kind"] === "string" ? payload["kind"] : "none";
-  let line = `refused ${op} kind=${kind}: ${String(payload["error"]).split("\n")[0]}`;
-  const secrets = isObjectFrame(frame) ? SECRET_FIELDS.flatMap(field => leaves(frame[field])) : [];
-  for (const secret of secrets) if (secret !== "") line = line.split(secret).join("[redacted]");
-  return line;
+  const secrets = [...new Set(requestSecrets(frame))];
+  if (secrets.length > SCANNED_SECRETS) return `refused ${op} kind=${kind}: (sentence withheld, ${secrets.length} secret values)`;
+  const text = said ?? String(payload["error"]);
+  const end = text.indexOf("\n");
+  const first = redacted(end === -1 ? text : text.slice(0, end), secrets);
+  const cut = first.length > LOGGED_CHARS ? `${first.slice(0, LOGGED_CHARS)} (cut ${first.length - LOGGED_CHARS} characters)` : first;
+  return `refused ${op} kind=${kind}: ${cut}`;
 }
 
 /** Every workspace a verb answers with goes through here on its way out. The record's view holds the display stream
@@ -538,9 +548,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     };
     const answering =
       (frame: () => unknown) =>
-      (payload: Record<string, unknown>): void => {
+      (payload: Record<string, unknown>, said?: string): void => {
         send(payload);
-        if (payload["ok"] === false) opts.log?.(refusedLine(frame(), payload));
+        if (payload["ok"] === false) opts.log?.(refusedLine(frame(), payload, said));
       };
 
     const onMessage = (raw: unknown): void => {
@@ -586,7 +596,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         }
         const req2 = RuntimeRequest.safeParse(parsed);
         if (!req2.success) {
-          send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: req2.error.message });
+          send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: req2.error.message }, issuesLine(req2.error.issues));
           if (!authed) ws.close(4401, UNAUTHORIZED);
           return;
         }

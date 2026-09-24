@@ -4,7 +4,7 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
-import { LoginChoice, ToolPin } from "@wsp/protocol";
+import { issuesLine, LoginChoice, ToolPin } from "@wsp/protocol";
 
 export const RUNGS = ["identity", "shell", "toolchains", "tools", "agents", "logins"] as const;
 export const Rung = z.enum(RUNGS);
@@ -106,6 +106,5 @@ export type Manifest = z.infer<typeof Manifest>;
 export function parseManifest(data: unknown): Manifest {
   const r = Manifest.safeParse(data);
   if (r.success) return r.data;
-  const lines = r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`);
-  throw new Error(`invalid manifest: ${lines.join("; ")}`);
+  throw new Error(`invalid manifest: ${issuesLine(r.error.issues)}`);
 }
