@@ -47,7 +47,7 @@ function testRuntime(): Runtime {
   void store.put("goldens", copyKey("default", "default"), GOLDEN);
   const state = mkdtempSync(join(tmpdir(), "wsp-door-state-"));
   dirs.push(state);
-  return createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(join(state, "state.json"), {}) });
+  return createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(join(state, "state.json")) });
 }
 
 /** Holds a port the way the door holds one: the wildcard, since a loopback bind and a wildcard bind on the same
