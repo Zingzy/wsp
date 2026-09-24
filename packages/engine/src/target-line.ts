@@ -5,7 +5,7 @@
 // on a computer comes through here and runs as the owner of the home instead.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { noRunuserRefusal, shellQuote } from "@wsp/protocol";
+import { noHomeRefusal, noRunuserRefusal, shellQuote } from "@wsp/protocol";
 import { landBytes } from "./land-bytes.js";
 import type { Machine } from "./machine.js";
 
@@ -24,14 +24,16 @@ const PROBE_MS = 20_000;
 /** The one read of who a computer's lines run as. `given` is the home and PATH the computer reported for its
  * login, which win over what the road's own shell has, since a box's daemon runs with root's. Refuses where the
  * road is root, the home is somebody else's and there is no runuser to hand the lines to: a line run as root there
- * is a root-owned file in that person's home. */
+ * is a root-owned file in that person's home. A root road whose home is not there is refused too, since it has no
+ * owner to hand the lines to. */
 export async function targetLogin(machine: Pick<Machine, "exec">, given: { HOME?: string; PATH?: string } = {}): Promise<TargetLogin> {
   const home = given.HOME === undefined ? '"$HOME"' : shellQuote(given.HOME);
   const probe = [
     "uname -s",
     "id -u",
     "id -un",
-    `stat -c %U ${home} 2>/dev/null || stat -f %Su ${home} 2>/dev/null || echo`,
+    // -L: a home that is a link is the folder behind it, whose owner the lines are for, not whoever made the link.
+    `stat -L -c %U ${home} 2>/dev/null || stat -L -f %Su ${home} 2>/dev/null || echo`,
     "command -v runuser >/dev/null 2>&1 && echo 1 || echo 0",
     `printf '%s\\n' "$HOME" "$PATH"`,
   ].join("; ");
@@ -42,7 +44,9 @@ export async function targetLogin(machine: Pick<Machine, "exec">, given: { HOME?
   const user = owner === "" ? self : owner;
   const path = given.PATH ?? shellPath;
   const at: TargetLogin = { platform, home: given.HOME ?? shellHome, ...(path !== "" ? { path } : {}), user };
-  if (platform !== "linux" || uid !== "0" || user === "root" || user === "") return at;
+  if (platform !== "linux" || uid !== "0") return at;
+  if (owner === "") throw new Error(noHomeRefusal(at.home));
+  if (user === "root") return at;
   if (runuser !== "1") throw new Error(noRunuserRefusal(user));
   return { ...at, runAs: user };
 }

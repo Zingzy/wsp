@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { noRunuserRefusal } from "@wsp/protocol";
+import { noHomeRefusal, noRunuserRefusal } from "@wsp/protocol";
+import { symlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { asLogin, landAsLogin, targetLogin, type TargetLogin } from "../src/target-line.js";
@@ -44,6 +45,38 @@ describe("the line a computer runs as its login", () => {
 
   it("refuses to read at all where the road is root, the home is somebody else's and there is no runuser", async () => {
     await expect(targetLogin(probed(["Linux", "0", "root", "ada", "0", "/root", "/usr/bin"]).machine, { HOME: "/home/ada" })).rejects.toThrow(noRunuserRefusal("ada"));
+  });
+
+  it("reads the owner of the folder a linked home points at, not of the link, so a link made by one user never names the lines' user", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-login-"));
+    dirs.push(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    // A root daemon on Linux, as the probe asks it; stat is the real one, GNU on Linux and BSD on a Mac.
+    writeFileSync(join(bin, "uname"), "#!/bin/sh\necho Linux\n");
+    writeFileSync(join(bin, "id"), '#!/bin/sh\ncase "$1" in -u) echo 0;; -un) echo root;; esac\n');
+    for (const f of ["uname", "id"]) chmodSync(join(bin, f), 0o755);
+    // The link is this test's own; the folder behind it is root's.
+    const home = join(root, "home-link");
+    symlinkSync("/", home);
+    const machine: Pick<Machine, "exec"> = {
+      exec: async cmd => {
+        try {
+          return { exitCode: 0, stdout: execFileSync("/bin/bash", ["-c", cmd], { env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" }), stderr: "" };
+        } catch (e) {
+          return { exitCode: 1, stdout: "", stderr: String(e) };
+        }
+      },
+    };
+    const login = await targetLogin(machine, { HOME: home });
+    expect(login.user).toBe("root");
+    expect(login.runAs).toBeUndefined();
+  });
+
+  it("refuses where a root road names a home that is not there, rather than running as root", async () => {
+    await expect(targetLogin(probed(["Linux", "0", "root", "", "1", "/root", "/usr/bin"]).machine, { HOME: "/home/gone" })).rejects.toThrow(noHomeRefusal("/home/gone"));
+    // A login that is not root with no home still runs as itself.
+    expect((await targetLogin(probed(["Linux", "1000", "ada", "", "1", "/home/ada", "/usr/bin"]).machine)).user).toBe("ada");
   });
 
   it("the wrapped line runs in bash as the login's own, quoting and all", () => {
