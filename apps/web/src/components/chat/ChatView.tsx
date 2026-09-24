@@ -10,6 +10,7 @@
 // Under the transcript stand the threads this one's agent opened, one row each
 // with the workspace it runs on and a link to it, and the footer weighs the
 // turn's own cost against what those threads spent.
+import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -164,14 +165,19 @@ export function ChatView({
   ) : null;
 
   return (
-    <div ref={rootRef} className="relative h-full min-h-0 text-foreground">
+    <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
       <div className="absolute inset-0">
         {!thread.hydrated ? (
           <div className="flex h-full items-center justify-center pb-(--chat-composer-inset) text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
         ) : empty ? (
-          <div className="h-full pb-(--chat-composer-inset)">
-            <EmptyThread workspaceName={workspace?.name ?? workspaceId} />
-          </div>
+          // A fresh thread centres the headline and the composer as one stack; the composer glides to its dock
+          // when the first message goes.
+          <>
+            <HeroAtmosphere {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
+            <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
+              <EmptyThread workspaceName={workspace?.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
+            </div>
+          </>
         ) : (
           <MessagesTimeline
             isWorking={view.running}
@@ -199,7 +205,8 @@ export function ChatView({
         ref={composerRef}
         data-chat-composer-dock
         data-at-end={!showTranscript || atEnd || undefined}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:62%] [--glass-blur:8px] data-at-end:[--glass-opacity:100%]"
+        data-centred={(thread.hydrated && empty) || undefined}
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:62%] [--glass-blur:8px] data-at-end:[--glass-opacity:100%] transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
       >
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />
         {children?.(thread)}
@@ -230,9 +237,10 @@ function ScrollToEnd({ hidden, onClick }: { hidden: boolean; onClick: () => void
   );
 }
 
-export function EmptyThread({ workspaceName }: { workspaceName: string }) {
+export function EmptyThread({ workspaceName, projectId }: { workspaceName: string; projectId?: string }) {
   return (
-    <div className="flex h-full items-center justify-center px-6">
+    <div className="flex flex-col items-center justify-center gap-6 px-6">
+      <HeroMark {...(projectId === undefined ? {} : { projectId })} />
       <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
         What should we build in{" "}
         <span className="inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline">{workspaceName}</span>?
