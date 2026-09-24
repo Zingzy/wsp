@@ -637,6 +637,62 @@ describe("Add a computer on the page", () => {
     expect(plan()[wsp]).toEqual([`${wsp + 1}installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"]);
   });
 
+  it("shows the spinner inside the Adding button while an add runs, and not before or after", async () => {
+    let refuse: ((e: Error) => void) | undefined;
+    await open("ssh", { addComputerOverSsh: () => new Promise<PlaceView>((_ok, no) => (refuse = no)) } as unknown as Partial<Api>);
+    const spinner = (): Element | null => document.querySelector("[data-k='ssh-add'] [data-k='adding-spinner']");
+    fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
+    expect(spinner()).toBeNull();
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await waitFor(() => expect(spinner()).not.toBeNull());
+    expect(document.querySelector("[data-k='ssh-add']")?.textContent).toBe(ADD_COMPUTER_WORDS.adding);
+    await act(async () => {
+      refuse?.(new RequestError("root@65.21.4.12 did not answer on port 22"));
+      await Promise.resolve();
+    });
+    expect(spinner()).toBeNull();
+  });
+
+  it("on a failed add keeps the finished steps ticked, marks the step that was running as failed, and leaves the rest waiting", async () => {
+    let report: ((stage: InstallStage) => void) | undefined;
+    let refuse: ((e: Error) => void) | undefined;
+    await open("ssh", {
+      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
+        new Promise<PlaceView>((_ok, no) => {
+          report = onStage;
+          refuse = no;
+        }),
+    } as unknown as Partial<Api>);
+    fireEvent.change(host(), { target: { value: "root@spoo" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await act(async () => {
+      report?.({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
+      report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+      report?.({ step: "reach", word: placeAddSheetWord("reach", "running"), state: "running" });
+      refuse?.(new RequestError("spoo cannot reach this computer at any of its addresses"));
+      await Promise.resolve();
+    });
+    const states = plan().map(([, state]) => state);
+    expect(states).toEqual(["done", "done", "failed", ...PlaceAddStep.options.slice(3).map(() => "waiting")]);
+    const failed = document.querySelector("[data-k='plan'] li[data-state='failed']")!;
+    expect(failed.querySelector("[data-k='step-failed']")).not.toBeNull();
+    expect(failed.querySelector("[data-k='step-failed']")?.className).toContain("destructive");
+    expect(document.querySelectorAll("[data-k='plan'] li[data-state='done'] svg")).toHaveLength(2);
+    expect(host().disabled).toBe(false);
+  });
+
+  it("marks the first step failed when the add is refused before any step reported", async () => {
+    let refuse: ((e: Error) => void) | undefined;
+    await open("ssh", { addComputerOverSsh: () => new Promise<PlaceView>((_ok, no) => (refuse = no)) } as unknown as Partial<Api>);
+    fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await act(async () => {
+      refuse?.(new RequestError("ssh refused the login (publickey).", PLACE_LOGIN_REFUSED_KIND));
+      await Promise.resolve();
+    });
+    expect(plan().map(([, state]) => state)).toEqual(["failed", ...PlaceAddStep.options.slice(1).map(() => "waiting")]);
+  });
+
   it("keeps the run when the person switches roads and comes back, since the host keeps installing", async () => {
     let report: ((stage: InstallStage) => void) | undefined;
     await open("ssh", { addComputerOverSsh: (_l: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);

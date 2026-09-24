@@ -5,13 +5,14 @@
 // to dial back; a cloud is its provider's key, each provider on its own; a
 // computer already running wsp types the join line this host mints. Every
 // state is read off what the host answered.
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { PLACES_WORDS, PLACE_INSTALL, PLACE_LOGIN_REFUSED_KIND, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
+import { Spinner } from "../components/ui/spinner.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { RequestError, type Api, type InstallStage } from "../protocol/client.js";
@@ -31,13 +32,17 @@ const GUIDES: Record<AddRoad, string> = {
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
-type StepLine = { word: string; state: "waiting" | "running" | "done"; fact?: string };
+type StepLine = { word: string; state: "waiting" | "running" | "done" | "failed"; fact?: string };
 
-function planLines(stages: readonly InstallStage[]): StepLine[] {
+/** A failed add marks the step that was running, or the first step not done when none had reported. */
+function planLines(stages: readonly InstallStage[], failed: boolean): StepLine[] {
+  const done = (step: PlaceAddStep): boolean => stages.some(stage => stage.step === step && stage.state === "done");
+  const failedStep = failed ? (stages.find(stage => stage.state === "running")?.step ?? PlaceAddStep.options.find(step => !done(step))) : undefined;
   return PlaceAddStep.options.map(step => {
     const reported = stages.find(stage => stage.step === step);
     const fact = reported?.fact ?? PLAN_FACTS[step];
-    return { word: reported?.word ?? placeAddSheetWord(step, "running"), state: reported?.state ?? "waiting", ...(fact === undefined ? {} : { fact }) };
+    const state = step === failedStep ? "failed" : (reported?.state ?? "waiting");
+    return { word: reported?.word ?? placeAddSheetWord(step, "running"), state, ...(fact === undefined ? {} : { fact }) };
   });
 }
 
@@ -186,8 +191,14 @@ function Steps({ lines }: { lines: readonly StepLine[] }) {
     <ol data-k="plan" className="flex flex-col gap-2.5">
       {lines.map((line, at) => (
         <li key={line.word} data-state={line.state} className="flex items-center gap-3">
-          <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full border font-mono text-[10px]", line.state === "done" ? "border-foreground/40 bg-foreground/10 text-foreground" : line.state === "running" ? "border-primary text-primary" : "border-border text-muted-foreground")}>
-            {line.state === "done" ? <CheckIcon className="size-3" /> : at + 1}
+          <span
+            {...(line.state === "failed" ? { "data-k": "step-failed" } : {})}
+            className={cn(
+              "inline-flex size-5 shrink-0 items-center justify-center rounded-full border font-mono text-[10px]",
+              line.state === "done" ? "border-foreground/40 bg-foreground/10 text-foreground" : line.state === "running" ? "border-primary text-primary" : line.state === "failed" ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border text-muted-foreground",
+            )}
+          >
+            {line.state === "done" ? <CheckIcon className="size-3" /> : line.state === "failed" ? <XIcon aria-hidden className="size-3" /> : at + 1}
           </span>
           <span className={cn("min-w-0 flex-1 truncate text-[13px]", line.state === "waiting" ? "text-muted-foreground" : "text-foreground")}>{line.word}</span>
           {line.fact === undefined ? null : <span className="font-mono text-[11px] text-muted-foreground">{line.fact}</span>}
@@ -235,7 +246,6 @@ function SshRoad({ now }: { now: () => number }) {
     const address = login.user.trim() === "" ? login.host.trim() : `${login.user.trim()}@${login.host.trim()}`;
     const n = Number.parseInt(login.port, 10);
     api.addComputerOverSsh({ address, ...(Number.isFinite(n) && n !== 22 ? { port: n } : {}) }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage])).then(setInstalled, (e: unknown) => {
-      setStages(null);
       const loginRefused = e instanceof RequestError && e.kind === PLACE_LOGIN_REFUSED_KIND;
       setRefusal({ said: errorText(e), ...(loginRefused ? { fix: MINE.refusedFix } : {}) });
     });
@@ -247,7 +257,7 @@ function SshRoad({ now }: { now: () => number }) {
       </RoadPanel>
     );
   }
-  const running = stages !== null;
+  const running = stages !== null && refusal === null;
   const held = api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
   const known = new Set(places.flatMap(p => [p.road?.ssh, p.name].filter((w): w is string => w !== undefined)));
   const suggested = (hosts ?? []).filter(h => !known.has(h.alias));
@@ -263,7 +273,14 @@ function SshRoad({ now }: { now: () => number }) {
             {running ? MINE.running : <><Kbd>↵</Kbd>{MINE.adds}</>}
           </span>
           <Button data-k="ssh-add" className={cn(KEYCAP, "ms-auto")} held={running || held !== undefined || host.trim() === ""} onClick={() => add({ user, host, port })}>
-            {running ? MINE.adding : MINE.addComputer}
+            {running ? (
+              <>
+                <Spinner data-k="adding-spinner" aria-hidden role={undefined} className="size-4" />
+                {MINE.adding}
+              </>
+            ) : (
+              MINE.addComputer
+            )}
           </Button>
         </>
       }
@@ -282,7 +299,7 @@ function SshRoad({ now }: { now: () => number }) {
       {refusal !== null || held !== undefined ? <RefusalSlot k="ssh-refusal" {...(refusal === null ? { waiting: held } : refusal)} /> : null}
       <div className="flex flex-col gap-3">
         <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-[0.12em]">{MINE.whatHappens}</span>
-        <Steps lines={planLines(stages ?? [])} />
+        <Steps lines={planLines(stages ?? [], refusal !== null && stages !== null)} />
       </div>
       {!running && suggested.length > 0 ? (
         <div className="flex flex-col gap-3" data-k="ssh-hosts">
