@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProposedPlanCard } from "../src/components/chat/ProposedPlanCard.js";
 import { useNotices } from "../src/notices/store.js";
+import { RequestError } from "../src/protocol/client.js";
 
 const PLAN = "# Plan\n\n1. Do the thing";
 
@@ -38,6 +39,16 @@ describe("saving a plan to the workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith({ path: "plan.md", contents: expect.any(String) }));
     await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it("a refused save is said under the field with the host's fix, the dialog stays, and no toast", async () => {
+    const save = vi.fn(async () => { throw new RequestError("plans/ is not writable Check the folder's owner.", undefined, "Check the folder's owner."); });
+    const field = await openSave(save);
+    fireEvent.change(field, { target: { value: "plans/plan.md" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(document.querySelector("[data-k='plan-path-refusal']")?.textContent).toBe("Plan not saved: plans/ is not writable Check the folder's owner."));
+    expect(screen.getByLabelText("Workspace path")).toBeTruthy();
     expect(useNotices.getState().notices).toEqual([]);
   });
 });

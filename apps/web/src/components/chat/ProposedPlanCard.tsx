@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { addNotice, noticeFailure } from "../../notices/store";
+import { failureOf } from "../../protocol/failure";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
@@ -45,7 +46,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const [pathRefusal, setPathRefusal] = useState<string | null>(null);
+  const [pathRefusal, setPathRefusal] = useState<{ said: string; fix?: string | undefined } | null>(null);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "plan",
     onError: (error) => noticeFailure(error, (said) => `Plan not copied: ${said}`),
@@ -84,7 +85,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       return;
     }
     if (!relativePath) {
-      setPathRefusal("Type a path in the workspace to save the plan to.");
+      setPathRefusal({ said: "Type a path in the workspace to save the plan to." });
       return;
     }
 
@@ -96,7 +97,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         setIsSaveDialogOpen(false);
       } catch (error) {
         setIsSavingToWorkspace(false);
-        noticeFailure(error, (said) => `Plan not saved: ${said}`);
+        const { said, fix } = failureOf(error);
+        setPathRefusal({ said: `Plan not saved: ${said}`, fix });
       }
     })();
   };
@@ -194,7 +196,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                 />
               </label>
               <p data-k="plan-path-refusal" className="min-h-4 font-mono text-xs text-destructive-foreground">
-                {pathRefusal ?? ""}
+                {pathRefusal?.said ?? ""}
+                {pathRefusal?.fix === undefined ? null : <span className="text-foreground"> {pathRefusal.fix}</span>}
               </p>
             </DialogPanel>
             <DialogFooter>

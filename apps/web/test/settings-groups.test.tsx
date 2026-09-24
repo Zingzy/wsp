@@ -178,6 +178,23 @@ describe("a project's Look", () => {
 });
 
 describe("Devices", () => {
+  it("a refused revoke is an error notice with the host's fix, and a lost socket says nothing", async () => {
+    let refuse: () => never = () => { throw new RequestError("that device is already gone Read the list again.", "gone", "Read the list again."); };
+    await mount({ devicesList: async () => [device("d_1", "zingzy-laptop")], devicesRevoke: async () => refuse() } as Partial<Api>, "devices");
+    fireEvent.click(rowOf("d_1")!.querySelector<HTMLElement>("[data-k=revoke]")!);
+    const confirm = async (): Promise<void> => {
+      fireEvent.click(document.querySelector("[data-k=revoke-confirm]")!);
+      await settle();
+    };
+    await confirm();
+    expect(useNotices.getState().notices.map(n => [n.kind, n.text])).toEqual([["error", "that device is already gone Read the list again."]]);
+    useNotices.getState().clear();
+    refuse = () => { throw new DisconnectedError("lost"); };
+    await confirm();
+    expect(useNotices.getState().notices).toEqual([]);
+    cleanup();
+  });
+
   it("lists one row per unscoped device with paired and seen, names this browser, and Revoke asks, calls the host and rereads", async () => {
     const revoked: string[] = [];
     let devices: DeviceView[] = [device("d_1", "zingzy-laptop"), device("d_2", "Safari on iPhone", { here: true, lastSeenAt: new Date().toISOString() }), device("d_3", "a thread's token", { scope: { kind: "thread", workspaceId: "ws_a", threadId: "th_1", rootThreadId: "th_1" } })];
