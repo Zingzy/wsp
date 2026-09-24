@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
@@ -191,10 +192,11 @@ function throughConnector(req: IncomingMessage): boolean {
  * computer this host runs on, dialling the loopback the guest tool server and the guest command line dial once the
  * guest door has read which workspace the token was minted for. A token scoped to a thread is minted into one turn
  * and comes back by that road alone, so one arriving by any other is a copy carried out of a machine and names
- * nobody here. The one home of that rule: the socket door and the JSON routes both read this, so neither can stay
- * open while the other closes. */
-function ownRoad(req: IncomingMessage): boolean {
-  return !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
+ * nobody here. A request on the door's listener is never that road whatever its peer, since a reverse forward
+ * into the door lands from the loopback too. The one home of that rule: the socket door and the JSON routes both
+ * read this, so neither can stay open while the other closes. */
+function ownRoad(req: IncomingMessage, door: WeakSet<Socket>): boolean {
+  return !door.has(req.socket) && !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
 }
 
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
@@ -465,7 +467,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
     // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
     if (scope === undefined) return { caller: "paired" };
-    return ownRoad(req) ? { caller: { origin: "relayed", by: scope } } : undefined;
+    return ownRoad(req, doorSockets) ? { caller: { origin: "relayed", by: scope } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -557,6 +559,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
+  // Held per socket rather than read off the port, so a socket the door let in stays the door's after it closes.
+  const doorSockets = new WeakSet<Socket>();
+  doorServer.on("connection", socket => doorSockets.add(socket));
   let doorAt: number | undefined;
   let doorOpening: Promise<DoorAt> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
@@ -634,7 +639,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       host: address,
       attach: [server, doorServer],
       originAllowed: originAllows,
-      ownRoad,
+      ownRoad: req => ownRoad(req, doorSockets),
       door: { open: openDoor },
       devices: rt.devices,
       authToken,
