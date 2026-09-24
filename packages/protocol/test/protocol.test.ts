@@ -1796,16 +1796,19 @@ describe("the newest release as the host read it", () => {
       checkedAt: "2026-09-24T11:00:00.000Z",
       triedAt: "2026-09-24T11:00:00.000Z",
       shape: "service",
-      restartReturns: false,
     };
     expect(wire.ReleaseView.parse(release)).toEqual(release);
     expect(wire.EventUnion.parse({ type: "release.changed", release, seq: 3 })).toEqual({ type: "release.changed", release, seq: 3 });
     // Off carries no reading, so nothing drawn off it can offer a download the person turned checks off for.
-    expect(wire.ReleaseView.parse({ state: "off", shape: "app", restartReturns: false })).toEqual({ state: "off", shape: "app", restartReturns: false });
+    expect(wire.ReleaseView.parse({ state: "off", shape: "app" })).toEqual({ state: "off", shape: "app" });
     expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
     // The line that moves this host onto the release rides beside it, read on the road the host was installed by.
     const behind = { ...release, update: "npm i -g @zingzy/wsp@0.3.0" };
     expect(wire.ReleaseView.parse(behind)).toEqual(behind);
+    // The restart road's own refusal rides as the words the page shows; absent, a restart brings the host back.
+    const refused = { ...release, restartRefusal: wire.UP_RESTART_LINE };
+    expect(wire.ReleaseView.parse(refused)).toEqual(refused);
+    expect(wire.HOST_NO_RESTART_LINE).toBe("This host cannot restart itself.");
   });
 
   it("restarts the host with no arguments, an op no thread and no paired computer sends", () => {
@@ -1815,13 +1818,13 @@ describe("the newest release as the host read it", () => {
   });
 
   it("reads the release as ahead only when it is above a version that runs", () => {
-    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" }, shape: "app", restartReturns: false });
+    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" }, shape: "app" });
     expect(wire.releaseAbove(view, "0.2.0")).toBe(true);
     expect(wire.releaseAbove(view, "0.3.0", "0.2.0")).toBe(true);
     expect(wire.releaseAbove(view, "0.3.0")).toBe(false);
     // A host built ahead of the newest release, a prerelease or a checkout's, reads level.
     expect(wire.releaseAbove(view, "0.4.0-rc.1")).toBe(false);
-    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking", shape: "app", restartReturns: false }), "0.2.0")).toBe(false);
+    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking", shape: "app" }), "0.2.0")).toBe(false);
   });
 });
 

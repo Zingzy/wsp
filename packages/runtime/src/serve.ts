@@ -38,6 +38,7 @@ import {
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
   HOST_RESTART_TICKET_REFUSAL,
+  HOST_NO_RESTART_LINE,
   HERE_PLACE_ID,
   DAEMON_OPEN_ONE_OF,
   PLACE_CODE_REFUSAL,
@@ -1432,11 +1433,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: HOST_RESTART_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              if (opts.restart === undefined) throw new Error("this host cannot restart itself");
+              if (opts.restart === undefined) throw new Error(HOST_NO_RESTART_LINE);
               if (opts.restart.refusal !== undefined) throw new Error(opts.restart.refusal);
               send({ id: msg.id, ok: true });
               // A second ask while the first is closing the host would close it twice and start two successors.
-              restarting ??= opts.restart.restart().catch((e: unknown) => opts.log?.(`host.restart failed: ${e instanceof Error ? e.message : String(e)}`));
+              // A restart that failed leaves this host serving, so the next ask may try again.
+              restarting ??= opts.restart.restart().catch((e: unknown) => {
+                restarting = undefined;
+                opts.log?.(`host.restart failed: ${e instanceof Error ? e.message : String(e)}`);
+              });
               return;
             }
             case "project.seed.plan":

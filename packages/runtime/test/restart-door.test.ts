@@ -2,7 +2,7 @@
 // host.restart over the wire: answered before the host goes, refused in the
 // road's own words where a restart would not bring it back, and refused on a
 // socket a ticket let in.
-import { HOST_RESTART_TICKET_REFUSAL } from "@wsp/protocol";
+import { HOST_NO_RESTART_LINE, HOST_RESTART_TICKET_REFUSAL } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime, serveRuntime, type RestartDoor, type RuntimeServer } from "../src/index.js";
 import { memoryStore } from "../src/store.js";
@@ -63,8 +63,19 @@ describe("restarting the host over the wire", () => {
     expect(restart).not.toHaveBeenCalled();
   });
 
-  it("a server with no restart road refuses in one line", async () => {
+  it("a server with no restart road refuses in the one line the release view carries for it", async () => {
     const { port } = await serving();
-    expect(await wsRequest(port, "t", { op: "host.restart" })).toMatchObject({ ok: false, error: "this host cannot restart itself" });
+    expect(await wsRequest(port, "t", { op: "host.restart" })).toMatchObject({ ok: false, error: HOST_NO_RESTART_LINE });
+  });
+
+  it("a restart that failed while the host still serves lets a later ask start another", async () => {
+    const lines: string[] = [];
+    const restart = vi.fn().mockRejectedValueOnce(new Error("the host is still starting")).mockResolvedValue(undefined);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    srv = await serveRuntime(rt, { port: 0, authToken: "t", restart: { restart }, log: line => lines.push(line) });
+    expect(await wsRequest(srv.port, "t", { op: "host.restart" })).toMatchObject({ ok: true });
+    await expect.poll(() => lines).toContain("host.restart failed: the host is still starting");
+    expect(await wsRequest(srv.port, "t", { op: "host.restart" })).toMatchObject({ ok: true });
+    await expect.poll(() => restart.mock.calls.length).toBe(2);
   });
 });

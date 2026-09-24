@@ -7,12 +7,15 @@ import { UP_RESTART_LINE } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { restartRoads, type RestartingHost } from "../src/restart.js";
 
-function recorded(respawn: (ports: { port: number; wsPort: number }) => Promise<unknown> = async () => undefined) {
+function recorded(respawn: (ports: { port: number; wsPort: number }) => Promise<unknown> = async () => undefined, close: () => Promise<void> = async () => undefined) {
   const steps: string[] = [];
   const host: RestartingHost = {
     port: 7101,
     wsPort: 7102,
-    close: async () => void steps.push("close"),
+    close: async () => {
+      steps.push("close");
+      await close();
+    },
   };
   const roads = restartRoads({
     exit: code => void steps.push(`exit ${code}`),
@@ -46,6 +49,22 @@ describe("the restart roads", () => {
     });
     await roads.verb.restart(host);
     expect(steps).toEqual(["close", "respawn 7101 7102", "log the host that was to replace this one did not serve: no host answered within 30 s", "exit 1"]);
+  });
+
+  it("a service whose close failed still exits, so its manager brings a host back rather than a process that serves nothing", async () => {
+    const { steps, host, roads } = recorded(undefined, async () => {
+      throw new Error("the lock is gone");
+    });
+    await roads.service.restart(host);
+    expect(steps).toEqual(["close", "log the host did not close cleanly: the lock is gone", "exit 1"]);
+  });
+
+  it("a verb's host whose close failed starts no successor and exits 1, so the next command starts a host", async () => {
+    const { steps, host, roads } = recorded(undefined, async () => {
+      throw new Error("the lock is gone");
+    });
+    await roads.verb.restart(host);
+    expect(steps).toEqual(["close", "log the host did not close cleanly: the lock is gone", "exit 1"]);
   });
 
   it("a host wsp up holds in a terminal does not come back from a restart, so it refuses in the terminal's words and closes nothing", async () => {

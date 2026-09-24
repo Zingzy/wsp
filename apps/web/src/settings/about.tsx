@@ -6,7 +6,7 @@
 // link. Once newer files are installed under a running host, Restart host
 // stands in Get's place. A browser tab has no shell half and shows the host's
 // line alone.
-import { UP_RESTART_LINE, placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { onAnotherComputer } from "../boot.js";
 import { Button } from "../components/ui/button.js";
@@ -36,12 +36,12 @@ function latestHover(release: ReleaseView, now: number): string | undefined {
 
 /** Restart where the installed files are newer, a restart brings the host back, and the page is on the host's own
  * computer, since the host refuses a restart asked from anywhere else. */
-const restartShown = (release: ReleaseView | null): boolean => release?.installed !== undefined && release.restartReturns && !onAnotherComputer();
+const restartShown = (release: ReleaseView | null): boolean => release?.installed !== undefined && release.restartRefusal === undefined && !onAnotherComputer();
 
 /** The Host line's hover: the files installed under the running host first, since the install already happened and
  * only its restart is left, then the line that installs the release while the host is behind it. */
 function hostHover(release: ReleaseView | null): string {
-  if (release?.installed !== undefined) return ABOUT_WORDS.hostInstalledHover(release.installed, !release.restartReturns ? UP_RESTART_LINE : restartShown(release) ? ABOUT_WORDS.restartRuns : ABOUT_WORDS.restartThere);
+  if (release?.installed !== undefined) return ABOUT_WORDS.hostInstalledHover(release.installed, release.restartRefusal ?? (restartShown(release) ? ABOUT_WORDS.restartRuns : ABOUT_WORDS.restartThere));
   if (release?.update !== undefined && release.latest !== undefined) return ABOUT_WORDS.hostUpdateHover(release.update, release.latest.version);
   return ABOUT_WORDS.hostHover;
 }

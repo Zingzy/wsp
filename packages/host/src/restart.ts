@@ -28,21 +28,33 @@ export interface RestartDeps {
   log(line: string): void;
 }
 
+/** Closes the host, and says in its log where the close failed: the process exits either way, since a host half
+ * closed serves nothing and holds its place. */
+async function closed(host: RestartingHost, deps: RestartDeps): Promise<boolean> {
+  try {
+    await host.close();
+    return true;
+  } catch (e) {
+    deps.log(`the host did not close cleanly: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
 export function restartRoads(deps: RestartDeps): Readonly<Record<HostStarted, RestartRoad>> {
   return {
     // launchd's KeepAlive and systemd's Restart=always bring back a unit that exits, whatever its code.
     service: {
       shape: "service",
-      restart: async host => {
-        await host.close();
-        deps.exit(0);
-      },
+      restart: async host => deps.exit((await closed(host, deps)) ? 0 : 1),
     },
     // The close drops the lock and frees the ports before the successor takes both.
     verb: {
       shape: "verb",
       restart: async host => {
-        await host.close();
+        if (!(await closed(host, deps))) {
+          deps.exit(1);
+          return;
+        }
         try {
           await deps.respawn({ port: host.port, wsPort: host.wsPort });
         } catch (e) {

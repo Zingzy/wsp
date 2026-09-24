@@ -23,8 +23,9 @@ export type HostShape = z.infer<typeof HostShape>;
  * who turned checks off is offered nothing off a stale number. `checkedAt` is the last answer, `triedAt` the last ask.
  * `installed` is the version the files this host was started from carry now, present only once it differs from the
  * running one, which is what a reinstall under a running host looks like. `update` is the line that moves this host
- * onto `latest` on the road it was installed by, present only while `latest` is above it. `restartReturns` says
- * whether host.restart brings this host back on the road it came up on. */
+ * onto `latest` on the road it was installed by, present only while `latest` is above it. `restartRefusal` is the
+ * sentence host.restart answers where it would not bring this host back, in the words of the road it came up on, and
+ * absent where it does. */
 export const ReleaseView = z.object({
   state: ReleaseState,
   latest: ReleaseLatest.optional(),
@@ -33,7 +34,7 @@ export const ReleaseView = z.object({
   installed: z.string().optional(),
   update: z.string().optional(),
   shape: HostShape,
-  restartReturns: z.boolean(),
+  restartRefusal: z.string().optional(),
 });
 export type ReleaseView = z.infer<typeof ReleaseView>;
 
@@ -50,6 +51,9 @@ export const releaseWord = (view: Pick<ReleaseView, "state" | "latest">): string
 
 /** What a host wsp up holds in a terminal says for a restart: nothing brings it back but that terminal. */
 export const UP_RESTART_LINE = "Ctrl-C the terminal running wsp up and run it again.";
+
+/** What a host with no restart road says for a restart: one wsp init serves, which nothing brings back. */
+export const HOST_NO_RESTART_LINE = "This host cannot restart itself.";
 
 /** host.restart on a socket a ticket let in: a restart is the computer's own to ask for. */
 export const HOST_RESTART_TICKET_REFUSAL = "a socket let in on a ticket cannot restart this host; restart it on the computer it runs on";

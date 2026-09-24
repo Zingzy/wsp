@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
@@ -365,7 +365,6 @@ describe("About and the newest release", () => {
     checkedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     shape: "app",
-    restartReturns: false,
     ...over,
   });
   const shell = (app: string | undefined, host: string): void => {
@@ -405,7 +404,7 @@ describe("About and the newest release", () => {
     expect(latestWord()).toBe("0.3.0");
     expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
     for (const [state, word] of [["checking", "checking"], ["unreached", "unreached"], ["off", "off"]] as const) {
-      await show({ state, shape: "app", restartReturns: false, ...(state === "unreached" ? { triedAt: tried } : {}) });
+      await show({ state, shape: "app", ...(state === "unreached" ? { triedAt: tried } : {}) });
       expect(latestWord()).toBe(word);
       expect(inks()).toContain("text-muted-foreground");
     }
@@ -445,7 +444,7 @@ describe("About and the newest release", () => {
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
     expect(opened.at(-1)).toMatch(/\/releases$/);
     // Under the switch no number stands, so nothing is offered off a stale one.
-    await show({ state: "off", shape: "app", restartReturns: false });
+    await show({ state: "off", shape: "app" });
     expect(buttons()).toEqual([ABOUT_WORDS.releases]);
   });
 
@@ -546,11 +545,12 @@ describe("About and the newest release", () => {
   it("offers Restart host in place of Get once the installed files are newer and a restart brings the host back, and the click asks the host", async () => {
     shell("0.2.0", "0.2.0");
     const hostRestart = vi.fn(async () => undefined);
-    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true, update: "npm i -g @zingzy/wsp@0.3.0" }) });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0" }) });
     await mount({ hostRestart } as Partial<Api>, "about");
     expect(buttons()).toEqual([ABOUT_WORDS.restartHost, ABOUT_WORDS.releases]);
     const restart = screen.getByRole("button", { name: ABOUT_WORDS.restartHost });
     expect(restart.title).toBe(ABOUT_WORDS.restartHover);
+    for (const dropped of ["terminal panes", "localhost forwards", "sign-in in progress"]) expect(restart.title).toContain(dropped);
     // The files are already the release, so the hover names the restart and not the install again.
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", ABOUT_WORDS.restartRuns));
     fireEvent.click(restart);
@@ -562,7 +562,7 @@ describe("About and the newest release", () => {
     const hostRestart = vi.fn(async () => {
       throw new RequestError("a socket let in on a ticket cannot restart this host");
     });
-    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true }) });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
     await mount({ hostRestart } as Partial<Api>, "about");
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.restartHost }));
     await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["a socket let in on a ticket cannot restart this host"]));
@@ -570,16 +570,24 @@ describe("About and the newest release", () => {
 
   it("draws no Restart where a restart would not bring the host back, and the Host hover says the terminal's line instead", async () => {
     shell("0.2.0", "0.2.0");
-    useStore.setState({ release: read("0.3.0", { shape: "up", installed: "0.3.0", restartReturns: false }) });
+    useStore.setState({ release: read("0.3.0", { shape: "up", installed: "0.3.0", restartRefusal: UP_RESTART_LINE }) });
     await mount({}, "about");
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", UP_RESTART_LINE));
   });
 
+  it("shows the host's own refusal as it arrives, whatever road it names, and draws no Restart", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0", { shape: "app", installed: "0.3.0", restartRefusal: HOST_NO_RESTART_LINE }) });
+    await mount({}, "about");
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", HOST_NO_RESTART_LINE));
+  });
+
   it("draws no Restart on a page served to another computer, whose restart the host refuses", async () => {
     shell("0.2.0", "0.2.0");
     (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: false, version: "0.2.0" };
-    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartReturns: true }) });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
     await mount({}, "about");
     expect(buttons()).not.toContain(ABOUT_WORDS.restartHost);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", ABOUT_WORDS.restartThere));
@@ -602,7 +610,7 @@ describe("About and the newest release", () => {
     expect(document.querySelectorAll("[data-slot=sidebar] [data-settings-meta]").length).toBe(1);
     await show(read("0.2.0"));
     expect(aboutMeta()).toBeUndefined();
-    await show({ state: "unreached", shape: "app", restartReturns: false });
+    await show({ state: "unreached", shape: "app" });
     expect(aboutMeta()).toBeUndefined();
   });
 

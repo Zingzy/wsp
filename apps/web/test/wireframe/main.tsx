@@ -444,9 +444,9 @@ useStore.setState({
   addComputerOpen: screen === "settings-add-computer",
   release:
     screen === "settings-about-behind"
-      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app", restartReturns: false }
+      ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
       : screen === "settings-about-restart"
-        ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service", restartReturns: true }
+        ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
         : null,
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,

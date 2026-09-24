@@ -241,11 +241,11 @@ export const ABOUT_WORDS = {
   downloading: "Downloading",
   quitAndOpen: "Quit and open",
   restartHost: "Restart host",
-  restartHover: "Closes every terminal pane on this computer; running turns continue.",
+  restartHover: "Drops open terminal panes, localhost forwards and any sign-in in progress; running turns continue.",
   restartRuns: "Restart host runs them.",
-  restartThere: "a restart on the computer it runs on runs them.",
+  restartThere: "A restart on the computer it runs on runs them.",
   hostUpdateHover: (line: string, version: string): string => `The wsp that serves this page. ${line} gets ${version}.`,
-  hostInstalledHover: (installed: string, then: string): string => `The wsp that serves this page. Its files carry ${installed} now; ${then}`,
+  hostInstalledHover: (installed: string, then: string): string => `The wsp that serves this page. Its files carry ${installed} now. ${then}`,
 } as const;
 
 /** What one row of the recipe on a computer came to, in the words the terminal's own lines say it in. The note a

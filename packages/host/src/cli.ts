@@ -1418,7 +1418,7 @@ async function hostFor(
         shape: started ?? "app",
         running: VERSION,
         installed: installedVersion,
-        restartReturns: road !== undefined && road.refusal === undefined,
+        ...(road !== undefined ? { restart: road } : {}),
         update: version => releaseUpdateLine(run, version),
         log: line => io.log(line),
       }),

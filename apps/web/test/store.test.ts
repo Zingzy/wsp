@@ -982,7 +982,7 @@ describe("the address never leaks out of the tests that set it", () => {
 });
 
 describe("the newest release in the store", () => {
-  const view = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://github.com/Zingzy/wsp/releases/tag/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app", restartReturns: false });
+  const view = (version: string): ReleaseView => ({ state: "read", latest: { version, tag: `v${version}`, url: `https://github.com/Zingzy/wsp/releases/tag/v${version}`, publishedAt: "2026-09-24T00:00:00Z" }, shape: "app" });
 
   it("is read on bind and again on every reconnect, since release.changed is never replayed, and follows the event between", async () => {
     const { api, emit } = fakeApi([], []);
