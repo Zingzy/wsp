@@ -3898,6 +3898,7 @@ const DAEMON_CONTENTS = [
   "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
   "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
+  "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4104,7 +4105,8 @@ const DAEMON_CONTENTS = [
  * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box.
  * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
  * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
- * removed beside that project, and refuses to remove a path that is not a copy of the project it names. */
+ * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
+ * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

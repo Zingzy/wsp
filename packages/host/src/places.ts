@@ -19,6 +19,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   isHttpUrl,
+  machineLacksLine,
+  machineNeverAnswered,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
   PLACE_CODE_REFUSAL,
@@ -82,11 +84,11 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   SignInLine,
 } from "@wsp/protocol";
 import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
-import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
+import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, backUrl, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
+import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -496,6 +498,27 @@ export function backRefusedLine(address: string, urls: readonly string[], why: s
 export const dialsBackOverSshNote = (urls: readonly string[], relay: string | undefined): string =>
   relay !== undefined ? `${relay}, and back over ssh` : fittedList(urls, list => `cannot reach this computer at ${list}, so it dials back over ssh`);
 
+/** How long taking a failed add back off a box may run, as long as the ssh road's own removal. */
+const UNDO_MS = 120_000;
+
+/** What an add says of a box whose login has / for its home: every file wsp keeps there sits under that home, and
+ * the undo of a failed add takes back folders up to it. */
+export const placeRootHomeRefusal = (address: string): string => `${address.slice(0, 64)} answered with / for its login's home folder; wsp keeps its files in a home folder of their own, so give that login one and add the box again`;
+
+/** A failed add's sentence where another add took the box between the read and the undo, which then took nothing. */
+export const addTakenLine = (said: string): string => {
+  const tail = "another add took the box meanwhile, so nothing was taken back off it";
+  return `${cappedLine(said, SSH_LINE_CAP - tail.length - 2)}; ${tail}`;
+};
+
+/** A failed add's sentence with what taking it back off the box came to, the box's line cut first so the end stands. */
+export function addUndoneLine(said: string, undone: boolean, agentWasRunning = false): string {
+  const kept = agentWasRunning ? "wsp's agent was running there before this add and is left running, and " : "";
+  const other = agentWasRunning ? " else" : "";
+  const tail = `${kept}${undone ? `nothing${other} this add put on it is left there` : `what${other} this add put on it may still be there`}`;
+  return `${cappedLine(said, SSH_LINE_CAP - tail.length - 2)}; ${tail}`;
+}
+
 /** What an add says when the box did not run the check at all. */
 export const reachUnsaidLine = (address: string, said: string): string => `${address} did not run the check for whether it can reach this computer: ${said.slice(-SSH_LINE_CAP)}`;
 
@@ -585,6 +608,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // The read that has just run already went through it once; what this stops is the deploy and every dial after.
       // A box that named no shell at all is one this rule says nothing about, and is taken as it always was.
       if (shell !== undefined && !PLACE_ROOT_SHELLS.includes(shell)) throw new Error(placeRootShellRefusal(req.address, shell));
+      if (login.HOME === "/") throw new Error(placeRootHomeRefusal(req.address));
       // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
       // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
       // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
@@ -634,6 +658,11 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const at = placeDaemonPaths(login.HOME);
     const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls: joinUrls, codeFile: `${at.wsp}/join-code`, name });
     stage("wsp", "running", target.uname);
+    // What the box already holds of the add's list, read before anything lands: a failed add takes back only what
+    // it wrote, and a box that would not say keeps everything.
+    const unit = placeUnit(login.HOME);
+    const writes = joinedAddWrites(place, unit.path);
+    const found = addFound((await machine.run(addFoundScript(place, writes, unit.systemctl.join(" ")), { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "", writes.length);
     await deployDaemon(machine, {
       place,
       target,
@@ -653,9 +682,21 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       },
       ...(deps.daemonDir !== undefined ? { daemonDir: deps.daemonDir } : {}),
       ...(deps.cliDir !== undefined ? { cliDir: deps.cliDir } : {}),
-    }).catch((e: unknown) => {
+    }).catch(async (e: unknown) => {
       if (back !== undefined) deps.back?.release(road);
-      throw e;
+      // A box that refused at the preflight, or never answered it, was sent nothing. A join refused as already joined
+      // stands beside another add that won the box between the read and the deploy, and what is there is that add's.
+      if (machineLacksLine(e) !== undefined || machineNeverAnswered(e) || e instanceof PlaceAlreadyJoinedError) throw e;
+      const said = e instanceof Error ? e.message : String(e);
+      const answer =
+        found === undefined
+          ? undefined
+          : await machine.run(addUndoScript(place, writes, found, unit.systemctl.join(" "), e instanceof PlaceJoinedThenFailedError), { deadlineMs: UNDO_MS }).catch(() => undefined);
+      if (answer?.stdout.includes(ADD_TAKEN_LINE) === true) throw new Error(addTakenLine(said));
+      const undone = answer !== undefined && answer.exitCode === 0 && answer.stdout.includes(DAEMON_GONE_LINE);
+      const agentWasRunning = found !== undefined && writes.some((w, i) => w.as === "running" && found.has(i));
+      const line = addUndoneLine(said, undone, agentWasRunning);
+      throw undone ? new PlaceAddTakenBackError(line) : new Error(line);
     });
     return { name, ssh: road.ssh, ...(reach.keyPath !== undefined ? { sshKeyPath: reach.keyPath } : {}), ...(hostKey !== undefined ? { hostKey } : {}), ...(back !== undefined ? { back } : {}) };
   };
@@ -666,12 +707,13 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
  * spelling of `wsp-place-<tag>` here would leave this road behind the day the unit scheme moves. The scope comes
  * from the same manager: a unit it says must be installed by root is the machine's, so it is driven without --user.
  * The uid decides nothing about either, and 0 is passed rather than this computer's, which is another computer's. */
-export function placeUnit(home: string): { name: string; systemctl: readonly string[]; journalctl: readonly string[] } {
+export function placeUnit(home: string): { name: string; path: string; systemctl: readonly string[]; journalctl: readonly string[] } {
   const manager = serviceManagerFor("linux");
   if (manager === undefined) throw new Error(noPlaceManagerLine("linux"));
   const at = placeService(home, 0);
   const scoped = manager.needsRoot?.(at) === true ? [] : ["--user"];
-  return { name: manager.unit(at).name, systemctl: ["systemctl", ...scoped], journalctl: ["journalctl", ...scoped] };
+  const unit = manager.unit(at);
+  return { name: unit.name, path: unit.path, systemctl: ["systemctl", ...scoped], journalctl: ["journalctl", ...scoped] };
 }
 
 /** What a computer answers once the daemon the host sent is the one its unit runs, and what it says instead when

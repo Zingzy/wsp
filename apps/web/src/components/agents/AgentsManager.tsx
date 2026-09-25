@@ -60,7 +60,7 @@ export interface AgentsManagerProps {
 
 type Level = { readonly kind: "list" } | { readonly kind: "detail"; readonly key: string } | { readonly kind: "under"; readonly key: string } | { readonly kind: "under-row"; readonly key: string; readonly row: string };
 
-const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope", state: "State" };
+const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope" };
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 
 /** The nearest box that scrolls, whose place the list keeps while a detail stands over it. */
@@ -86,7 +86,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const tab = kinds.find(k => k.id === tabId) ?? kinds[0]!;
   const paused = pausedReport(report);
   const held = given.heldWhy ?? (paused ? W.paused : null);
-  const ctx: RowsContext = held === null ? given : { ...given, heldWhy: held };
+  const ctx: RowsContext = { ...given, ...(held === null ? {} : { heldWhy: held }), ...(report?.reach === undefined ? {} : { reach: report.reach }) };
   const staleWord = paused ? W.paused : given.heldWhy !== null && given.heldWhy !== undefined ? W.away : undefined;
   const dim = reading || held !== null;
   const page = shell === "page";

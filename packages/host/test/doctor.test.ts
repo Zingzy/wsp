@@ -483,7 +483,7 @@ describe("stageDaemonBundle", () => {
     }
     expect(script).toContain(`chmod 0755 ${GUEST_WSP_PATH}`);
     expect(GUEST_WSP_PATH).toBe("/usr/local/bin/wsp");
-    expect(script.split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+    expect(script.split("\n")).toContain(`tar --no-same-owner -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
     // And it goes when the rest of wsp does.
     expect(removeDaemonScript(CLOUD_PLACE)).toContain(GUEST_WSP_PATH);
   });
@@ -1190,8 +1190,8 @@ describe("what a deploy that would not come up says", () => {
     const lines = deployScript(SPOO, "aabbcc").split("\n");
     const at = (line: string): number => lines.findIndex(l => l.startsWith(line));
     expect(at("echo WSP_STEP files")).toBeGreaterThan(-1);
-    expect(at("echo WSP_STEP files")).toBeLessThan(at("tar -xzf"));
-    expect(at("tar -xzf")).toBeLessThan(at("echo WSP_STEP login"));
+    expect(at("echo WSP_STEP files")).toBeLessThan(at("tar --no-same-owner -xzf"));
+    expect(at("tar --no-same-owner -xzf")).toBeLessThan(at("echo WSP_STEP login"));
     expect(at("echo WSP_STEP login")).toBeLessThan(at("mkdir -p '/root/.wsp' && printf"));
     expect(at("echo WSP_STEP agent")).toBeLessThan(at('case "$(uname -m)" in'));
     for (const place of [CLOUD_PLACE, CONTAINER_PLACE, sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" })]) expect(deployScript(place, "aabbcc")).not.toContain("WSP_STEP");
@@ -1240,7 +1240,7 @@ describe("deployScript", () => {
   it("keeps the binary for the chip the guest says it is and drops the other, by the one word uname prints", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     const lines = script.split("\n");
-    const unpack = lines.indexOf("tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
+    const unpack = lines.indexOf("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
     expect(unpack).toBeGreaterThan(-1);
     expect(unpack).toBeLessThan(lines.indexOf('case "$(uname -m)" in'));
     expect(lines).toContain("  x86_64)");

@@ -54,13 +54,14 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
     (rowId: string, begin: SignInStart): void => {
       if (targetKey === null) return;
       if (begin.kind === "terminal") return;
-      if (begin.kind === "copy") return put(rowId, () => ({ kind: "copy", line: begin.line }));
+      if (begin.kind === "copy") return put(rowId, () => ({ kind: "copy", line: begin.line, ...(begin.why !== undefined ? { why: begin.why } : {}) }));
       if (begin.kind === "vault") return put(rowId, () => ({ kind: "vault", agent: begin.agent, word: begin.word, ...(begin.mint !== undefined ? { mint: begin.mint } : {}) }));
       if (api?.agentsSignIn === undefined) return;
       running.current.get(rowId)?.stop?.();
       const run = {};
       runs.current.set(rowId, run);
-      put(rowId, () => ({ kind: "run", state: "running" }));
+      const finish = begin.finish === undefined ? {} : { finish: begin.finish };
+      put(rowId, () => ({ kind: "run", state: "running", ...finish }));
       const step = (e: AgentsSignInEvent): void => {
         if (runs.current.get(rowId) !== run) return;
         if (e.state === "signed-in") {
@@ -76,6 +77,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
         put(rowId, was => ({
           kind: "run",
           state,
+          ...finish,
           ...(e.url !== undefined ? { url: e.url } : was?.kind === "run" && was.url !== undefined ? { url: was.url } : {}),
           ...(e.code !== undefined ? { code: e.code } : {}),
           ...(e.paste !== undefined ? { paste: e.paste } : was?.kind === "run" && was.paste !== undefined ? { paste: was.paste } : {}),

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The MCP servers tab: one entry per server across agents, folded where two
 // agents in one scope name the same server with the same command or address.
-// The row says where it is reached and its state in one badge; the detail is
-// the /mcp view: status, command, names, each agent's file, the tools, and
-// the next step first. Tools are asked only on a click.
+// The row says where it is reached and its state as a dot and a word; the
+// detail is the /mcp view: status, command, names, each agent's file, the
+// tools, and the next step first. Tools are asked only on a click.
 import { PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import type { AgentsReport, McpRow, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext } from "../agentsRows.js";
-import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type ServerState, type StatusBadge } from "./kind.js";
+import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type ServerState, type ServerStatus } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
 type Scope = "global" | "project";
@@ -22,6 +22,8 @@ export interface ServerEntry {
   readonly stdio: boolean;
   /** One per agent it is set up for, in the report's order. */
   readonly rows: readonly McpRow[];
+  /** When the report these rows came from was read. */
+  readonly readAt?: string;
 }
 
 const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "global");
@@ -29,7 +31,7 @@ const reachOf = (row: McpRow): string => (row.transport.kind === "stdio" ? row.t
 const rowId = (row: McpRow): string => `server-${row.agent}-${row.scope}-${row.name}`;
 
 /** One entry per server: the same name reached the same way in the same scope is one server set up for each agent. */
-export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
+export function foldServers(rows: readonly McpRow[], readAt?: string): ServerEntry[] {
   const out = new Map<string, { name: string; scope: Scope; reach: string; stdio: boolean; rows: McpRow[] }>();
   for (const row of rows) {
     const key = `${scopeOf(row)}\0${row.name}\0${row.transport.kind}\0${reachOf(row)}`;
@@ -37,18 +39,19 @@ export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
     if (was === undefined) out.set(key, { name: row.name, scope: scopeOf(row), reach: reachOf(row), stdio: row.transport.kind === "stdio", rows: [row] });
     else was.rows.push(row);
   }
-  return [...out].map(([key, e]) => ({ key: `server-${key.replaceAll("\0", "-")}`, ...e }));
+  return [...out].map(([key, e]) => ({ key: `server-${key.replaceAll("\0", "-")}`, ...e, ...(readAt === undefined ? {} : { readAt }) }));
 }
 
-/** One agent's state for a server: off, then the connect's answer where one came back, then the config's word. */
-export function rowState(row: McpRow, answer: ServerToolsAnswer | undefined): ServerState {
+/** One agent's state for a server: off, then the newer of the connect's answer and the report, where a report that
+ * checked nothing never outweighs an answer. */
+export function rowState(row: McpRow, answer: ServerToolsAnswer | undefined, reportAt?: string): ServerState {
   if (!row.enabled) return "off";
-  const auth = answer?.auth ?? row.auth;
-  return auth === "failed" ? "failed" : auth === "needs-sign-in" ? "needs-sign-in" : auth === "unknown" ? "unknown" : "connected";
+  const unchecked = row.auth === "open" || row.auth === "env-key" || row.auth === "unknown";
+  return answer !== undefined && (unchecked || reportAt === undefined || answer.readAt >= reportAt) ? answer.auth : row.auth;
 }
 
-/** Worst first: what a folded entry's one badge says. */
-const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "unknown", "connected"];
+/** Worst first: what a folded entry's one status says. */
+const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "unknown", "env-key", "open", "signed-in", "connected"];
 
 interface Standing {
   readonly row: McpRow;
@@ -61,7 +64,7 @@ interface Standing {
 const standings = (entry: ServerEntry, ctx: RowsContext): Standing[] =>
   entry.rows.map(row => {
     const s = ctx.tools?.of(row);
-    return { row, state: rowState(row, s?.answer), listing: s?.listing === true, ...(s?.answer === undefined ? {} : { answer: s.answer }), ...(s?.error === undefined ? {} : { error: s.error }) };
+    return { row, state: rowState(row, s?.answer, entry.readAt), listing: s?.listing === true, ...(s?.answer === undefined ? {} : { answer: s.answer }), ...(s?.error === undefined ? {} : { error: s.error }) };
   });
 
 const worstOf = (all: readonly Standing[]): Standing => [...all].sort((a, b) => WORST.indexOf(a.state) - WORST.indexOf(b.state))[0]!;
@@ -69,10 +72,15 @@ const worstOf = (all: readonly Standing[]): Standing => [...all].sort((a, b) => 
 /** The standing whose connect answered, which speaks for the server's tools: the server is one whoever asked. */
 const askedOf = (all: readonly Standing[]): Standing | undefined => all.find(s => s.answer !== undefined || s.error !== undefined || s.listing);
 
-export function badgeOf(s: Standing, tools: readonly unknown[] | undefined): StatusBadge {
+export function statusOf(s: Standing, tools: readonly unknown[] | undefined): ServerStatus {
   switch (s.state) {
     case "connected":
-      return { state: "connected", words: tools !== undefined ? W.toolsCount(tools.length) : (s.answer?.auth ?? s.row.auth) === "signed-in" ? W.signedIn : "open" };
+    case "signed-in":
+      return { state: s.state, words: tools !== undefined ? W.toolsCount(tools.length) : s.state === "connected" ? W.connected : W.signedIn };
+    case "open":
+      return { state: "open", words: W.noSignInNeeded };
+    case "env-key":
+      return { state: "env-key", words: W.keyFromEnvironment };
     case "needs-sign-in":
       return { state: "needs-sign-in", words: "needs sign-in", hover: W.signInToSee };
     case "failed": {
@@ -142,14 +150,6 @@ function scopeGroups(items: readonly ServerEntry[], ctx: RowsContext): GroupView
   ];
 }
 
-const STATE_GROUPS: readonly { state: ServerState; label: string }[] = [
-  { state: "needs-sign-in", label: "Needs sign-in" },
-  { state: "failed", label: "Failed" },
-  { state: "off", label: "Off" },
-  { state: "connected", label: "Connected" },
-  { state: "unknown", label: "Not checked" },
-];
-
 export const SERVERS_KIND: KindModule<ServerEntry> = {
   id: "servers",
   icon: PlugIcon,
@@ -158,9 +158,9 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   search: "Search MCP servers",
   add: "Add an MCP server",
   rowHeight: "h-[84px]",
-  groupings: ["scope", "state", "agent", "none"],
+  groupings: ["scope", "agent", "none"],
   defaultGroup: () => "scope",
-  items: (report: AgentsReport) => foldServers(report.servers).sort(byName),
+  items: (report: AgentsReport) => foldServers(report.servers, report.readAt).sort(byName),
   count: items => items.length,
   key: entry => entry.key,
   matches: (entry, q) => matchesAny(q, entry.name, entry.reach, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
@@ -170,17 +170,11 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       const agents = [...new Set(items.flatMap(e => e.rows.map(r => r.agent)))];
       return agents.map(agent => ({ id: `agent-${agent}`, label: agentName(agent), items: items.filter(e => e.rows.some(r => r.agent === agent)) }));
     }
-    if (by === "state") {
-      return STATE_GROUPS.flatMap(g => {
-        const hit = items.filter(e => worstOf(standings(e, ctx)).state === g.state);
-        return hit.length === 0 ? [] : [{ id: `state-${g.state}`, label: g.label, items: hit }];
-      });
-    }
     return scopeGroups(items, ctx);
   },
   row: (entry, ctx) => {
     const { worst, asked, acts, flow } = actsOf(entry, ctx, NO_NAV);
-    const badge = badgeOf(worst, asked?.answer?.tools);
+    const status = statusOf(worst, asked?.answer?.tools);
     const step = worst.state === "needs-sign-in" ? acts.find(a => a.id === "sign-in" || a.id === "cancel") : worst.state === "failed" ? acts.find(a => a.id === "reconnect") : worst.state === "off" ? acts.find(a => a.id === "turn-on") : undefined;
     const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
     return {
@@ -189,14 +183,14 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       lead: { kind: "box", icon: ServerIcon },
       marks: entry.rows.map(r => r.agent),
       subtext: entry.reach,
-      badge: waitingFlow(flow) ? { ...badge, words: W.waitingOnYou } : badge,
+      status: waitingFlow(flow) ? { ...status, words: W.waitingOnYou } : status,
       ...(quick === undefined ? {} : { quick }),
     };
   },
   detail: (entry, ctx, nav) => {
     const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx, nav.openUnder);
     const listed = asked?.answer?.tools;
-    const badge = badgeOf(worst, listed);
+    const status = statusOf(worst, listed);
     const first = entry.rows[0]!;
     const names = [...new Set(entry.rows.flatMap(r => r.envNames))].join(", ");
     const disagree = new Set(all.map(s => s.state)).size > 1;
@@ -206,11 +200,11 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       listed !== undefined
         ? { id: "tools", label: W.tools, value: W.toolsCount(listed.length) }
         : holder !== undefined
-          ? { id: "tools", label: W.tools, value: W.heldBy(agentName(holder)), muted: true, hover: W.heldByHover(agentName(holder)) }
+          ? { id: "tools", label: W.tools, value: W.keepsSignIn(agentName(holder)), muted: true }
           : { id: "tools", label: W.tools, value: worst.state === "needs-sign-in" ? W.signInToSee : W.notListed, muted: true };
     const recipe = entry.rows.find(r => r.inRecipe !== undefined)?.inRecipe;
     const facts: Fact[] = [
-      { id: "status", label: W.status, badge, ...(badge.state === "failed" && badge.hover !== undefined ? { fact: badge.hover } : {}) },
+      { id: "status", label: W.status, status, ...(status.state === "failed" && status.hover !== undefined ? { fact: status.hover } : {}) },
       { id: "reach", label: entry.stdio ? W.command : W.url, value: entry.reach, copy: true },
       ...(names === "" ? [] : [{ id: "names", label: entry.stdio ? W.environment : W.headers, value: names, muted: true }]),
       ...all.map((s, at) => {
@@ -221,7 +215,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
           value: s.row.file,
           agent: s.row.agent,
           copy: true,
-          ...(disagree ? { fact: badgeOf(s, s.answer?.tools).words } : {}),
+          ...(disagree ? { fact: statusOf(s, s.answer?.tools).words } : {}),
           ...(act === undefined ? {} : { act: heldReason(ctx) === undefined ? act : { ...act, hover: heldReason(ctx)! } }),
         } satisfies Fact;
       }),
