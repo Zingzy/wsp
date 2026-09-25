@@ -13,6 +13,7 @@ export const QWEN: AgentEntry = {
   skillRoots: { user: [{ dir: "~/.qwen/skills", lands: "copy" }], project: [{ dir: ".qwen/skills", lands: "copy" }] },
   // The package runs no script of its own; its dependencies ship prebuilt per platform.
   installRoad: { road: "npm", package: "@qwen-code/qwen-code", version: "0.24.5", ignoreScripts: true },
+  latest: { from: "npm", package: "@qwen-code/qwen-code" },
   node: 22,
   signIn: NO_SIGN_IN,
 };

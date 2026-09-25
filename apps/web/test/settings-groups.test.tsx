@@ -281,7 +281,7 @@ describe("Privacy", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "privacy" } });
     await settle();
-    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons]);
+    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons, PRIVACY_WORDS.agentVersions]);
     expect(descriptionOf("server-icons")).toBe(PRIVACY_WORDS.serverIconsDescription);
     expect(PRIVACY_WORDS.serverIconsDescription).toBe("wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons.");
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=server-icons]")!;
@@ -293,8 +293,26 @@ describe("Privacy", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
     await settle();
-    expect(sets.at(-1)).toEqual({ serverIcons: true });
+    expect(sets.at(-1)).toEqual({ serverIcons: true, agentVersions: true });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("offers agent version checks as a second switch, on by default, and holds it off where the host's environment turned update checks off", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "privacy" } });
+    await settle();
+    expect(descriptionOf("agent-versions")).toBe(PRIVACY_WORDS.agentVersionsDescription);
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=agent-versions]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(sets).toEqual([{ agentVersions: false }]);
+    expect(useStore.getState().preferences.agentVersions).toBe(false);
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, agentVersions: true }, release: { state: "off", shape: "service" } }));
+    await settle();
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    expect(toggle().hasAttribute("data-disabled")).toBe(true);
+    expect(toggle().closest("[title]")?.getAttribute("title")).toBe(PRIVACY_WORDS.agentVersionsHeld);
   });
 });
 

@@ -79,12 +79,13 @@ function readKept(path: string): Kept {
   }
 }
 
-const checksOff = (statePath: string, env: Env): boolean => env[UPDATE_CHECK_ENV] === "0" || savedEnv(statePath)[UPDATE_CHECK_ENV] === "0";
+/** Whether the person turned off every check for a newer version, in the environment or the saved file. */
+export const updateChecksOff = (statePath: string, env: Env): boolean => env[UPDATE_CHECK_ENV] === "0" || savedEnv(statePath)[UPDATE_CHECK_ENV] === "0";
 
 /** What a line that asks no host reads: the switch, then release.json. Nothing where no ask was ever kept. */
 export type ReleaseReading = Pick<ReleaseView, "state" | "latest">;
 export function releaseReading(statePath: string, env: Env = process.env): ReleaseReading | undefined {
-  if (checksOff(statePath, env)) return { state: "off" };
+  if (updateChecksOff(statePath, env)) return { state: "off" };
   const kept = readKept(releaseFileFor(statePath));
   if (kept.latest !== undefined) return { state: "read", latest: kept.latest };
   return kept.triedAt === undefined ? undefined : { state: "unreached" };
@@ -141,7 +142,7 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
   let every: ReturnType<typeof setInterval> | undefined;
   const closer = new AbortController();
 
-  const off = (): boolean => checksOff(opts.statePath, env);
+  const off = (): boolean => updateChecksOff(opts.statePath, env);
 
   const view = (): ReleaseView => {
     const restartRefusal = opts.restart === undefined ? HOST_NO_RESTART_LINE : opts.restart.refusal;

@@ -127,6 +127,9 @@ export const CLAUDE_CODE = {
 
 const CLAUDE_DOWNLOADS = "https://downloads.claude.ai/claude-code-releases";
 
+/** The address whose whole answer is the newest version the vendor publishes, which its own installer reads. */
+export const CLAUDE_LATEST = `${CLAUDE_DOWNLOADS}/latest`;
+
 /** The binary alone, since the vendor's installer reads the current version off the network, in the folder every
  * pinned command lands in: the home a box shares with its workspaces is off its job's PATH and each can write it. */
 export const CLAUDE_INSTALL = [

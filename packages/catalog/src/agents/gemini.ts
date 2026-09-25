@@ -15,6 +15,7 @@ export const GEMINI: AgentEntry = {
   // Its docs as of 0.58.0 (no Gemini on the Mac measured); copies found there.
   skillRoots: { user: [{ dir: "~/.gemini/skills", lands: "copy" }], project: [{ dir: ".gemini/skills", lands: "copy" }] },
   installRoad: { road: "npm", package: "@google/gemini-cli", version: "0.58.0" },
+  latest: { from: "npm", package: "@google/gemini-cli" },
   node: 20,
   signIn: SIGN_IN_ROWS.gemini,
   // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)

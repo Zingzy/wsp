@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
+import { catalogEntry, versionOf } from "@wsp/catalog";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
 import { controlNameRefusal, placeProvisionPaths } from "@wsp/protocol";
@@ -124,6 +125,25 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(agent("hermes")).toMatchObject({ version: "0.20.0", signIn: "signed-in" });
     expect(read.servers.every(s => s.inRecipe === undefined)).toBe(true);
     nothingLeaked(at, read);
+  });
+
+  it("carries each agent's newest version as this host read it and the version the catalog installs, and a failed reading costs only the newest", async () => {
+    const at = fixture();
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), latest: async () => ({ claude: "2.1.283", pi: "0.85.0" }) }).read({ kind: "here" });
+    const agent = (id: string) => read.agents.find(a => a.id === id)!;
+    expect(agent("claude")).toMatchObject({ version: "2.1.281", latest: "2.1.283", pinned: versionOf(catalogEntry("claude")!.installRoad) });
+    expect(agent("pi")).toMatchObject({ installed: false, latest: "0.85.0", pinned: versionOf(catalogEntry("pi")!.installRoad) });
+    expect(agent("codex").latest).toBeUndefined();
+    // Hermes names no place its newest version is published, so its date-tagged pin is not set beside a semver.
+    expect(agent("hermes").pinned).toBeUndefined();
+    const failed = await agentsReader({ vault: () => ({}), here: () => here(at), latest: () => Promise.reject(new Error("offline")) }).read({ kind: "here" });
+    expect(failed.refused).toEqual([]);
+    expect(failed.agents.find(a => a.id === "claude")).toMatchObject({ version: "2.1.281", pinned: versionOf(catalogEntry("claude")!.installRoad) });
+    expect(failed.agents.some(a => a.latest !== undefined)).toBe(false);
+    let asked = 0;
+    const off = await agentsReader({ vault: () => ({}), here: () => here(at), latest: async () => (asked++, { claude: "2.1.283" }) }).read({ kind: "here" }, undefined, { latest: false });
+    expect(asked).toBe(0);
+    expect(off.agents.some(a => a.latest !== undefined)).toBe(false);
   });
 
   it("reads past a wrapper another app put first on the PATH to the binary behind it, and names the app", async () => {

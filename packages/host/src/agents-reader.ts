@@ -8,10 +8,10 @@
 // by looking at it.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, signInRoadOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
-import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
+import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
 import { projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { serverChecks, type Knocker, type Resolver, type ServerChecks } from "./server-check.js";
@@ -205,6 +205,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     const said = i < 0 ? undefined : versions[i];
     const version = said === undefined || said.trim() === "" ? undefined : agentVersionWord(said);
     const status = i < 0 ? undefined : statuses[i];
+    const pinned = a.latest === undefined ? undefined : strictVersion(versionOf(a.installRoad) ?? "");
     const signIn: AgentRow["signIn"] =
       box !== undefined
         ? (box.signIns?.[a.id] ?? "unknown")
@@ -218,6 +219,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       name: a.name,
       installed: found,
       ...(version !== undefined ? { version } : {}),
+      ...(pinned !== undefined ? { pinned } : {}),
       road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
       ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
       ...(via !== undefined ? { via } : {}),
@@ -252,6 +254,8 @@ export function agentsReader(o: {
   /** How its name is resolved before it is asked. */
   resolve?: Resolver;
   checkMs?: number;
+  /** Each agent's newest version by id as this host last read it off its vendor; none leaves every row without one. */
+  latest?: () => Promise<Readonly<Record<string, string>>>;
 }): AgentsReader & { forget(key: string): void } {
   const kept = new Map<string, KeptTools>();
   const now = o.now ?? Date.now;
@@ -262,16 +266,22 @@ export function agentsReader(o: {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
     return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user, ...(login.runAs !== undefined ? { runAs: login.runAs } : {}) };
   };
+  const readOn = async (on: AgentsOn, key?: string): Promise<AgentsRead> => {
+    if (on.kind === "here") {
+      const host = o.here?.() ?? nodeHost();
+      return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...checkOn(host, key) });
+    }
+    const { host, user, runAs } = await hostOf(on);
+    const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
+    const read = await readAgents(host, { user, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...(box !== undefined ? { box } : {}), ...checkOn(host, key) });
+    return { ...read, refused: [...read.refused, ...host.refused], ...(runAs !== undefined ? { runAs } : {}) };
+  };
   return {
-    read: async (on: AgentsOn, key?: string) => {
-      if (on.kind === "here") {
-        const host = o.here?.() ?? nodeHost();
-        return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...checkOn(host, key) });
-      }
-      const { host, user, runAs } = await hostOf(on);
-      const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
-      const read = await readAgents(host, { user, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}), ...(box !== undefined ? { box } : {}), ...checkOn(host, key) });
-      return { ...read, refused: [...read.refused, ...host.refused], ...(runAs !== undefined ? { runAs } : {}) };
+    read: async (on: AgentsOn, key?: string, ask?: { latest?: boolean }) => {
+      // A failed ask costs the newest version alone, and the person's switch off asks nothing.
+      const none: Readonly<Record<string, string>> = {};
+      const [read, latest] = await Promise.all([readOn(on, key), ask?.latest === false ? none : (o.latest?.().catch(() => none) ?? none)]);
+      return { ...read, agents: read.agents.map(a => (latest[a.id] === undefined ? a : { ...a, latest: latest[a.id] })) };
     },
     tools: async (on, ask) => {
       const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;

@@ -447,12 +447,12 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         {at.kind !== "list" || lines.length === 0 ? null : (
           <div data-agents-refused className="mt-2 flex flex-col px-4">
             {lines.map(line => (
-              <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-center gap-2 py-1">
-                <span data-refused-label className={cn(FACT, line.value !== undefined && "text-foreground", "min-w-0 shrink-0 truncate")} title={line.label}>
+              <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-start gap-2 py-1.5">
+                <span data-refused-label className={cn(FACT, "min-w-0 [overflow-wrap:anywhere]", line.value !== undefined && "shrink-0 text-foreground")}>
                   {line.label}
                 </span>
                 {line.value === undefined ? null : (
-                  <span data-refused-value className={cn(FACT, "min-w-0 truncate")} title={line.value}>
+                  <span data-refused-value className={cn(FACT, "min-w-0 flex-1 [overflow-wrap:anywhere]")}>
                     {line.value}
                   </span>
                 )}

@@ -17,6 +17,7 @@ export const CODEX: AgentEntry = {
   // 0.155.1: CODEX_HOME's skills, where it writes copies, and the shared folder.
   skillRoots: { user: [{ dir: "~/.codex/skills", lands: "copy" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
   installRoad: { road: "npm", package: "@openai/codex", version: "0.153.0" },
+  latest: { from: "npm", package: "@openai/codex" },
   node: 16,
   signIn: SIGN_IN_ROWS.codex,
   // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
