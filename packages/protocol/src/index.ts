@@ -2869,6 +2869,11 @@ export const PlaceView = z.object({
   /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
    * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
   build: z.string().optional(),
+  /** Set when `build` is the reason a build there stopped rather than the stage of one running. */
+  buildStopped: z.boolean().optional(),
+  /** Whether a copy of the image can stand here at all, by buildsImages over this place's own capabilities. Absent on
+   * a joined computer that has not yet said what it forks with. */
+  buildsImages: z.boolean().optional(),
   /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
    * on this computer itself, and on a computer nothing has provisioned yet. */
   provision: PlaceProvision.optional(),

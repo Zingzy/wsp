@@ -33,14 +33,17 @@ const DAY = new Intl.DateTimeFormat(APP_LOCALE, { month: "short", day: "numeric"
  * to count, and its line says nothing about agents or tools rather than saying zero. */
 const rowsOn = (recipe: Recipe, kind: "agent" | "tool"): number => recipe.rows.filter(row => row.on && row.kind === kind).length;
 
-/** The record in the row's fact slot: which version it is, what the image came to on disk, what it carries and how
+/** The record as chips: which version it is, what the image came to on disk, what it carries and how
  * many sign-ins it holds. A field the record does not carry is left out rather than drawn as unknown. The content
- * hash is a fact of the record and not of this row, so it is not here; the copies table says what it decides. */
-export function imageFacts(image: SealedImage): string {
+ * hash is a fact of the record the person never reads, so it is not here; the copies table says what it decides. */
+export function recordChips(image: SealedImage): string[] {
   const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
   const held = image.recipe === undefined ? [] : [plural(rowsOn(image.recipe, "agent"), "agent"), plural(rowsOn(image.recipe, "tool"), "tool")];
-  return [`v${image.version}`, ...size, ...held, plural(sealedLoginsHeld(image), "sign-in")].join(" · ");
+  return [`v${image.version}`, ...size, ...held, plural(sealedLoginsHeld(image), "sign-in")];
 }
+
+/** The same facts in one line, for the row that has one slot for them. */
+export const imageFacts = (image: SealedImage): string => recordChips(image).join(" · ");
 
 /** A stamp as the section reads one: the clock alone on the day it happened, the day and the clock before that, so
  * the two rows that carry a time read the same. Which day it belongs to is the app's own reading; these are only

@@ -3539,6 +3539,8 @@ describe("a computer joining a host that holds a sealed image", () => {
     // The fake computer runs no builder's setup, so the build stops there: the row says so in the seal's own
     // words, and the stopped build starts no second one on its own.
     await until(async () => (await rowOf(placeId)).build?.startsWith(copyStoppedLine()) === true, 5000);
+    expect((await rowOf(placeId)).buildStopped).toBe(true);
+    expect((await rowOf(placeId)).buildsImages).toBe(true);
     expect(frames.filter(f => f.place === placeId).map(f => f.stage)).toContain("failed");
     expect(place.killed).toHaveLength(1);
     expect((await runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);

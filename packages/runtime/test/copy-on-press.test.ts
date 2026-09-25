@@ -166,6 +166,26 @@ describe("a copy of the image is built on a press", () => {
     await rt.close();
   });
 
+  it("each row says whether it can hold the image, and a build that stopped there says it stopped rather than only in words", async () => {
+    const { solari, rt, row, seal } = providers();
+    expect([(await row("solari")).buildsImages, (await row("box")).buildsImages, (await row("none")).buildsImages, (await row(HERE_PLACE_ID)).buildsImages]).toEqual([true, true, false, false]);
+    await seal();
+    let refuse: () => void = () => {};
+    const gate = new Promise<void>(r => (refuse = r));
+    solari.create = async () => {
+      await gate;
+      throw Object.assign(new Error("no room at solari today"), { kind: "conflict" });
+    };
+    const building = rt.image.build({ place: "solari" }).catch(() => undefined);
+    await until(async () => (await row("solari")).build !== undefined);
+    expect((await row("solari")).buildStopped).toBeUndefined();
+    refuse();
+    await building;
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect((await row("solari")).build).toContain("no room at solari today");
+    await rt.close();
+  });
+
   it("a host with no sealed image keeps nothing current, and a place that forks nothing owes no copy: nothing composed, nothing built, nothing on the row", async () => {
     const { solari, rt, row, composed, seal } = providers();
     await rt.image.keepCurrent("solari");

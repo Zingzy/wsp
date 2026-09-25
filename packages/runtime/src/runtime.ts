@@ -2910,11 +2910,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What each place's row says about its copy: the stage while a build runs there, the reason after one stopped,
    * nothing once the copy stands. Written off the golden.stage frames naming the place, so a build reads the same on
    * the row whoever started it. */
-  const copyRows = new Map<string, string>();
+  const copyRows = new Map<string, { line: string; stopped: boolean }>();
   bus.on("golden.stage", e => {
     if (e.type !== "golden.stage" || e.place === undefined) return;
     if (e.stage === "sealed") copyRows.delete(e.place);
-    else copyRows.set(e.place, e.stage === "failed" ? copyStoppedLine(e.detail) : copyBuildingLine(e.stage));
+    else copyRows.set(e.place, e.stage === "failed" ? { line: copyStoppedLine(e.detail), stopped: true } : { line: copyBuildingLine(e.stage), stopped: false });
   });
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
   /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
@@ -8345,7 +8345,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const running = copyBuilds.get(key);
       o.starting?.();
       if (running !== undefined) return running;
-      const run = buildCopy({ place, where, at, name, record, ...(o.signal !== undefined ? { signal: o.signal } : {}) }).finally(() => copyBuilds.delete(key));
+      const run = buildCopy({ place, where, at, name, record, ...(o.signal !== undefined ? { signal: o.signal } : {}) })
+        .catch((e: unknown) => {
+          // Not every road out of a build frames its failure: a builder the provider would not make ends in a throw
+          // alone, and the row would read building for good.
+          if (copyRows.get(place)?.stopped === false && !isPlaceAbsent(e)) copyRows.set(place, { line: copyStoppedLine(e instanceof Error ? e.message : String(e)), stopped: true });
+          throw e;
+        })
+        .finally(() => copyBuilds.delete(key));
       copyBuilds.set(key, run);
       return run;
     },
@@ -8375,7 +8382,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // asks again, and a row here would read as a build that stopped. Every other failure is the row's to say
         // until the next build there takes the row over.
         if (e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || away()) return;
-        copyRows.set(place, copyStoppedLine(e instanceof Error ? e.message : String(e)));
+        copyRows.set(place, { line: copyStoppedLine(e instanceof Error ? e.message : String(e)), stopped: true });
       }
     },
   };
