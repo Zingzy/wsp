@@ -228,6 +228,12 @@ describe("the list grammar", () => {
     expect(titles()).toEqual(["frontend-design"]);
     fireEvent.change(search, { target: { value: "zzz" } });
     expect(document.querySelector("[data-k=agents-empty]")?.textContent).toBe('Nothing matches "zzz".');
+    // Typing from a detail brings the list back, since the search filters the list.
+    fireEvent.change(search, { target: { value: "" } });
+    openRow("skill-plugin-pdf");
+    fireEvent.change(search, { target: { value: "pdf" } });
+    expect(document.querySelector("[data-agents-detail]")).toBeNull();
+    expect(titles()).toEqual(["pdf"]);
   });
 });
 

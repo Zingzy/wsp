@@ -157,8 +157,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         </span>
       </>
     );
-  // The panel's second line names the computer, the project and its folder, which one truncated line never reached
-  // at a panel's width: it takes two lines, held at two so nothing under it moves.
+  // Two lines held at two: one truncated line never reached the project's folder at a panel's width.
   const headRow =
     head.title === undefined ? (
       <div data-agents-head className="flex min-h-6 items-center gap-3 px-4 pb-3">
@@ -256,7 +255,10 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
             aria-label={tab.search}
             spellCheck={false}
             className="font-mono text-[13px] sm:text-[13px]"
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => {
+              setQuery(e.target.value);
+              setLevel({ kind: "list" });
+            }}
             onKeyDown={e => {
               if (e.key !== "Escape" || query !== "") return;
               e.preventDefault();

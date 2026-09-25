@@ -5,6 +5,7 @@
 // tool. Escape goes back one level; ArrowDown from the head reaches the acts.
 import { ArrowLeftIcon, CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { agentName } from "@wsp/catalog";
 import { offlineFor, type McpTool } from "@wsp/protocol";
 import { copyText } from "../../actions/clipboard.js";
 import { cn } from "../../lib/utils.js";
@@ -16,9 +17,8 @@ import { Spinner } from "../ui/spinner.js";
 import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import type { DetailView, Fact, Lead, ToolsLevel } from "./kinds/kind.js";
-import { SignInFlowView } from "./SignInFlowView.js";
 import { rovingKeys } from "./roving.js";
-import { agentName } from "@wsp/catalog";
+import { SignInFlowView } from "./SignInFlowView.js";
 
 const COPIED_MS = 1_400;
 
