@@ -19,12 +19,10 @@ afterEach(async () => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-/** A host serving this state file as a fresh run reads it: the provider picked out of the .env beside it alone, and
- * no image build behind a swap, since a unit test reaches no provider. */
+/** A host serving this state file as a fresh run reads it: the provider picked out of the .env beside it alone. */
 function hostOn(statePath: string): Runtime {
   const { providerEnv } = optsFor({ state: statePath }, {});
   const rt = makeRuntime({}, statePath, goldenRecipe({}), providerEnv, undefined, undefined, placeWiring(statePath));
-  rt.image.keepCurrent = async () => {};
   runtimes.push(rt);
   return rt;
 }

@@ -557,7 +557,7 @@ export interface Api {
   /** The cloud setup as the host serves it: which keys it holds (never their values), the agents on this computer,
    * what a machine costs, and the init job when one runs or ran. Optional so fixtures without the modal need not fake
    * it; without it the sidebar's cloud row opens nothing that can start a build. */
-  initGet?(): Promise<InitSetup>;
+  initGet?(o?: { on?: string }): Promise<InitSetup>;
   /** Saves keys into the wsp home's .env on the host's computer: the provider key, checked with the provider named
    * before it is written and saved under the variable that provider's module reads, and an agent's API key by the
    * sign-in row that took it. The provider is the word WSP_PROVIDER holds; absent, the key is the wired provider's.
@@ -574,7 +574,7 @@ export interface Api {
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on. */
   initRetry?(o: { tool: string }): Promise<InitJob>;
   /** Writes the recipe as answered and starts the build, which rides on after the reply. */
-  initBuild?(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  initBuild?(o: { firstWorkspace?: string; importFolder?: string; on?: string }): Promise<InitJob>;
   /** The code a sign-in's page handed back, typed into the tool waiting for it on the machine. Nothing of it is kept
    * here or on the host; refused when that sign-in is not waiting for one. */
   initSignInCode?(o: { tool: string; code: string }): Promise<InitJob>;
@@ -775,7 +775,7 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.
-    initGet: async () => InitSetup.parse((await c.request<{ setup?: unknown }>("init.get")).setup),
+    initGet: async o => InitSetup.parse((await c.request<{ setup?: unknown }>("init.get", { ...o })).setup),
     initKeys: async keys => InitSetup.parse((await c.request<{ setup?: unknown }>("init.keys", { ...keys })).setup),
     initStart: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.start", { ...o })).job),
     initAnswer: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.answer", { ...o })).job),
