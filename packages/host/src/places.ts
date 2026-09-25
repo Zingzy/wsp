@@ -88,7 +88,7 @@ import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSea
 import { BackCutError, backUrl, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { DAEMON_GONE_LINE, PLACE_JOINED_LINE, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
+import { DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -508,8 +508,10 @@ const UNDO_MS = 120_000;
 export const placeRootHomeRefusal = (address: string): string => `${address.slice(0, 64)} answered with / for its login's home folder; wsp keeps its files in a home folder of their own, so give that login one and add the box again`;
 
 /** A failed add's sentence with what taking it back off the box came to, the box's line cut first so the end stands. */
-export function addUndoneLine(said: string, undone: boolean): string {
-  const tail = undone ? "nothing this add put on it is left there" : "what this add put on it may still be there";
+export function addUndoneLine(said: string, undone: boolean, agentWasRunning = false): string {
+  const kept = agentWasRunning ? "wsp's agent was running there before this add and is left running, and " : "";
+  const other = agentWasRunning ? " else" : "";
+  const tail = `${kept}${undone ? `nothing${other} this add put on it is left there` : `what${other} this add put on it may still be there`}`;
   return `${cappedLine(said, SSH_LINE_CAP - tail.length - 2)}; ${tail}`;
 }
 
@@ -680,14 +682,15 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       if (back !== undefined) deps.back?.release(road);
       // A box that refused at the preflight, or never answered it, was sent nothing. A join refused as already joined
       // stands beside another add that won the box between the read and the deploy, and what is there is that add's.
-      if (machineLacksLine(e) !== undefined || machineNeverAnswered(e) || (e instanceof Error && e.message.includes(ALREADY_JOINED_LINE))) throw e;
+      if (machineLacksLine(e) !== undefined || machineNeverAnswered(e) || e instanceof PlaceAlreadyJoinedError) throw e;
       const undone =
         found !== undefined &&
         (await machine.run(addUndoScript(place, writes, found, unit.systemctl.join(" ")), { deadlineMs: UNDO_MS }).then(
           res => res.exitCode === 0 && res.stdout.includes(DAEMON_GONE_LINE),
           () => false,
         ));
-      const said = addUndoneLine(e instanceof Error ? e.message : String(e), undone);
+      const agentWasRunning = found !== undefined && writes.some((w, i) => w.as === "running" && found.has(i));
+      const said = addUndoneLine(e instanceof Error ? e.message : String(e), undone, agentWasRunning);
       throw undone ? new PlaceAddTakenBackError(said) : new Error(said);
     });
     return { name, ssh: road.ssh, ...(reach.keyPath !== undefined ? { sshKeyPath: reach.keyPath } : {}), ...(hostKey !== undefined ? { hostKey } : {}), ...(back !== undefined ? { back } : {}) };

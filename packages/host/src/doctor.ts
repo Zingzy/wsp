@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -1082,6 +1082,12 @@ export function deployFailureLine(place: DaemonPlace, res: { stdout: string; std
   return place.join === undefined ? deployFailureDetail(place, res, previewHostSuffix, targets) : joinedFailureLine(place.join, res);
 }
 
+/** A joined deploy whose own join refused the computer as already in a wsp, read off the join's line on stderr
+ * before any sentence is capped: what stands there is another add's, and nothing of it is this add's to take back. */
+export class PlaceAlreadyJoinedError extends Error {}
+
+const joinSaidAlreadyJoined = (stderr: string): boolean => stderr.split("\n").some(line => line.replace(/\r/g, "").trim() === ALREADY_JOINED_LINE);
+
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
  * with (the runtime replaces it the first time a client reaches the daemon) and, where the machine picked the port,
  * the port it bound. The bytes go by the one road that reads the machine
@@ -1124,7 +1130,8 @@ export async function deployDaemon(
     const res = await machine.run(deployScript(place, token, suffix, targets), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       if (place.join !== undefined) console.warn(deployFailureDetail(place, res, suffix, targets));
-      throw new Error(deployFailureLine(place, res, suffix, targets));
+      const line = deployFailureLine(place, res, suffix, targets);
+      throw place.join !== undefined && joinSaidAlreadyJoined(res.stderr) ? new PlaceAlreadyJoinedError(line) : new Error(line);
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
     return { token, ...(port > 0 ? { port } : {}) };

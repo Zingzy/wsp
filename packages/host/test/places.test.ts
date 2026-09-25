@@ -1798,6 +1798,12 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(thrown.message).toBe(`box took wsp but could not connect back: ${ALREADY_JOINED_LINE}`);
     expect(thrown).not.toBeInstanceOf(PlaceAddTakenBackError);
     expect(box.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
+    // A name long enough that the sentence's cap cuts the join's line off still reads as refused, off the box's own line.
+    const long = failingBox(() => false, { deploy: { stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\n", stderr: `${ALREADY_JOINED_LINE}\n` } });
+    const cut = await placeInstaller({ backend: long.backend as never, ...assets(tmp("undo-raced-long"), [X86]) })({ address: "maya@box", name: "b".repeat(250), code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, long.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    expect(cut.message).not.toContain(ALREADY_JOINED_LINE);
+    expect(cut).not.toBeInstanceOf(PlaceAddTakenBackError);
+    expect(long.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
   });
 
   it("stops a place unit this add started and leaves one the box was already running as it was", async () => {
@@ -1812,9 +1818,12 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(stopped.join("\n")).not.toContain(`rm -f ${shellQuote(unit.path)}`);
     // Running and enabled before the add: nothing of the undo reaches for it.
     const running = failingBox(w => w.as === "unit" || w.as === "running" || w.as === "enabled");
-    await placeInstaller({ backend: running.backend as never, ...assets(tmp("undo-running-unit"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, running.stage).catch(() => undefined);
+    const said = await placeInstaller({ backend: running.backend as never, ...assets(tmp("undo-running-unit"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, running.stage).then(() => "the add stood", (e: unknown) => (e as Error).message);
     warned.mockRestore();
     expect(running.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).not.toContain(shellQuote(unit.name));
+    // The join restarted that agent with this add's flags; the sentence says it stands because it was there before.
+    expect(said).toBe(`${SERVICE_SAID}; wsp's agent was running there before this add and is left running, and nothing else this add put on it is left there`);
+    expect(addUndoneLine(SERVICE_SAID, false, true)).toBe(`${SERVICE_SAID}; wsp's agent was running there before this add and is left running, and what else this add put on it may still be there`);
   });
 
   it("refuses a box whose login has / for its home before it reads what the box holds", async () => {
