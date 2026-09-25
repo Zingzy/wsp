@@ -661,7 +661,7 @@ function AgentsWidths() {
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"
-            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
+            ctx={{ where: "box", computer: "spoo", ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />
@@ -691,7 +691,7 @@ function AgentsStates() {
             report={STATES_REPORT}
             reading={false}
             on="this Mac"
-            ctx={{ where: "here", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
+            ctx={{ where: "here", ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />

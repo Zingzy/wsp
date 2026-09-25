@@ -61,6 +61,7 @@ export const AGENTS_REPORT: AgentsReport = {
     { agent: "claude", name: "wsp", scope: "user", file: "~/.claude.json", transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true },
   ],
   refused: ["skills: the answer was cut short, so the list is not whole", "~/.hermes/config.yaml is over 1 MB and was not read"],
+  projects: [WSP_PROJECT],
 };
 
 /** The box's report as its page reads it, over the two projects it holds: wsp's rows, and spoo's own server and

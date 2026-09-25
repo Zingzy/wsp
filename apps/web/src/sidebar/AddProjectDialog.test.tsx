@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostFolderListing, PlaceView, ProjectView } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
 import { ADD_PROJECT_WORDS } from "./words.js";
+import { pickOption } from "../../test/select.js";
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false } as PlaceView;
 const BOX: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true } as PlaceView;
@@ -168,12 +169,7 @@ describe("Add a project", () => {
   it("writes the look picked for the new project once it is recorded", async () => {
     const t = mount();
     await settle();
-    fireEvent.click(t.dialog().querySelector("[data-k=project-hue]")!);
-    const option = await screen.findByRole("option", { name: "Blue" });
-    await settle();
-    // Under jsdom the select takes a click on an item only once a key has highlighted it.
-    fireEvent.keyDown(option, { key: "Enter" });
-    fireEvent.click(option);
+    await pickOption(t.dialog().querySelector("[data-k=project-hue]")!, "Blue");
     await waitFor(() => expect(t.dialog().querySelector("[data-k=project-hue]")!.textContent).toBe("Blue"));
     fireEvent.click(t.rows()[0]!);
     await settle();
