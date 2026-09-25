@@ -93,7 +93,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { COPY_CURRENT, COPY_STALE, NETWORK_LOST_LINE, SealedImage as SealedImageSchema, ToolPin, agentOfRow, buildsImages, copyBuildingLine, copyIsCurrent, copyStanding, copyStoppedLine, placeWorkspacesParts, recipePins, sealedBuiltLine, sealedCopyLine, type PlaceView, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, NETWORK_LOST_LINE, SealedImage as SealedImageSchema, ToolPin, agentOfRow, buildsImages, copyBuildOf, copyBuildingLine, copyIsCurrent, copyStanding, copyStoppedLine, placeWorkspacesParts, recipePins, sealedBuiltLine, sealedCopyLine, type PlaceView, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -160,6 +160,12 @@ describe("a copy of the image beside the record", () => {
     const provider: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, build: copyStoppedLine("no room") };
     expect(placeWorkspacesParts(provider, 1, 0.41)).toEqual({ count: "1", note: copyStoppedLine("no room") });
     expect(placeWorkspacesParts({ ...provider, build: undefined }, 1, 0.41)).toEqual({ count: "1", note: "$0.41 this month" });
+  });
+
+  it("one rule reads a build frame as the copy building, stopped or cleared, in the row's own words", () => {
+    expect(copyBuildOf({ stage: "installing-tools" })).toEqual({ line: copyBuildingLine("installing-tools"), stopped: false });
+    expect(copyBuildOf({ stage: "failed", detail: "no room today" })).toEqual({ line: copyStoppedLine("no room today"), stopped: true });
+    expect(copyBuildOf({ stage: "sealed" })).toBeUndefined();
   });
 
   it("a place builds a copy only where it both forks a machine and copies its disk", () => {

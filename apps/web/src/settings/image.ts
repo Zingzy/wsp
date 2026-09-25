@@ -22,6 +22,10 @@ export const IMAGE_WORDS = {
   /** The one sentence under that row: what will build it and when. */
   firstBuild: "Built from this Mac with Edit image. A task on another computer or in the cloud then builds its copy there first.",
   copies: "Copies",
+  /** The chips of a copy standing on a computer's card. */
+  builtChip: (when: string): string => `built ${when}`,
+  fromChip: (computer: string): string => `from ${computer}`,
+  behindChip: (version: number): string => `behind your image v${version}`,
 } as const;
 
 /** The clock and the date this section spells a stamp with, both in the app's own locale, as every other stamp in

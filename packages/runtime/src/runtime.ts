@@ -222,7 +222,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -2910,12 +2910,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What each place's row says about its copy: the stage while a build runs there, the reason after one stopped,
    * nothing once the copy stands. Written off the golden.stage frames naming the place, so a build reads the same on
    * the row whoever started it. */
-  const copyRows = new Map<string, { line: string; stopped: boolean }>();
+  const copyRows = new Map<string, CopyBuild>();
   bus.on("golden.stage", e => {
     if (e.type !== "golden.stage" || e.place === undefined) return;
-    if (e.stage === "sealed") copyRows.delete(e.place);
-    else copyRows.set(e.place, e.stage === "failed" ? { line: copyStoppedLine(e.detail), stopped: true } : { line: copyBuildingLine(e.stage), stopped: false });
+    const build = copyBuildOf(e);
+    if (build === undefined) copyRows.delete(e.place);
+    else copyRows.set(e.place, build);
   });
+  /** Whether a build's failure at a place is that place's row to say. A place that runs no workspaces has no copy to
+   * keep, a link that went is not a build to show, and a computer whose recipe is running is no build either: nothing
+   * was asked of its image and the job's own end asks again. */
+  const rowSaysFailure = (place: string, e: unknown): boolean =>
+    !(e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || placeAway(place));
+  /** A computer this host holds no link to now: a laptop asleep, or one that went mid-ask. */
+  const placeAway = (place: string): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
+  /** A failure said on the bus as the build's own failed frame, so the row, the app's store and the image card read
+   * the same stop. */
+  const frameStopped = (place: string, name: string, e: unknown): void => stageOf(name, place, true)("failed", e instanceof Error ? e.message : String(e));
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
   /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
   const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
@@ -8348,8 +8359,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const run = buildCopy({ place, where, at, name, record, ...(o.signal !== undefined ? { signal: o.signal } : {}) })
         .catch((e: unknown) => {
           // Not every road out of a build frames its failure: a builder the provider would not make ends in a throw
-          // alone, and the row would read building for good.
-          if (copyRows.get(place)?.stopped === false && !isPlaceAbsent(e)) copyRows.set(place, { line: copyStoppedLine(e instanceof Error ? e.message : String(e)), stopped: true });
+          // alone, and everything reading the frames would read building for good.
+          if (copyRows.get(place)?.stopped === false && rowSaysFailure(place, e)) frameStopped(place, name, e);
           throw e;
         })
         .finally(() => copyBuilds.delete(key));
@@ -8362,10 +8373,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A computer that is not connected owes nothing now: a fork there builds its copy. Read before anything is
       // composed or framed, so no row says a build stopped that never started, and read again on a failure, since
       // the link going mid-ask is a laptop sleeping.
-      const away = (): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
+      const before = copyRows.get(place);
       try {
         await ready();
-        if ((await recordOf(key)) === undefined || away()) return;
+        if ((await recordOf(key)) === undefined || placeAway(place)) return;
         // A place that builds no copy at all owes none: a provider that forks nothing, a computer that keeps no disk.
         const { at } = await placeAt(place);
         if (!buildsImages(at.capabilities)) return;
@@ -8377,12 +8388,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (record === undefined || copyIsCurrent(record, built.copy)) return;
         }
       } catch (e) {
-        // A place that runs no workspaces has no copy to keep, and a link that went is not a build to show. A
-        // computer whose recipe is running is no build either: nothing was asked of its image, the job's own end
-        // asks again, and a row here would read as a build that stopped. Every other failure is the row's to say
+        // A build that already framed its stop has said it; a refusal before any build is said here, and stands
         // until the next build there takes the row over.
-        if (e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || away()) return;
-        copyRows.set(place, { line: copyStoppedLine(e instanceof Error ? e.message : String(e)), stopped: true });
+        const now = copyRows.get(place);
+        if (now !== before && now?.stopped === true) return;
+        if (rowSaysFailure(place, e)) frameStopped(place, key, e);
       }
     },
   };

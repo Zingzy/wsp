@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SealedProjectImage, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, GoldenStageEvent, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SealedProjectImage, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { namesPlace } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
@@ -941,6 +941,15 @@ export const copyStoppedLine = (reason?: string): string => {
   const head = lowerFirst(CLOUD_SETUP_WORDS.build.failed);
   const said = reason === undefined ? "" : initStoppedLine(reason);
   return said === "" ? head : `${head} · ${said}`;
+};
+
+/** What one golden.stage frame says of the copy at its place: the stage while a build runs, the reason once one
+ * stopped, and nothing once one sealed, when what stands is the copies' to say. The host's row, the app's store and
+ * its image card all read a frame through this one rule. */
+export type CopyBuild = { line: string; stopped: boolean };
+export const copyBuildOf = (frame: Pick<GoldenStageEvent, "stage" | "detail">): CopyBuild | undefined => {
+  if (frame.stage === "sealed") return undefined;
+  return frame.stage === "failed" ? { line: copyStoppedLine(frame.detail), stopped: true } : { line: copyBuildingLine(frame.stage), stopped: false };
 };
 
 /** The two words a copy's standing is said in, either of which fits the slot the longer one needs. */

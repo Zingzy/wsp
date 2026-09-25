@@ -44,8 +44,10 @@ const read = (place: PlaceView, o: { view?: SealedImageView | null; job?: InitJo
   imageState(place, { view: o.view === undefined ? viewWith() : o.view, job: o.job ?? null, frames: o.frames ?? {} });
 
 describe("one reading of a computer's image", () => {
-  it("has nothing to say about a place that cannot hold the image", () => {
+  it("has nothing to say about a place that cannot hold the image, or on a host that does not say whether it can", () => {
     expect(read(here)).toBeUndefined();
+    const { buildsImages: _said, ...unsaid } = here;
+    expect(read(unsaid)).toBeUndefined();
   });
 
   it("reads none where no copy stands and nothing builds, whether or not the image exists elsewhere", () => {
@@ -86,8 +88,15 @@ describe("one reading of a computer's image", () => {
     expect(read({ ...box, build: copyStoppedLine("gone"), buildStopped: true })).toEqual({ kind: "stopped", said: copyStoppedLine("gone") });
   });
 
-  it("finds frames filed under the place's name", () => {
-    expect(read(srv, { frames: { srv: [frame("creating", "srv")] } })?.kind).toBe("copying");
+  it("reads frames by the place's id alone, so a computer named after a provider never reads that provider's build", () => {
+    expect(read(srv, { frames: { p_1: [frame("creating", "p_1")] } })?.kind).toBe("copying");
+    const namedBox: PlaceView = { ...srv, name: "box" };
+    expect(read(namedBox, { frames: { box: [frame("creating", "box")] } })).toEqual({ kind: "none" });
+  });
+
+  it("a failed frame outranks a row still read as building", () => {
+    const frames = { box: [frame("creating", "box"), frame("failed", "box", "no room at box today")] };
+    expect(read({ ...box, build: copyBuildingLine("creating") }, { frames })).toEqual({ kind: "stopped", said: copyStoppedLine("no room at box today") });
   });
 
   it("reads building while the image's own build runs on this place, and never on another", () => {

@@ -4,9 +4,8 @@
 // and the row's build line for a copy's, and copyStanding over the copies for
 // what stands. No rule of its own lives here, so the card, the command line and
 // the refusals cannot tell a computer's image two ways.
-import { COPY_STALE, copyBuildingLine, copyStanding, copyStoppedLine, initJobBuilding, type GoldenStageEvent, type InitJob, type PlaceView, type SealedImage, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
-import { builtWhen, copyOn, recordChips } from "./image.js";
-import { placeNamed } from "./places.js";
+import { COPY_STALE, copyBuildOf, copyStanding, copyStoppedLine, initJobBuilding, type CopyBuild, type GoldenStageEvent, type InitJob, type PlaceView, type SealedImage, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
+import { builtWhen, copyOn, IMAGE_WORDS, recordChips } from "./image.js";
 
 export type ImageState =
   | { kind: "none" }
@@ -19,28 +18,26 @@ export type ImageState =
 export interface ImageReads {
   view: SealedImageView | null;
   job: InitJob | null;
-  /** The store's frames, by the word each build named its place with. */
+  /** The store's frames, by the place id each build's frames carry. */
   frames: Readonly<Record<string, readonly GoldenStageEvent[]>>;
 }
 
 /** The copy build at this place as its newest frame says, else as the row said when it was read. A sealed frame
- * says nothing: what stands is the copies' to say. */
+ * says nothing: what stands is the copies' to say. Frames are read by id alone, so a computer named after a provider
+ * never reads that provider's build. */
 function copyBuild(place: PlaceView, frames: ImageReads["frames"]): ImageState | undefined {
-  const word = Object.keys(frames).find(key => placeNamed(place, key));
-  const last = word === undefined ? undefined : frames[word]!.at(-1);
-  if (last !== undefined) {
-    if (last.stage === "sealed") return undefined;
-    return last.stage === "failed" ? { kind: "stopped", said: copyStoppedLine(last.detail) } : { kind: "copying", line: copyBuildingLine(last.stage) };
-  }
-  if (place.build === undefined) return undefined;
-  return place.buildStopped === true ? { kind: "stopped", said: place.build } : { kind: "copying", line: place.build };
+  const last = frames[place.id]?.at(-1);
+  const build: CopyBuild | undefined = last !== undefined ? copyBuildOf(last) : place.build === undefined ? undefined : { line: place.build, stopped: place.buildStopped === true };
+  if (build === undefined) return undefined;
+  return build.stopped ? { kind: "stopped", said: build.line } : { kind: "copying", line: build.line };
 }
 
 /** What stands on this place, read in order: the image's own build running here, a copy building or stopped here,
  * the copy standing here, then a first build that stopped here. A rebuild that stopped leaves the standing image
- * readable; the job's own rows say why it stopped. Nothing for a place that cannot hold the image at all. */
+ * readable; the job's own rows say why it stopped. Nothing for a place that cannot hold the image at all, or whose
+ * host has not said whether it can. */
 export function imageState(place: PlaceView, reads: ImageReads): ImageState | undefined {
-  if (place.buildsImages === false) return undefined;
+  if (place.buildsImages !== true) return undefined;
   const { view, job } = reads;
   const jobHere = job !== null && job.place?.id === place.id;
   if (jobHere && initJobBuilding(job.phase)) return { kind: "building", job };
@@ -56,7 +53,7 @@ export function imageState(place: PlaceView, reads: ImageReads): ImageState | un
 /** The facts a state is drawn with, one chip each: what a standing copy is and when it was built, and how far a stale
  * one is behind. A state with no copy standing has none. */
 export function imageChips(state: ImageState, now?: number): string[] {
-  if (state.kind === "ready") return [...recordChips(state.image), `built ${builtWhen(state.copy.builtAt, now)}`, `from ${state.image.sealedFrom}`];
-  if (state.kind === "stale") return [`behind your image v${state.image.version}`, `built ${builtWhen(state.copy.builtAt, now)}`];
+  if (state.kind === "ready") return [...recordChips(state.image), IMAGE_WORDS.builtChip(builtWhen(state.copy.builtAt, now)), IMAGE_WORDS.fromChip(state.image.sealedFrom)];
+  if (state.kind === "stale") return [IMAGE_WORDS.behindChip(state.image.version), IMAGE_WORDS.builtChip(builtWhen(state.copy.builtAt, now))];
   return [];
 }

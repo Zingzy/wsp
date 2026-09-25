@@ -361,6 +361,17 @@ describe("store creations", () => {
     expect(useStore.getState().goldenFrames["box"]!.map(f => f.stage)).toEqual(["creating"]);
   });
 
+  it("drops a removed place's build frames, and every pull starts the frames over, since a host that restarted mid-build holds no build to end them", () => {
+    const apply = useStore.getState().applyEvent;
+    useStore.setState({ goldenFrames: {} });
+    apply({ type: "golden.stage", name: "default", stage: "installing-tools", place: "p_1" });
+    apply({ type: "golden.stage", name: "default", stage: "installing-tools", place: "box" });
+    apply({ type: "place.removed", placeId: "p_1" });
+    expect(Object.keys(useStore.getState().goldenFrames)).toEqual(["box"]);
+    useStore.getState().bind(fakeApi([], []).api);
+    expect(useStore.getState().goldenFrames).toEqual({});
+  });
+
   it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {
     vi.useFakeTimers();
     try {
