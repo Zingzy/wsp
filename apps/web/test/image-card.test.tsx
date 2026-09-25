@@ -42,6 +42,7 @@ function host(view: SealedImageView, o: { build?: (place: string, force: boolean
       reads += 1;
       return held.view;
     },
+    initStart: async () => ({}) as InitJob,
     imageBuild: async (place: string, force?: boolean) => {
       builds.push({ place, force });
       return (o.build ?? (async () => ({ copy: copyAt(place), built: true })))(place, force);
@@ -215,16 +216,18 @@ describe("the Image card", () => {
     expect(fake.builds).toEqual([{ place: "p_2", force: undefined }]);
   });
 
-  it("holds Build your image here with its reason where no image exists yet, and keeps Edit image as the door that builds one", async () => {
-    await open(host({ image: null, copies: [], projects: [] }).api, "p_2");
+  it("opens the recipe in place from Build your image here where no image exists yet, and never the setup sheet", async () => {
+    const fake = settingsApi({ initGet: async () => setup(), image: async () => ({ image: null, copies: [], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>);
+    await open(fake.api, "p_2");
     expect(title()).toBe(IMAGE_WORDS.state.nothing);
     expect(description()).toBe(IMAGE_WORDS.chooseAndBuild);
     expect(press().textContent).toBe(IMAGE_WORDS.buildHere);
-    expect(press().hasAttribute("data-held")).toBe(true);
-    expect(slot()).toBe(IMAGE_WORDS.buildHeld);
-    fireEvent.click(card()!.querySelector("[data-k='edit-image']")!);
-    expect(useStore.getState().setupOpen).toBe(true);
-    act(() => useStore.getState().closeSetup());
+    expect(press().hasAttribute("data-held")).toBe(false);
+    expect(card()!.querySelector("[data-k='edit-image']")).toBeNull();
+    fireEvent.click(press());
+    await settle();
+    expect(card()!.querySelector("[data-k='recipe']")?.getAttribute("data-step")).toBe("choice");
+    expect(useStore.getState().setupOpen).toBe(false);
   });
 
   it("draws the image's own build running here from the job, with no press", async () => {
