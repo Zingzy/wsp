@@ -12,6 +12,7 @@
 import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { offlineFor, type AgentsReport } from "@wsp/protocol";
+import { MICRO_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { Button } from "../ui/button.js";
@@ -73,7 +74,7 @@ type Level =
 const ASK_AFTER_MS = 250;
 
 const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope" };
-const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
+const LABEL = cn(MICRO_LABEL, "text-muted-foreground");
 
 /** The nearest box that scrolls, whose place the list keeps while a detail stands over it. */
 const scrollerOf = (el: HTMLElement | null): HTMLElement | null => {

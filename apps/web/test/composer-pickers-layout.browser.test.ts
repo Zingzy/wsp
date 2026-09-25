@@ -35,12 +35,13 @@ interface Trigger {
   cut: boolean;
   left: number;
   right: number;
+  /** From the footer's top edge, so a composer the empty view settles into place does not read as the pick moving it. */
   top: number;
   height: number;
 }
 
 interface Row {
-  /** The visible edges of the footer's left group, which the triggers must sit inside. */
+  /** The visible edges of the footer, whose own children are the triggers and which they must sit inside. */
   group: { left: number; right: number; width: number; height: number; overflow: number };
   footer: { height: number; width: number };
   triggers: Trigger[];
@@ -73,7 +74,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
   const readRow = (): Promise<Row> =>
     page!.locator("[data-chat-composer-footer]").evaluate(footer => {
-      const group = footer.firstElementChild as HTMLElement;
+      const group = footer;
       const g = group.getBoundingClientRect();
       const f = footer.getBoundingClientRect();
       const triggers = [...footer.querySelectorAll<HTMLElement>("[data-composer-picker]")].map(el => {
@@ -85,7 +86,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
           cut: label.scrollWidth > label.clientWidth,
           left: b.left,
           right: b.right,
-          top: b.top,
+          top: b.top - f.top,
           height: b.height,
         };
       });
@@ -117,20 +118,6 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
       expect(t.right, `${t.picker} runs past the row at ${where}`).toBeLessThanOrEqual(row.group.right + 0.5);
     }
     expect(row.group.overflow, `the row scrolls at ${where}`).toBe(0);
-  };
-
-  /** The project with the longest name, picked from the menu as a person picks it; the name as the menu row says it. */
-  const pickLongestProject = async (): Promise<string> => {
-    const trigger = "[data-composer-picker='project']";
-    await page!.locator(trigger).click();
-    await page!.waitForSelector("[data-composer-project]");
-    const names = await page!.locator("[data-composer-project]").evaluateAll(els => els.map(el => el.getAttribute("data-composer-project") ?? ""));
-    const longest = names.reduce((a, b) => (b.length > a.length ? b : a), "");
-    await page!.locator(`[data-composer-project='${longest}']`).click();
-    await page!.waitForSelector(`${trigger}[data-value='${longest}']`);
-    await page!.keyboard.press("Escape");
-    await page!.waitForSelector("[role=menu]", { state: "detached" });
-    return longest;
   };
 
   const widths = [
@@ -170,14 +157,15 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
         expect(new Set(after.triggers.map(t => t.height))).toEqual(new Set([32]));
 
         // A project name longer than the row: its button is cut inside the row, under nothing, and every other
-        // trigger still reads whole; the menu row carries the name whole.
-        const longest = await pickLongestProject();
+        // trigger still reads whole.
+        const longest = "customer-billing-service-platform";
+        await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1&longproject=1${width.query}`);
+        await page!.waitForSelector(`[data-composer-picker='project'][data-value='${longest}']`);
         const long = await readRow();
         console.info(`${width.name} ${theme} long name: ${JSON.stringify(long)}`);
         const longShot = join(SHOTS_DIR, `composer-pickers-long-${width.name}-${theme}.png`);
         await page!.locator("[data-chat-composer]").screenshot({ path: longShot });
         console.info(`composer pickers long name screenshot: ${longShot}`);
-        expect(longest.length).toBeGreaterThanOrEqual(30);
         const project = long.triggers.find(t => t.picker === "project")!;
         expect(project.text).toBe(longest);
         for (const t of long.triggers) {

@@ -28,9 +28,9 @@ const ROW_TEXT_CLASS = "text-sm font-normal";
 const LIFTED_ROW_CLASS = "data-[active=true]:inset-ring data-[active=true]:inset-ring-[var(--sidebar-row-edge)]";
 const ROW_SHAPE_CLASS = `rounded-[var(--control-radius)] px-2 py-0 text-left ${ROW_TEXT_CLASS} ${ROW_FADE_CLASS} ${LIFTED_ROW_CLASS}`;
 /** A one-line row: the search row, the switcher head, a project, a thread, a fold, a leaf, a workspace whose copy
- * carries no branch. 28 px whatever its words. */
+ * carries no branch. 36 px whatever its words. */
 export const ONE_LINE_ROW_CLASS = `h-9 gap-2.5 ${ROW_SHAPE_CLASS}`;
-/** A two-line row: a workspace on a branch, a creation. 44 px: the first line is a one-line row's height, so the
+/** A two-line row: a workspace on a branch, a creation. 52 px: the first line is a one-line row's height, so the
  * tree's tick lands on it as on every other row, and the second line takes the rest. */
 export const TWO_LINE_ROW_CLASS = `h-13 items-start gap-2.5 ${ROW_SHAPE_CLASS}`;
 export const TWO_LINE_FIRST_CLASS = "flex h-8 items-center gap-2.5";

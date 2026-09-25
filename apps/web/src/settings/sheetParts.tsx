@@ -9,6 +9,7 @@ import { useState, type ReactNode } from "react";
 import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
 import { Spinner } from "../components/ui/spinner.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { STATE_WORD } from "./recipe/rows.js";
 
@@ -49,7 +50,7 @@ export function CopyRow({
   return (
     <div data-copy-row={k} className={cn("flex w-full items-center gap-3 rounded-md border border-border bg-card px-3", whole ? "min-h-10 py-2" : "h-10")}>
       {label === undefined ? null : (
-        <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
+        <span className={cn(LABEL_WIDTH, MICRO_LABEL, "shrink-0 text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
       {/* A whole line breaks only between its words, never at a flag's or a package's hyphen. */}
