@@ -121,11 +121,10 @@ const PROJECTS = [
 const projects = params.get("projects") === "1";
 if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
-// With ?projects=1 it holds the same two projects and a third with a name longer than the composer's picker row is
-// wide in a narrow window, so the composer on a kept machine draws every picker it has and the one label a person
-// names, which no width bounds.
-const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
-const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}) };
+// With ?longproject=1 its project has a name longer than the composer's picker row is wide in a narrow window: the one
+// label a person names, which no width bounds.
+const LONG_PROJECT = { id: "pr_long", name: "customer-billing-service-platform", path: "/Users/zingzy/customer-billing-service-platform", computer: "default" };
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}), ...(params.get("longproject") === "1" ? { project: LONG_PROJECT } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
 // one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The

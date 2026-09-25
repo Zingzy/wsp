@@ -43,7 +43,8 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     expect(await page!.locator("[role=dialog] label").allTextContents()).toEqual(["What are you working on", "Project"]);
     // No size rows, no image caption and no branch field: the rest are defaults the runtime decides.
     expect(await page!.locator("[aria-label=Size]").count()).toBe(0);
-    expect(await page!.locator("[role=dialog] input").count()).toBe(1);
+    // The project pick's segments carry hidden radio inputs of their own; the one field is the task's.
+    expect(await page!.locator("[role=dialog] input:not([aria-hidden=true])").count()).toBe(1);
     expect(await line.textContent()).toBe("This Mac · shares this Mac's ports");
     const drawn = await line.evaluate(el => ({ font: getComputedStyle(el).fontFamily, width: Math.round(el.getBoundingClientRect().width) }));
     expect(drawn.font.toLowerCase()).toMatch(/mono/);
