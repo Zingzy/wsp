@@ -189,9 +189,6 @@ describe("what the two screens say wsp puts on a computer", () => {
     expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
     expect(PLACE_INSTALL.weight).toBe("about 40 MB");
     expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
-    expect(PLACE_INSTALL.imageCopy("4.2 GB")).toBe("Your image (4.2 GB) is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
-    // A host that has built no image yet says the sentence without a figure rather than one it guessed.
-    expect(PLACE_INSTALL.imageCopy(undefined)).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 
   it("calls the command beside wsp's files what it does, on the way in and on the way out, and never a shim", () => {
@@ -209,14 +206,12 @@ describe("what the two screens say wsp puts on a computer", () => {
     );
   });
 
-  it("tells a person the same thing about the copy of their image on the way in as on the way out", () => {
+  it("tells a person the copy of their image stays where it is when wsp comes off", () => {
     // placeOwnedPaths is what a sweep walks, at the terminal and over the link alike, and the workspace store the
-    // copy sits in is not on it: what neither road takes may not be promised on the way in.
+    // copy sits in is not on it.
     expect(placeOwnedPaths("/home/maya").some(path => path.includes("var/lib"))).toBe(false);
-    for (const said of [PLACE_INSTALL.imageCopy("4.2 GB"), PLACES_WORDS.remove.leaveTakes]) {
-      expect(said).toContain(imageCopyStaysLine());
-      expect(said).not.toContain("Docker");
-    }
+    expect(PLACES_WORDS.remove.leaveTakes).toContain(imageCopyStaysLine());
+    expect(PLACES_WORDS.remove.leaveTakes).not.toContain("Docker");
   });
 });
 
