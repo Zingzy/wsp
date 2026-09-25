@@ -331,7 +331,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     road === null
       ? []
       : [
-          ...(road.address === null ? [] : [{ kind: "row" as const, id: "address", title: WHERE_WORDS.address, description: WHERE_WORDS.addressDescription, word: road.address, attrs: { "data-k": "address" } }]),
+          ...(road.address === null ? [] : [{ kind: "row" as const, id: "address", title: WHERE_WORDS.address, description: road.dialsBack === null ? WHERE_WORDS.addressDescription : WHERE_WORDS.addressBackDescription(road.dialsBack), word: road.address, attrs: { "data-k": "address" } }]),
           {
             kind: "row" as const,
             id: "answered",

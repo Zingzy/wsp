@@ -268,7 +268,7 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
  * done, one still running and one that lost two rows, and the cloud account whose key this host holds. */
 const COMPUTERS: PlaceView[] = [
   { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, takesForks: false } as PlaceView,
-  box("p_spoo", "spoo", { default: true, provision: provision({}) }),
+  box("p_spoo", "spoo", { default: true, provision: provision({}), road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } }),
   box("p_dev4", "dev4", { provision: provision({ state: "running", finishedAt: undefined, at: { label: "uv", index: 3, of: 7 } }) }),
   box("p_lab", "lab", {
     provision: provision({
