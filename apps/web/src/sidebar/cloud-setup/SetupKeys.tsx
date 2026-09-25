@@ -15,7 +15,7 @@ import { CLOUD_SETUP_WORDS, SOLARI_CONSOLE, fmtSize, type InitSetup, type Worksp
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { cn } from "../../lib/utils.js";
-import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "./rows.js";
+import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "../../settings/recipe/rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 /** What a saved key reads as: never the key. */

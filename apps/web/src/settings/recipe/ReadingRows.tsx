@@ -8,27 +8,21 @@
 import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, type InitJob } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
-import { SetupScreen } from "./SetupScreen.js";
 
-export function SetupFacts({ job, refusal }: { job: InitJob | null; refusal: string | null }) {
-  const words = CLOUD_SETUP_WORDS.reading;
+export function ReadingRows({ job }: { job: InitJob | null }) {
   const landed = job?.rows ?? [];
   const rows: InitJob["rows"] = landed.length > 0 ? landed : [{ id: "fact/first", kind: "fact", label: CLOUD_SETUP_WORDS.reading.first, state: INIT_ROW_STATES.running }];
   return (
-    <SetupScreen k="reading" headline={words.headline} top={words.top} refusal={refusal}>
-      {(
-        <Card label={words.headline}>
-          {rows.map(row => (
-            <li key={row.id} data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW, ROW_LINE)}>
-              <span className={NAME}>{row.label}</span>
-              {row.detail !== undefined ? <span className={cn(META, "min-w-0 truncate")}>{row.detail}</span> : null}
-              <Slot>
-                <RowState state={row.state} />
-              </Slot>
-            </li>
-          ))}
-        </Card>
-      )}
-    </SetupScreen>
+    <Card label={CLOUD_SETUP_WORDS.reading.headline}>
+      {rows.map(row => (
+        <li key={row.id} data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW, ROW_LINE)}>
+          <span className={NAME}>{row.label}</span>
+          {row.detail !== undefined ? <span className={cn(META, "min-w-0 truncate")}>{row.detail}</span> : null}
+          <Slot>
+            <RowState state={row.state} />
+          </Slot>
+        </li>
+      ))}
+    </Card>
   );
 }
