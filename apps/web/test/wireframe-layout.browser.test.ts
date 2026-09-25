@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The sidebar of the four nouns in a real Chromium, on the wireframe page's
-// fixed store: every one-line row (search, head, project, thread, fold, leaf)
-// is 28 px and every two-line row (workspace, creation) 44 px at three sidebar
+// fixed store: every one-line row (search, head, project, thread, leaf) is 36
+// px, every fold 28 and every two-line row (workspace, creation) 52 at three sidebar
 // widths and in the 390 px sheet; every row ends at one right edge; nothing in
 // the sidebar wears caps or letter-spacing; the head sits in the fixed header
 // over the scrolling tree; each child list's rail runs the height of its item
@@ -13,16 +13,17 @@
 // chevron, which takes its tap; every row fades its fill and ink in 150 ms;
 // the leaf under an empty project is a
 // sentence in the sans; the held compose glyph still answers a hover with its
-// tooltip; the switcher's menu is the head's width, its rows 28 px, at rest
+// tooltip; the switcher's menu is the head's width, its rows 36 px, at rest
 // with no transform once open; the desktop foot names this computer; and the
 // whole is photographed on every screen in both themes for a judge. The
-// settings page follows, on the same page: every row 52 px and every line 32,
-// the settings sidebar's rows 28 with one lifted, at 390 a card whose rows
-// hold a value standing them at 88 with the slot under the description and
-// every other card at 64, every line 48 with its right side under its label,
-// no label, word, sentence or value cut or spilling its box at that width, no
-// caps, no cut segment, no sideways scroll, the muted words at AA, a held
-// control further down the opacity ramp than a live one, no group row lifted
+// settings page follows, on the same page: every row 64 px and every line 44,
+// the settings sidebar's rows 36 with one lifted, at 390 a card whose rows
+// hold a value standing them at 96 with the slot under the description and
+// every other card at 72, every line 56 with its right side under its label,
+// a row of chips growing until no chip is cut at either width, no label,
+// word, sentence or value cut or spilling its box at that width, no caps but
+// the small mono labels, no cut segment, no sideways scroll, the muted words
+// at AA, a held control further down the opacity ramp than a live one, no group row lifted
 // while the results stand and a dimmed row standing back by opacity on both
 // sides, the sub-rows holding their room so picking a group moves no row below
 // it, the Light pick drawing the page light, Restore defaults only off the
@@ -37,9 +38,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { PlaceAddStep } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, PlaceAddStep } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
+import { MICRO_LABEL } from "../src/lib/microLabel";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -47,13 +49,15 @@ const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
 const THEMES = ["dark", "light"] as const;
 const WIDTHS = [220, 256, 480] as const;
-const ONE_LINE = 28;
-const TWO_LINE = 44;
+const ONE_LINE = 36;
+const TWO_LINE = 52;
+/** A fold is a label over rows rather than a row of its own, so it stands shorter than one. */
+const FOLD = 28;
 
 /** Every row of the sidebar by what it is, with its box and the box of the slot at its right edge. */
 interface RowRead {
   id: string;
-  kind: "one" | "two";
+  kind: "one" | "two" | "fold";
   height: number;
   left: number;
   right: number;
@@ -103,13 +107,13 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
         const box = el.getBoundingClientRect();
         const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time], [data-workspace-state], [data-project-slot], [data-creation-state]");
         // A row says how many lines it has: a workspace on a branch or a creation is two, everything else one.
-        return { id, kind: el.dataset["lines"] === "2" ? "two" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
+        return { id, kind: el.dataset["lines"] === "2" ? "two" : el.querySelector("[data-group-word]") !== null ? "fold" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
       });
     });
 
   const expectOneGrammar = (read: RowRead[], where: string): void => {
     expect(read.length, where).toBeGreaterThan(2);
-    for (const row of read) expect(row.height, `${row.id} at ${where}`).toBe(row.kind === "two" ? TWO_LINE : ONE_LINE);
+    for (const row of read) expect(row.height, `${row.id} at ${where}`).toBe(row.kind === "two" ? TWO_LINE : row.kind === "fold" ? FOLD : ONE_LINE);
     // Every row ends at one x whatever its depth: the tree takes its room from the left alone.
     const rights = new Set(read.filter(row => row.id !== "search" && row.id !== "project-switcher").map(row => Math.round(row.right)));
     expect([...rights], `right edges at ${where}`).toHaveLength(1);
@@ -117,7 +121,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     expect(slots.size, `slot edges at ${where}`).toBeLessThanOrEqual(1);
   };
 
-  it("every one-line row is 28 px and every two-line row 44 px at 220, 256 and 480, every row and every slot ending at one x, in both themes", async () => {
+  it("every one-line row is 36 px, every fold 28 and every two-line row 52 at 220, 256 and 480, every row and every slot ending at one x, in both themes", async () => {
     for (const theme of THEMES) {
       for (const width of WIDTHS) {
         await open("sidebar", theme, `&sidebar=${width}`);
@@ -208,16 +212,20 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     expect(faces.leaf.size).toBe("13px");
   }, 30_000);
 
-  it("every row fades its fill and its ink in 150 ms on hover, whatever its kind", async () => {
+  it("every row fades its fill and its ink in 150 ms on hover, and a fold, which takes no fill, its words", async () => {
     await open("sidebar", "dark");
     const read = await rows();
     const fades = await page!.evaluate(() => {
       const els = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-search-row], [data-slot=sidebar] [data-k=project-switcher], [data-slot=sidebar] [data-sidebar-row]")];
-      return els.map(el => ({ id: el.dataset["rowId"] ?? el.dataset["k"] ?? "search", property: getComputedStyle(el).transitionProperty, duration: getComputedStyle(el).transitionDuration }));
+      return els.map(el => {
+        const faded = el.querySelector<HTMLElement>("[data-group-word]") ?? el;
+        return { id: el.dataset["rowId"] ?? el.dataset["k"] ?? "search", fold: faded !== el, property: getComputedStyle(faded).transitionProperty, duration: getComputedStyle(faded).transitionDuration };
+      });
     });
     expect(fades.length).toBe(read.length - 1);
     for (const fade of fades) {
-      expect(fade.property, fade.id).toBe("background-color, color");
+      if (fade.fold) expect(fade.property.split(", "), fade.id).toContain("color");
+      else expect(fade.property, fade.id).toBe("background-color, color");
       expect(fade.duration, fade.id).toBe("0.15s");
     }
     // The kinds this screen has: the search row, the head, a project, a workspace, a thread and a fold.
@@ -271,13 +279,13 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     }
   }, 60_000);
 
-  it("a desktop window names the computer it is on in the foot, one 28 px mono row under Settings, in both themes", async () => {
+  it("a desktop window names the computer it is on in the foot, one 36 px row under Settings in the rows' sans, in both themes", async () => {
     for (const theme of THEMES) {
       await open("sidebar-hosts", theme, "", "[data-host-foot] button");
       const foot = await page!.locator("[data-host-foot] button").evaluate(el => ({ text: el.textContent, height: el.getBoundingClientRect().height, family: getComputedStyle(el).fontFamily }));
       expect(foot.text).toBe("This Mac");
       expect(foot.height).toBe(ONE_LINE);
-      expect(foot.family).toMatch(/Mono|mono/);
+      expect(foot.family).not.toMatch(/mono/i);
       await shot(`sidebar-hosts-1280-${theme}`);
       await shot(`sidebar-hosts-256-${theme}`, "[data-slot=sidebar]");
     }
@@ -296,21 +304,12 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     expect(await page!.locator("[data-slot=sidebar-content] [data-sidebar-row]").count()).toBeGreaterThan(0);
   }, 30_000);
 
-  it("each child list draws its rail per item: the height of the item on every one but the last, 14 px to the tick on the last, the tick 6 by 1 at 14 px, in both themes", async () => {
+  it("each child list draws its rail per item: the height of the item on every one but the last, 18 px to the tick on the last, the tick 4 by 1 at 18 px, in both themes", async () => {
     for (const theme of THEMES) {
       await open("sidebar", theme);
       const rails = await page!.evaluate(() => {
-        // Colours computed in oklch and in srgb are one colour to a canvas pixel, so every ink is read as bytes.
-        const ctx = document.createElement("canvas").getContext("2d")!;
-        const bytes = (c: string): number[] => {
-          ctx.clearRect(0, 0, 1, 1);
-          ctx.fillStyle = c;
-          ctx.fillRect(0, 0, 1, 1);
-          return [...ctx.getImageData(0, 0, 1, 1).data];
-        };
-        const items = [...document.querySelectorAll<HTMLElement>("[data-sidebar-tree] ul li")].filter(li => getComputedStyle(li.parentElement!).marginLeft === "15px");
+        const items = [...document.querySelectorAll<HTMLElement>("[data-sidebar-tree] ul li")].filter(li => getComputedStyle(li.parentElement!).marginLeft === "12px");
         return {
-          edge: bytes(getComputedStyle(document.querySelector("[data-slot=sidebar]")!).borderRightColor),
           items: items.map(li => {
             const before = getComputedStyle(li, "::before");
             const after = getComputedStyle(li, "::after");
@@ -322,22 +321,18 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
               railWidth: before.width,
               tick: { top: after.top, width: after.width, height: after.height },
               ink: before.backgroundColor,
-              inkBytes: bytes(before.backgroundColor),
             };
           }),
         };
       });
       console.info(`rails at ${theme}: ${JSON.stringify(rails)}`);
       expect(rails.items.length).toBeGreaterThan(6);
-      // The rails' ink: on dark one step over the 6 percent structural hairline, so the tree reads on a bright
-      // display; on light the structural hairline itself, the sidebar's own edge.
+      // The rails' ink is the theme's ink at 16 percent rather than a hairline, which vanished over the light glass.
       for (const item of rails.items) {
         expect(item.railWidth, item.id).toBe("1px");
-        expect(item.tick, item.id).toEqual({ top: "14px", width: "6px", height: "1px" });
-        expect(item.ink, item.id).not.toBe("rgba(0, 0, 0, 0)");
-        if (theme === "dark") expect(item.ink, item.id).toBe("rgba(255, 255, 255, 0.08)");
-        else expect(item.inkBytes, item.id).toEqual(rails.edge);
-        if (item.last) expect(item.rail, `${item.id} is last`).toBe(14);
+        expect(item.tick, item.id).toEqual({ top: "18px", width: "4px", height: "1px" });
+        expect(item.ink, item.id).toBe(theme === "dark" ? "rgba(255, 255, 255, 0.16)" : "rgba(0, 0, 0, 0.16)");
+        if (item.last) expect(item.rail, `${item.id} is last`).toBe(18);
         else expect(Math.round(item.rail), item.id).toBe(Math.round(item.height));
       }
     }
@@ -378,7 +373,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
     expect(atRest.filter(opacity => opacity === "1")).toHaveLength(1);
   }, 30_000);
 
-  it("the switcher's menu opens under the head at the head's width, its rows 28 px, and comes to rest with no transform, in both themes", async () => {
+  it("the switcher's menu opens under the head at the head's width, its rows 36 px, and comes to rest with no transform, in both themes", async () => {
     for (const theme of THEMES) {
       await open("switcher-open", theme, "", "[data-project-switcher-menu]");
       // The menu slides in on the translate property and the primitive scales on transform: both at rest first.
@@ -487,7 +482,6 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
 /** The settings screens the wireframe page holds, each with the element its shot waits on. */
 const SETTINGS_SCREENS = [
   ["settings-appearance", "[data-settings-at=appearance]"],
-  ["settings-restore", "[data-k=restore-defaults]"],
   ["settings-light-picked", "[data-settings-at=appearance]"],
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
   ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-agents-row]"],
@@ -500,26 +494,26 @@ const SETTINGS_SCREENS = [
   ["settings-account", "[data-settings-at=account] [data-k=account-action]"],
   ["settings-keybindings", "[data-settings-at=keybindings] [data-slot=kbd]"],
   ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
-  ["settings-search", "[data-settings-at=search] [data-settings-row=sidebar-width]"],
+  ["settings-search", "[data-settings-at=search] [data-settings-row=server-icons]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
   ["settings-add-computer", "[data-k=add-computer] [data-k=road-ssh] [data-k=login]"],
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
-const ROW = 52;
-const NARROW_ROW = 64;
-const NARROW_DROPPED_ROW = 88;
-const LINE = 32;
-const NARROW_LINE = 48;
+const ROW = 64;
+const NARROW_ROW = 72;
+const NARROW_DROPPED_ROW = 96;
+const LINE = 44;
+const NARROW_LINE = 56;
 /** The computers whose page is photographed to its foot, in a window tall enough to hold the whole of it. */
 const FOOT_SCREENS = ["settings-computer", "settings-computer-failed", "settings-this-mac"] as const;
 const FOOT_SIZES = [
-  { width: 1280, height: 1800 },
+  { width: 1280, height: 1900 },
   { width: 390, height: 3000 },
 ] as const;
 
 /** Every row, line and sidebar row of a settings screen, with its height and what it holds. */
 interface SettingsRead {
-  rows: { id: string; height: number; card: string; fill: string; spills: boolean; drops: boolean }[];
+  rows: { id: string; height: number; card: string; fill: string; spills: boolean; drops: boolean; chips: boolean; chipsCut: string[] }[];
   lines: { id: string; height: number; spills: boolean }[];
   sidebarRows: { id: string; height: number; active: boolean; dimmed: boolean; opacity: number }[];
   cutSegments: string[];
@@ -566,7 +560,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
   };
 
   const read = (): Promise<SettingsRead> =>
-    page!.evaluate(() => {
+    page!.evaluate(micro => {
       const box = (el: Element) => el.getBoundingClientRect();
       const spills = (el: HTMLElement): boolean => el.scrollHeight > el.clientHeight + 1;
       const rows = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")].map(el => ({
@@ -577,6 +571,16 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         spills: spills(el),
         // A card drops its slots below 640 px where one of its rows needs the width, and then every row of it does.
         drops: el.hasAttribute("data-settings-drops"),
+        chips: el.querySelector("[data-chips]") !== null,
+        // A chip cut by its own ellipsis, or standing past the row's edge.
+        chipsCut: [...el.querySelectorAll<HTMLElement>("[data-chip]")]
+          .filter(chip => {
+            const words = chip.querySelector<HTMLElement>("span:last-child") ?? chip;
+            const c = box(chip);
+            const r = box(el);
+            return words.scrollWidth > words.clientWidth + 1 || c.right > r.right + 0.5 || c.bottom > r.bottom + 0.5;
+          })
+          .map(chip => (chip.textContent ?? "").trim()),
       }));
       const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({
         id: el.dataset["settingsLine"] ?? "?",
@@ -597,8 +601,17 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         opacity: Number(getComputedStyle(el).opacity),
       }));
       const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
+      // Caps and tracked-out words outside the one small label, which wears MICRO_LABEL itself or sits inside it; the
+      // page title's tight tracking draws it closer, which is no dress, and a picture's masked code is not words.
+      const eyebrow = (el: Element): boolean => {
+        for (let n: Element | null = el; n !== null; n = n.parentElement) if (micro.every(c => n!.classList.contains(c))) return true;
+        return false;
+      };
       const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
-        .filter(el => getComputedStyle(el).textTransform !== "none" || getComputedStyle(el).letterSpacing !== "normal")
+        .filter(el => {
+          const s = getComputedStyle(el);
+          return /\p{L}/u.test(el.textContent ?? "") && (s.textTransform !== "none" || parseFloat(s.letterSpacing) > 0) && !eyebrow(el);
+        })
         .map(el => (el.textContent ?? "").trim().slice(0, 20));
       const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
       const viewport = pageEl.closest<HTMLElement>("[data-slot=scroll-area-viewport]")!;
@@ -612,14 +625,16 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth },
         opacities: { held: opacity("[data-settings-page] [data-slot=button][data-held]"), live: opacity("[data-settings-page] [data-slot=button]:not([data-held]):not(:disabled)") },
       };
-    });
+    }, MICRO_LABEL.split(" "));
 
   const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
-    // One height per kind at each width: a row is 52, or 88 below 640 px where its slot has moved under a
-    // description holding two lines; a line is 32, or 48 there where its value stands under its label.
+    // One height per kind at each width: a row is 64, 72 below 640 px, or 96 there where its slot has moved under a
+    // description holding two lines; a line is 44, or 56 there where its value stands under its label. A row
+    // carrying chips grows until no chip is cut, so it is held to that rather than to a height.
     for (const row of got.rows) {
       expect(row.fill, `${row.id} at ${where} carries no fill of its own`).toBe("rgba(0, 0, 0, 0)");
-      expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? (row.drops ? NARROW_DROPPED_ROW : NARROW_ROW) : ROW);
+      if (row.chips) expect(row.chipsCut, `chips cut in ${row.id} at ${where}`).toEqual([]);
+      else expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? (row.drops ? NARROW_DROPPED_ROW : NARROW_ROW) : ROW);
       expect(row.spills, `${row.id} at ${where} holds what it says`).toBe(false);
     }
     for (const line of got.lines) {
@@ -637,10 +652,10 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     for (const row of got.sidebarRows) expect(row.opacity, `${row.id} at ${where}`).toBe(row.dimmed ? 0.5 : 1);
   };
 
-  it("every row is 52 px and every line 32, the sidebar rows 28 with exactly one lifted, no caps, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
+  it("every row is 64 px and every line 44, a row of chips whole whatever its height, the sidebar rows 36 with exactly one lifted, no caps but the small mono labels, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
-        await open(screen, theme, waitFor, { width: 1280, height: 800 }, screen === "settings-restore" ? "&sidebar=312" : "");
+        await open(screen, theme, waitFor);
         const got = await read();
         // At this width a description is cut with the whole on its hover, which is the grammar; the log names the
         // ones that are, so a judge reading the shots and a reader of the report see the same list.
@@ -656,23 +671,18 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("at 390 a card holding a value stands its rows at 88 with the slot under a two-line description and every other card at 64, every line at 48 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
+  it("at 390 a card holding a value stands its rows at 96 with the slot under a two-line description and every other card at 72, a row of chips grows until no chip is cut, every line at 56 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         if (screen === "settings-search") continue;
-        await open(screen, theme, waitFor, { width: 390, height: 844 }, screen === "settings-restore" ? "&sidebar=312" : "");
+        await open(screen, theme, waitFor, { width: 390, height: 844 });
         const got = await read();
         expectGrammar(got, `${screen} ${theme} 390`, true);
         // Nothing a person reads is cut at a width with no hover to read the whole on.
         expect(got.cutWords, `words cut at ${screen} ${theme} 390`).toEqual([]);
-        if (screen === "settings-appearance") {
-          expect(got.rows.map(row => row.height)).toEqual([NARROW_DROPPED_ROW, NARROW_DROPPED_ROW, NARROW_DROPPED_ROW]);
-          // The segment's whole words at this width, which is why the size segments read App and Ghostty file.
-          expect(await page!.locator("[data-settings-row=terminal-size] [role=radio]").allTextContents()).toEqual(["App", "Ghostty file"]);
-        }
         await shot(`${screen}-390-${theme}`);
       }
-      // The sheet: the groups at 28 px, one lifted; then the field's results in the sheet, a tap landing on the row.
+      // The sheet: the groups at 36 px, one lifted; then the field's results in the sheet, a tap landing on the row.
       await open("settings-appearance", theme, "[data-settings-at=appearance]", { width: 390, height: 844 });
       await page!.locator("[data-slot=sidebar-trigger]").first().click();
       await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-settings-groups]");
@@ -681,14 +691,14 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       for (const row of sheet.sidebarRows) expect(row.height).toBe(ONE_LINE);
       expect(sheet.sidebarRows.filter(row => row.active).map(row => row.id)).toEqual(["group:appearance"]);
       await shot(`settings-appearance-390-sheet-${theme}`);
-      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-k=settings-search] input, [data-slot=sidebar][data-mobile=true] input[data-k=settings-search]").first().fill("width");
-      await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-row-id='result:appearance:sidebar-width']");
+      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-k=settings-search] input, [data-slot=sidebar][data-mobile=true] input[data-k=settings-search]").first().fill("icons");
+      await page!.waitForSelector("[data-slot=sidebar][data-mobile=true] [data-row-id='result:privacy:server-icons']");
       // The centre keeps its page while the results stand in the sheet.
       expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
       await shot(`settings-search-390-sheet-${theme}`);
-      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-row-id='result:appearance:sidebar-width']").click();
+      await page!.locator("[data-slot=sidebar][data-mobile=true] [data-row-id='result:privacy:server-icons']").click();
       await page!.waitForSelector("[data-slot=sidebar][data-mobile=true]", { state: "detached" });
-      expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("appearance");
+      expect(await page!.locator("[data-settings-page]").getAttribute("data-settings-at")).toBe("privacy");
     }
   }, 300_000);
 
@@ -755,22 +765,17 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     for (const [id, top] of Object.entries(before)) expect(after[id], `${id} stayed where it was`).toBe(top);
   }, 60_000);
 
-  it("the Light segment picked on the dark side draws the page light, and Restore defaults stands only off the defaults", async () => {
+  it("the Light theme picked on the dark side draws the page light, and Restore defaults stands only off the defaults and puts the page back", async () => {
     await open("settings-light-picked", "dark", "[data-settings-at=appearance]");
     await page!.waitForFunction(() => !document.documentElement.classList.contains("dark"));
-    expect(await page!.locator("[data-settings-row=theme] [role=radio][aria-checked=true]").textContent()).toBe("Light");
+    // The grid under the side segments holds the light side's pictures, with the light pick checked.
+    expect(await page!.locator("[data-k=theme-picker] [data-theme-option][aria-checked=true]").getAttribute("data-theme-option")).toBe(DEFAULT_PREFERENCES.lightTheme);
     expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(1);
     await shot("light-picked-1280-dark");
-    await open("settings-appearance", "dark", "[data-settings-at=appearance]");
-    expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(0);
-    await open("settings-restore", "dark", "[data-k=restore-defaults]", { width: 1280, height: 800 }, "&sidebar=312");
-    // The stepper moves the settings sidebar itself by eight: the body swapped, the width and the rail stayed.
-    expect(Math.round((await page!.locator("[data-slot=sidebar]").first().boundingBox())!.width)).toBe(312);
-    expect(await page!.locator("[data-slot=sidebar-rail]").count()).toBe(1);
-    await page!.getByRole("button", { name: "Wider" }).click();
-    await page!.waitForFunction(() => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - 320) < 1);
     await page!.locator("[data-k=restore-defaults]").click();
-    await page!.waitForFunction(() => Math.abs(document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width - 256) < 1);
+    await page!.waitForFunction(() => document.documentElement.classList.contains("dark"));
+    expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(0);
+    await open("settings-appearance", "dark", "[data-settings-at=appearance]");
     expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(0);
   }, 60_000);
 

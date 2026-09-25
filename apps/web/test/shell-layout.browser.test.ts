@@ -30,8 +30,8 @@
 // still, or swaps it with no travel for a reader who asked for less motion,
 // a mixed list of a local machine and two cloud ones keeps that one
 // grammar with no glyph in any lead, and the threads quiet for
-// over a day sit in an Archived group shut inside that workspace's idle
-// shelf, in the fold row's own grammar. Vite
+// over a day sit in an Archived group shut under that workspace's idle
+// threads, in the fold row's own grammar. Vite
 // serves test/shell to Playwright's browser, so like the glyph test it runs
 // only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
 // on the machine.
@@ -41,9 +41,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, goneRoadRefusal, INK_FLOOR, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
+import { WHERE_WORDS } from "../src/settings/format";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -215,7 +216,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // it has to be there on both surfaces.
       const wells = await page!.locator("[data-card-preview]").evaluateAll(els =>
         els.map(el => {
-          const shadows = getComputedStyle(el).boxShadow.match(/(rgba?\([^)]*\)|color\([^)]*\))/g) ?? [];
+          const shadows = getComputedStyle(el).boxShadow.match(/((?:rgba?|color|oklch|oklab)\([^)]*\))/g) ?? [];
           return { empty: el.hasAttribute("data-card-preview-empty"), rings: shadows.filter(c => !/[,/]\s*0\)$/.test(c)).length };
         }),
       );
@@ -293,17 +294,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(colours.size).toBe(2);
       expect(colours.get("claude")).not.toBe(colours.get("codex"));
       expect(new Set(rows.map(r => r!.height)).size).toBe(1);
-      expect(rows[0]!.height).toBe(28);
+      expect(rows[0]!.height).toBe(36);
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
       console.info(`sidebar thread rows screenshot: ${path}`);
     }
   }, 30_000);
 
-  it("a workspace with no working thread still carries its Idle header, and an idle title sits closer to the background than a working one, in both themes", async () => {
+  it("an idle title sits closer to the background than a working one, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
-      expect(await page!.locator("[data-row-id='settled:ws_b']").count()).toBe(1);
       const titles = await page!.locator("[data-row-id^='thread:']").evaluateAll(rows => {
         // The tokens compute to oklab(), which no regex reads as channels: rasterize each one and read the sRGB bytes back.
         const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d")!;
@@ -355,7 +355,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("the Archived group sits shut under the idle shelf, one row grammar with the Idle header and no colour of its own, and opens to rows of the same height, in both themes", async () => {
+  it("the Archived group sits shut under the workspace's idle threads, a plain fold with no colour of its own, and opens to rows of the same height, in both themes", async () => {
     const readGroups = () =>
       page!.evaluate(() => {
         const read = (rowId: string) => {
@@ -382,7 +382,6 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         // Only the first workspace's own block: the other two draw their own thread rows further down the list.
         const block = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!.closest<HTMLElement>("[data-sidebar='menu-item']")!;
         return {
-          idle: read("settled:ws_a"),
           archived: read("archived:ws_a"),
           threads: Array.from(block.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(row => ({
             id: row.getAttribute("data-row-id"),
@@ -397,23 +396,14 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.waitForSelector("[data-row-id='archived:ws_a']");
       const shut = await readGroups();
       console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
-      // Shut, carrying its count, and under the idle shelf it belongs to rather than above it.
+      // Shut, carrying its count, under the workspace's idle threads rather than above them.
       expect(shut.archived.expanded).toBe("false");
       expect(shut.archived.text).toBe("Archived 2");
-      expect(shut.idle.text).toBe("Idle");
-      expect(shut.archived.y).toBeGreaterThan(shut.idle.y);
       // The two threads it holds are not drawn; the working row and the one idle row are.
       expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
       for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
-      // One row grammar with the fold above it: same height, same left edge, same muted word, same rounding, and
-      // the fold is a plain row, not a chip or a badge, so it carries no fill and no border of its own.
+      // A fold is a label over rows, not a chip or a badge, so it carries no fill and no border of its own.
       expect(shut.archived.height).toBe(28);
-      expect(shut.archived.height).toBe(shut.idle.height);
-      expect(shut.archived.x).toBe(shut.idle.x);
-      expect(shut.archived.color).toBe(shut.idle.color);
-      expect(shut.archived.size).toBe(shut.idle.size);
-      expect(shut.archived.weight).toBe(shut.idle.weight);
-      expect(shut.archived.radius).toBe(shut.idle.radius);
       expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
       expect(shut.archived.border).toBe("0px");
       expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
@@ -548,7 +538,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // A cloud fork with no copy of a folder has no branch to name: its row is one line at a thread row's height,
       // with no blank second line and never a figure.
       expect(plain[0]!.text).toBe("");
-      expect(plain[0]!.height).toBe(28);
+      expect(plain[0]!.height).toBe(36);
 
       await page!.goto(`${base}?theme=${theme}&helper=1`);
       await page!.waitForSelector("[data-sidebar-row]");
@@ -558,7 +548,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // The slot is about 159px at the default width, so a line that outgrows it goes red here.
       expect(updating[0]!.text).toBe("updating the helper");
       expect(updating[0]!.clipped).toBe(false);
-      expect(updating[0]!.height).toBe(44);
+      expect(updating[0]!.height).toBe(52);
       expect(updating.slice(1).map(m => m.text)).toEqual(plain.slice(1).map(m => m.text));
       const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -570,17 +560,15 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const oom = await metaOf();
       expect(oom[0]!.text).toBe("out of memory, 3.6 of 3.9 GB");
       expect(oom[0]!.clipped).toBe(false);
-      expect(oom[0]!.height).toBe(44);
+      expect(oom[0]!.height).toBe(52);
       const oomPath = join(SHOTS_DIR, `sidebar-oom-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: oomPath });
       console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);
     }
   }, 30_000);
 
-  it("a send refusal is one muted mono line, no panel, in a slot the composer keeps at one height; a paused workspace has no line, its box takes words, and its send button reads Wake and send, in both themes", async () => {
+  it("a send refusal is one muted mono line, no panel, in a slot that takes room only while it holds one; a paused workspace has no line, its box takes words, and its send button reads Wake and send, in both themes", async () => {
     interface Composer {
-      shell: Box;
-      slot: Box;
       box: Box;
       text: string;
       /** The line's paint, or null when the slot is empty. */
@@ -592,7 +580,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
     const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
       await page!.goto(`${base}?theme=${theme}&${query}`);
-      await page!.waitForSelector("[data-composer-refusal]");
+      await page!.waitForSelector("[data-composer-refusal]", { state: "attached" });
       // The transcript is fetched after mount; the line for a lingering turn exists only once it is in.
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
       // The send fades between its held tier and its accent over 150 ms, so a computed style read at mount catches
@@ -625,8 +613,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const path = join(SHOTS_DIR, `composer-${name}-${theme}.png`);
       await page!.locator("[data-chat-composer]").screenshot({ path });
       console.info(`composer ${name} screenshot: ${path}`);
-      return { shell: await box("[data-chat-composer]"), slot: await box("[data-composer-refusal]"), box: await box("[data-slot=composer-shell]"), ...read };
+      return { box: await box("[data-slot=composer-shell]"), ...read };
     };
+    const sendInBox = (c: Composer) => ({ x: c.send.box!.x - c.box.x, y: c.send.box!.y - c.box.y, width: c.send.box!.width, height: c.send.box!.height });
+    // A paused workspace's row carries fewer picks; wide enough that no row wraps, the boxes compare as boxes.
+    await page!.setViewportSize({ width: 1600, height: 800 });
     for (const theme of ["dark", "light"] as const) {
       const idle = await composerAt("ws=ws_a", theme, "idle");
       expect(idle.text).toBe("");
@@ -644,16 +635,15 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(paused.placeholder).not.toMatch(/paus|wake/i);
       expect(paused.send.label).toBe(WAKE_AND_SEND_LABEL);
       expect(paused.send.title).toBe(WAKE_AND_SEND_LABEL);
-      expect(paused.send.box).toEqual(idle.send.box);
-      expect(paused.slot).toEqual(idle.slot);
-      expect(paused.box).toEqual(idle.box);
-      expect(paused.shell).toEqual(idle.shell);
+      // The empty view centres its composer under a heading of the workspace's own words, so boxes are read in the box.
+      expect(sendInBox(paused)).toEqual(sendInBox(idle));
+      expect([paused.box.width, paused.box.height]).toEqual([idle.box.width, idle.box.height]);
       expect(gone.text).toBe(sendRefusal("gone"));
       expect(working.text).toBe(stillWorkingLine());
       // A send held for a reason is not the accent faded: it wears the held tier, a hairline and the popover fill
       // with the arrow in the ink the line above the box is written in, in the slot the live send stands in. Five
       // testers read a lit arrow over a box that refused them as a screen saying it was ready to send.
-      expect(gone.send.box).toEqual(idle.send.box);
+      expect(sendInBox(gone)).toEqual(sendInBox(idle));
       expect(gone.send.fill).not.toBe(idle.send.fill);
       expect(gone.send.ink).toBe(gone.line!.ink);
       expect(gone.send.border.startsWith("1px ")).toBe(true);
@@ -667,27 +657,27 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
         expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0, ink: expect.any(String) });
         expect(state.panels).toBe(0);
-        // The slot and the box sit where they sit for the idle composer: the line moves nothing.
-        expect(state.slot).toEqual(idle.slot);
-        expect(state.box).toEqual(idle.box);
-        expect(state.shell).toEqual(idle.shell);
       }
+      // The line takes room over the box and leaves the box itself as it is. A running turn's composer is the one
+      // line over its transcript, so only the empty view's box is held to the idle one.
+      expect([gone.box.width, gone.box.height]).toEqual([idle.box.width, idle.box.height]);
     }
+    await page!.setViewportSize({ width: 1200, height: 800 });
   }, 60_000);
 
   it("a pick closes the option menu, so the click after it lands on the prompt the menu was covering", async () => {
     // A turn running on this computer with a prompt open under the composer, which is the page the menu covered.
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
-    await page!.waitForSelector("[data-composer-picker='permissionMode']");
+    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.waitForSelector("text=loading transcript", { state: "detached" });
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
-    await page!.locator("[data-composer-picker='permissionMode']").click();
+    await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='plan']");
     // What the pick will do to the turn running now, read over the list before anything is picked.
     expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
 
     await page!.locator("[data-composer-option='plan']").click();
-    await page!.waitForSelector(`[data-composer-picker='permissionMode'][data-value='plan']`);
+    await page!.waitForSelector(`[data-composer-picker='access'][data-access='plan']`);
     // The menu is gone on the pick: nothing of it is left over the page, visible or not.
     await page!.waitForSelector("[role=menu]", { state: "detached" });
 
@@ -700,16 +690,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
   it("an access that answers the open prompt closes it without a click, and says nothing about a next message", async () => {
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
-    await page!.waitForSelector("[data-composer-picker='permissionMode']");
+    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.waitForSelector("text=loading transcript", { state: "detached" });
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
-    await page!.locator("[data-composer-picker='permissionMode']").click();
+    await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='bypassPermissions']");
     await page!.locator("[data-composer-option='bypassPermissions']").click();
 
     // The prompt the turn was stopped on is answered by the pick itself: the person clicks nothing.
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
-    await page!.waitForSelector(`[data-composer-picker='permissionMode'][data-value='bypassPermissions']`);
+    await page!.waitForSelector(`[data-composer-picker='access'][data-access='bypassPermissions']`);
     expect(await page!.locator("[data-composer-refusal]").textContent()).toBe("");
   }, 60_000);
 
@@ -718,30 +708,30 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // A turn running on this computer whose harness takes the change back after its row said it takes it, which is
       // the one thing the composer says in that slot.
       await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1&access=refused`);
-      await page!.waitForSelector("[data-composer-picker='permissionMode']");
+      await page!.waitForSelector("[data-composer-picker='access']");
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
-      const trigger = "[data-composer-picker='permissionMode']";
-      // The picker opens on the mode the harness asks in, which is what a thread on this computer starts at.
-      expect(await page!.locator(trigger).getAttribute("data-value")).toBe("default");
+      const trigger = "[data-composer-picker='access']";
+      // The picker opens on bypass, which is what a thread on this computer starts at.
+      expect(await page!.locator(trigger).getAttribute("data-access")).toBe("bypassPermissions");
       const before = await box("[data-slot=composer-shell]");
       await page!.locator(trigger).click();
-      await page!.waitForSelector("[data-composer-option='bypassPermissions']");
+      await page!.waitForSelector("[data-composer-option='acceptEdits']");
       // The menu says what the pick does before it is made; the refusal below is the harness taking that back.
       expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
       const menu = join(SHOTS_DIR, `composer-access-menu-${theme}.png`);
       await page!.locator("[role=menu]").first().screenshot({ path: menu });
       console.info(`composer access menu screenshot: ${menu}`);
-      await page!.locator("[data-composer-option='bypassPermissions']").click();
+      await page!.locator("[data-composer-option='acceptEdits']").click();
 
       // The pick reads back on the trigger whatever the running turn did with it, and the line says when it lands.
-      await page!.waitForSelector(`${trigger}[data-value='bypassPermissions']`);
+      await page!.waitForSelector(`${trigger}[data-access='acceptEdits']`);
       // The pick closes the menu, so the line is photographed with nothing over it.
       await page!.waitForSelector("[role=menu]", { state: "detached" });
       await page!.waitForSelector("[data-composer-refusal] [role=status]");
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
         const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]")!;
         const s = getComputedStyle(line);
-        const label = el.querySelector<HTMLElement>("[data-composer-picker='permissionMode']")!;
+        const label = el.querySelector<HTMLElement>("[data-composer-picker='access']")!;
         return {
           text: line.textContent ?? "",
           skin: { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
@@ -758,8 +748,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`composer access line screenshot: ${shot} (${read.width} px of line in ${read.slot} px of slot)`);
 
       expect(read.text).toBe(ACCESS_REFUSED_LINE);
-      // The button wears the mode's short form; the machine is named in the menu and in the line.
-      expect(read.trigger).toBe("Bypass");
+      expect(read.trigger).toBe("Accept edits");
       // Whole at the width this app is smallest in: the clause that says when the pick lands is the point of it.
       expect(read.cut).toBe(false);
       expect(read.width).toBeLessThan(read.slot);
@@ -776,11 +765,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
       await page!.waitForSelector("[data-composer-image-picker]");
       const empty = await box("[data-chat-composer]");
-      // The picker sits in the footer's left group, first, before the model and access pickers.
-      const order = await page!.locator("[data-chat-composer-footer]").evaluate(el =>
-        [...el.querySelectorAll("button")].map(b => b.getAttribute("aria-label") ?? b.textContent?.trim() ?? ""),
+      // The picker sits with the send at the right, first, before the send.
+      const order = await page!.locator("[data-chat-composer-actions]").evaluate(el =>
+        [...el.querySelectorAll("button")].map(b => (b.hasAttribute("data-composer-image-picker") ? "picker" : b.getAttribute("type") === "submit" ? "send" : "?")),
       );
-      expect(order[0]).toBe("Add an image");
+      expect(order).toEqual(["picker", "send"]);
       expect(await page!.locator("[data-composer-images]").count()).toBe(0);
 
       await page!.goto(`${base}?theme=${theme}&ws=ws_a&images=3`);
@@ -840,11 +829,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           };
         }),
       );
-    const expectBare = (marks: MarkRead[]) => {
+    const expectBare = (marks: MarkRead[], low = 13, high = 16) => {
       for (const mark of marks) {
         for (const side of mark.size) {
-          expect(side).toBeGreaterThanOrEqual(13);
-          expect(side).toBeLessThanOrEqual(16);
+          expect(side).toBeGreaterThanOrEqual(low);
+          expect(side).toBeLessThanOrEqual(high);
         }
         expect(Math.abs(mark.offset)).toBeLessThan(1.5);
         expect(mark.bare).toBe(true);
@@ -868,7 +857,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const rail = await readMarks("[data-composer-harness] svg[data-harness-mark]");
       console.info(`picker marks at ${theme}: ${JSON.stringify({ trigger, rail })}`);
       expect(rail.map(m => m.harness)).toEqual(["claude", "codex"]);
-      expectBare(rail);
+      // The rail's tabs are square buttons of their own, so their marks stand a step larger than the button's.
+      expectBare(rail, 20, 20);
       expect(rail[0]!.color).toBe(trigger!.color);
       expect(rail[1]!.color).not.toBe(rail[0]!.color);
       const path = join(SHOTS_DIR, `composer-picker-${theme}.png`);
@@ -881,7 +871,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
   it("the effort picker marks the default of the model picked, not of the agent, in both themes", async () => {
     const read = async (): Promise<{ label: string; marked: string[]; checked: string[]; badge: { mono: boolean; bare: boolean; muted: boolean } }> => {
-      const label = await page!.locator("[data-composer-picker='effort']").evaluate(el => el.textContent ?? "");
+      const label = await page!.locator("[data-composer-picker='reasoning']").evaluate(el => el.textContent ?? "");
       return page!.locator("[data-slot=menu-popup] [data-composer-option]").evaluateAll(
         (els, buttonLabel) => {
           const badgeOf = (el: Element) => [...el.querySelectorAll("span")].find(s => s.textContent === "default");
@@ -905,15 +895,15 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.locator("[data-composer-picker='model']").click();
       await page!.waitForSelector("[data-composer-model-menu]");
       await page!.locator("[data-composer-harness='codex']").click();
-      await page!.waitForSelector("[data-composer-picker='effort'][data-value='low']");
-      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-composer-picker='reasoning'][data-effort='low']");
+      await page!.locator("[data-composer-picker='reasoning']").click();
       await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
       const sol = await read();
       await page!.keyboard.press("Escape");
       await page!.locator("[data-composer-picker='model']").click();
       await page!.locator("[data-composer-option='gpt-5.5']").click();
-      await page!.waitForSelector("[data-composer-picker='effort'][data-value='medium']");
-      await page!.locator("[data-composer-picker='effort']").click();
+      await page!.waitForSelector("[data-composer-picker='reasoning'][data-effort='medium']");
+      await page!.locator("[data-composer-picker='reasoning']").click();
       await page!.waitForSelector("[data-slot=menu-popup] [data-composer-option='medium']");
       const picked = await read();
       console.info(`effort default at ${theme}: ${JSON.stringify({ sol, picked })}`);
@@ -933,69 +923,12 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("each tab's footer is one muted mono line naming that agent's own binary and pin, at the popup's width, in both themes", async () => {
-    interface Footer {
-      text: string;
-      title: string;
-      mono: boolean;
-      bare: boolean;
-      muted: boolean;
-      height: number;
-      /** Wider than the box it draws in, which is what a line the slot had to cut looks like. */
-      cut: boolean;
-    }
-    for (const theme of ["dark", "light"] as const) {
-      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
-      await page!.waitForSelector("[data-composer-picker='model']");
-      await page!.locator("[data-composer-picker='model']").click();
-      await page!.waitForSelector("[data-composer-model-menu]");
-      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-slot=popover-popup]")!).opacity === "1");
-      const read = async (): Promise<Footer> =>
-        page!.locator("[data-composer-catalog-source]").evaluate(el => {
-          const s = getComputedStyle(el);
-          return {
-            text: el.textContent ?? "",
-            title: el.getAttribute("title") ?? "",
-            mono: s.fontFamily.toLowerCase().includes("mono"),
-            bare: s.backgroundColor === "rgba(0, 0, 0, 0)" && s.borderRadius === "0px" && s.boxShadow === "none",
-            muted: s.color !== getComputedStyle(el.closest("[data-composer-model-menu]")!.querySelector("[role=option]")!).color,
-            height: el.getBoundingClientRect().height,
-            cut: el.scrollWidth > el.clientWidth,
-          };
-        });
-      // The composer remembers the last agent picked for the workspace, so the tab to read from is chosen, not assumed.
-      await page!.locator("[data-composer-harness='claude']").click();
-      // ws_a names no provider, so where it runs is the name wsp holds for its machine, as the sidebar row says it.
-      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.endsWith("on m_ws_a") === true);
-      const claude = await read();
-      expect(claude.text).toBe("Claude Code 2.1.257 on m_ws_a");
-      await page!.locator("[data-composer-harness='codex']").click();
-      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.includes(" table · ") === true);
-      const codex = await read();
-      expect(codex.text).toBe("codex table · app-server 0.153.0, 2026-09-07");
-      // The words are the pinned table's own; a badge or a fill behind them would make a state out of a caption.
-      for (const line of [claude, codex]) {
-        expect([line.mono, line.bare, line.muted]).toEqual([true, true, true]);
-        // One line at this width, uncut, and the same height on either tab: switching tabs must not move the popup.
-        expect(line.cut).toBe(false);
-        expect(line.title).toBe(line.text);
-      }
-      expect(codex.height).toBe(claude.height);
-      const popup = await box("[data-slot=popover-popup]");
-      const footer = await box("[data-composer-catalog-source]");
-      expect(footer.width).toBeLessThanOrEqual(popup.width);
-      expect(footer.y + footer.height).toBeLessThanOrEqual(popup.y + popup.height + 1);
-      const path = join(SHOTS_DIR, `composer-catalog-source-${theme}.png`);
-      await page!.locator("[data-slot=popover-popup]").screenshot({ path });
-      console.info(`composer catalog source screenshot: ${path} (${JSON.stringify({ claude, codex })})`);
-      await page!.keyboard.press("Escape");
-      await page!.waitForSelector("[data-composer-model-menu]", { state: "detached" });
-    }
-  }, 60_000);
-
   it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
+      // A workspace opens on its composer; the crumb names a thread once one is open.
+      await page!.locator("[data-row-id='thread:s2']").click();
+      await page!.waitForSelector("header [data-breadcrumb-thread]");
       const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
       await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
@@ -1062,10 +995,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
       expect(skin.z).toBe("130");
       expect(skin.arrows).toBe(0);
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(15);
-      // Rebuild, the start of a daemon this host does not hold, the two project trips (this fake host has no folder
-      // ops), fork and forget.
-      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(6);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(10);
+      // Bring back, export (this fake host has no folder ops), run a copy and delete.
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(4);
       // The first row that can run holds focus, so the keyboard is already in the menu.
       expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
       const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);
@@ -1074,12 +1006,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // The refusal rides the tooltip skin: hovering a dimmed row shows it.
       await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
       await page!.waitForSelector("[data-slot=tooltip-popup]");
-      const rebuildTip = await page!.locator("[data-slot=tooltip-popup]").textContent();
-      expect(rebuildTip).toBe(goneRoadRefusal("running", "rebuild"));
-      // The word this row shows, and the one moment every state promises the rebuild at: a running workspace and an
-      // unreachable one told a person two different things about when it arrives.
-      expect(rebuildTip).toContain("This one is running");
-      expect(rebuildTip).toContain("once a workspace is gone");
+      // Bring back is the first held row: this fake host carries no bring back.
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe(WHERE_WORDS.notYet);
       const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
       await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
       console.info(`sidebar context menu refusal screenshot: ${tipPath}`);

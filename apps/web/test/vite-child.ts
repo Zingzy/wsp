@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
@@ -33,6 +34,8 @@ async function waitFor(url: string, child: ChildProcess): Promise<void> {
 
 /** Spawns the web dev server on a free port and resolves once it serves `path`. */
 export async function startVite(webDir: string, path: string): Promise<ViteChild> {
+  // Vite answers a missing page with the app's index and a 200, so a deleted harness would only show as timeouts.
+  if (!existsSync(join(webDir, path))) throw new Error(`${path} is not a file under ${webDir}`);
   const port = await freePort();
   const child = spawn(join(webDir, "node_modules", ".bin", "vite"), ["--host", "127.0.0.1", "--port", String(port), "--strictPort", "--logLevel", "silent"], { cwd: webDir, stdio: "ignore" });
   const base = `http://127.0.0.1:${port}`;

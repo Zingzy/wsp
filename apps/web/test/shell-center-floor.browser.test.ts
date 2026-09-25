@@ -92,7 +92,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
       const row = center.parentElement!;
       const panel = document.querySelector("[data-preview-panel-mode=inline]");
       const footer = one("[data-chat-composer-footer]");
-      const group = footer.firstElementChild as HTMLElement;
+      const group = footer;
       const g = group.getBoundingClientRect();
       return {
         sidebar: rect(one("[data-slot=sidebar-gap]")),
@@ -114,30 +114,32 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
       };
     });
 
-  /** The sidebar's width animates over 200 ms at half a pixel a millisecond; a reading is taken once the width has
-   * held still for 120 ms, whatever width that is, so a shell that never moves is measured as it stands. The poll
-   * is synchronous: Playwright takes a returned Promise as a truthy value and would stop at the first frame. */
+  /** The sidebar's width animates over 200 ms at half a pixel a millisecond, and the empty view's composer glides into
+   * place as it mounts; a reading is taken once both have held still for 120 ms, whatever they read, so a shell that
+   * never moves is measured as it stands. The poll is synchronous: Playwright takes a returned Promise as a truthy
+   * value and would stop at the first frame. */
   const settle = async (): Promise<void> => {
     await page!.evaluate(() => delete document.documentElement.dataset["gapHeld"]);
     await page!.waitForFunction(() => {
       const width = document.querySelector("[data-slot=sidebar-gap]")!.getBoundingClientRect().width;
+      const top = document.querySelector("[data-chat-composer-footer]")?.getBoundingClientRect().top ?? 0;
       const now = performance.now();
       const held = document.documentElement.dataset["gapHeld"]?.split(":").map(Number);
-      if (held === undefined || held[0] !== width) {
-        document.documentElement.dataset["gapHeld"] = `${width}:${now}`;
+      if (held === undefined || held[0] !== width || held[1] !== top) {
+        document.documentElement.dataset["gapHeld"] = `${width}:${top}:${now}`;
         return false;
       }
-      return now - held[1]! >= 120;
+      return now - held[2]! >= 120;
     });
   };
 
   const expectRowWhole = (shell: Shell, where: string): void => {
-    expect(shell.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "effort", "permissionMode", "project"]);
+    expect(shell.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "reasoning", "access", "project"]);
     for (const t of shell.triggers) {
       expect(t.cut, `${t.picker} reads "${t.text}" cut at ${where}`).toBe(false);
       expect(t.left, `${t.picker} starts before the row at ${where}`).toBeGreaterThanOrEqual(shell.group.left - 0.5);
       expect(t.right, `${t.picker} runs past the row at ${where}`).toBeLessThanOrEqual(shell.group.right + 0.5);
-      expect(t.height, `${t.picker} is not one row high at ${where}`).toBe(24);
+      expect(t.height, `${t.picker} is not one row high at ${where}`).toBe(32);
     }
     expect(shell.group.overflow, `the picker row scrolls at ${where}`).toBe(0);
   };
