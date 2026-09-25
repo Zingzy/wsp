@@ -4,6 +4,7 @@
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SealedProjectImage, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import { namesPlace } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
@@ -1640,6 +1641,16 @@ export function startingLine(name: string, where: string): string {
   return `starting ${name} on ${where}`;
 }
 
+/** How long a build is said to take where none has been measured. */
+export const BUILD_TAKES_UNMEASURED = "about ten minutes";
+
+/** The creation log's first line for a fork at a place that holds no current copy of the image: the copy is built
+ * there before the fork, which takes a build's time and, where the place charges, a builder's hours. */
+export function copyFirstLine(where: string, name: string, rateUsdPerHour: number): string {
+  const billed = chargesNothing(rateUsdPerHour) ? "" : `, billed at ${fmtRate(rateUsdPerHour)} while it builds`;
+  return `building your image on ${where} first, ${BUILD_TAKES_UNMEASURED}${billed}, then ${name} forks from it`;
+}
+
 /** The last line of a create, as the word table ends it. */
 export const CREATE_READY = "ready";
 
@@ -1764,6 +1775,10 @@ export const placeForksNothingPickLine = (place: string, names: readonly string[
 
 /** The line under wsp init's opening that names where the image is built, so the first screen says it. */
 export const imageBuiltOnLine = (place: string): string => `your image is built on ${place}`;
+
+/** The line beside it when --on named a place other than the image's own: a rebuild never moves the image's home. */
+export const imageHomeKeptLine = (on: string | undefined, home: { id: string; name: string }): string | undefined =>
+  on === undefined || namesPlace(home, on) ? undefined : `your image lives on ${home.name}, so it is built there and not on ${on}`;
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";

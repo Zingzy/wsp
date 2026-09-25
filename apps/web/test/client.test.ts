@@ -80,6 +80,20 @@ describe("makeApi wrappers", () => {
     await expect(read("dark")).rejects.toThrow();
   });
 
+  it("initGet and initBuild carry the place the card asks about, and the job names the place its build went to", async () => {
+    const { api, lastSent } = await connect();
+    const setup = { keys: { solari: true }, home: "/Users/dev", agents: [], pricing: null, place: { id: "box", name: "box" }, job: null };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, setup });
+    expect((await api.initGet!({ on: "box" })).place).toEqual({ id: "box", name: "box" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "init.get", on: "box" });
+    await api.initGet!();
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "init.get" });
+    const job = { id: "j1", road: "manual", phase: "building", keys: { solari: true }, step: 5, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [], place: { id: "box", name: "box" } };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, job });
+    expect((await api.initBuild!({ on: "box" })).place).toEqual({ id: "box", name: "box" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "init.build", on: "box" });
+  });
+
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
     const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };

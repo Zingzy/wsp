@@ -186,6 +186,7 @@ import {
   HOSTNAME_KEPT,
   hostnameSetLine,
   startingLine,
+  imageHomeKeptLine,
   CREATE_READY,
   vaultStaleLine,
   vaultOverCapLine,
@@ -1260,6 +1261,16 @@ describe("the nap's words when its vault was not stored", () => {
     expect(vaultStaleLine({ vaultRefused: refused })).toBe("no backup");
     expect(vaultStaleLine({ vaultedAt: "2026-09-08T07:10:04.444Z" })).toBeNull();
     expect(vaultStaleLine({})).toBeNull();
+  });
+});
+
+describe("wsp init --on once an image stands", () => {
+  it("says in one sentence that the image is built at its own place when --on named another, and nothing when it named that place by id or name", () => {
+    const home = { id: "p_abc", name: "spoo" };
+    expect(imageHomeKeptLine("solari", home)).toBe("your image lives on spoo, so it is built there and not on solari");
+    expect(imageHomeKeptLine("spoo", home)).toBeUndefined();
+    expect(imageHomeKeptLine("p_abc", home)).toBeUndefined();
+    expect(imageHomeKeptLine(undefined, home)).toBeUndefined();
   });
 });
 

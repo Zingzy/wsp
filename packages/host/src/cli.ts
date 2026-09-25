@@ -30,7 +30,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -720,8 +720,6 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
     pick.id = wiredProviderId(env);
     pick.env = env;
   }
-  // The wired provider's copy of the image is kept current behind the save; a place that forks nothing builds none.
-  void rt.image.keepCurrent(wiredProviderId(env));
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -993,7 +991,7 @@ function noGoldenThroughHost(lock: HostLock, statePath: string, why: string): st
  * the image is built on and what a builder there costs, and where the app it already serves answers. */
 interface BesideHost {
   client: HostClient;
-  place: string;
+  place: { id: string; name: string };
   pricing: InitPricing;
   /** The provider that host forks on, which no flag of this run's can move; absent on a host of an earlier build,
    * which does not say. */
@@ -1047,7 +1045,7 @@ async function besideHost(lock: HostLock, opts: SharedOpts, upCommand: string, o
     const price = setup.pricing;
     return {
       client,
-      place: setup.place.name,
+      place: setup.place,
       pricing: { rateUsdPerHour: () => price.rateUsdPerHour, defaultSize: price.size, ...(price.builderDiskGb !== undefined ? { builderDiskGb: price.builderDiskGb } : {}) },
       ...(setup.forksOn !== undefined ? { forksOn: setup.forksOn } : {}),
       at: { port: lock.port, address: lock.address },
@@ -1150,8 +1148,8 @@ async function init(
   // planner are the same on both roads below.
   const links = placeWiring(opts.statePath, opts.advertise);
   // The first screen names where the image is built: the host's place, or the provider this run itself forks on.
-  const builds = beside !== undefined ? beside.place : forksNoMachines(providerBackendFor(providerEnv).capabilities) ? undefined : wiredProviderId(providerEnv);
-  if (builds !== undefined) builtOn(screen, builds);
+  const builds = beside !== undefined ? beside.place.name : forksNoMachines(providerBackendFor(providerEnv).capabilities) ? undefined : wiredProviderId(providerEnv);
+  if (builds !== undefined) builtOn(screen, builds, beside === undefined ? undefined : imageHomeKeptLine(flags.on, beside.place));
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (beside === undefined && forksNoMachines(providerBackendFor(providerEnv).capabilities)) {

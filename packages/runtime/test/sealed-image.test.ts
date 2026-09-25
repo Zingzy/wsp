@@ -11,7 +11,6 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { COPY_RECIPE, EMPTY_TGZ_SHA, SMALL, dfOk, digestOf, importOf, recipeWith } from "./image-fixtures.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
-import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
 function started(o: { places?: (wired: StubBackend) => PlaceBackends; store?: Store } = {}) {
@@ -71,6 +70,29 @@ describe("the image record a seal writes", () => {
     const view = await rt.image.get();
     expect(view.image).toMatchObject({ hash: image.hash });
     expect(view.copies).toEqual([expect.objectContaining({ place: "default", version: 1, hash: image.hash, snapshotId: version.snapshotId })]);
+    await rt.close();
+  });
+
+  it("a seal at the wired provider files that provider as the image's home, so a rebuild after the provider is swapped is refused rather than sent to the new one", async () => {
+    let id = "solari";
+    const { store, rt, backend } = started({ places: wired => wiredPlace(() => id, wired) });
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    expect(((await store.get("images", "default")) as SealedImage).place).toBe("solari");
+    const machines = backend.machines.length;
+    id = "ascii";
+    await expect(rt.golden.prepare()).rejects.toThrow(/solari/);
+    expect(backend.machines.length).toBe(machines);
+    await rt.close();
+  });
+
+  it("a builder made at the wired provider is sealed only there, so a provider swapped in mid-build is never filed as the image's home", async () => {
+    let id = "solari";
+    const { store, rt } = started({ places: wired => wiredPlace(() => id, wired) });
+    const b = await rt.golden.prepare();
+    id = "ascii";
+    await expect(rt.golden.seal(b.id)).rejects.toThrow(/solari/);
+    expect(await store.get("images", "default")).toBeUndefined();
     await rt.close();
   });
 
@@ -181,8 +203,7 @@ describe("the image record a seal writes", () => {
 });
 
 describe("building the image at a second place", () => {
-  /** The image sealed at the provider this host forks on. The cut moves the record's hash, so the seal owes solari,
-   * the one other place that runs workspaces, its copy: it is built behind the seal, and this waits for it. */
+  /** The image sealed at the provider this host forks on, and its copy built at solari on a press. */
   async function sealedAtWired() {
     const { other, places } = twoPlaces();
     const { backend, store, rt, composed } = started({ places });
@@ -194,11 +215,11 @@ describe("building the image at a second place", () => {
     const { version } = await rt.golden.seal(b.id);
     const madeAtWired = backend.machines.length;
     const record = (await store.get("images", "default")) as SealedImage;
-    await until(async () => (await rt.image.get()).copies.some(c => c.place === "solari" && c.hash === record.hash), 5000);
+    await rt.image.build({ place: "solari" });
     return { backend, other, store, rt, version, record, frames, composed, madeAtWired };
   }
 
-  it("the seal builds solari's copy behind it: a builder there, the record's vault landed on it, every line naming the place, and the copy filed at the record's hash", async () => {
+  it("a copy built at solari: a builder there, the record's vault landed on it, every line naming the place, and the copy filed at the record's hash", async () => {
     const { backend, other, rt, record, frames, composed, madeAtWired } = await sealedAtWired();
     // This computer was read once for the copy's recipe, and the wired provider made nothing after its own seal.
     expect(composed.count).toBe(1);
@@ -439,7 +460,7 @@ describe("the image over the protocol", () => {
 });
 
 describe("the image's own seal at a place that is not the provider this host forks on", () => {
-  it("makes the builder there, writes the record naming that place, files the copy under it, reads the golden's manifest and recipe from there, and the provider this host forks on gets its copy behind the seal", async () => {
+  it("makes the builder there, writes the record naming that place, files the copy under it, reads the golden's manifest and recipe from there, and the provider this host forks on gets its copy when asked", async () => {
     const { other, places } = twoPlaces();
     const { backend, store, rt } = started({ places });
     const frames: { stage: string; place?: string }[] = [];
@@ -458,13 +479,13 @@ describe("the image's own seal at a place that is not the provider this host for
     expect(manifest?.versions[0]?.snapshotId).toBe(version.snapshotId);
     expect(await rt.golden.recipe()).toEqual(digestOf("h1"));
     // The image's own build names no place on its frames, wherever it runs: that is how the app tells it from a
-    // copy's. Its frames are every one up to its seal; what follows is the copy the seal owes the other place.
-    const own = frames.slice(0, frames.findIndex(f => f.stage === "sealed") + 1);
-    expect(own.length).toBeGreaterThan(0);
-    expect(own.every(f => f.place === undefined)).toBe(true);
-    // The provider this host forks on is the one other place that runs workspaces: its copy is built there behind
-    // the seal, from the record, and the record stays where it was sealed.
-    await until(async () => (await rt.image.get()).copies.some(c => c.place === "box" && c.hash === image.hash), 5000);
+    // copy's.
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.every(f => f.place === undefined)).toBe(true);
+    expect(backend.machines).toEqual([]);
+    // The provider this host forks on gets its copy when asked, from the record, and the record stays where it was
+    // sealed.
+    await rt.image.build({ place: "box" });
     expect(backend.machines.length).toBeGreaterThan(0);
     expect(frames.filter(f => f.place !== undefined).every(f => f.place === "box")).toBe(true);
     expect((await store.get("images", "default")) as SealedImage).toMatchObject({ version: 1, place: "solari" });

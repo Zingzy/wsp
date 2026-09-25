@@ -222,7 +222,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type SignInAsk } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1502,8 +1502,9 @@ export interface Runtime {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     /** The manifest at the place the image's own seal stands: the versions wsp init built and updates there. */
     get(name?: string): Promise<GoldenManifest | undefined>;
-    /** Where an image build goes: the place `word` names, by the name or id wsp places lists, else the default place,
-     * else the one other place that runs workspaces. Answers the id its copies are filed under, the name a person
+    /** Where an image build goes: the image's own place once a record stands, whatever `word` says; before that,
+     * the place `word` names, by the name or id wsp places lists, else the default place, else the one other place
+     * that runs workspaces. Answers the id its copies are filed under, the name a person
      * reads and the backend a builder there is made on. Refused with the place's own reason where it runs none, with
      * NO_BUILD_PLACE_LINE where no place here does, and with buildPlaceAskLine where more than one does and none is the
      * default. */
@@ -1576,13 +1577,13 @@ export interface Runtime {
      * takes it, a joined computer by name or id included. Refused when the place builds no copy at all, when the
      * record has no small recipe to build from, and, without `force`, when it holds no vault. Progress rides
      * golden.stage frames carrying the place's id, and the place's row reads them. */
-    build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
-    /** Brings a place's copy up to the record behind whatever added the place, cut the version or linked the
-     * computer: nothing where this host holds no image, where the place runs no workspaces or is not connected, or
-     * where its copy already stands on the record; else the build, joined where one is running there, and built
-     * again where the record moved while it ran. Never rejects: a build that stopped leaves its reason on the
-     * place's row until the next build there takes the row over, which wsp image build, the next cut or the
-     * computer's next link starts. Resolves once the copy stands or the build stopped. */
+    build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal; starting?: () => void }): Promise<SealedImageBuilt>;
+    /** Brings a joined computer's copy up to the record at the end of its setup: nothing where this host holds no
+     * image, where the place runs no workspaces or is not connected, or where its copy already stands on the
+     * record; else the build, joined where one is running there, and built again where the record moved while it
+     * ran. Never rejects: a build that stopped leaves its reason on the place's row until the next build there
+     * takes the row over, which wsp image build or a fork there starts. Resolves once the copy stands or the build
+     * stopped. */
     keepCurrent(place: string, name?: string): Promise<void>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
@@ -1829,7 +1830,8 @@ interface BuilderRecord {
   base?: GoldenBaseTool[];
   /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
   sealed?: { at: string; version: number };
-  /** The place this builder was made at, when it is not the wired one: a copy's build. Absent reads as the wired place. */
+  /** The place this builder was made at, so a provider swapped in mid-build never becomes where it seals. Absent,
+   * on a record from before places, reads as the wired place. */
   place?: string;
 }
 
@@ -2819,17 +2821,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
     // over the socket it already holds and no road subscribes to the door itself.
     placeDoor.on(e => bus.emit(e));
-    // Every link of a computer is the moment its copy is brought up to the record: the agent's link behind a join
-    // (the join command's own socket comes present first and closes behind its prove, so the ask over it fails and
-    // says nothing), a laptop dialling back in after a cut it was away for, a computer whose last build stopped. A
-    // copy that stands costs the ask nothing.
     placeDoor.on(e => {
-      if (e.type === "place.present") void image.keepCurrent(e.placeId);
-      else if (e.type === "place.removed") copyRows.delete(e.placeId);
+      if (e.type === "place.removed") copyRows.delete(e.placeId);
     });
-    // The recipe job on a computer holds the road a copy is built over, so the ask at its link answered nothing
-    // about its image: the job's own end is when the image there can be read at all, which is the moment the
-    // tally beside it is written.
+    // A copy is built only when somebody asks for one, and a computer's setup was asked for: its end is when the
+    // image there can be read at all, which is the moment the tally beside it is written. A link builds nothing.
     bus.on("place.stage", e => {
       if (e.type !== "place.stage" || e.step !== "provision" || e.placeId === undefined) return;
       if (e.state === "done" || e.state === "failed") void image.keepCurrent(e.placeId);
@@ -4982,8 +4978,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fromImage = keepsImages(at);
     // What this workspace forks: the image the add built for this project where it built one, since that image
     // already holds the clone and its dependencies; else, at a place that is not the image's own, that place's
-    // copy of the image once a build of it running there has finished, and everywhere else the snapshot asked for.
-    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId) : "";
+    // current copy of the image, built there first when it holds none, and everywhere else the snapshot asked for.
+    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId, (where, rate) => report("fork-requested", copyFirstLine(where, o.name, rate))) : "";
     const inherited = fromImage ? (await imageOf(golden)).version?.size : undefined;
     const record: WorkspaceRecord = {
       id,
@@ -7479,9 +7475,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
   };
   const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
-  /** What a builder record says about where it was made: its place, except the provider this host forks on, which
-   * records before places never named and which every reader takes an absent place to mean. */
-  const filedAt = (place: string): string | undefined => (place === places.wired ? undefined : place);
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
    * sealed before places. The manifest there is the one wsp init built and updates. */
   const imagePlace = async (name: string): Promise<string> => (await recordOf(name))?.place ?? places.wired;
@@ -7527,8 +7520,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     name: string,
     imp: Pick<GoldenImport, "recipeHash" | "recipe"> | undefined,
     made: (placeholder: LiveBuilder) => void,
-    stop?: { signal: AbortSignal | undefined; began: (creating: Promise<Machine>) => void },
-    place?: string,
+    stop: { signal: AbortSignal | undefined; began: (creating: Promise<Machine>) => void } | undefined,
+    place: string,
   ): MachineBackend => ({
     ...b,
     create: spec => {
@@ -7550,7 +7543,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           building: true,
           ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
           ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
-          ...(place !== undefined ? { place } : {}),
+          place,
         };
         const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, sealable: true, life: "own" };
         builders.set(machine.id, placeholder);
@@ -7564,7 +7557,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   /** The finished builder replaces its placeholder on the record and stays this process's own. */
-  const settleBuilder = async (name: string, builder: Builder, placeholder: LiveBuilder | undefined, place?: string): Promise<LiveBuilder> => {
+  const settleBuilder = async (name: string, builder: Builder, placeholder: LiveBuilder | undefined, place: string): Promise<LiveBuilder> => {
     const record: BuilderRecord = {
       id: builder.machine.id,
       name,
@@ -7577,7 +7570,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
       ...(builder.import !== undefined ? { import: builder.import } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
-      ...(place !== undefined ? { place } : {}),
+      place,
     };
     const entry: LiveBuilder = placeholder ?? { record, builder, sealable: true, life: "own" };
     entry.record = record;
@@ -7641,7 +7634,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const place = entry.record.place ?? places.wired;
     const prior = await copyOf(place, name);
     const at = backendAt(place);
-    const before = copy !== undefined ? undefined : (await recordOf(name))?.hash;
     try {
       const result = await claiming(`smoke/${entry.record.id}`, b =>
         sealGolden(entry.builder, {
@@ -7669,7 +7661,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await putCopy(place, name, stamped.manifest);
       const snapshot = entry.builder.import?.recipe;
       if (snapshot !== undefined) await putCopyRecipe(place, name, stamped.version.version, snapshot);
-      if (copy === undefined && stamped.version.imageHash !== before) void followCut(name, place);
+      // The seal stands whatever the mark does: a default that could not be written is a later fork's to ask about.
+      if (copy === undefined && name === "default") await placeDoor?.markDefaultIfNone(place).catch((e: unknown) => console.warn(`the default place was not marked at the seal: ${e instanceof Error ? e.message : String(e)}`));
       if (result.builderKept) {
         entry.record.sealed = { at: new Date(clock.now()).toISOString(), version: result.version.version };
         entry.life = "own";
@@ -7735,8 +7728,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (forksNoMachines(at.capabilities)) throw Object.assign(new PlaceForksNowhereError(`${name} forks no machines, so your image cannot be built there`), { kind: "conflict" });
         return { place, name, backend: at };
       };
-      if (word !== undefined) {
-        const { place, at } = await placeAt(word);
+      // A rebuild seals over the record, so building it anywhere else would move the image's home.
+      const target = (await recordOf("default")) !== undefined ? await imagePlace("default") : word;
+      if (target !== undefined) {
+        const { place, at } = await placeAt(target);
         return runs(place, at);
       }
       // The default place first, since it is where every fork that names none lands; where it runs no workspaces, the
@@ -7762,7 +7757,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
-      const { place, at } = o?.place === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(o.place);
+      // A seal over a standing record files it where the builder was made, so the image's own build goes to the
+      // record's place whatever was asked, and only a copy is built anywhere else.
+      const asked = o?.copy !== true && (await recordOf(name)) !== undefined ? await imagePlace(name) : o?.place;
+      const { place, at } = asked === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(asked);
       // Per place as well as per name: a copy building at one place and the image building at another are two
       // prepares of one golden, and neither is the other's to join.
       const preparingKey = copyKey(place, name);
@@ -7772,7 +7770,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
       const stage = stageOf(name, place, o?.copy === true);
-      const filed = filedAt(place);
       const run = claiming(`builder/${preparingKey}`, async b => {
         await refreshBuilders();
         // A builder with a seal still in it carrying the same ticks is attached to instead of
@@ -7857,7 +7854,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           let builder: Builder;
           try {
             builder = await prepareBuilder({
-              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, filed),
+              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, place),
               ...size,
               ...(o?.kind !== undefined ? { kind: o.kind } : {}),
               ...(deployDaemon !== undefined ? { deployDaemon } : {}),
@@ -7872,7 +7869,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
           if (stopping !== undefined) throw await stopping;
-          const entry = await settleBuilder(name, builder, mine, filed);
+          const entry = await settleBuilder(name, builder, mine, place);
           entry.recipe = recipe;
           return builderView(entry.record, entry);
         };
@@ -7976,7 +7973,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           let builder: Builder;
           try {
             builder = await upgradeBuilder({
-              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, filedAt(place)),
+              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, place),
             head,
             delta: o.delta,
               setup: recipe.setup,
@@ -7992,7 +7989,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (placeholder !== undefined) await forgetIfGone(placeholder, at);
             throw e;
           }
-          return settleBuilder(name, builder, placeholder, filedAt(place));
+          return settleBuilder(name, builder, placeholder, place);
         },
         at,
       );
@@ -8318,8 +8315,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const held = goldenHead(await copyOf(place, name));
       // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
-      // the other. A place already standing on the record is answered with what it holds: the road that builds a
-      // copy on first use asks this of every place a fork lands on, and a second ask must cost nothing.
+      // the other. A place already standing on the record is answered with what it holds: a fork there asks this
+      // before it builds, and a second ask must cost nothing.
       if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) {
         const standing = (await copiesOf(name)).find(c => c.place === place);
         if (standing === undefined) throw new Error(`${where} holds ${name} v${held.version} and no copy of it was recorded there`);
@@ -8329,6 +8326,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // rather than inheriting a build it would have refused; what is joined is the build itself.
       const key = copyKey(place, name);
       const running = copyBuilds.get(key);
+      o.starting?.();
       if (running !== undefined) return running;
       const run = buildCopy({ place, where, at, name, record, ...(o.signal !== undefined ? { signal: o.signal } : {}) }).finally(() => copyBuilds.delete(key));
       copyBuilds.set(key, run);
@@ -8337,9 +8335,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async keepCurrent(place, name) {
       const key = name ?? "default";
-      // A computer that is not connected owes nothing now: its next link runs this again. Read before anything is
+      // A computer that is not connected owes nothing now: a fork there builds its copy. Read before anything is
       // composed or framed, so no row says a build stopped that never started, and read again on a failure, since
-      // the link going mid-ask is the join command's socket closing behind its prove or a laptop sleeping.
+      // the link going mid-ask is a laptop sleeping.
       const away = (): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
       try {
         await ready();
@@ -8405,16 +8403,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { copy, built: true };
   };
 
-  /** A cut moved the record's hash: every other place that runs workspaces builds its copy behind the seal, one per
-   * place, the image's own place left out since the seal just built it. A place whose build stops says so on its row. */
-  const followCut = async (name: string, own: string): Promise<void> => {
-    try {
-      for (const row of await buildPlaces()) if (row.place !== own) void image.keepCurrent(row.place, name);
-    } catch (e) {
-      console.warn(`the places were not read for the copies of ${name}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-
   /** The image whose head, at the place its own seal stands, is this snapshot: the one a fork's copy is looked up by.
    * Nothing for a project golden or a version that is no longer the head. */
   const imageHeadNamed = async (snapshotId: string): Promise<string | undefined> => {
@@ -8426,20 +8414,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** The snapshot a fork names at the place it lands on. A place that is not the image's own forks its own copy: the
-   * one a build running there seals, which the create waits for, or the one standing there on the record. Everywhere
-   * else, and where the place holds no current copy, the snapshot asked for goes through as it is. */
-  const copyForFork = async (golden: string, placeId: string | undefined): Promise<string> => {
+   * one a build running there seals, which the create waits for, or the one standing there on the record. A caller
+   * that can say so before anything bills has a place holding no current copy build one first, through the same
+   * build a press starts; everywhere else the snapshot asked for goes through as it is. */
+  const copyForFork = async (golden: string, placeId: string | undefined, announce?: (where: string, rateUsdPerHour: number) => void): Promise<string> => {
     const place = placeId ?? places.wired;
     const name = await imageHeadNamed(golden);
     if (name === undefined || place === (await imagePlace(name))) return golden;
-    const building = copyBuilds.get(copyKey(place, name));
-    if (building !== undefined) {
-      const built = await building.catch(() => undefined);
+    if (announce === undefined) {
+      const built = await copyBuilds.get(copyKey(place, name))?.catch(() => undefined);
       if (built !== undefined) return built.copy.snapshotId;
     }
     const record = await recordOf(name);
+    if (record === undefined) return golden;
     const held = goldenHead(await copyOf(place, name));
-    return record !== undefined && held !== undefined && copyIsCurrent(record, { hash: held.imageHash }) ? held.snapshotId : golden;
+    if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) return held.snapshotId;
+    if (announce === undefined) return golden;
+    const { at } = await placeAt(place);
+    if (!buildsImages(at.capabilities)) return golden;
+    const starting = (): void => announce(placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
+    return (await image.build({ place, name, starting })).copy.snapshotId;
   };
 
   /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the
