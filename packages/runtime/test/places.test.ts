@@ -65,6 +65,7 @@ import {
   noSuchPlaceRefusal,
   providerFoldersRefusal,
   providerAgentsRefusal,
+  refusal,
   type HostFolderListing,
   type GoldenStageEvent,
   type PlaceBack,
@@ -1850,6 +1851,101 @@ describe("putting the agent on a computer over ssh", () => {
     expect(asked.map(r => r.ssh)).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
   });
 
+});
+
+describe("the adds this host keeps", () => {
+  const door = { open: async () => ({ port: 4420, addresses: DOOR }) };
+  const addsOf = async (c: WsClient): Promise<unknown[]> => ((await c.request("places.list")) as { adds?: unknown[] }).adds ?? [];
+
+  it("keeps an add that failed mid-way, its steps, what it said and the fix, for a second client to read off places.list", async () => {
+    let go: () => void = () => {};
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          stage("connect", "done", "Ubuntu 24.04");
+          stage("wsp", "running");
+          await new Promise<void>(ok => (go = ok));
+          throw refusal("spoo has no curl or wget on its PATH", "Install one of them there, then add again.");
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const mine = await WsClient.connect(srv.port, { token: "host-token" });
+    const other = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(mine.ws, other.ws);
+    const answer = mine.request("places.add", { addId: "a_spoo", address: "root@spoo", sshPort: 2222 });
+    await until(async () => (await addsOf(other)).length === 1);
+    expect(await addsOf(other)).toEqual([
+      expect.objectContaining({ addId: "a_spoo", address: "root@spoo", sshPort: 2222, state: "running", steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "wsp", state: "running" }] }),
+    ]);
+    go();
+    expect(await answer).toMatchObject({ ok: false, fix: "Install one of them there, then add again." });
+    const [job] = (await addsOf(other)) as Record<string, unknown>[];
+    expect(job).toMatchObject({
+      addId: "a_spoo",
+      state: "failed",
+      said: "spoo has no curl or wget on its PATH.",
+      fix: "Install one of them there, then add again.",
+      steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "wsp", state: "failed", note: "spoo has no curl or wget on its PATH. Install one of them there, then add again." }],
+    });
+    expect(job).not.toHaveProperty("kind");
+    expect(Date.parse(String(job!["startedAt"]))).not.toBeNaN();
+  });
+
+  it("keeps the kind a refused login carries, so the app's login fix reads off the record", async () => {
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(new PlaceLoginRefusedError("maya@box: Permission denied (publickey).")) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    await c.request("places.add", { addId: "a_maya", address: "maya@box" });
+    expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_maya", state: "failed", said: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND, steps: [expect.objectContaining({ step: "connect", state: "failed" })] })]);
+  });
+
+  it("marks an add done with the computer it made once that computer has joined", async () => {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          await join(hostKey, { code: readJoinToken(req.code).code, name: "box" });
+          return { name: "box" };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const added = await runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_box", state: "done", placeId: added.place.id })]);
+  });
+
+  it("keeps every add still running and the last twenty that finished", async () => {
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(new Error("root@10.0.0.9 did not answer on port 22")) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    for (let n = 0; n < 22; n++) await runtime.places!.add({ addId: `a_${n}`, address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect(((await addsOf(c)) as { addId: string }[]).map(j => j.addId)).toEqual(Array.from({ length: 20 }, (_, n) => `a_${n + 2}`));
+  });
 });
 
 

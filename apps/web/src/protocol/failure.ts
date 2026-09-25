@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { refusalSaid } from "@wsp/protocol";
 import { DisconnectedError, NO_REASON } from "./client.js";
 
 /** A failure as the app shows it: what happened, what to do about it when the host said, the kind it was stamped
@@ -20,7 +21,5 @@ const stringProp = (e: object, key: "fix" | "kind"): string | undefined => {
 export function failureOf(e: unknown): Failure {
   if (!(e instanceof Error)) return { said: e == null ? NO_REASON : String(e), fix: undefined, kind: undefined, disconnected: false };
   const fix = stringProp(e, "fix");
-  const tail = fix === undefined ? "" : ` ${fix}`;
-  const said = tail !== "" && e.message.endsWith(tail) ? e.message.slice(0, -tail.length) : e.message;
-  return { said, fix, kind: stringProp(e, "kind"), disconnected: e instanceof DisconnectedError };
+  return { said: refusalSaid(e.message, fix), fix, kind: stringProp(e, "kind"), disconnected: e instanceof DisconnectedError };
 }

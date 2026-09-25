@@ -45,6 +45,9 @@ export function verbFailure(e: unknown): VerbFailure {
 export const refusal = (happened: string, fix: string, kind?: string): Error & { fix: string; kind?: string } =>
   Object.assign(new Error(refusalLine(happened, fix)), { fix }, kind !== undefined ? { kind } : {});
 
+/** What a refusal said before its fix: the message with the fix `refusal` joined on taken back off the end. */
+export const refusalSaid = (message: string, fix: string | undefined): string => (fix !== undefined && message.endsWith(` ${fix}`) ? message.slice(0, -fix.length - 1) : message);
+
 /** A line refused before anything ran: a missing argument, a flag or a value nothing takes. */
 export const usageRefusal = (happened: string, fix: string): Error => refusal(happened, fix, "usage");
 

@@ -14,6 +14,7 @@ import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
+import { applyAddStage, readAdds } from "../settings/adds.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
@@ -452,6 +453,7 @@ export const useStore = create<State>((set, get) => {
         if (failureOf(e).kind !== "ticket") noticeFailure(e, said => `Setup not read: ${said}`);
       });
     readPlaces(api);
+    readAdds(api);
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
     if (projectsAsked === undefined) set({ projectsRead: true });
@@ -881,6 +883,9 @@ export const useStore = create<State>((set, get) => {
           return;
         case "place.joined":
           set(s => ({ places: [...s.places.filter(p => p.id !== e.place.id), e.place] }));
+          return;
+        case "place.stage":
+          applyAddStage(get().api, e);
           return;
         case "place.present":
         case "place.absent":

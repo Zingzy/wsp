@@ -54,6 +54,9 @@ import {
   type PlaceAddStep,
   PLACE_LOGIN_REFUSED_KIND,
   type PlaceStageEvent,
+  type PlaceAddJob,
+  withPlaceStage,
+  refusalSaid,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
   type PlaceAuthRequest,
@@ -455,6 +458,8 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
+  /** Every add over ssh still running and the last ADDS_KEPT that finished, oldest first. */
+  adds(): PlaceAddJob[];
   /** Puts the daemon this host deploys on one place where it is behind, then runs the recipe job on it. Refuses in
    * one sentence a place this host does not hold, and a computer that is behind on a runtime wired with no
    * updater; a computer already on this daemon takes the job alone. */
@@ -688,6 +693,9 @@ const DIAL_MS = 20_000;
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
 
+/** Finished adds kept beside the running ones, for a sheet opened after one ended to read what it came to. */
+const ADDS_KEPT = 20;
+
 /** What the box itself said while that wait ran out, where this host holds a login to it and the road to read it:
  * the agent's log names the address it could not dial and why. A read that will not take adds nothing, since the
  * sentence above it is the one the person came for. */
@@ -792,6 +800,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * the code became and the attach that follows wakes the install. The login the install logged in over is here
    * too, from the moment its ssh answered, since the record is written by whichever of the two lands second. */
   const awaiting = new Map<string, { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void }>();
+
+  /** The adds over ssh, oldest first, for the host's life: a finished one past the last ADDS_KEPT goes. */
+  const adds = new Map<string, PlaceAddJob>();
+  const putAdd = (addId: string, next: (job: PlaceAddJob) => PlaceAddJob): void => {
+    const job = adds.get(addId);
+    if (job === undefined) return;
+    adds.set(addId, next(job));
+    const finished = [...adds.values()].filter(j => j.state !== "running");
+    for (const gone of finished.slice(0, Math.max(0, finished.length - ADDS_KEPT))) adds.delete(gone.addId);
+  };
 
   /** The road the install came in over, written onto a record: the join frame the record is made from says nothing
    * about how the computer was reached, and every later dial, update and read of its log rides this login. */
@@ -1670,9 +1688,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note, placeId) => {
         if (state === "running") step = which;
-        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
+        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) };
+        putAdd(addId, job => withPlaceStage(job, said));
+        opts.onStage?.(said);
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
+      // Kept from here, where the catch below ends every add it starts: a job that never ends would read as running.
+      adds.delete(addId);
+      adds.set(addId, { addId, address: req.address, ...(req.sshPort !== undefined ? { sshPort: req.sshPort } : {}), startedAt: new Date(at).toISOString(), state: "running", steps: [] });
       const waiting: { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void } = {};
       awaiting.set(code, waiting);
       try {
@@ -1727,7 +1750,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // against the line it belongs to rather than under the list. One line of it: a note is printed after the
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
-        stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
+        const message = e instanceof Error ? e.message : String(e);
+        const { fix, kind } = e as { fix?: unknown; kind?: unknown };
+        putAdd(addId, job => ({ ...job, said: refusalSaid(message, typeof fix === "string" ? fix : undefined), ...(typeof fix === "string" ? { fix } : {}), ...(typeof kind === "string" ? { kind } : {}) }));
+        stage(step, "failed", message.split("\n")[0]!);
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
         // A forward stays held for as long as a record dials back through it, and goes with an add that left none.
@@ -1808,6 +1834,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       });
       return { exitCode: Number(answer["exitCode"] ?? -1), stdout: String(answer["stdout"] ?? ""), stderr: String(answer["stderr"] ?? "") };
     },
+
+    adds: () => [...adds.values()],
 
     reportOf: async placeId => (await recordOf(placeId))?.report,
     homeOf: async placeId => (await recordOf(placeId))?.report.login["HOME"],

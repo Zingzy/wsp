@@ -58,7 +58,10 @@
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer Computers scrolled to Add a computer, the ssh road open
-//   settings-add-computer-failed  the same, the add refused while the reach step ran
+//   settings-add-computer-failed  the same after a reload, the add the host kept
+//                         refused while the wsp step ran, with the host's fix
+//   settings-computers-refused  Computers with the host refusing the places read
+//                         and the ssh config read
 //   settings-remove-computer  the Remove dialog over the box's page
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
@@ -73,7 +76,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
@@ -85,7 +88,7 @@ import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
-import type { Api } from "../../src/protocol/client";
+import { RequestError, type Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import "../../src/index.css";
@@ -301,9 +304,25 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
   "settings-add-computer-failed": { kind: "group", group: "computers" },
+  "settings-computers-refused": { kind: "group", group: "computers" },
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
 };
 const settingsAt = SETTINGS_SCREENS[screen];
+/** The add the host kept after it failed on the wsp step, read on bind as a reload reads it. */
+const FAILED_ADD: PlaceAddJob = {
+  addId: "a_spoo",
+  address: "root@spoo",
+  startedAt: AT,
+  state: "failed",
+  steps: [
+    { step: "connect", state: "done", note: "Ubuntu 24.04" },
+    { step: "host-key", state: "done" },
+    { step: "reach", state: "done", note: "http://192.168.1.20:4640" },
+    { step: "wsp", state: "failed", note: "spoo has no curl or wget on its PATH." },
+  ],
+  said: "spoo has no curl or wget on its PATH.",
+  fix: "Install one of them there, then add again.",
+};
 const settings = settingsAt !== undefined;
 /** Every computer this host holds on a settings screen: this Mac, three boxes and the cloud whose key it holds. */
 const computers = settings ? COMPUTERS : places;
@@ -362,7 +381,9 @@ const api = {
   watchStatuses: async () => [],
   capabilities: async () => caps({}),
   getGolden: async () => ({ head: null, versions: [] }),
-  placesList: async () => computers,
+  placesList: async () => (screen === "settings-computers-refused" ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again.")) : computers),
+  ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
+  ...(screen === "settings-add-computer-failed" ? { addsList: async () => [FAILED_ADD] } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
   listHarnesses: async () => [],
@@ -413,18 +434,14 @@ const api = {
     const place = computers.find(row => row.id === placeId)!;
     return { dialled: { at: new Date().toISOString(), answered: true, roundTripMs: 41 }, line: `${place.name} answered in 41 ms.`, place };
   },
-  // The one road the sheet runs: it reports each step in the protocol's own words for it, the way the client does,
-  // so no line on the plan says one thing before Add and another after. On the refused screen it answers with
-  // ssh's own line instead, which lands in the slot under the field.
-  addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
-    onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
-    onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
-    if (screen === "settings-add-computer-failed") {
-      onStage({ step: "reach", word: placeAddSheetWord("reach", "running"), state: "running" });
-      throw new Error("spoo cannot reach this computer at any of its addresses");
-    }
-    onStage({ step: "reach", word: placeAddSheetWord("reach", "done"), state: "done" });
-    onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
+  // The one road the sheet runs: it reports each step as the host's events do, under the stream the sheet minted,
+  // and stays running.
+  addComputerOverSsh: async (_login: unknown, addId: string) => {
+    const stage = (step: PlaceAddStep, state: "running" | "done"): void => useStore.getState().applyEvent({ type: "place.stage", addId, step, state } as never);
+    stage("connect", "done");
+    stage("host-key", "done");
+    stage("reach", "done");
+    stage("wsp", "running");
     return new Promise<never>(() => {});
   },
 } as unknown as Api;
@@ -462,7 +479,7 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed",
+  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused",
   release:
     screen === "settings-about-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
