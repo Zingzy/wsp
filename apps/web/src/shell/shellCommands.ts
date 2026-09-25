@@ -22,7 +22,7 @@ import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { addNotice } from "../notices/store.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
-import { selectWorkspaceRightPanelState, useHeldPanelStore, useRightPanelStore } from "../rightPanelStore.js";
+import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { absenceOf } from "../settings/places.js";
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../adapt/workspaces.js";
@@ -259,8 +259,7 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
     // that flips one would move a record behind a page that never shows it.
     case "rightPanel.toggle":
       if (useStore.getState().settingsOpen) return;
-      if (workspaceId) useRightPanelStore.getState().toggleVisibility(workspaceId);
-      else useHeldPanelStore.getState().toggle();
+      useRightPanelStore.getState().toggleVisibility(workspaceOrHere(workspaceId));
       return;
     case "preview.toggle":
       if (workspaceId && !useStore.getState().settingsOpen) useRightPanelStore.getState().toggle(workspaceId, "preview");

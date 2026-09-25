@@ -55,7 +55,7 @@ export interface TerminalPaneInput {
 export function terminalPaneState(input: TerminalPaneInput): TerminalPaneState {
   const oom = input.outOfMemory ? { outOfMemory: input.outOfMemory } : {};
   const local = input.local ?? false;
-  const where = local ? THIS_COMPUTER : (input.where ?? "this workspace");
+  const where = local ? THIS_COMPUTER : (input.where ?? "this task");
   /** What a machine that is up but whose link is not open reads as, from the link alone. */
   const fromLink = (): TerminalPaneState => {
     if (input.socket === "opening") return { kind: "starting", local, where };
@@ -99,11 +99,11 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
     case "unanswered":
       return `Nothing has answered on ${pane.where}`;
     case "reconnecting":
-      return "Reconnecting to the workspace";
+      return "Reconnecting to the task";
     case "reauth":
-      return "The workspace refused a stale daemon token; reconnecting with the one wsp holds now";
+      return "The task refused a stale daemon token; reconnecting with the one wsp holds now";
     case "not-answering":
-      return pane.outOfMemory ? outOfMemoryLine(pane.outOfMemory) : "The workspace is not answering";
+      return pane.outOfMemory ? outOfMemoryLine(pane.outOfMemory) : "The task is not answering";
     case "absent":
       return pane.absent.said;
     case "no-daemon":
@@ -111,11 +111,11 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
     case "refused":
       return REFUSED_TITLE;
     case "paused":
-      return `${pane.pausing ? "Pausing" : "Paused"}. The shell is kept; wake the workspace to continue`;
+      return `${pane.pausing ? "Pausing" : "Paused"}. The shell is kept; wake the task to continue`;
     case "waking":
-      return "Waking the workspace. The shell continues when it is back";
+      return "Waking the task. The shell continues when it is back";
     case "gone":
-      return "The workspace is gone";
+      return "The task is gone";
     default: {
       const _exhaustive: never = pane;
       return null;
@@ -126,7 +126,7 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
 /** Where a person now reads what a workspace is doing and reaches its verbs: its own row in the sidebar, the pane
  * that held those facts having gone. Written once here because two sentences in this file name it and a rename
  * that moved one would leave the other. */
-const WORKSPACE_ROW = "workspace's row";
+const WORKSPACE_ROW = "task's row";
 
 const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_ROW}`;
 
@@ -147,16 +147,16 @@ const unansweredHint = (pane: { local: boolean; where: string }): string =>
 /** What a pane says for a machine with no daemon at all. One sentence stating the fact, with no return promised and
  * nothing to wait for: a pane that read "reconnecting" for a workspace that never had a daemon road was the bug
  * (seen on a local workspace before its daemon landed).  */
-const NO_DAEMON_TITLE = "There is no daemon on this workspace";
-const NO_DAEMON_LINE = "There is no daemon on this workspace, so no terminal opens here";
-const NO_DAEMON_TYPING = "Typing is refused: there is no daemon on this workspace";
+const NO_DAEMON_TITLE = "There is no daemon on this task";
+const NO_DAEMON_LINE = "There is no daemon on this task, so no terminal opens here";
+const NO_DAEMON_TYPING = "Typing is refused: there is no daemon on this task";
 
 /** What a pane says for a connection that was turned away. The fact of what happened to this window's connection,
  * then that the work on the workspace is untouched by it, with no return promised and nothing offered to do: the
  * retry that goes on behind it is at the slowest pace there is. Neither sentence says machine or daemon, which a
  * person never reads, and a test pins the words. */
-const REFUSED_TITLE = "The connection to this workspace was refused; its threads keep running";
-const REFUSED_TYPING = "Typing is refused: the connection to this workspace was refused";
+const REFUSED_TITLE = "The connection to this task was refused; its threads keep running";
+const REFUSED_TYPING = "Typing is refused: the connection to this task was refused";
 
 /** The lines under the pane's title, in the order they are shown. A drop with memory near full says so and names
  * the next size up before anything else; the rebuild is the last thing offered, and only once the runtime gave up
@@ -205,9 +205,9 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "reconnecting":
       return "The daemon link is reconnecting; terminals open when it is back";
     case "reauth":
-      return "The workspace refused a stale daemon token; terminals open once the link carries the current one";
+      return "The task refused a stale daemon token; terminals open once the link carries the current one";
     case "not-answering":
-      return "The workspace is not answering; terminals open when it does";
+      return "The task is not answering; terminals open when it does";
     case "absent":
       // The one sentence the pane already shows for an absent computer, which a refused terminal lands in too: a
       // reading with a button promises nothing after it, since the button is what opens the terminal.
@@ -215,13 +215,13 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "no-daemon":
       return NO_DAEMON_LINE;
     case "refused":
-      return `No terminal opens from this window: ${pane.reason}. The workspace's threads keep running.`;
+      return `No terminal opens from this window: ${pane.reason}. The task's threads keep running.`;
     case "paused":
-      return `Workspace is ${pane.pausing ? "pausing" : "paused"}; wake it to open a terminal`;
+      return `Task is ${pane.pausing ? "pausing" : "paused"}; wake it to open a terminal`;
     case "waking":
-      return "Workspace is waking; terminals open when it is running";
+      return "Task is waking; terminals open when it is running";
     case "gone":
-      return `The workspace is gone; rebuild it from the ${WORKSPACE_ROW}`;
+      return `The task is gone; rebuild it from the ${WORKSPACE_ROW}`;
     default: {
       const _exhaustive: never = pane;
       return null;
@@ -239,11 +239,11 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
     case "unanswered":
       return `Typing is refused: nothing has answered on ${pane.where}`;
     case "reconnecting":
-      return "Typing is refused while the workspace is reconnecting";
+      return "Typing is refused while the task is reconnecting";
     case "reauth":
-      return "Typing is refused until the workspace takes the current daemon token";
+      return "Typing is refused until the task takes the current daemon token";
     case "not-answering":
-      return "Typing is refused: the workspace is not answering";
+      return "Typing is refused: the task is not answering";
     case "absent":
       return `Typing is refused: ${pane.absent.said}`;
     case "no-daemon":
@@ -251,11 +251,11 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
     case "refused":
       return REFUSED_TYPING;
     case "paused":
-      return `Typing is refused: the workspace is ${pane.pausing ? "pausing" : "paused"}`;
+      return `Typing is refused: the task is ${pane.pausing ? "pausing" : "paused"}`;
     case "waking":
-      return "Typing is refused while the workspace wakes";
+      return "Typing is refused while the task wakes";
     case "gone":
-      return "Typing is refused: the workspace is gone";
+      return "Typing is refused: the task is gone";
     default: {
       const _exhaustive: never = pane;
       return null;

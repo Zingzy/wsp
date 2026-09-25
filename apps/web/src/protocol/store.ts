@@ -74,12 +74,12 @@ export function explainCreateRefusal(error: unknown): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
   // The runtime names the machines holding the slots and the move that frees one; a second wording here would say less.
   if (error instanceof RequestError && error.kind === "concurrency") {
-    return { title: "The provider refused: no more workspaces can run there now", detail: message };
+    return { title: "The provider refused: no more tasks can run there now", detail: message };
   }
   if (error instanceof DisconnectedError) {
     return { title: "Not connected to the runtime", detail: message };
   }
-  return { title: "Could not create the workspace", detail: message };
+  return { title: "Could not create the task", detail: message };
 }
 
 interface State {
@@ -939,7 +939,7 @@ export const useStore = create<State>((set, get) => {
             // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created
             // settles which row is whose; the runtime's id is not known here any earlier than its first stage.
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
-            const failed = e.stage === "failed" ? { title: "Could not create the workspace", detail: e.message } : null;
+            const failed = e.stage === "failed" ? { title: "Could not create the task", detail: e.message } : null;
             if (own === undefined) {
               return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
@@ -1208,4 +1208,3 @@ export function useProjectsRead(): boolean { return useStore(s => s.projectsRead
 export function useFirstRun(): boolean {
   return useStore(s => s.ready && s.projectsRead && s.projectsRefused === null && s.projects.length === 0 && s.workspaces.length === 0);
 }
-export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }

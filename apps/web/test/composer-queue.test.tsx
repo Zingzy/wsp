@@ -606,7 +606,7 @@ describe("composer queue", () => {
     emit({ type: "session.start", ...B, prompt: "hello b" });
     emit({ type: "session.done", ...B, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...B, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("completed"));
+    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
     expect(started).toHaveLength(1);
     expect(queued()).toEqual([]);
 
@@ -653,7 +653,7 @@ describe("composer queue", () => {
     history[WS] = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
     view.rerender(<WorkspaceThread workspaceId={WS} threadId="thr_a" />);
     await screen.findByText(/Server is live at :3000\./);
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("completed"));
+    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
     expect(started).toHaveLength(1);
     expect(queued()).toEqual([]);
     expect(useComposerDraftStore.getState().queues["thr_a"]).toBeUndefined();
@@ -683,7 +683,7 @@ describe("composer queue", () => {
     const { api, started, emit } = fixtureApi({ [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("completed"));
+    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
     expect(started).toHaveLength(0);
     expect(queued()).toEqual(["and the context window?", "and the cost?"]);
     await enter("what model are you?");
@@ -724,7 +724,7 @@ describe("composer queue", () => {
     expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
     emit({ type: "session.done", ...A, result: { status: "completed", durationMs: 9_000 } });
     emit({ type: "session.end", ...A, exitCode: 0, sawResult: true });
-    expect(screen.getByTestId("settled-footer").textContent).not.toContain("completed");
+    expect(screen.getByTestId("settled-footer").textContent).not.toContain("9.0s");
     expect(started).toHaveLength(0);
     expect(queued()).toEqual(["retry later"]);
     await enter("retry");

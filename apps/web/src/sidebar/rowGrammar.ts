@@ -47,14 +47,14 @@ export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
  * collapse chevron. Worn over the hover glyph's class, which it overrides under the breakpoint. */
 export const SELECTED_ROW_GLYPH_CLASS = "max-md:peer-data-[active=true]/menu-button:flex max-md:peer-data-[active=true]/menu-button:opacity-100";
 
-/** A child list of the tree: 15 px in, so its rail runs under the centre of the parent's lead (the 8 px inset plus
- * half the 14 px mark), no gap between rows, so the rail segments read as one line. */
-export const CHILD_LIST_CLASS = "ml-4 flex min-w-0 flex-col";
+/** A child list of the tree: 12 px in, the rail just inside the parent's lead rather than under its centre; no gap
+ * between rows, so the rail segments read as one line. */
+export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";
 /** One item of a child list: the rail down its left edge for its whole height, a tick into its row's first line,
  * and the rail stopping at that tick on the last item, which is the elbow. Its row starts past the elbow, so a
  * lifted or hovered row never paints over it. */
 export const RAIL_ITEM_CLASS =
-  "relative pl-1.5 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[18px] after:absolute after:top-[18px] after:left-0 after:h-px after:w-1 after:bg-[var(--sidebar-rail)]";
+  "relative pl-1 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-[var(--sidebar-rail)] last:before:h-[18px] after:absolute after:top-[18px] after:left-0 after:h-px after:w-1 after:bg-[var(--sidebar-rail)]";
 
 /** The sidebar footer's own row: 36 px, muted, the whole width, the rows' own pitch. Every row in the foot wears it, so the foot
  * reads as one column whether the row is a button or a line with a link at its edge. */

@@ -120,6 +120,6 @@ describe("delete on the workspace row", () => {
     expect(action.refusal).toBeNull();
     await action.run();
     expect(open).toHaveBeenCalledWith("ws_a");
-    expect(deleteEntry("running", { deleteWorkspace: undefined }).refusal).toBe("This client cannot delete workspaces");
+    expect(deleteEntry("running", { deleteWorkspace: undefined }).refusal).toBe("This client cannot delete tasks");
   });
 });

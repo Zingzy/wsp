@@ -412,7 +412,7 @@ describe("the header row", () => {
     act(() => useStore.getState().select("ws_a", "thr_1"));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/make me a simple server");
     act(() => useStore.getState().select(null));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No workspace selected");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No task selected");
   });
 
   it("the pane header carries the one thread state a person has to act on, and nothing for a thread that is working or settled", async () => {

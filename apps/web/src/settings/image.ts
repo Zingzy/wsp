@@ -20,7 +20,7 @@ export const IMAGE_WORDS = {
   /** The fact beside the row before anything has been sealed. */
   notBuilt: "not built yet",
   /** The one sentence under that row: what will build it and when. */
-  firstBuild: "Built from this Mac with Edit image. A workspace on another computer or in the cloud then builds its copy there first.",
+  firstBuild: "Built from this Mac with Edit image. A task on another computer or in the cloud then builds its copy there first.",
   copies: "Copies",
 } as const;
 

@@ -32,7 +32,7 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     id: "new-workspace",
     group: "open",
     icon: () => PlusIcon,
-    searchTerms: ["new workspace", "new piece of work", "start work"],
+    searchTerms: ["new task", "new piece of work", "start work"],
     title: () => NEW_WORKSPACE,
     rowLabel: target => `${NEW_WORKSPACE} on ${target.name}`,
     refusal: () => null,

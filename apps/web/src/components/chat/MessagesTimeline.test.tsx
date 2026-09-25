@@ -209,6 +209,22 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Worked for 8.0s");
   });
 
+  it("draws the settled turn's facts on the last reply's row, beside its time", () => {
+    const turnId = "turn-with-meta";
+    const assistantEntry = buildAssistantTimelineEntry("Done.");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        turns={[buildTurn(turnId, "completed", "2026-03-17T19:12:20.000Z", "2026-03-17T19:12:28.000Z")]}
+        timelineEntries={[{ ...assistantEntry, message: { ...assistantEntry.message, turnId } }]}
+        replyMeta={<span data-reply-meta>$0.47</span>}
+      />,
+    );
+    const row = markup.slice(markup.lastIndexOf("group-hover/assistant:opacity-100"));
+    expect(row.indexOf("data-reply-meta")).toBeGreaterThan(0);
+    expect(row.indexOf("data-reply-meta")).toBeLessThan(row.indexOf("</div>"));
+  });
+
   it("keeps assistant changed-files headers sticky below the thread header", () => {
     const assistantMessageId = "message-assistant-with-files";
     const turnId = "turn-with-files";

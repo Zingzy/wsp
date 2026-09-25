@@ -13,14 +13,14 @@ const PLAN = "# Plan\n\n1. Do the thing";
 async function openSave(onSavePlan: (input: { path: string; contents: string }) => Promise<void>) {
   render(<ProposedPlanCard planMarkdown={PLAN} cwd="/w" workspaceRoot="/w" resolvedTheme="dark" onSavePlan={onSavePlan} />);
   fireEvent.click(screen.getByRole("button", { name: "Plan actions" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Save to workspace" }));
-  return (await screen.findByLabelText("Workspace path")) as HTMLInputElement;
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Save to task" }));
+  return (await screen.findByLabelText("Folder")) as HTMLInputElement;
 }
 
 async function reopenSave() {
   fireEvent.click(screen.getByRole("button", { name: "Plan actions" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Save to workspace" }));
-  await screen.findByLabelText("Workspace path");
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Save to task" }));
+  await screen.findByLabelText("Folder");
 }
 
 const refusalText = () => document.querySelector("[data-k='plan-path-refusal']")?.textContent ?? "";
@@ -33,7 +33,7 @@ describe("saving a plan to the workspace", () => {
     const field = await openSave(save);
     fireEvent.change(field, { target: { value: "  " } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(document.querySelector("[data-k='plan-path-refusal']")?.textContent).toBe("Type a path in the workspace to save the plan to.");
+    expect(document.querySelector("[data-k='plan-path-refusal']")?.textContent).toBe("Type a path to save the plan to.");
     expect(useNotices.getState().notices).toEqual([]);
     expect(save).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "plan.md" } });
@@ -46,7 +46,7 @@ describe("saving a plan to the workspace", () => {
     fireEvent.change(field, { target: { value: "plan.md" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith({ path: "plan.md", contents: expect.any(String) }));
-    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("Folder")).toBeNull());
     expect(useNotices.getState().notices).toEqual([]);
   });
 
@@ -56,7 +56,7 @@ describe("saving a plan to the workspace", () => {
     fireEvent.change(field, { target: { value: "plans/plan.md" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(document.querySelector("[data-k='plan-path-refusal']")?.textContent).toBe("Plan not saved: plans/ is not writable Check the folder's owner."));
-    expect(screen.getByLabelText("Workspace path")).toBeTruthy();
+    expect(screen.getByLabelText("Folder")).toBeTruthy();
     expect(useNotices.getState().notices).toEqual([]);
   });
 
@@ -76,7 +76,7 @@ describe("saving a plan to the workspace", () => {
     await screen.findByRole("button", { name: "Saving..." });
     expect(refusalText()).toBe("");
     await act(async () => release());
-    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("Folder")).toBeNull());
     await reopenSave();
     expect(refusalText()).toBe("");
   });
@@ -88,7 +88,7 @@ describe("saving a plan to the workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(refusalText()).toBe("Plan not saved: busy Try again."));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("Folder")).toBeNull());
     await reopenSave();
     expect(refusalText()).toBe("");
   });
@@ -97,9 +97,9 @@ describe("saving a plan to the workspace", () => {
     const field = await openSave(vi.fn(async () => {}));
     fireEvent.change(field, { target: { value: " " } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(refusalText()).toBe("Type a path in the workspace to save the plan to.");
+    expect(refusalText()).toBe("Type a path to save the plan to.");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByLabelText("Workspace path")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("Folder")).toBeNull());
     await reopenSave();
     expect(refusalText()).toBe("");
   });

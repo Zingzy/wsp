@@ -57,6 +57,24 @@ interface PtyState {
   mode: PtyModeReport | null;
 }
 
+// A shell started at a width other than its view's redraws its prompt on the first resize and leaves zsh's
+// partial-line mark above it, so a new pty starts at the size a view last measured, kept across reloads.
+const SIZE_KEY = "wsp.terminal.size";
+let lastSize = readSize();
+function readSize(): { cols: number; rows: number } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SIZE_KEY) ?? "null") as { cols?: unknown; rows?: unknown } | null;
+    if (typeof saved?.cols === "number" && typeof saved.rows === "number") return { cols: saved.cols, rows: saved.rows };
+  } catch {}
+  return { cols: 80, rows: 24 };
+}
+function keepSize(cols: number, rows: number): void {
+  lastSize = { cols, rows };
+  try {
+    localStorage.setItem(SIZE_KEY, JSON.stringify(lastSize));
+  } catch {}
+}
+
 export class WorkspaceTerminals {
   #wire: TerminalWire;
   #ptys = new Map<string, PtyState>();
@@ -153,7 +171,7 @@ export class WorkspaceTerminals {
   // --- pty lifecycle -----------------------------------------------------------
 
   async open(opts: OpenOpts = {}): Promise<PtyTabView> {
-    const params: Record<string, unknown> = { cols: 80, rows: 24 };
+    const params: Record<string, unknown> = { ...lastSize };
     if (opts.shell !== undefined) params["shell"] = opts.shell;
     if (opts.cwd !== undefined) params["cwd"] = opts.cwd;
     const created = await this.#wire.request("pty.create", params);
@@ -245,6 +263,7 @@ export class WorkspaceTerminals {
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
+    keepSize(cols, rows);
     this.#wire.request("pty.resize", { ptyId, cols, rows }).catch(() => {});
   }
 

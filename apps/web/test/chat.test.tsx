@@ -109,7 +109,7 @@ describe("chat tab rendering", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
     const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("completed");
+    expect(footer.textContent).toContain("Worked for");
     expect(footer.textContent).toContain("Worked for 10s");
     expect(footer.textContent).toContain("$0.02");
     expect(screen.queryByText(/Working for/)).toBeNull();
@@ -375,7 +375,7 @@ describe("chat tab send after a harness died before its init", () => {
     for (const e of RETRY) emit(e);
     expect(screen.getByText("Second time lucky.")).toBeDefined();
     expect(screen.getByText(/exited before init/)).toBeDefined();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
@@ -747,7 +747,7 @@ describe("chat tab threads", () => {
     await screen.findByText("two.");
     expect(screen.getByText("second")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
     expect(isEditable(composerEditor())).toBe(true);
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
@@ -889,7 +889,7 @@ describe("chat tab threads", () => {
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(status()).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
   });
 
   it("fresh thread, send, drop, gap, reload while the person's turn still runs: it shows as in flight, never as the previous turn", async () => {
@@ -914,6 +914,6 @@ describe("chat tab threads", () => {
     for (const e of fresh.slice(2)) emit(e);
     expect(status()).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(screen.getByTestId("settled-footer").textContent).toContain("completed");
+    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
   });
 });

@@ -74,6 +74,27 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { access: { ws_b: "plan" } } });
   });
 
+  it("a computer's icon lands on the record, a null clears it, and the next runtime on the store reads it", async () => {
+    const store = memoryStore();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { computerLook: { pl_box: { icon: "server" }, pl_mac: { icon: "laptop" } } } })).toMatchObject({
+      ok: true,
+      preferences: { computerLook: { pl_box: { icon: "server" }, pl_mac: { icon: "laptop" } } },
+    });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { computerLook: { pl_mac: null } } })).toMatchObject({ ok: true, preferences: { computerLook: { pl_box: { icon: "server" } } } });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { computerLook: { pl_box: { icon: "toaster" } } } })).toMatchObject({ ok: false });
+    await srv.close();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect((await wsRequest(srv.port, "t", { op: "preferences.get" }))["preferences"]).toMatchObject({ computerLook: { pl_box: { icon: "server" } } });
+  });
+
+  it("a record kept before computers had icons reads with none", async () => {
+    const store = memoryStore();
+    await store.put("preferences", "default", { theme: "light", projectLook: { pr_1: { icon: "rocket" } } });
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect((await wsRequest(srv.port, "t", { op: "preferences.get" }))["preferences"]).toEqual({ ...DEFAULT_PREFERENCES, theme: "light", projectLook: { pr_1: { icon: "rocket" } }, computerLook: {} });
+  });
+
   it("two patches landing at once keep both fields", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS });
     const [a, b] = await Promise.all([rt.preferences.set({ theme: "light" }), rt.preferences.set({ sidebarMode: "spaces" })]);

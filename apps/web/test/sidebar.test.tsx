@@ -661,7 +661,7 @@ describe("rows from the fixture wire", () => {
     api.watchStatuses = vi.fn(async () => { throw new Error("runtime unreachable"); });
     useStore.getState().bind(api);
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    await waitFor(() => expect(screen.getByText(/No workspaces yet/)).toBeDefined());
+    await waitFor(() => expect(screen.getByText(/No tasks yet/)).toBeDefined());
     await waitFor(() => expect(lastNotice()).toBe("Live status is not coming from the host: runtime unreachable"));
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -803,7 +803,7 @@ describe("search", () => {
 describe("the body before the first list has arrived, and on a wsp with no project", () => {
   it("says nothing at all while the store is not ready: no rows, no bars, not even the road to a project, and the head held", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(rowIds()).toEqual([]);
     expect(document.querySelectorAll("[data-slot=skeleton]").length).toBe(0);
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
@@ -824,7 +824,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(menu()).toBeNull();
     // The empty line belongs to a project with no workspace; with no project at all the centre is the first run,
     // whose title says what is being made, so no second sentence stands here.
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(screen.queryByText(/No projects yet/)).toBeNull();
     expect(screen.queryByText(/A project is a folder/)).toBeNull();
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
@@ -841,7 +841,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(screen.getByText("beta")).toBeDefined();
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(screen.queryByText(/No tasks yet/)).toBeNull();
     expect(screen.queryByText(PROJECT_WORDS.new)).toBeNull();
   });
 });
@@ -1372,7 +1372,7 @@ describe("the tree", () => {
     for (const id of ["ws:ws_a", "thread:th_lead", "thread:th_build", "thread:th_review", "ws:ws_fork", "thread:th_move"]) {
       const item = document.querySelector<HTMLElement>(`[data-row-id='${id}']`)!.closest("li")!;
       expect(item.className, id).toContain("before:w-px");
-      expect(item.parentElement!.className, id).toContain("ml-4");
+      expect(item.parentElement!.className, id).toContain("ml-3");
     }
     expect(rowOf("spoo-landing").closest("li")!.className).not.toContain("before:w-px");
     expect(threadState(rowOf("review the rows"))).toBe("Needs you");
