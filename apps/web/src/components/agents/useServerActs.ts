@@ -62,7 +62,7 @@ export function useServerActs(target: AgentsTarget | null): ServerActs | undefin
       })();
     };
     return {
-      add: ask => api.serversAdd!(at, ask),
+      add: (ask, project) => api.serversAdd!(rowTarget(at, project), ask),
       remove: (key, rows) => write(key, rows, row => api.serversRemove?.(rowTarget(at, row.project), askOf(row))),
       toggle: (key, rows, on) => write(key, rows, row => api.serversToggle?.(rowTarget(at, row.project), askOf(row), on)),
       busyOf: key => shown.busy[key] === true,

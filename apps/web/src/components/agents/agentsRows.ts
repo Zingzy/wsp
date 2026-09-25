@@ -148,6 +148,7 @@ export const AGENTS_LIST_WORDS = {
   addServerGo: "Add server",
   adding: "Adding",
   twoPairsOneName: (road: "command" | "address"): string => (road === "command" ? "Two variables have the same name; keep one of them." : "Two headers have the same name; keep one of them."),
+  projectLeft: (project: string, computer: string): string => `${project} is no longer on ${computer}; pick where it goes.`,
   noServerAgents: (computer: string): string => `No agent on ${computer} keeps MCP servers in a file wsp writes.`,
 } as const;
 
@@ -225,10 +226,10 @@ export interface SkillSearch {
   readonly error?: string;
 }
 
-/** What an install is told: the agents to put the skill in and whether it goes in the project. */
+/** What an install is picked to take: the agents to put the skill in and the project it goes in, else the home. */
 export interface SkillPicks {
   readonly agents: readonly string[];
-  readonly project: boolean;
+  readonly project?: ProjectPick;
 }
 
 /** The skills road of one target: a SKILL.md read for its preview, skills.sh searched and read by the host, a skill
@@ -245,7 +246,7 @@ export interface SkillActs {
   setPicks(id: string, picks: SkillPicks): void;
   toggle(row: SkillRow, on: boolean): void;
   remove(row: SkillRow): void;
-  add(id: string, picks: SkillPicks): void;
+  add(id: string, agents: readonly string[], project: AgentsProject | undefined): void;
   busyOf(key: string): boolean;
   refusedOf(key: string): string | undefined;
 }
@@ -254,7 +255,7 @@ export interface SkillActs {
  * and one entry's rows removed or turned off or on, each by the entry's key, with what is running and why the last
  * ask was refused. */
 export interface ServerActs {
-  add(ask: ServerAdd): Promise<unknown>;
+  add(ask: ServerAdd, project: AgentsProject | undefined): Promise<unknown>;
   remove(key: string, rows: readonly McpRow[]): void;
   toggle(key: string, rows: readonly McpRow[], on: boolean): void;
   busyOf(key: string): boolean;
@@ -268,6 +269,50 @@ export const skillKey = (row: Pick<SkillRow, "scope" | "name" | "project">): str
 /** Where an act on one row goes: a computer's read covers all its projects, so an act on a project's row names that
  * project; a workspace names its own. */
 export const rowTarget = (target: AgentsTarget, project: AgentsProject | undefined): AgentsTarget => ("placeId" in target && project !== undefined ? { placeId: target.placeId, project: project.id } : target);
+
+/** Whether a row lives in that project's folder. */
+export const inProject = (row: { readonly scope: string; readonly project?: AgentsProject }, project: AgentsProject): boolean => row.scope === "project" && row.project?.id === project.id;
+
+/** The value of the pick that puts an add in the home rather than in a project, whose values are the projects' ids. */
+export const HOME_PICK = "home";
+
+/** A project an add is pointed at: its id, which is what resolves it, and its name as it read when picked, which is
+ * what a line says once it has left the computer. */
+export interface ProjectPick {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** The pick a value of where makes: none for the home, else the project the report has by that id. */
+export const pickOf = (report: AgentsReport | null, value: string): ProjectPick | undefined => {
+  const project = report?.projects?.find(p => p.id === value);
+  return project === undefined ? undefined : { id: project.id, name: project.name };
+};
+
+/** Where an add goes, resolved against the report as it stands: the options (the home, then each project by name
+ * with its folder; none where the report covers no project and nothing was picked), the project picked, and, where
+ * that project has left, the line that says so, while the add is held. */
+export interface WhereNow {
+  readonly options: readonly PickOption[];
+  readonly value: string;
+  readonly project?: AgentsProject;
+  readonly lost?: string;
+}
+
+export function whereNow(report: AgentsReport | null, pick: ProjectPick | undefined, computer: string): WhereNow {
+  const projects = [...(report?.projects ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const options = projects.length === 0 && pick === undefined ? [] : [{ value: HOME_PICK, label: AGENTS_LIST_WORDS.global }, ...projects.map(p => ({ value: p.id, label: p.name, fact: p.path }))];
+  if (pick === undefined) return { options, value: HOME_PICK };
+  const project = projects.find(p => p.id === pick.id);
+  return project === undefined ? { options, value: pick.id, lost: AGENTS_LIST_WORDS.projectLeft(pick.name, computer) } : { options, value: pick.id, project };
+}
+
+/** One option of a pick, by its name with a fact beside it. */
+export interface PickOption {
+  readonly value: string;
+  readonly label: string;
+  readonly fact?: string;
+}
 
 /** The sign-ins and writes a list on one target takes, by the row's id. */
 export interface AgentActs {
@@ -295,8 +340,6 @@ export interface RowsContext {
   readonly servers?: ServerActs;
   /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
   readonly typeInTerminal?: (line: string) => void;
-  /** The project a task's panel reads beside the computer's own rows, which names the project group. */
-  readonly project?: { readonly name: string; readonly path?: string };
   /** The computer as the manager's lines name it; the manager fills it in. */
   readonly on?: string;
   /** Where a sign-in page that returns to localhost reaches, as the host said on the report. */

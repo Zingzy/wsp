@@ -90,7 +90,6 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
           ...(skills === undefined ? {} : { skills }),
           ...(servers === undefined ? {} : { servers }),
           ...(where === "here" ? { typeInTerminal: (typed: string) => void openPanelTerminalWith(workspaceId, typed) } : {}),
-          ...(workspace === null ? {} : { project: { name: project, ...(path === undefined ? {} : { path }) } }),
         }}
         onRefresh={refresh}
         now={Date.now()}

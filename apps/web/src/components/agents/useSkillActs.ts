@@ -116,7 +116,7 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
       setPicks: (id, picks) => put("picks", id, picks),
       toggle: (row, on) => write(skillKey(row), () => api.skillsToggle?.(rowTarget(at, row.project), row.name, row.scope === "project", on)),
       remove: row => write(skillKey(row), () => api.skillsRemove?.(rowTarget(at, row.project), row.name, row.scope === "project")),
-      add: (id, picks) => write(id, () => api.skillsAdd?.(at, id, picks.agents, picks.project)),
+      add: (id, agents, project) => write(id, () => api.skillsAdd?.(rowTarget(at, project), id, agents, project !== undefined)),
       busyOf: key => shown.busy[key] === true,
       refusedOf: key => shown.refused[key],
     };

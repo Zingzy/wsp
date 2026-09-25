@@ -21,6 +21,7 @@ import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore
 import { SettingsRow } from "../src/sidebar/SettingsRow.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, settingsApi, settle, wordOf } from "./settings-harness.js";
+import { pickOption } from "./select.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 
@@ -90,7 +91,7 @@ const openPage = (id: string): void => {
 /** The agent rows of the open page, by the name a person reads. */
 const agentTitles = (): string[] => [...document.querySelectorAll("[data-settings-page] [data-agents-row] [data-row-title]")].map(t => t.textContent ?? "");
 /** A report with nothing on it. */
-const EMPTY_REPORT: AgentsReport = { ...AGENTS_REPORT, agents: [], skills: [], servers: [] };
+const EMPTY_REPORT: AgentsReport = { ...AGENTS_REPORT, agents: [], skills: [], servers: [], projects: [] };
 /** The word the laptop's own page reads it by while it is away, which is what every act there is held with. */
 const stateOfPage = (): string | undefined => absentOf(laptop, Date.now())?.away;
 const lineValue = (k: string): string | undefined => document.querySelector(`[data-settings-page] [data-k='${k}'] [data-settings-word]`)?.textContent ?? undefined;
@@ -314,7 +315,7 @@ describe("a computer's own page", () => {
     expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
     // The manager stands where the Agents card stood, the section named for all three kinds.
     expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, MCP servers and skills");
-    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac.");
+    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
     expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
   });
 
@@ -574,12 +575,7 @@ describe("a computer's icon", () => {
     await mountComputers(api, { kind: "computer", id: "p_2" });
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=computer-icon]")!;
     expect(select.textContent).toBe("Server");
-    fireEvent.click(select);
-    const option = await screen.findByRole("option", { name: "Home" });
-    await settle();
-    // Under jsdom the select takes a click on an item only once a key has highlighted it.
-    fireEvent.keyDown(option, { key: "Enter" });
-    fireEvent.click(option);
+    await pickOption(select, "Home");
     await waitFor(() => expect(sets).toEqual([{ computerLook: { p_2: { icon: "home" } } }]));
     cleanup();
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
