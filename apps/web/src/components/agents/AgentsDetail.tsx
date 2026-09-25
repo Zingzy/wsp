@@ -144,9 +144,9 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
           {trailing ? null : copy}
         </span>
         {trailing ? (
-          <span className="flex flex-1 items-center gap-2">
+          <span className="flex min-w-0 flex-auto items-center gap-2">
             {fact.fact === undefined ? null : (
-              <span data-fact-note className={cn(FACT, "whitespace-nowrap")} title={fact.fact}>
+              <span data-fact-note className={cn(FACT, "line-clamp-2 min-w-0 break-words")} title={fact.fact}>
                 {fact.fact}
               </span>
             )}

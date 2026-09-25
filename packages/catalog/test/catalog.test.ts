@@ -334,6 +334,28 @@ describe("catalog", () => {
     expect(runsThreads("nope")).toBe(false);
   });
 
+  it("says where each agent's newest version is published: its own npm package or release, or the vendor's own answer", () => {
+    expect(CATALOG_AGENTS.map(a => [a.id, a.latest?.from])).toEqual([
+      ["claude", "text"],
+      ["codex", "npm"],
+      ["gemini", "npm"],
+      ["opencode", "npm"],
+      ["pi", "npm"],
+      // Its releases are tagged by date while its binary prints a semver first, so the two are never compared.
+      ["hermes", undefined],
+      ["crush", "github"],
+      ["qwen", "npm"],
+      ["goose", "github"],
+      ["amp", "npm"],
+    ]);
+    for (const a of CATALOG_AGENTS) {
+      const [road, latest] = [a.installRoad, a.latest];
+      if (latest?.from === "npm") expect(road.road === "npm" ? road.package : undefined, a.id).toBe(latest.package);
+      if (latest?.from === "github") expect(road.road === "release" ? road.repo : undefined, a.id).toBe(latest.repo);
+      if (latest?.from === "text") expect(latest.url, a.id).toMatch(/^https:\/\//);
+    }
+  });
+
   it("says who makes each agent, what it is in a sentence or two, its license, where it lives, and the line a person pastes to install it", () => {
     expect(CATALOG_AGENTS.map(a => [a.id, a.about.creator, a.about.license])).toEqual([
       ["claude", "Anthropic", "proprietary"],

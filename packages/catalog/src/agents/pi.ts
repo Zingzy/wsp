@@ -14,6 +14,7 @@ export const PI: AgentEntry = {
   // 0.84.1: its own folder, links into the shared folder there, and the shared folder.
   skillRoots: { user: [{ dir: "~/.pi/agent/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: ".pi/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
   installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
+  latest: { from: "npm", package: "@earendil-works/pi-coding-agent" },
   node: 22,
   signIn: SIGN_IN_ROWS.pi,
   // models.json stays: a provider entry may carry a literal apiKey. trust.json stays: it keys on this laptop's absolute project paths.

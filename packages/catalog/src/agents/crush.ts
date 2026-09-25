@@ -19,5 +19,6 @@ export const CRUSH: AgentEntry = {
     project: [{ dir: ".crush/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }, { dir: ".claude/skills", lands: "link" }, { dir: ".cursor/skills", lands: "copy" }],
   },
   installRoad: pinnedRelease("charmbracelet/crush"),
+  latest: { from: "github", repo: "charmbracelet/crush" },
   signIn: NO_SIGN_IN,
 };

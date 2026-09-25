@@ -17,5 +17,6 @@ export const AMP: AgentEntry = {
   },
   // Its postinstall links the binary out of the platform package npm already fetched; it downloads nothing.
   installRoad: { road: "npm", package: "@ampcode/cli", version: "0.0.1790352060-g26b83c" },
+  latest: { from: "npm", package: "@ampcode/cli" },
   signIn: NO_SIGN_IN,
 };

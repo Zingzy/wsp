@@ -3792,6 +3792,17 @@ export function agentVersionWord(raw: string): string {
   return /\d+\.\d+\.\d+/.exec(raw)?.[0] ?? raw.trim();
 }
 
+/** semver.org's own pattern, whole. */
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+export const VERSION_MAX_CHARS = 64;
+
+/** A version read off the network or a tag: the whole trimmed text, one leading v aside, is a strict semver under the
+ * cap, or it is nothing. No number is ever lifted out of other words, since an error page can carry one. */
+export function strictVersion(raw: string): string | undefined {
+  const bare = raw.trim().replace(/^v/, "");
+  return bare.length <= VERSION_MAX_CHARS && SEMVER.test(bare) ? bare : undefined;
+}
+
 /** The agents cell of the computers table: each agent that computer reported, its version and the word for its
  * sign-in, one clause apiece. Empty where the row reported no agent at all, which is a cloud account, this
  * computer, and a computer that has not said yet. */

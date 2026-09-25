@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentEntry } from "../catalog.js";
 import { AGENTS_MD, SET_UP_WSP, agent, dfSize } from "./entry.js";
-import { CLAUDE_CODE, CLAUDE_CONFIG_DIR, CLAUDE_INSTALL, LOCAL_BIN } from "../roads.js";
+import { CLAUDE_CODE, CLAUDE_CONFIG_DIR, CLAUDE_INSTALL, CLAUDE_LATEST, LOCAL_BIN } from "../roads.js";
 import { CLAUDE_CONTEXT } from "../context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE } from "../hooks.js";
 import { CLAUDE_MCP_CHECK } from "../mcp-check.js";
@@ -26,6 +26,7 @@ export const CLAUDE: AgentEntry = {
   // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
   firstMove: `/wsp ${SET_UP_WSP}`,
   installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
+  latest: { from: "text", url: CLAUDE_LATEST },
   signIn: SIGN_IN_ROWS.claude,
   // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
   mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK, login: CLAUDE_MCP_LOGIN },

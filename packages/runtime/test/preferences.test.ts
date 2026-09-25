@@ -6,9 +6,9 @@
 // the record's own values is refused and changes nothing.
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_PREFERENCES, LABS_ENV } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HERE_PLACE_ID, LABS_ENV } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRuntime, serveRuntime, type RuntimeServer, type ServerIcons } from "../src/index.js";
+import { createRuntime, serveRuntime, type AgentsReader, type RuntimeServer, type ServerIcons } from "../src/index.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -122,6 +122,20 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { theme: "sepia" } })).toMatchObject({ ok: false });
     expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { sidebarWidth: 0 } })).toMatchObject({ ok: false });
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: DEFAULT_PREFERENCES });
+  });
+
+  it("agent version checks follow the person's switch: on by default, and once off the next agents read asks the reader not to ask the vendors", async () => {
+    const asked: (boolean | undefined)[] = [];
+    const agentsReader: AgentsReader = {
+      read: async (_on, _key, o) => (asked.push(o?.latest), { home: "/Users/ada", user: "ada", agents: [], skills: [], servers: [], refused: [] }),
+      tools: async () => ({ auth: "open", readAt: "2026-09-26T12:00:00.000Z" }),
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS, agentsReader });
+    expect((await rt.preferences.get()).agentVersions).toBe(true);
+    await rt.agents.read({ placeId: HERE_PLACE_ID });
+    await rt.preferences.set({ agentVersions: false });
+    await rt.agents.read({ placeId: HERE_PLACE_ID });
+    expect(asked).toEqual([true, false]);
   });
 
   it("icons turned off whose folder cannot be deleted still save, tell every socket, and answer with a notice naming the folder", async () => {

@@ -44,8 +44,8 @@ export interface ServerToolsAsk {
 /** How the host reads the agents off a target, and asks one server there for its tools. Absent on a runtime wired
  * without it, where every read is refused. */
 export interface AgentsReader {
-  /** `key` names the target, which what a read checks is kept under. */
-  read(on: AgentsOn, key?: string): Promise<AgentsRead>;
+  /** `key` names the target, which what a read checks is kept under; `latest` false asks no vendor for a newest version. */
+  read(on: AgentsOn, key?: string, ask?: { latest?: boolean }): Promise<AgentsRead>;
   /** Drops what was kept for the target, which a sign-in there has just changed. */
   forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
@@ -164,6 +164,8 @@ export interface AgentsReadOptions<Caller> {
   servers?: ServersActs;
   /** Absent, or with the person's switch off, every server draws its glyph and nothing is asked. */
   icons?: ServerIcons;
+  /** Whether the person lets this host ask vendors for each agent's newest version; absent, it may. */
+  latestOn?: () => Promise<boolean>;
   /** One channel to the target's daemon: this computer's, a joined computer's over its link, or a workspace's. */
   channel: (target: AgentsTarget, onEvent: (event: Record<string, unknown>) => void, origin?: Caller) => Promise<DaemonChannel>;
   /** Something written changed what a report reads there; no target is every report. */
@@ -333,7 +335,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const { runAs, ...read } = await reader.read(on, JSON.stringify(target));
+      const { runAs, ...read } = await reader.read(on, JSON.stringify(target), { latest: (await o.latestOn?.()) ?? true });
       const report = stamped(target, { ...read, reach: pageReachOf(on, runAs) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;

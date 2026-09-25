@@ -223,6 +223,13 @@ describe("what a computer says about its agents, and what a person reads off it"
     expect(wire.agentVersionWord(" nightly ")).toBe("nightly");
   });
 
+  it("a version read off a vendor is a whole strict semver under 64 characters or nothing, never lifted out of other words", () => {
+    expect(wire.strictVersion(" 2.1.283\n")).toBe("2.1.283");
+    expect(wire.strictVersion("v0.96.1")).toBe("0.96.1");
+    expect(wire.strictVersion("0.0.1790352060-g26b83c")).toBe("0.0.1790352060-g26b83c");
+    for (const bad of ["nginx/1.18.0", "\x1b[31m2.1.283\x07", "<html>moved</html>", "01.2.3", "1.2", `1.0.0-${"a".repeat(60)}`, `${"9".repeat(100)}.0.0`]) expect(wire.strictVersion(bad), bad).toBeUndefined();
+  });
+
   it("the agents cell names each agent, its version and its sign-in, and says nothing for a row that reported none", () => {
     const row = { agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
     expect(wire.agentsCell(row)).toBe("claude 2.1.270 your key · codex 0.153.0 not signed in");

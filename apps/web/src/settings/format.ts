@@ -196,6 +196,9 @@ export const PRIVACY_WORDS = {
   title: "Privacy",
   serverIcons: "Server icons from Google",
   serverIconsDescription: "wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons.",
+  agentVersions: "Newest agent versions",
+  agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
+  agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
 } as const;
 
 /** Settings > Devices: every computer and browser paired with this wsp, and the one act on each. */

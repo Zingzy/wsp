@@ -2763,7 +2763,7 @@ function reportTail(r: AgentsReport): string[] {
 
 function agentRowLines(r: AgentsReport): string[] {
   const word = (a: AgentRow): string => (!a.installed ? "not found" : a.signIn === "unknown" ? "sign-in unknown" : agentSignInWord(a.signIn));
-  return [...table([["AGENT", "VERSION", "SIGN-IN", "WSP TOOLS", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", word(a), a.wspTools ? "yes" : "no", a.path ?? "-"])]), ...reportTail(r)];
+  return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", a.path ?? "-"])]), ...reportTail(r)];
 }
 
 /** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */
@@ -2963,7 +2963,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "agents",
     usage: "wsp agents [<workspace>] [--on <computer>]",
-    about: "the coding agents on this computer, a box you added or a workspace: each one's version, whether it is signed in there, and whether it carries the wsp tools",
+    about: "the coding agents on this computer, a box you added or a workspace: each one's version and the newest out, whether it is signed in there, and whether it carries the wsp tools",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
@@ -2973,7 +2973,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. ${AGENTS_READ_WORDS}`,
+      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. ${AGENTS_READ_WORDS}`,
       input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, agents: z.array(AgentRow) },
       call: async ({ workspace, on }, deps) => {

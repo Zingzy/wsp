@@ -99,6 +99,7 @@ import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring,
 import { agentsReader } from "./agents-reader.js";
 import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
+import { agentLatest } from "./agent-latest.js";
 import { serversActs } from "./servers-acts.js";
 import { knock } from "./server-check.js";
 import { hostActs } from "./agents-signin.js";
@@ -782,7 +783,8 @@ export function makeRuntime(
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
-    agentsReader: agentsReader({ vault: () => vaultNow(statePath), knock }),
+    // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.
+    agentsReader: agentsReader({ vault: () => vaultNow(statePath), knock, latest: agentLatest({ statePath, running: VERSION }).read }),
     // A key pasted in the app lands in the same vault, and the wsp tools an agent's config gets are the entry an
     // install writes: this same wsp against this state file.
     agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),

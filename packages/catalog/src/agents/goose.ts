@@ -18,5 +18,6 @@ export const GOOSE: AgentEntry = {
     project: [{ dir: ".goose/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }, { dir: ".claude/skills", lands: "link" }],
   },
   installRoad: pinnedRelease("aaif-goose/goose"),
+  latest: { from: "github", repo: "aaif-goose/goose" },
   signIn: NO_SIGN_IN,
 };
