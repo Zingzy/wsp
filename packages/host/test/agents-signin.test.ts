@@ -126,6 +126,19 @@ describe("a watched sign-in", () => {
     await t.done;
     expect(t.link.ptys[0]!.writes).toContain("4/0AbCd\r");
     expect(t.steps.at(-1)).toEqual({ state: "failed", said: "Authentication failed: invalid code" });
+    // A tool that ends saying nothing of its own is read by its exit, never by the pty's echo of the line or the code.
+    const quiet = await run((l, pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        l.data(pty, "WSP_STATUS 1\r\n");
+        l.exit(pty, 0);
+        return;
+      }
+      if (line === "4/0AbCd") l.exit(pty, 1);
+    }, plan);
+    await new Promise(r => setTimeout(r, 40));
+    await quiet.type("4/0AbCd");
+    await quiet.done;
+    expect(quiet.steps.at(-1)).toEqual({ state: "failed", said: "it ended with exit 1" });
   });
 
   it("ends when whoever started it stops it, killing the pty, and reads a server's sign-in by its own exit", async () => {

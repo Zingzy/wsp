@@ -86,9 +86,14 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
 }
 
-/** The last thing the tool said, with the terminal's escapes taken out. */
-function lastSaid(text: string): string | undefined {
-  return lastLine(text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r/g, "\n"));
+/** The last thing the tool said, with the terminal's escapes taken out and the pty's echo of what was typed into it
+ * (the command line, a code from a page) left out, since those are not the tool's words. */
+function lastSaid(text: string, typed: readonly string[]): string | undefined {
+  const lines = text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .split(/\r?\n|\r/)
+    .filter(l => !typed.some(t => l.includes(t)));
+  return lastLine(lines.join("\n"));
 }
 
 /** Runs the plan's line in a watched pty over the run's link, reporting each step, until the tool's own status says
@@ -101,6 +106,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (line.prepare !== undefined) await link.op("exec", { cmd: line.prepare });
   run.emit({ state: "running" });
   let seen = "";
+  const typed: string[] = [line.command];
   let told: { url: string; code?: string } | undefined;
   const page = (url: string): void => {
     const code = codeIn(seen, plan.code);
@@ -128,7 +134,15 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
     onScanned: () => {
       if (told !== undefined && told.code === undefined && plan.code !== undefined) page(told.url);
     },
-    onTyping: write => run.typing(write === undefined ? undefined : code => write(`${code}\r`)),
+    onTyping: write =>
+      run.typing(
+        write === undefined
+          ? undefined
+          : code => {
+              typed.push(code);
+              return write(`${code}\r`);
+            },
+      ),
   }).then(
     w => void (outcome = w),
     (e: unknown) => void (failure = e instanceof Error ? e.message : String(e)),
@@ -158,8 +172,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (outcome.dropped) return void run.emit({ state: "failed", said: "the computer's terminal link dropped" });
   const through = plan.status === undefined ? outcome.exitCode === 0 : await asked();
   if (through) return void run.emit({ state: "signed-in" });
-  const said = lastSaid(seen);
-  run.emit({ state: "failed", ...(said !== undefined ? { said } : {}) });
+  run.emit({ state: "failed", said: lastSaid(seen, typed) ?? `it ended with exit ${outcome.exitCode}` });
 }
 
 export interface HostActsOptions {
