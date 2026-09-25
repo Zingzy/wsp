@@ -1387,7 +1387,7 @@ async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDe
   const env: ProviderEnv = { ...(opts.providerEnv ?? process.env), [PROVIDER_ENV]: id };
   const backend = providerBackendFor(env);
   const check = await deps.checkKey(backend);
-  const said = keyCheckLine(check, true);
+  const said = keyCheckLine(check, id, true);
   if (check.state === "refused" && said !== undefined) {
     io.error(said);
     return 1;

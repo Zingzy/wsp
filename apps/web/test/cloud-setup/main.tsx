@@ -271,7 +271,7 @@ const api: Api = {
   subscribe: () => () => {},
   initGet: async () => setup,
   initKeys: async () => {
-    if (at === "keys-refused") throw new RequestError(keyRefusedLine("401 Unauthorized"), KEY_REFUSED);
+    if (at === "keys-refused") throw new RequestError(keyRefusedLine("401 Unauthorized", "solari"), KEY_REFUSED);
     return setup;
   },
   initStart: async () => base,

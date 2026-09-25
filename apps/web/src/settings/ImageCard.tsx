@@ -3,13 +3,15 @@
 // computer is added: what stands there of your image, as imageState reads it,
 // and the one press that state invites; under it what the image holds, on
 // every computer's card alike, with Edit; and the recipe itself, opened in
-// place by Build your image here or Edit. A copy is built only on Copy, never
-// on opening the page, and the time and the rate stand beside the press, since
-// a build bills where it runs. While the image builds anywhere, every press
-// that would start another build is held with where it is building.
+// place by Build your image here or Edit; and the image's own build, drawn
+// under the card of the computer it runs on until it seals or the person
+// starts over. A copy is built only on Copy, never on opening the page, and
+// the time and the rate stand beside the press, since a build bills where it
+// runs. While the image builds anywhere, every press that would start another
+// build is held with where it is building.
 import { PencilIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, HERE_PLACE_ID, copyAsksSignIns, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
+import { HERE_PLACE_ID, copyAsksSignIns, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -18,6 +20,7 @@ import { useGoldenFrames, useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { FACT, WHERE_WORDS } from "./format.js";
 import { copyCost, IMAGE_WORDS, recipeNames } from "./image.js";
+import { ImageBuild } from "./ImageBuild.js";
 import { ImageRecipe } from "./ImageRecipe.js";
 import { imageChips, imageState, type ImageState } from "./imageState.js";
 import { placeName, projectOn } from "./places.js";
@@ -76,6 +79,9 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
     if (building) setRecipeOpen(false);
   }, [building]);
   const open = recipeOpen && !building;
+  // The image's own build at this computer, running or ended short, until Close puts that job away.
+  const [putAway, setPutAway] = useState<string | null>(null);
+  const buildHere = !open && job !== null && job.place?.id === place.id && (building || job.phase === "failed" || job.phase === "cancelled") && putAway !== job.id;
   const buildingAt = building ? ctx.places.find(p => p.id === job.place?.id) : undefined;
   const buildHeld = building ? IMAGE_WORDS.buildingOn(buildingAt === undefined ? (job.place?.name ?? name) : placeName(buildingAt, buildingAt.id === HERE_PLACE_ID)) : ctx.api?.initStart === undefined ? WHERE_WORDS.notYet : undefined;
   const openRecipe = (): void => setRecipeOpen(true);
@@ -102,11 +108,8 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
         if (image === null) return { title, description: IMAGE_WORDS.chooseAndBuild, press: buildPress };
         return { title, description: force ? IMAGE_WORDS.copyAsks(image.version) : IMAGE_WORDS.copyComes(image.version), cost, press: copyPress };
       case "building": {
-        // Until the build's own rows are drawn here, a sign-in it waits on opens the setup sheet at that step.
         const waitedOn = initSignInWaitedOn(state.job);
-        return waitedOn === undefined
-          ? { title, description: IMAGE_WORDS.steps(state.job.progress.done, state.job.progress.total), mono: true, busy: true }
-          : { title, description: signInWaitLine(waitedOn), press: { word: CLOUD_SETUP_WORDS.build.open, run: ctx.openSetup } };
+        return waitedOn === undefined ? { title, description: IMAGE_WORDS.steps(state.job.progress.done, state.job.progress.total), mono: true, busy: true } : { title, description: signInWaitLine(waitedOn) };
       }
       case "copying":
         return { title, description: state.line, mono: true, busy: true };
@@ -134,8 +137,9 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
     }
   })();
 
-  // While the recipe stands open it is the one thing to press, so the state row keeps its words and drops its press.
-  const press = open ? undefined : row.press;
+  // While the recipe or the build stands under the card it is the one thing to press, so the state row keeps its
+  // words and drops its press.
+  const press = open || buildHere ? undefined : row.press;
   const control = row.busy ? (
     <Spinner className="size-4 text-muted-foreground" />
   ) : press === undefined ? undefined : (
@@ -152,7 +156,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
       </Button>
     </>
   );
-  const waiting = press?.heldWhy ?? row.note ?? (image !== null && !open ? buildHeld : undefined);
+  const waiting = press?.heldWhy ?? row.note ?? (image !== null && !open && !buildHere ? buildHeld : undefined);
   const stateRow: Omit<SettingsRowData, "kind"> = {
     id: "image-state",
     title: row.title,
@@ -189,10 +193,12 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
       </div>
       {open ? (
         <ImageRecipe place={place} name={name} version={image?.version} onClose={() => setRecipeOpen(false)} />
-      ) : (
-        // The slot stands in every state, so a refusal or a held press's reason arriving moves nothing under the card.
+      ) : buildHere && refused === null && waiting === undefined ? null : (
+        // The slot stands in every state but one, so a refusal or a held press's reason arriving moves nothing under
+        // the card; under a build with nothing to say it gives way to the build.
         <RefusalSlot k="image-refusal" {...(refused === null ? {} : { said: refused.said, ...(refused.fix === undefined ? {} : { fix: refused.fix }) })} {...(waiting === undefined ? {} : { waiting })} />
       )}
+      {buildHere ? <ImageBuild key={job.id} job={job} place={place} said={state.kind === "stopped" && state.said === job.error} onAgain={openRecipe} onClose={() => setPutAway(job.id)} /> : null}
     </div>
   );
 }

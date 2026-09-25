@@ -55,7 +55,7 @@ export const settle = async (): Promise<void> => {
 export function resetSettings(): void {
   window.localStorage.clear();
   forgetAgentsReports();
-  useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0 });
+  useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();
   useAdds.setState({ jobs: {}, putAway: null });

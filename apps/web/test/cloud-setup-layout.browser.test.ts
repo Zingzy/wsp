@@ -608,7 +608,7 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const field = await box(`${frame} #setup-key-solari`);
     expect(line.y, "the refusal is under the field").toBeGreaterThan(field.y + field.height - 1);
     expect(line.x, "and starts where the field does").toBeGreaterThanOrEqual(field.x - 1);
-    expect(await page!.locator(`${frame} [data-k=key-check]`).textContent()).toBe(keyRefusedLine("401 Unauthorized"));
+    expect(await page!.locator(`${frame} [data-k=key-check]`).textContent()).toBe(keyRefusedLine("401 Unauthorized", "solari"));
     expect(await page!.locator(`${frame} [data-k=refusal]`).count(), "not the footer's slot").toBe(0);
     // The danger tone on both: the field's border and the line's own colour, the same token.
     const [border = ""] = await style(`${frame} #setup-key-solari`, "border-top-color");

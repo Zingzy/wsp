@@ -31,10 +31,11 @@ export async function checkProviderKey(backend: MachineBackend): Promise<KeyChec
   }
 }
 
-/** The check as one line a person reads, in the words of the step that asked: `saved` is the build reading a key
- * already in the file, and anything else is the keys step reading what was just typed. */
-export function keyCheckLine(check: KeyCheck, saved = false): string | undefined {
+/** The check as one line a person reads, naming the provider it asked by its id, in the words of the step that asked:
+ * `saved` is the build reading a key already in the file, and anything else is the keys step reading what was just
+ * typed. */
+export function keyCheckLine(check: KeyCheck, provider: string, saved = false): string | undefined {
   if (check.state === "taken") return undefined;
-  if (check.state === "unchecked") return keyUncheckedLine(check.said);
-  return saved ? savedKeyRefusedLine(check.said) : keyRefusedLine(check.said);
+  if (check.state === "unchecked") return keyUncheckedLine(check.said, provider);
+  return saved ? savedKeyRefusedLine(check.said, provider) : keyRefusedLine(check.said, provider);
 }
