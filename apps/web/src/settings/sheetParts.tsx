@@ -5,38 +5,49 @@
 // slot stands whether or not it holds a sentence, so a refusal arriving moves
 // nothing on the screen under it.
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
 import { Spinner } from "../components/ui/spinner.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { STATE_WORD } from "./recipe/rows.js";
 
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
 const COPIED_MS = 1_400;
 
+/** The mask that fades a copy line's right edge while more of it waits past the box. */
+const MORE_TO_SCROLL = "[mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)]";
+
+/** Whether a line runs past its box and is not scrolled to its end, read again on every scroll and resize. */
+function useMoreToScroll(value: string): { ref: RefObject<HTMLSpanElement | null>; more: boolean; measure: () => void } {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [more, setMore] = useState(false);
+  const measure = (): void => {
+    const el = ref.current;
+    if (el !== null) setMore(el.scrollWidth > el.clientWidth && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+  useLayoutEffect(() => {
+    const el = ref.current;
+    measure();
+    if (el === null || typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(measure);
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [value]);
+  return { ref, more, measure };
+}
+
 /** How wide a copy row's label column stands, so the values under each other line up whatever their labels are:
  * wide enough for ADDRESS, the longest, at 11 px caps with the tracking the label wears. */
 const LABEL_WIDTH = "w-14";
 
 /** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
- * that copies it. */
-export function CopyRow({
-  label,
-  value,
-  whole = false,
-  k,
-  children,
-}: {
-  label?: string;
-  value: string;
-  /** A value there is no reading half of: it wraps to as many lines as it takes and the row grows to hold them,
-   * where every other row ends a value too long for it in an ellipsis. */
-  whole?: boolean;
-  k: string;
-  children?: ReactNode;
-}) {
+ * that copies it. The fact is one run of text that scrolls sideways in its own box, since a line broken or cut is
+ * not the line a person pastes. */
+export function CopyRow({ label, value, k, children }: { label?: string; value: string; k: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false);
+  const scroll = useMoreToScroll(value);
   const copy = (): void => {
     void copyText(value).then(
       () => {
@@ -47,24 +58,22 @@ export function CopyRow({
     );
   };
   return (
-    <div data-copy-row={k} className={cn("flex w-full items-center gap-3 rounded-md border border-border bg-card px-3", whole ? "min-h-10 py-2" : "h-10")}>
+    <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-card px-3">
       {label === undefined ? null : (
-        <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
+        <span className={cn(LABEL_WIDTH, MICRO_LABEL, "shrink-0 text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
-      {/* A whole line breaks only between its words, never at a flag's or a package's hyphen. */}
-      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-words" : "truncate")} title={value}>
-        {whole
-          ? value.split(" ").map((word, i) => (
-              <span key={i}>
-                {i > 0 ? " " : null}
-                <span className="whitespace-nowrap">{word}</span>
-              </span>
-            ))
-          : value}
+      <span
+        ref={scroll.ref}
+        data-k={k}
+        onScroll={scroll.measure}
+        className={cn("min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-xs tabular-nums text-foreground [scrollbar-color:color-mix(in_srgb,var(--border)_78%,transparent)_transparent] [scrollbar-width:thin]", scroll.more && MORE_TO_SCROLL)}
+        title={value}
+      >
+        {value}
       </span>
       {children}
-      <Button variant="ghost-muted" size="icon-xs" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>
+      <Button variant="ghost-muted" size="icon-xs" className="shrink-0" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>
         {copied ? <CheckIcon /> : <CopyIcon />}
       </Button>
     </div>

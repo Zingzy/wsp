@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, catalogEntry, isSystemSkill, ownSkillFolder, skillsDirOf, type AgentEntry } from "../src/index.js";
+import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, XDG_SHARED_SKILLS, catalogEntry, isSystemSkill, ownSkillFolder, skillsDirOf, type AgentEntry } from "../src/index.js";
 
 describe("the folders each agent loads skills from", () => {
   it("every agent names its own folder under the home first, and project folders relative to the project", () => {
@@ -9,8 +9,10 @@ describe("the folders each agent loads skills from", () => {
       for (const r of a.skillRoots.user) expect(r.dir.startsWith("~/"), `${a.id} ${r.dir}`).toBe(true);
       for (const r of a.skillRoots.project) expect(r.dir.startsWith("/") || r.dir.startsWith("~"), `${a.id} ${r.dir}`).toBe(false);
     }
-    // No agent's own folder is the shared one: the shared folder is read by several and carries no one agent.
-    expect(CATALOG_AGENTS.map(skillsDirOf)).not.toContain(SHARED_SKILLS);
+    // No agent's own folder is a shared one: ~/.agents/skills and the XDG ~/.config/agents/skills are each read by
+    // several agents and carry no one of them, so a skill installed for one agent never lands where others read it.
+    for (const shared of [SHARED_SKILLS, XDG_SHARED_SKILLS]) expect(CATALOG_AGENTS.map(skillsDirOf)).not.toContain(shared);
+    expect(XDG_SHARED_SKILLS).toBe("~/.config/agents/skills");
   });
 
   it("Claude Code's plugin index names the skill folders of its user-scoped plugins only", () => {

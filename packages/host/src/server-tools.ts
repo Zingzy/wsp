@@ -15,7 +15,7 @@ import { posix } from "node:path";
 import { MCP_AGENTS, MCP_AGENT_IDS, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
 import { expand, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
-import { lastLine, serverToolsLateRefusal, shellQuote, type McpTool, type ServerToolsAnswer } from "@wsp/protocol";
+import { lastLine, serverToolsLateRefusal, shellQuote, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
 
 export const TOOLS_DEADLINE_MS = 20_000;
 /** How long one server's answer stands before a click starts it again. */
@@ -109,6 +109,24 @@ const curlSaid = (err: string): string | undefined =>
     ?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/gi, "$1")
     .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
 
+const trimmed = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+
+/** A tool's parameters off its input schema: each property with the type the schema names (several joined, or none
+ * where it names a union another way) and whether `required` lists it. Nothing where the schema has no properties. */
+function paramsOf(schema: unknown): McpToolParam[] | undefined {
+  if (typeof schema !== "object" || schema === null) return undefined;
+  const { properties, required } = schema as { properties?: unknown; required?: unknown };
+  if (typeof properties !== "object" || properties === null || Array.isArray(properties)) return undefined;
+  const needed = new Set(Array.isArray(required) ? required.filter((r): r is string => typeof r === "string") : []);
+  const params = Object.entries(properties as Record<string, unknown>).map(([name, p]): McpToolParam => {
+    const prop = typeof p === "object" && p !== null ? (p as { type?: unknown; description?: unknown }) : {};
+    const types = typeof prop.type === "string" ? [prop.type] : Array.isArray(prop.type) ? prop.type.filter((t): t is string => typeof t === "string") : [];
+    const description = trimmed(prop.description);
+    return { name, ...(types.length > 0 ? { type: types.join(" or ") } : {}), required: needed.has(name), ...(description !== undefined ? { description } : {}) };
+  });
+  return params.length > 0 ? params : undefined;
+}
+
 /** The tools off a JSON-RPC answer to tools/list, or why there are none: the server's own error, or a list past the
  * cap. An SSE body carries the answer on its `data:` lines. A server's error message may carry its own key, so the
  * page is told its code and the message is only `said`, for the host's log. */
@@ -132,8 +150,10 @@ function toolsOf(body: string): { tools: McpTool[] } | { refused: string; said?:
     return {
       tools: result.tools.flatMap((t: unknown) => {
         if (typeof t !== "object" || t === null || typeof (t as { name?: unknown }).name !== "string") return [];
-        const { name, description } = t as { name: string; description?: unknown };
-        return [{ name, ...(typeof description === "string" && description.trim() !== "" ? { description: description.trim() } : {}) }];
+        const { name, description, inputSchema } = t as { name: string; description?: unknown; inputSchema?: unknown };
+        const about = trimmed(description);
+        const params = paramsOf(inputSchema);
+        return [{ name, ...(about !== undefined ? { description: about } : {}), ...(params !== undefined ? { params } : {}) }];
       }),
     };
   }

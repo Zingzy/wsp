@@ -6,7 +6,7 @@
 // in one round trip however many skills it keeps.
 import { posix } from "node:path";
 import { CATALOG_AGENTS, type AgentEntry } from "@wsp/catalog";
-import type { SkillPath, SkillRow, SkillScope } from "@wsp/protocol";
+import type { AgentsProject, SkillPath, SkillRow, SkillScope } from "@wsp/protocol";
 import { type Host, expand, tilde } from "../host.js";
 
 /** One folder to read skills from, absolute: whose own folder it is, where it is one agent's, and what kind. */
@@ -14,6 +14,8 @@ export interface SkillRootAt {
   dir: string;
   scope: SkillScope;
   agent?: string;
+  /** The project a project folder is in, its path absolute. */
+  project?: AgentsProject;
 }
 
 export interface SkillsRead {
@@ -108,25 +110,26 @@ async function linkedInside(host: Host, project: string, dirs: readonly string[]
 }
 
 /** The folders every catalog agent loads skills from on that computer, absolute, each once: an agent's own folder
- * carries that agent, a folder several read carries none. A project adds the folders the agents read inside it,
+ * carries that agent, a folder several read carries none. Each project adds the folders the agents read inside it,
  * and the plugin indexes name the folders their plugins' skills sit in. */
-export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]; project?: string } = {}): Promise<SkillRootAt[]> {
+export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]; projects?: readonly AgentsProject[] } = {}): Promise<SkillRootAt[]> {
   const agents = o.agents ?? CATALOG_AGENTS;
   const out = new Map<string, SkillRootAt>();
-  const add = (dirs: { dir: string; own: boolean }[], scope: SkillScope, agent: string): void => {
+  const add = (dirs: { dir: string; own: boolean }[], scope: SkillScope, agent: string, project?: AgentsProject): void => {
     for (const { dir, own } of dirs) {
       const at = out.get(dir);
-      if (at === undefined) out.set(dir, { dir, scope, ...(own ? { agent } : {}) });
+      if (at === undefined) out.set(dir, { dir, scope, ...(own ? { agent } : {}), ...(project !== undefined ? { project } : {}) });
       else if (own && at.agent === undefined) out.set(dir, { ...at, agent });
     }
   };
   for (const a of agents) add(a.skillRoots.user.map((r, i) => ({ dir: expand(host, r.dir), own: i === 0 })), "user", a.id);
-  if (o.project !== undefined) {
-    const project = o.project;
-    const at = (r: { dir: string }): string => posix.join(project, r.dir);
-    const linked = await linkedInside(host, project, [...new Set(agents.flatMap(a => a.skillRoots.project.map(at)))]);
-    for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: at(r), own: i === 0 })).filter(r => !linked.has(r.dir)), "project", a.id);
-  }
+  await Promise.all(
+    (o.projects ?? []).map(async project => {
+      const at = (r: { dir: string }): string => posix.join(project.path, r.dir);
+      const linked = await linkedInside(host, project.path, [...new Set(agents.flatMap(a => a.skillRoots.project.map(at)))]);
+      for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: at(r), own: i === 0 })).filter(r => !linked.has(r.dir)), "project", a.id, project);
+    }),
+  );
   const plugins = agents.filter(a => a.pluginSkills !== undefined);
   const indexes = await Promise.all(plugins.map(a => host.fs.readText(expand(host, a.pluginSkills!.index))));
   plugins.forEach((a, i) => {
@@ -163,7 +166,7 @@ export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): P
     const meta = skillFrontmatter(f.head);
     // Keyed by folder, which is what an agent loads a skill by; the frontmatter's name is the file's own claim.
     const name = posix.basename(f.dir);
-    const key = `${f.root.scope}\0${name}`;
+    const key = `${f.root.scope}\0${f.root.project?.id ?? ""}\0${name}`;
     const path: SkillPath = {
       path: tilde(host.home, f.dir),
       ...(f.root.agent !== undefined ? { agent: f.root.agent } : {}),
@@ -171,8 +174,9 @@ export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): P
       ...(f.off ? { off: true as const } : {}),
     };
     const row = rows.get(key);
-    if (row === undefined) rows.set(key, { name, ...(meta.description !== undefined ? { description: meta.description } : {}), paths: [path], scope: f.root.scope });
+    const project = f.root.project === undefined ? {} : { project: { ...f.root.project, path: tilde(host.home, f.root.project.path) } };
+    if (row === undefined) rows.set(key, { name, ...(meta.description !== undefined ? { description: meta.description } : {}), paths: [path], scope: f.root.scope, ...project });
     else if (!row.paths.some(p => p.path === path.path)) row.paths.push(path);
   }
-  return { skills: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)), refused };
+  return { skills: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope) || (a.project?.name ?? "").localeCompare(b.project?.name ?? "")), refused };
 }

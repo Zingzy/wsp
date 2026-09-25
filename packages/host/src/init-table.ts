@@ -3,7 +3,7 @@
 // with its tick, why it is here in the words the person's own machine gives,
 // and the size its install downloads. wsp recipe prints it as text; wsp init's
 // agents and tools screens are the same rows as a list.
-import { CATALOG, CATALOG_AGENTS, THREAD_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, runsThreads, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { HEAVY_USED_FLOOR, USED_FLOOR, type ProjectScan, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
 import { customRows, fmtBytes, pinWords, plural, type Recipe, type RecipeCustomRow, type RecipeRow, type ToolPin } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
@@ -111,7 +111,7 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
       why: whyLine(e, r, sessions, size, recipe.tick),
       ...(size !== undefined ? { size } : {}),
       heavy: isHeavy(size),
-      ...(e.kind === "agent" && !THREAD_AGENTS.some(id => id === e.id) ? { note: "installs, but wsp cannot run its threads yet" } : {}),
+      ...(e.kind === "agent" && !runsThreads(e.id) ? { note: "installs, but wsp cannot run its threads yet" } : {}),
       ...(r?.pin !== undefined ? { pin: r.pin } : {}),
     };
   });

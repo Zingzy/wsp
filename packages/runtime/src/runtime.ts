@@ -9070,8 +9070,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     places: () => placeDoor,
     workspace: async (id, origin) => {
       const entry = await entryOf(id, origin);
-      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: checkoutOf(entry.record) };
+      const project = projectHeld(entry.record.project);
+      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: { id: project.id, name: project.name, path: checkoutOf(entry.record) } };
     },
+    // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
+    projects: async placeId => (await ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
     ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
     ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),

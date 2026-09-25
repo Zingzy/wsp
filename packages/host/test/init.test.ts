@@ -1088,7 +1088,7 @@ describe("wsp init, the summary-first screens", () => {
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
     // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
-    expect(summary).toMatch(/Agents\s+6 of 8/);
+    expect(summary).toMatch(/Agents\s+6 of 12/);
     expect(summary).toMatch(/Sign-ins\s+2 copy, 1 during the build, 2 when you need it, 1 token\s+25 KB\n/);
     expect(summary).toMatch(/Hermes Agent login\s+copy\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);

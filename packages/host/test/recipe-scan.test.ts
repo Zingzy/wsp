@@ -38,7 +38,7 @@ describe("wsp recipe scan", () => {
     expect(existsSync(join(dir, "recipe.json"))).toBe(false);
     expect(scan.tick).toBe("used");
     expect(scan.at).toBe("2026-09-06T03:00:00.000Z");
-    expect(scan.agents.map(r => r.id).sort()).toEqual(["claude", "codex", "gemini", "hermes", "opencode", "pi"]);
+    expect(scan.agents.map(r => r.id).sort()).toEqual(["amp", "claude", "codex", "crush", "gemini", "goose", "hermes", "opencode", "pi", "qwen"]);
     expect(scan.tools.find(r => r.id === "curl")).toMatchObject({ on: true });
     expect(scan.tools.find(r => r.id === "java")).toMatchObject({ on: false, why: "installed here, never used" });
     expect(scan.commands.map(c => c.name)).toEqual(["pulumi"]);

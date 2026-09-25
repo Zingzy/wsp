@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentsTarget, McpRow, ServerAsk } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
 import { errorText } from "../../lib/utils.js";
-import type { ServerActs } from "./agentsRows.js";
+import { rowTarget, type ServerActs } from "./agentsRows.js";
 
 interface Held {
   readonly targetKey: string | null;
@@ -62,9 +62,9 @@ export function useServerActs(target: AgentsTarget | null): ServerActs | undefin
       })();
     };
     return {
-      add: ask => api.serversAdd!(at, ask),
-      remove: (key, rows) => write(key, rows, row => api.serversRemove?.(at, askOf(row))),
-      toggle: (key, rows, on) => write(key, rows, row => api.serversToggle?.(at, askOf(row), on)),
+      add: (ask, project) => api.serversAdd!(rowTarget(at, project), ask),
+      remove: (key, rows) => write(key, rows, row => api.serversRemove?.(rowTarget(at, row.project), askOf(row))),
+      toggle: (key, rows, on) => write(key, rows, row => api.serversToggle?.(rowTarget(at, row.project), askOf(row), on)),
       busyOf: key => shown.busy[key] === true,
       refusedOf: key => shown.refused[key],
     };

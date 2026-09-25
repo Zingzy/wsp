@@ -38,8 +38,6 @@
 //   creating         the creation view with its stage log and the word table's
 //                    own line under it, off the record the create answered with
 //   settings-appearance   Settings on Appearance, the record at its defaults
-//   settings-restore      the same with the sidebar width off its default, so
-//                         Restore defaults stands (with ?sidebar=<px>)
 //   settings-light-picked the Light segment picked on the dark side
 //   settings-computers    the Computers list: this Mac, three boxes joined and
 //                         the cloud whose key this host holds
@@ -56,7 +54,7 @@
 //   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
 //                         shell holds the bundle's download until the test lets it go
 //   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
-//   settings-search       "width" typed in the field
+//   settings-search       "icons" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer Computers scrolled to Add a computer, the ssh road open
 //   settings-add-computer-failed  the same after an add this window watched fail, one the host kept
@@ -75,6 +73,7 @@
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
 //                         ready card and settings-cloud the cloud's copy behind
+//                         (&projects=1: the box's agents over the two projects it holds)
 //   settings-image-recipe, -recipe-last, -recipe-choice  the box's card with the
 //                         recipe open on its first screen, on the screen that
 //                         builds, and on the road before any job (&image=none);
@@ -112,7 +111,7 @@ import { useServerActs } from "../../src/components/agents/useServerActs";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -374,7 +373,6 @@ const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting",
 /** The screens that are Settings in the centre rather than a workspace, each by the page it opens on. */
 const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-appearance": { kind: "group", group: "appearance" },
-  "settings-restore": { kind: "group", group: "appearance" },
   "settings-light-picked": { kind: "group", group: "appearance" },
   "settings-computers": { kind: "group", group: "computers" },
   "settings-computer": { kind: "computer", id: "p_spoo" },
@@ -559,7 +557,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => AGENTS_REPORT,
+  agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
@@ -623,6 +621,7 @@ if (screen === "settings-about-behind") {
     hosts: async () => ({ here: hereWord(true), current: null, hosts: [] }),
     getBundle: () => new Promise(resolve => (held.finishBundle = () => resolve({ ok: true }))),
     quitAndOpen: async () => ({ ok: true }),
+    bundleHover: "Downloads the disk image and checks its sha256.",
   };
 }
 
@@ -631,7 +630,7 @@ const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
 const sidebarWidth = params.get("sidebar");
 // The page Settings opens on, as this window would remember it, and the one screen with text in the field.
-if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "width" : "" });
+if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "" });
 useStore.setState({
   conn: "live",
   ready: true,
@@ -701,7 +700,7 @@ function AgentsWidths() {
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"
-            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
+            ctx={{ where: "box", computer: "spoo", ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />
@@ -716,6 +715,7 @@ function AgentsWidths() {
 const STATES_REPORT = {
   ...AGENTS_REPORT,
   target: { placeId: "here" },
+  reach: "here" as const,
   servers: AGENTS_REPORT.servers.map(s => (s.name === "github" ? { ...s, auth: "connected" as const } : s.name === "linear" ? { ...s, auth: "signed-in" as const } : s.name === "sentry" ? { ...s, enabled: true, auth: "failed" as const } : s)),
 };
 function AgentsStates() {
@@ -731,7 +731,7 @@ function AgentsStates() {
             report={STATES_REPORT}
             reading={false}
             on="this Mac"
-            ctx={{ where: "here", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
+            ctx={{ where: "here", ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />

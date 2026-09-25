@@ -154,12 +154,13 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       const list = await at(width).evaluate(el => {
         const left = el.getBoundingClientRect().left;
         const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - left);
-        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group]"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
+        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group] svg circle"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
       });
       await at(width).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-trigger]').click();
       const detail = await at(width).evaluate(el => Math.round(el.querySelector("[data-fact-label]")!.getBoundingClientRect().left - el.getBoundingClientRect().left));
       console.info(`agents left edge at ${width}: ${JSON.stringify({ ...list, detail })}`);
-      // The panel's 16 px; the page's 21, the cards' hairline and px-5.
+      // The panel's 16 px; the page's 21, the cards' hairline and px-5. The ghost search box starts in the gutter, so
+      // its glyph's ink is what stands on the edge.
       const edge = width === 360 ? 16 : 21;
       expect([list.line, list.tabs, list.search, list.label, list.mark, detail]).toEqual([edge, edge, edge, edge, edge, edge]);
       await at(width).locator("[data-k=agents-back]").click();
@@ -206,16 +207,16 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       }
       return { color: "", image: "" };
     };
-    const panel = await surface.evaluate((el, underSrc) => {
-      const underOf = new Function(`return ${underSrc}`)() as typeof under;
-      el.scrollTop = 300;
+    // In the panel the list scrolls under a head that stands outside it, so nothing passes under the head.
+    const panel = await surface.evaluate(el => {
+      const body = el.querySelector<HTMLElement>("[data-agents-body]")!;
+      body.scrollTop = 300;
       const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
-      const style = getComputedStyle(top);
-      return { scrolled: el.scrollTop, offset: Math.round(top.getBoundingClientRect().top - el.getBoundingClientRect().top), bg: { color: style.backgroundColor, image: style.backgroundImage }, under: underOf(top) };
-    }, under.toString());
+      return { scrolled: body.scrollTop, offset: Math.round(top.getBoundingClientRect().top - el.getBoundingClientRect().top), inside: body.contains(top) };
+    });
     expect(panel.scrolled).toBeGreaterThan(0);
     expect(panel.offset).toBe(0);
-    expect(panel.bg).toEqual(panel.under);
+    expect(panel.inside).toBe(false);
     expect(await page!.locator("[data-k=agents-surface] [data-k=agents-line]").count()).toBe(0);
     await open("screen=settings-computer&theme=dark", { width: 1280, height: 600 });
     await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
@@ -298,6 +299,55 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     expect(await at(360).locator("[data-agents-detail] [data-k=detail-title]").textContent()).toBe("OpenCode");
     await page!.keyboard.press("Escape");
     expect(await page!.evaluate(() => (document.activeElement as HTMLElement).closest<HTMLElement>("[data-agents-row]")?.dataset["agentsRow"])).toBe("agent-opencode");
+  });
+
+  it("scrolls a long install line sideways in its own box at 360, never broken, never cut and never under the copy glyph", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [358, 360]) {
+      await at(width).locator('[data-agents-row="agent-pi"] [data-row-trigger]').click();
+      const box = at(width).locator("[data-fact=install] [data-copy-row]");
+      await box.waitFor();
+      const m = await box.evaluate(row => {
+        const value = row.querySelector<HTMLElement>("[data-k]")!;
+        const glyph = row.querySelector<HTMLElement>("button")!;
+        const v = value.getBoundingClientRect();
+        const g = glyph.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        value.scrollLeft = value.scrollWidth;
+        return { valueRight: v.right, glyphLeft: g.left, glyphRight: g.right, rowRight: r.right, height: Math.round(r.height), scrolls: value.scrollWidth > value.clientWidth, scrolled: value.scrollLeft > 0, overflowX: getComputedStyle(value).overflowX };
+      });
+      expect(m.valueRight, `${width}`).toBeLessThanOrEqual(m.glyphLeft);
+      expect(m.glyphRight, `${width}`).toBeLessThanOrEqual(m.rowRight);
+      expect(m.height, `${width}`).toBe(40);
+      expect(m.overflowX, `${width}`).toBe("auto");
+      expect(m.scrolls && m.scrolled, `${width}`).toBe(true);
+      await at(width).locator("[data-k=agents-back]").click();
+    }
+  });
+
+  it("fades a copy line's right edge only while it overflows its box, and drops the fade once it is scrolled to its end", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    const read = (width: number) =>
+      at(width)
+        .locator("[data-fact=install] [data-copy-row] [data-k]")
+        .evaluate(v => ({ scrolls: v.scrollWidth > v.clientWidth, mask: getComputedStyle(v).maskImage }));
+    const install = async (width: number): Promise<void> => {
+      await at(width).locator('[data-agents-row="agent-pi"] [data-row-trigger]').click();
+      await at(width).locator("[data-fact=install] [data-copy-row]").waitFor();
+    };
+    // A long line in the panel's floor: the fade stands, and leaves once the line is scrolled to its end.
+    await install(360);
+    expect(await read(360)).toEqual({ scrolls: true, mask: expect.stringMatching(/linear-gradient/) });
+    await at(360).locator("[data-fact=install] [data-copy-row] [data-k]").evaluate(v => void (v.scrollLeft = v.scrollWidth));
+    await expect.poll(async () => (await read(360)).mask).toBe("none");
+    // The same line in a box wide enough for it: no fade; narrowed, it is measured again and fades.
+    await at(760).evaluate(el => void (el.style.width = "1400px"));
+    await install(760);
+    await expect.poll(async () => await read(760)).toEqual({ scrolls: false, mask: "none" });
+    await at(760).evaluate(el => void (el.style.width = "360px"));
+    await expect.poll(async () => (await read(760)).mask).toMatch(/linear-gradient/);
   });
 
   it("photographs every tab and a detail of each kind at 360, 480 and 696 in both themes", async () => {

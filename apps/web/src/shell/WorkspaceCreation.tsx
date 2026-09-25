@@ -15,6 +15,7 @@ import { CREATION_ASKED } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { APP_LOCALE, localZoneLabel } from "../lib/timestampFormat.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
 import { FACT } from "../settings/format.js";
@@ -35,7 +36,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
   return (
     <div data-testid="workspace-creation" aria-busy={!failed} className="flex h-full min-h-0 flex-col items-center overflow-y-auto bg-background px-6 py-12 text-foreground sm:py-16">
       <div className="flex w-full max-w-xl flex-col items-center text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{failed ? "Creation failed" : "Creating task"}</p>
+        <p className={cn(MICRO_LABEL, "text-muted-foreground")}>{failed ? "Creation failed" : "Creating task"}</p>
         <h1 className="mt-2 w-full truncate text-2xl font-normal tracking-tight">{creation.name}</h1>
         <Squiggle failed={failed} className="mt-6" />
         <div data-testid="creation-log" className="mt-6 h-32 w-full rounded-md border border-border/60 text-left">

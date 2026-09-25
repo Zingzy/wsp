@@ -5,8 +5,8 @@
 // its module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, RefObject } from "react";
-import type { AgentsReport } from "@wsp/protocol";
-import type { DocState, FlowView, RowAct, RowsContext } from "../agentsRows.js";
+import type { AgentsProject, AgentsReport } from "@wsp/protocol";
+import type { DocState, FlowView, PickOption, RowAct, RowsContext } from "../agentsRows.js";
 
 export type GroupBy = "none" | "agent" | "source" | "scope";
 
@@ -66,12 +66,22 @@ export interface Fact {
   readonly line?: boolean;
 }
 
-/** One row of the level under a detail, and what its own level says whole. */
+/** One line of a list a row's own level draws under its body: a name in the mono, a fact after it in the muted mono,
+ * and what it is under both. */
+export interface UnderItem {
+  readonly name: string;
+  readonly fact?: string;
+  readonly about?: string;
+}
+
+/** One row of the level under a detail, and what its own level says whole: its body, then a labelled list (a tool's
+ * parameters). */
 export interface UnderRow {
   readonly key: string;
   readonly title: string;
   readonly subtext?: string;
   readonly body?: string;
+  readonly list?: { readonly label: string; readonly items: readonly UnderItem[] };
 }
 
 /** A further level under a detail where a kind has one (a server's tools): its rows, each opening its body. */
@@ -94,8 +104,10 @@ export interface Choice {
   readonly id: string;
   readonly label: string;
   readonly many: boolean;
-  readonly options: readonly { readonly value: string; readonly label: string; readonly agent?: string; readonly held?: string }[];
+  readonly options: readonly (PickOption & { readonly agent?: string; readonly held?: string })[];
   readonly value: readonly string[];
+  /** Why the one value picked no longer stands, said under the pick. */
+  readonly lost?: string;
   readonly set: (value: readonly string[]) => void;
 }
 
@@ -215,3 +227,22 @@ export const matchesAny = (query: string, ...words: readonly (string | undefined
 };
 
 export const byName = <T extends { readonly name: string }>(a: T, b: T): number => a.name.localeCompare(b.name);
+
+/** A row's key: its words, the project's id where it is a project's row, then its name, so two projects' rows of one
+ * name never share one. */
+export const rowKey = (head: readonly string[], project: AgentsProject | undefined, name: string): string => [...head, ...(project === undefined ? [] : [project.id]), name].join("-");
+
+/** One group per project the items live in, by the project's name with its folder beside it, by name. Every project
+ * row carries its project; one that does not is a reader's bug, and it stands in a group with no label. */
+export function projectGroups<T extends { readonly project?: AgentsProject }>(items: readonly T[]): GroupView<T>[] {
+  const groups = new Map<string, { project?: AgentsProject; items: T[] }>();
+  for (const item of items) {
+    const id = item.project?.id ?? "";
+    const was = groups.get(id);
+    if (was === undefined) groups.set(id, { ...(item.project !== undefined ? { project: item.project } : {}), items: [item] });
+    else was.items.push(item);
+  }
+  return [...groups]
+    .map(([id, g]) => ({ id: `project-${id}`, ...(g.project === undefined ? {} : { label: g.project.name, path: g.project.path }), items: g.items }))
+    .sort((a, b) => (a.label ?? "").localeCompare(b.label ?? ""));
+}

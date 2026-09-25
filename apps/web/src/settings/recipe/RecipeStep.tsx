@@ -9,7 +9,7 @@ import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../format.js";
 import { RefusalSlot } from "../sheetParts.js";
-import { MICRO_LABEL } from "./rows.js";
+import { MICRO_LABEL } from "../../lib/microLabel.js";
 
 export interface StepAction {
   k: string;
@@ -61,7 +61,7 @@ export function RecipeStep({
     <div data-k={root} data-step={k} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         {counter === undefined ? null : (
-          <p data-k={`${root}-counter`} className={MICRO_LABEL}>
+          <p data-k={`${root}-counter`} className={cn(MICRO_LABEL, "text-muted-foreground")}>
             {counter}
           </p>
         )}

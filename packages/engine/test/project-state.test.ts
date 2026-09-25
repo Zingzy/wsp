@@ -553,6 +553,10 @@ describe("moveProjectState", () => {
       ["opencode", "nothing"],
       ["pi", "moved"],
       ["hermes", "nothing"],
+      ["crush", "transcript-only"],
+      ["qwen", "transcript-only"],
+      ["goose", "transcript-only"],
+      ["amp", "transcript-only"],
     ]);
     expect(tree(claude)).toEqual(claudeAfter("-root-work-b-2-x"));
     expect(Object.keys(tree(pi))).toContain("sessions/--root-work-b_2.x--/2026-09-05T21-56-00-000Z_s1.jsonl");
@@ -565,7 +569,7 @@ describe("moveProjectState", () => {
     const before = tree(home);
     const report = await moveProjectState({ from: FROM, to: TO, homes: { newagent: home } }, [...CATALOG_AGENTS, { id: "newagent" }]);
     expect(report.find(r => r.agent === "newagent")).toEqual({ agent: "newagent", outcome: "transcript-only" });
-    expect(report.filter(r => r.outcome === "transcript-only")).toHaveLength(1);
+    expect(report.filter(r => r.outcome === "transcript-only").map(r => r.agent)).toEqual([...CATALOG_AGENTS.filter(a => !PROJECT_STATE_RESOLVERS.has(a.id)).map(a => a.id), "newagent"]);
     expect(tree(home)).toEqual(before);
   });
 
@@ -913,7 +917,7 @@ describe("the listing the machine runs", () => {
     expect(command.startsWith("set -e\npython3 -c '")).toBe(true);
     expect(runs(command)).toBe(PROJECT_STATE_RESOLVERS.size);
     const carried = (value: string): string => Buffer.from(JSON.stringify(value), "utf8").toString("base64");
-    for (const home of Object.values(homes)) expect(command).toContain(carried(home));
+    for (const [id, home] of Object.entries(homes)) expect(command.includes(carried(home)), id).toBe(PROJECT_STATE_RESOLVERS.has(id));
     expect(command).toContain(carried(FROM));
     for (const r of PROJECT_STATE_RESOLVERS.values()) if (r.shared !== undefined) expect(command).toContain(carried(storeCopy(into, homes[r.agent]!, r.shared.store)));
     expect(runs(stateListing(homes, FROM, into, ["pi", "claude"]))).toBe(2);

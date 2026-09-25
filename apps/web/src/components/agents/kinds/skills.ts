@@ -8,9 +8,9 @@
 // same detail with its SKILL.md before anything is installed.
 import { DownloadIcon, PowerIcon, PowerOffIcon, ScrollTextIcon, Trash2Icon } from "lucide-react";
 import { agentName, catalogEntry, isSystemSkill, ownSkillFolder, type AgentEntry } from "@wsp/catalog";
-import type { AgentsReport, SkillHit, SkillRow } from "@wsp/protocol";
-import { AGENTS_LIST_WORDS as W, compactCount, holdAll, notYet, onImage, skillKey, type RowAct, type RowsContext, type SkillActs, type SkillPicks } from "../agentsRows.js";
-import { byName, kind, matchesAny, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule } from "./kind.js";
+import type { AgentsProject, AgentsReport, SkillHit, SkillRow } from "@wsp/protocol";
+import { AGENTS_LIST_WORDS as W, compactCount, holdAll, inProject, notYet, onImage, pickOf, skillKey, whereNow, type RowAct, type RowsContext, type SkillActs, type SkillPicks } from "../agentsRows.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule } from "./kind.js";
 
 /** The folder a skill really lives in: the one that is no link, else the first. */
 const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0])?.path ?? "";
@@ -20,16 +20,15 @@ const agentsOf = (row: SkillRow): string[] => [...new Set(row.paths.flatMap(p =>
 /** Off where every folder it lives in is off: no agent loads it. */
 const isOff = (row: SkillRow): boolean => row.paths.every(p => p.off === true);
 
-const rowId = (row: SkillRow): string => `skill-${row.scope}-${row.name}`;
+const rowId = (row: SkillRow): string => rowKey(["skill", row.scope], row.project, row.name);
 
 type Source = "system" | "plugin" | "user" | "project";
 const sourceOf = (row: SkillRow): Source => (isSystemSkill(row.name) ? "system" : row.scope);
 
-const SOURCES: readonly { source: Source; label: string }[] = [
+const SOURCES: readonly { source: Exclude<Source, "project">; label: string }[] = [
   { source: "system", label: "System" },
   { source: "plugin", label: "Plugins" },
   { source: "user", label: "Global" },
-  { source: "project", label: "Project" },
 ];
 
 function actsOf(row: SkillRow, ctx: RowsContext): RowAct[] {
@@ -68,29 +67,46 @@ function agentOptions(report: AgentsReport | null, project: boolean): Choice["op
 }
 
 /** What an install takes before the person picks: every installed agent, in the home. */
-const firstPicks = (report: AgentsReport | null): SkillPicks => ({ agents: (report?.agents ?? []).filter(a => a.installed).map(a => a.id), project: false });
+const firstPicks = (report: AgentsReport | null): SkillPicks => ({ agents: (report?.agents ?? []).filter(a => a.installed).map(a => a.id) });
 
-/** The skill already in the folder a hit installs into: the person's own, or the project's; a plugin's of the same
+/** The skill already in the folder a hit installs into: the person's own, or that project's; a plugin's of the same
  * name lives elsewhere and stands in no install's way. */
-const installedAs = (hit: SkillHit, report: AgentsReport | null, project: boolean): SkillRow | undefined => report?.skills.find(s => s.name === hit.skillId && s.scope === (project ? "project" : "user"));
+const installedAs = (hit: SkillHit, report: AgentsReport | null, project: AgentsProject | undefined): SkillRow | undefined =>
+  report?.skills.find(s => s.name === hit.skillId && (project === undefined ? s.scope === "user" : inProject(s, project)));
 
 function remoteDetail(hit: SkillHit, report: AgentsReport | null, ctx: RowsContext, skills: SkillActs): DetailView {
   const picks = skills.picksOf(hit.id) ?? firstPicks(report);
-  const there = installedAs(hit, report, picks.project);
+  const on = ctx.on ?? ctx.computer ?? "";
+  const where = whereNow(report, picks.project, on);
+  const there = where.lost === undefined ? installedAs(hit, report, where.project) : undefined;
   const busy = skills.busyOf(hit.id);
-  const offered = agentOptions(report, picks.project);
+  const offered = agentOptions(report, picks.project !== undefined);
   const choices: Choice[] = [
     { id: "agents", label: W.agents, many: true, options: offered, value: offered.filter(o => o.held !== undefined || picks.agents.includes(o.value)).map(o => o.value), set: agents => skills.setPicks(hit.id, { ...picks, agents }) },
-    ...(ctx.project === undefined
+    ...(where.options.length === 0
       ? []
-      : [{ id: "where", label: W.where, many: false, options: [{ value: "user", label: W.global }, { value: "project", label: ctx.project.name }], value: [picks.project ? "project" : "user"], set: (v: readonly string[]) => skills.setPicks(hit.id, { ...picks, project: v[0] === "project" }) }]),
+      : [
+          {
+            id: "where",
+            label: W.where,
+            many: false,
+            options: where.options,
+            value: [where.value],
+            ...(where.lost === undefined ? {} : { lost: where.lost }),
+            set: (v: readonly string[]) => {
+              const { project: _was, ...rest } = picks;
+              const project = v[0] === undefined ? undefined : pickOf(report, v[0]);
+              skills.setPicks(hit.id, { ...rest, ...(project === undefined ? {} : { project }) });
+            },
+          },
+        ]),
   ];
   const install: RowAct = {
     id: "install",
     label: busy ? W.installing : W.installName(hit.skillId),
     icon: DownloadIcon,
     ...(busy ? { busy: true } : {}),
-    ...(there !== undefined ? { hover: W.alreadyOn(ctx.on ?? ctx.computer ?? "") } : busy ? {} : { run: () => skills.add(hit.id, { ...picks, agents: picks.agents.filter(a => offered.some(o => o.value === a && o.held === undefined)) }) }),
+    ...(where.lost !== undefined ? { hover: where.lost } : there !== undefined ? { hover: W.alreadyOn(on) } : busy ? {} : { run: () => skills.add(hit.id, picks.agents.filter(a => offered.some(o => o.value === a && o.held === undefined)), where.project) }),
   };
   const doc = skills.remoteOf(hit.id);
   const refused = skills.refusedOf(hit.id);
@@ -104,7 +120,8 @@ function remoteDetail(hit: SkillHit, report: AgentsReport | null, ctx: RowsConte
     lead: { kind: "glyph", icon: ScrollTextIcon },
     facts,
     acts: holdAll([install], ctx),
-    ...(there === undefined ? { choices } : {}),
+    // Where stays open on an installed skill, since another folder may not have it yet.
+    ...(there === undefined || where.options.length > 0 ? { choices } : {}),
     doc: { ...(doc ?? { reading: true }), load: () => skills.loadRemote(hit.id) },
     ...(refused === undefined ? {} : { refused }),
   };
@@ -125,7 +142,7 @@ function adder(ctx: RowsContext): AddModule | undefined {
       if (q === "") return { reading: false, rows: [], empty: W.typeToSearch };
       const search = skills.searchOf(q);
       const rows = hitsOf(q).map(hit => {
-        const there = installedAs(hit, report, false) !== undefined;
+        const there = installedAs(hit, report, undefined) !== undefined;
         return { key: hit.id, title: hit.skillId, subtext: hit.source, fact: there ? W.installed : compactCount(hit.installs), ...(there ? { dim: true } : {}) };
       });
       if (search?.error !== undefined) return { reading: false, rows: [], empty: search.error };
@@ -151,7 +168,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
   items: (report: AgentsReport) => [...report.skills].sort(byName),
   count: items => items.length,
   key: rowId,
-  matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), ...agentsOf(row).map(agentName)),
+  matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), row.project?.name, ...agentsOf(row).map(agentName)),
   groups: (items, by: GroupBy): GroupView<SkillRow>[] => {
     if (by === "agent") {
       const agents = [...new Set(items.flatMap(agentsOf))];
@@ -159,10 +176,11 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
       return [...agents.map(agent => ({ id: `agent-${agent}`, label: agentName(agent), items: items.filter(s => agentsOf(s).includes(agent)) })), ...(shared.length === 0 ? [] : [{ id: "shared", label: W.shared, items: shared }])];
     }
     if (by === "source") {
-      return SOURCES.flatMap(g => {
+      const sources = SOURCES.flatMap(g => {
         const hit = items.filter(s => sourceOf(s) === g.source);
         return hit.length === 0 ? [] : [{ id: `source-${g.source}`, label: g.label, items: hit }];
       });
+      return [...sources, ...projectGroups(items.filter(s => sourceOf(s) === "project"))];
     }
     return [{ id: "all", items }];
   },

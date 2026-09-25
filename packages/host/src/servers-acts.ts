@@ -26,7 +26,7 @@ import {
   type ServerAdd,
   type ServerAsk,
 } from "@wsp/protocol";
-import type { AgentsOn, ServersActs } from "@wsp/runtime";
+import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
 /** The exit a line takes, with the file and where it points on stdout, when the file is a link out of its folder. */
@@ -101,8 +101,8 @@ function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): C
   const agent = mcpAgent(agentId);
   const home = road.host.home;
   if (scope !== "project") return { agent, files: agent.mcp.files.map(f => expand(road.host, f)), base: home, ...(scope === "home" ? { folder: home } : {}) };
-  const project = on.kind === "box" ? undefined : on.project;
-  if (project === undefined) throw usage("A project's server is changed from a workspace, which names the project.");
+  const project = projectOf(on);
+  if (project === undefined) throw usage("A project's server is changed from a workspace of that project, or from its computer's page.");
   const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f));
   if (files.length === 0) throw usage(noServersConfigRefusal(agentName(agentId)));
   return { agent, files, base: project };

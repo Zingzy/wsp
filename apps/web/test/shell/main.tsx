@@ -121,11 +121,10 @@ const PROJECTS = [
 const projects = params.get("projects") === "1";
 if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
-// With ?projects=1 it holds the same two projects and a third with a name longer than the composer's picker row is
-// wide in a narrow window, so the composer on a kept machine draws every picker it has and the one label a person
-// names, which no width bounds.
-const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
-const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}) };
+// With ?longproject=1 its project has a name longer than the composer's picker row is wide in a narrow window: the one
+// label a person names, which no width bounds.
+const LONG_PROJECT = { id: "pr_long", name: "customer-billing-service-platform", path: "/Users/zingzy/customer-billing-service-platform", computer: "default" };
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}), ...(params.get("longproject") === "1" ? { project: LONG_PROJECT } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
 // one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The
@@ -143,19 +142,19 @@ for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`
 // coloured and a monochrome agent mark sit in the shots.
 // Two of the first workspace's threads quiet for days, added only with ?archived=1 so every other case keeps the
 // four rows it measures: past the protocol's threshold they fold into the Archived group under that workspace's
-// idle shelf, which is what the group's own case reads.
+// idle threads, which is what the group's own case reads.
 const archived: SessionView[] = params.get("archived") !== "1"
   ? []
   : [
-      { id: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 },
-      { id: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
+      { id: "s5", threadId: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 },
+      { id: "s6", threadId: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
     ];
 const sessions: SessionView[] = [
   // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
-  { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
-  { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000, ...(projects ? { cwd: "/root/wsp/packages/host" } : {}) },
-  { id: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
-  { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
+  { id: "s1", threadId: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
+  { id: "s2", threadId: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000, ...(projects ? { cwd: "/root/wsp/packages/host" } : {}) },
+  { id: "s3", threadId: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
+  { id: "s4", threadId: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
 ];
 

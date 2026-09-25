@@ -9,6 +9,7 @@
 import { ChevronDownIcon } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { ROW_META_CLASS, TOP_ROW_CLASS } from "./rowGrammar.js";
 
@@ -47,7 +48,7 @@ export function SectionRow({
         onClick={onToggle ?? onPress}
         {...(onContextMenu === undefined ? {} : { onContextMenu })}
       >
-        <span className="font-mono text-[11px] uppercase tracking-[0.12em]">{label}</span>
+        <span className={MICRO_LABEL}>{label}</span>
         {shut && count !== undefined ? <span className={ROW_META_CLASS}>{count}</span> : null}
         {onToggle === undefined ? null : <ChevronDownIcon aria-hidden className={cn("size-4 transition-transform duration-150", shut && "-rotate-90")} />}
       </SidebarMenuButton>
