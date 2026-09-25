@@ -52,8 +52,16 @@ export function CopyRow({
         <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
-      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-all" : "truncate")} title={value}>
-        {value}
+      {/* A whole line breaks only between its words, never at a flag's or a package's hyphen. */}
+      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-words" : "truncate")} title={value}>
+        {whole
+          ? value.split(" ").map((word, i) => (
+              <span key={i}>
+                {i > 0 ? " " : null}
+                <span className="whitespace-nowrap">{word}</span>
+              </span>
+            ))
+          : value}
       </span>
       {children}
       <Button variant="ghost-muted" size="icon-xs" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>

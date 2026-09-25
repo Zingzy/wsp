@@ -14,7 +14,7 @@ import type { ChipItem } from "../components/ui/chips.js";
 import { useState } from "react";
 import { HERE_PLACE_ID, fmtMemGb, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
-import { AgentsList } from "../components/agents/AgentsList.js";
+import { AgentsManager } from "../components/agents/AgentsManager.js";
 import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useServerTools } from "../components/agents/useServerTools.js";
@@ -198,6 +198,10 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
   );
 }
 
+/** What the agents manager's head says on a computer's page, and on a cloud's, whose rows are its image's. */
+const AGENTS_PAGE_LINE = (computer: string): string => `Agents, MCP servers and skills on ${computer}.`;
+const AGENTS_IMAGE_LINE = (cloud: string): string => `The agents in the image every copy at ${cloud} is made from.`;
+
 /** The agents, skills and MCP servers a computer reports, read when its page opens. Every act is held with the
  * page's away word while the computer is not answering, over the last report this window read. */
 function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
@@ -205,13 +209,15 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
   const tools = useServerTools({ placeId: place.id });
   const acts = useAgentActs({ placeId: place.id });
   const away = absentOf(place, ctx.now, here)?.away ?? null;
+  const name = here ? THIS_COMPUTER_WORD : placeName(place);
   return (
-    <AgentsList
+    <AgentsManager
       shell="page"
+      head={{ line: AGENTS_PAGE_LINE(name) }}
       report={report}
       reading={reading}
       error={error}
-      on={here ? THIS_COMPUTER_WORD : placeName(place)}
+      on={name}
       ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: placeName(place) }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
       onRefresh={refresh}
       now={ctx.now}
@@ -269,7 +275,7 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
   );
   // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
   const agents =
-    image === null ? undefined : <AgentsList shell="page" report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: ctx.openSetup }} now={ctx.now} />;
+    image === null ? undefined : <AgentsManager shell="page" head={{ line: AGENTS_IMAGE_LINE(placeName(place)) }} report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: ctx.openSetup }} now={ctx.now} />;
   return [
     // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
     ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts, ...(edit === undefined ? {} : { under: edit }) }]),

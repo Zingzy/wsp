@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
-import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, installShown, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -278,6 +278,28 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
     // An agent's npm road is pinned in the data; an unpinned one would install whatever the registry serves that day.
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
+  });
+
+  it("says who makes each agent, what it is in a sentence or two, its license, where it lives, and the line a person pastes to install it", () => {
+    expect(CATALOG_AGENTS.map(a => [a.id, a.about.creator, a.about.license])).toEqual([
+      ["claude", "Anthropic", "proprietary"],
+      ["codex", "OpenAI", "Apache-2.0"],
+      ["gemini", "Google", "Apache-2.0"],
+      ["opencode", "Anomaly", "MIT"],
+      ["pi", "Earendil Works", "MIT"],
+      ["hermes", "Nous Research", "MIT"],
+    ]);
+    for (const a of CATALOG_AGENTS) {
+      const sentences = a.about.description.split(/(?<=\.) /);
+      expect(sentences.length, a.id).toBeLessThanOrEqual(2);
+      for (const s of sentences) expect(s, a.id).toMatch(/^[A-Z].*\.$/);
+      expect(a.about.repo, a.id).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/);
+      if (a.about.homepage !== undefined) expect(a.about.homepage, a.id).toMatch(/^https:\/\//);
+    }
+    expect(installShown(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
+    // A vendor's script is many lines no person pastes.
+    expect(installShown(catalogEntry("claude")!)).toBeUndefined();
+    expect(installShown(catalogEntry("hermes")!)).toBeUndefined();
   });
 
   it("gives every entry one install line from its road's module: apt, npm, Homebrew as linuxbrew, a release at its current tag, a vendor's download", () => {

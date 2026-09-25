@@ -298,19 +298,22 @@ describe("a computer's own page", () => {
     await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "here" });
     for (const k of ["remove", "update", "dial", "address", "answered", "joined"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
     expect(asked).toEqual([{ placeId: "here" }]);
-    expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode"]);
-    // The segments stand where the Agents card stood, the section named for all three.
-    expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, skills and servers");
+    expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
+    // The manager stands where the Agents card stood, the section named for all three kinds.
+    expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, MCP servers and skills");
+    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac.");
     expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
   });
 
-  it("says so when a computer reported no agent at all, naming that computer", async () => {
+  it("says so when a computer reported no agent at all, the head naming that computer", async () => {
     useStore.setState({ places: [here, { ...laptop, present: true, agents: [] }] });
     await mountComputers(computersApi({ agentsRead: async () => EMPTY_REPORT }).api, { kind: "computer", id: "here" });
-    expect(document.querySelector("[data-k='agents-empty']")?.textContent).toBe("No agents found on this Mac.");
+    expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac.");
     act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_1" }));
     await settle();
-    expect(document.querySelector("[data-k='agents-empty']")?.textContent).toBe("No agents found on old-macbook.");
+    expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on old-macbook.");
   });
 
   it("reads a joined computer by its id, and holds every act with the page's away word while it does not answer", async () => {
@@ -321,7 +324,9 @@ describe("a computer's own page", () => {
     const again = screen.getByRole("button", { name: "Read again" });
     expect(again.hasAttribute("disabled")).toBe(true);
     expect(again.parentElement?.getAttribute("title")).toBe(stateOfPage());
-    expect(document.querySelector("[data-agents-under] [data-act-hover]")?.getAttribute("title")).toBe(stateOfPage());
+    // Agents has no search, so no toolbar; Add stands on the other tabs.
+    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
+    expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe(stateOfPage());
   });
 
   it("puts the recipe's rows that are not on the computer under the rows as lines, and draws no recipe card", async () => {
@@ -342,19 +347,20 @@ describe("a computer's own page", () => {
     useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
     await mountComputers(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: [] }) }).api, { kind: "computer", id: "p_1" });
     expect(document.querySelector("[data-settings-card='recipe']")).toBeNull();
-    expect([...document.querySelectorAll("[data-agents-refused] [data-open-line]")].map(l => [l.querySelector("[data-open-label]")?.textContent, l.querySelector("[data-open-value]")?.textContent])).toEqual([
+    expect([...document.querySelectorAll("[data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
       ["Codex", "failed: npm exited 1"],
       ["linear", "set aside: waited on GitHub CLI"],
     ]);
   });
 
-  it("draws a cloud's agents off its image, with Edit image under them", async () => {
+  it("draws a cloud's agents off its image, with Edit image in Add's place", async () => {
     const image = { name: "default", version: 1, hash: "a".repeat(64), recipeHash: "r", pins: [{ id: "claude", tag: "2.1.280" }], logins: [], sealedAt: AT, sealedFrom: "this Mac" } as SealedImage;
     useStore.setState({ places: [here, solari] });
     await mountComputers(computersApi({ image: async () => ({ image, copies: [], projects: [] }) }, setupOf({ keys: { solari: true } })).api, { kind: "computer", id: "solari" });
     expect(agentTitles()).toEqual(["Claude Code"]);
     expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
-    fireEvent.click(document.querySelector<HTMLElement>("[data-agents-under] button")!);
+    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=agents-add]")!);
     expect(useStore.getState().setupOpen).toBe(true);
   });
 

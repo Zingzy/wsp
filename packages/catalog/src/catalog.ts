@@ -74,9 +74,21 @@ export interface SessionHistory {
   root: string;
 }
 
+/** Who an agent is, as its detail says it: read off each project's own repository, README and npm entry. */
+export interface AgentAbout {
+  creator: string;
+  /** One or two sentences. */
+  description: string;
+  homepage?: string;
+  repo: string;
+  /** An SPDX id, or "proprietary". */
+  license: string;
+}
+
 /** An agent is never on by the catalog's own default: a recipe ticks one only from this computer's use of it. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
+  about: AgentAbout;
   /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
@@ -185,6 +197,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHomeEnv: "CLAUDE_CONFIG_DIR",
     projectKeyEnv: "CLAUDE_CODE_PROJECT_DIR_NAME",
     name: "Claude Code",
+    about: { creator: "Anthropic", description: "Anthropic's coding agent for the terminal. It reads the codebase, edits files, runs commands and handles git.", homepage: "https://code.claude.com/docs/en/overview", repo: "https://github.com/anthropics/claude-code", license: "proprietary" },
     context: CLAUDE_CONTEXT,
     // 2.1.281: ~/.claude/skills alone, links into the shared folder among them; plugins under their own folders.
     skillRoots: { user: [{ dir: "~/.claude/skills", lands: "link" }], project: [{ dir: ".claude/skills", lands: "link" }] },
@@ -216,6 +229,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("codex", 455),
     stateHome: ".codex",
     name: "Codex",
+    about: { creator: "OpenAI", description: "OpenAI's coding agent that runs locally in the terminal.", homepage: "https://developers.openai.com/codex", repo: "https://github.com/openai/codex", license: "Apache-2.0" },
     context: CODEX_CONTEXT,
     // 0.155.1: CODEX_HOME's skills, where it writes copies, and the shared folder.
     skillRoots: { user: [{ dir: "~/.codex/skills", lands: "copy" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
@@ -239,6 +253,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("gemini", 189),
     stateHome: ".gemini",
     name: "Gemini CLI",
+    about: { creator: "Google", description: "An open source agent that brings Gemini into the terminal.", homepage: "https://geminicli.com", repo: "https://github.com/google-gemini/gemini-cli", license: "Apache-2.0" },
     context: GEMINI_CONTEXT,
     // Its docs as of 0.58.0 (no Gemini on the Mac measured); copies found there.
     skillRoots: { user: [{ dir: "~/.gemini/skills", lands: "copy" }], project: [{ dir: ".gemini/skills", lands: "copy" }] },
@@ -261,6 +276,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("opencode", 673),
     stateHome: ".local/share/opencode",
     name: "OpenCode",
+    about: { creator: "Anomaly", description: "The open source coding agent for the terminal.", homepage: "https://opencode.ai", repo: "https://github.com/anomalyco/opencode", license: "MIT" },
     context: OPENCODE_CONTEXT,
     // 1.18.18: its own folder, where it holds copies, then Claude Code's and the shared folder, which it loads too.
     skillRoots: {
@@ -286,6 +302,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("pi", 165),
     stateHome: ".pi/agent",
     name: "Pi",
+    about: { creator: "Earendil Works", description: "A small coding agent for the terminal with read, bash, edit and write tools and saved sessions.", repo: "https://github.com/earendil-works/pi", license: "MIT" },
     context: PI_CONTEXT,
     // 0.84.1: its own folder, links into the shared folder there, and the shared folder.
     skillRoots: { user: [{ dir: "~/.pi/agent/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: ".pi/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
@@ -307,6 +324,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     ...agent("hermes", 484),
     stateHome: ".hermes",
     name: "Hermes Agent",
+    about: { creator: "Nous Research", description: "Nous Research's agent that keeps memories and skills and grows with use.", homepage: "https://hermes-agent.nousresearch.com", repo: "https://github.com/NousResearch/hermes-agent", license: "MIT" },
     context: HERMES_CONTEXT,
     // 0.20.0: one folder, skills under a category folder or straight in it, links into the shared folder among them.
     skillRoots: { user: [{ dir: "~/.hermes/skills", lands: "link" }], project: [] },
@@ -547,6 +565,13 @@ export function loginSignIn(row: string): SignIn | undefined {
 /** Exits 0 once an entry is on the machine. */
 export function smokeOf(e: CatalogEntry): string {
   return `${e.bin} --version`;
+}
+
+/** The one line a person pastes to install an entry, for its detail; nothing where the road runs a vendor's script
+ * of many lines. */
+export function installShown(e: CatalogEntry): string | undefined {
+  const line = roadModule(e.installRoad).shown?.(e.installRoad, e.bin) ?? installLine(e);
+  return line.includes("\n") ? undefined : line;
 }
 
 /** The bash line an entry's road runs on the guest, from the road's module; an entry whose road has nothing to run is a
