@@ -5,20 +5,23 @@
 // root, with a shared login's store pointed at the computer's logins folder,
 // and never with a DISPLAY, so a tool with a paste road takes it. A server's
 // sign-in runs its harness's browser flow wherever the page's return reaches
-// it: this computer's browser here, the relay's forward for a workspace. The
-// watched pty reports each page the tool prints or hands its own opener and
-// the code beside it, types what a page hands back, and asks the tool's own
-// status until it says signed in. The vault and the wsp tools are the two
-// writes that sit beside it.
+// it: this computer's browser here, the relay's forward for a workspace or a
+// computer you joined. The watched pty reports each page the tool prints or
+// hands its own opener and the code beside it, arms the relay's forward for
+// that page's callback port, types what a page hands back, and asks the
+// tool's own status until it says signed in. The vault and the wsp tools are
+// the two writes that sit beside it.
 import { CATALOG_AGENTS, MCP_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
-import { asLogin, targetLogin } from "@wsp/engine";
+import { asLogin, targetLogin, type TargetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
   controlSignInRefusal,
   hasControlChar,
+  callbackPortOf,
   lastLine,
   noVaultKeyRefusal,
   notTokenRefusal,
+  placeDaemonPaths,
   redirectsToMachine,
   serverSignInCopyRefusal,
   shellQuote,
@@ -59,10 +62,11 @@ function agentOf(id: string): (typeof CATALOG_AGENTS)[number] {
 
 /** How each line reaches the target: as the owner of the home where a box's daemon runs as root, as it is elsewhere. */
 async function wrapFor(on: AgentsOn): Promise<(line: string) => string> {
-  if (on.kind !== "box") return line => line;
-  const login = await targetLogin(on.machine, on.login);
-  return line => asLogin(login, line);
+  const login = await loginOf(on);
+  return login === undefined ? line => line : line => asLogin(login, line);
 }
+
+const loginOf = async (on: AgentsOn): Promise<TargetLogin | undefined> => (on.kind === "box" ? targetLogin(on.machine, on.login) : undefined);
 
 /** The opener a harness is handed for a sign-in: it writes the page onto the sign-in's own terminal, then hands it to
  * the browser the terminal had. A tool may open its page with no terminal of its own, so the write goes to the device. */
@@ -86,14 +90,17 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   if (hasControlChar(ask.agent) || (ask.server !== undefined && hasControlChar(ask.server))) throw new Error(controlSignInRefusal);
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
-    const reach = pageReachOf(on);
+    const login = await loginOf(on);
+    const reach = pageReachOf(on, login?.runAs);
     const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
     if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
-    const wrap = await wrapFor(on);
+    const wrap = login === undefined ? (line: string) => line : (line: string) => asLogin(login, line);
     // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it behind
-    // the sign-in's own opener, and its browser.open is what the relay carries here.
-    const env = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? signInEnv("callback") : undefined;
+    // the sign-in's own opener, and its browser.open is what the relay carries here. A joined computer keeps its
+    // shim under the login's home.
+    const shim: Record<string, string> = login === undefined ? {} : { BROWSER: placeDaemonPaths(login.home).openShim };
+    const env: Record<string, string> | undefined = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? { ...signInEnv("callback"), ...shim } : undefined;
     const command = reach === "relay" ? pagesOnPty(road.command) : road.command;
     return { line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
   }
@@ -136,12 +143,29 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   let seen = "";
   let said = "";
   const codes: string[] = [];
-  let told: { url: string; code?: string } | undefined;
+  let told: { url: string; code?: string; byAddress: boolean } | undefined;
+  /** The page whose callback port this computer could not listen on: the address the browser landed on is taken
+   * instead and carried there. */
+  let unbound: string | undefined;
+  let armed: number | undefined;
   const page = (url: string): void => {
     const code = codeIn(seen, plan.code);
-    if (told !== undefined && told.url === url && told.code === code) return;
-    told = { url, ...(code !== undefined ? { code } : {}) };
-    run.emit({ state: "waiting", url, ...(code !== undefined ? { code } : {}), paste: plan.paste(url) });
+    const byAddress = unbound === url;
+    if (told !== undefined && told.url === url && told.code === code && told.byAddress === byAddress) return;
+    told = { url, ...(code !== undefined ? { code } : {}), byAddress };
+    run.emit({ state: "waiting", url, ...(code !== undefined ? { code } : {}), paste: byAddress || plan.paste(url) });
+    const port = callbackPortOf(url);
+    const forward = run.forward;
+    if (forward === undefined || port === undefined || armed === port) return;
+    armed = port;
+    void forward
+      .arm(url)
+      .catch(() => false)
+      .then(bound => {
+        if (bound) return;
+        unbound = url;
+        if (told?.url === url) page(url);
+      });
   };
   let settle: () => void = () => {};
   const stop = new Promise<void>(r => (settle = r));
@@ -170,6 +194,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
           ? undefined
           : code => {
               codes.push(code);
+              if (unbound !== undefined && run.forward !== undefined) return run.forward.deliver(code);
               return write(`${code}\r`);
             },
       ),
