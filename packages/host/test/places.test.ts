@@ -6,17 +6,33 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
-import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { dirname, join, posix } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+/** A seam between a join's key and its place file, where another process's leave or a crash would land. */
+const fsHooks = vi.hoisted(() => ({ beforeLink: undefined as (() => void) | undefined }));
+vi.mock("node:fs", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...fs,
+    linkSync: (existing: import("node:fs").PathLike, path: import("node:fs").PathLike) => {
+      fsHooks.beforeLink?.();
+      return fs.linkSync(existing, path);
+    },
+  };
+});
+afterEach(() => {
+  fsHooks.beforeLink = undefined;
+});
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -28,6 +44,9 @@ import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
+  brokenJoinLine,
+  brokenPlaceLeftLine,
+  joinCutByLeaveLine,
   addCommand,
   addFlags,
   addLines,
@@ -695,6 +714,133 @@ describe("a computer joining a wsp", () => {
     expect(io.errors).toEqual([ALREADY_JOINED_LINE]);
   });
 
+  it("lets one of two joins racing on one computer write its place file, and refuses the other before it writes anything", async () => {
+    const home = tmp("join-race");
+    const host = await fakeHost();
+    const runner = fakeRunner();
+    const ios = [captured(), captured()];
+    const sent: string[] = [];
+    // Each join's own public key, off its first frame, so the key left on disk can be traced to the join that won.
+    const dialFor = (i: number) => (url: string): WebSocket => {
+      const ws = new WebSocket(wsUrlOf(url));
+      const send = ws.send.bind(ws) as (data: unknown) => void;
+      ws.send = ((data: unknown) => {
+        if (typeof data === "string" && sent[i] === undefined) sent[i] = String((JSON.parse(data) as Record<string, unknown>)["publicKey"]);
+        send(data);
+      }) as typeof ws.send;
+      return ws;
+    };
+    const both = await Promise.allSettled(ios.map((io, i) => joinCommand(io, [host.url], { code: codeFor(host, `R${i}`) }, { ...joinDepsFor(home, runner.run), dial: dialFor(i) })));
+    expect(both.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    const lost = both.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(String(lost?.reason)).toContain(ALREADY_JOINED_LINE);
+    const won = ios[both.findIndex(r => r.status === "fulfilled")]!;
+    expect(won.lines.join("\n")).toContain("joined the wsp at");
+    expect(ios.filter(io => io.lines.join("\n").includes("joined the wsp at"))).toHaveLength(1);
+    const onDisk = createPublicKey(createPrivateKey(readFileSync(placeKeyPath(home), "utf8"))).export({ type: "spki", format: "der" }).toString("base64");
+    expect(onDisk).toBe(sent[both.findIndex(r => r.status === "fulfilled")]);
+  });
+
+  it("refuses a join over a place file it cannot read, naming the file and wsp leave, and leaves the file for leave to take", async () => {
+    const home = tmp("join-broken");
+    const file = placeFilePath(home);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "{\"placeId\": \"p_1\", \"na");
+    const host = await fakeHost();
+    const io = captured();
+    expect(await joinCommand(io, [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(1);
+    expect(io.errors).toEqual([brokenJoinLine(file)]);
+    expect(io.errors[0]).toContain(file);
+    expect(io.errors[0]).toContain(PLACE_LEAVE_LINE);
+    expect(host.frames).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe("{\"placeId\": \"p_1\", \"na");
+  });
+
+  it("reads a key with no place file beside it, which a join cut off between its two writes leaves, as broken: join names it, leave takes it", async () => {
+    const home = tmp("join-cut");
+    const key = placeKeyPath(home);
+    mkdirSync(dirname(key), { recursive: true });
+    writeFileSync(key, "-----BEGIN PRIVATE KEY-----\n");
+    const host = await fakeHost();
+    const io = captured();
+    expect(await joinCommand(io, [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(1);
+    expect(io.errors).toEqual([brokenJoinLine(key)]);
+    expect(host.frames).toEqual([]);
+    const left = captured();
+    expect(await leaveCommand(left, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(existsSync(key)).toBe(false);
+    expect(left.lines[0]).toBe(brokenPlaceLeftLine(key));
+  });
+
+  it("reads a dangling link at the place file as broken rather than as no file: join names it before any handshake, leave takes the link", async () => {
+    const home = tmp("join-dangling");
+    const file = placeFilePath(home);
+    mkdirSync(dirname(file), { recursive: true });
+    symlinkSync(join(home, "nowhere.json"), file);
+    const host = await fakeHost();
+    const io = captured();
+    expect(await joinCommand(io, [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(1);
+    expect(io.errors).toEqual([brokenJoinLine(file)]);
+    expect(host.frames).toEqual([]);
+    expect(await leaveCommand(captured(), [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(() => lstatSync(file)).toThrow();
+  });
+
+  it("claims the key before the place file and never writes it through a link planted during the handshake", async () => {
+    const home = tmp("join-key-link");
+    const key = placeKeyPath(home);
+    const theirs = join(home, "their-file");
+    writeFileSync(theirs, "mine");
+    const host = await fakeHost();
+    const dial = (url: string): WebSocket => {
+      const ws = new WebSocket(wsUrlOf(url));
+      ws.once("open", () => {
+        mkdirSync(dirname(key), { recursive: true });
+        symlinkSync(theirs, key);
+      });
+      return ws;
+    };
+    await expect(joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, { ...joinDepsFor(home, fakeRunner().run), dial })).rejects.toThrow(ALREADY_JOINED_LINE);
+    expect(readFileSync(theirs, "utf8")).toBe("mine");
+    expect(existsSync(placeFilePath(home))).toBe(false);
+  });
+
+  it("writes the place file whole, after the key: at the moment it lands the key is there and no place file stands", async () => {
+    const home = tmp("join-order");
+    const host = await fakeHost();
+    const seen: boolean[] = [];
+    fsHooks.beforeLink = () => seen.push(existsSync(placeKeyPath(home)), existsSync(placeFilePath(home)));
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(seen).toEqual([true, false]);
+    expect(readdirSync(dirname(placeFilePath(home))).filter(f => f.startsWith(`${basename(placeFilePath(home))}.`))).toEqual([]);
+  });
+
+  it("gives way to a leave that lands between its two writes, leaving neither file behind", async () => {
+    const home = tmp("join-leave-race");
+    const host = await fakeHost();
+    // A leave in another process finds the key with no place file beside it, reads it as broken and takes it.
+    fsHooks.beforeLink = () => rmSync(placeKeyPath(home), { force: true });
+    await expect(joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(joinCutByLeaveLine);
+    expect(existsSync(placeFilePath(home))).toBe(false);
+    expect(existsSync(placeKeyPath(home))).toBe(false);
+  });
+
+  it("leaves a second join's key alone when that join landed both its files between this join's two writes", async () => {
+    const home = tmp("join-lost-link");
+    const host = await fakeHost();
+    const theirs = { placeId: "p_2", name: "other", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() };
+    // A leave takes this join's key, then another join writes its own key and place file, all before this link.
+    fsHooks.beforeLink = () => {
+      fsHooks.beforeLink = undefined;
+      rmSync(placeKeyPath(home), { force: true });
+      writeFileSync(placeKeyPath(home), "their key");
+      writeFileSync(placeFilePath(home), placeFileText(theirs));
+    };
+    await expect(joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(ALREADY_JOINED_LINE);
+    expect(readFileSync(placeKeyPath(home), "utf8")).toBe("their key");
+    expect(readPlaceFile(placeFilePath(home))?.placeId).toBe("p_2");
+  });
+
   it("takes the code as the other screen shows it, since a person copies the code they can read", async () => {
     const home = tmp("join-dashed");
     const host = await fakeHost();
@@ -892,6 +1038,18 @@ describe("taking wsp off the computer it is typed on", () => {
     const io = captured();
     expect(await leaveCommand(io, [], { home: tmp("leave-none"), run: fakeRunner().run, platform: "linux" })).toBe(1);
     expect(io.errors).toEqual([NOTHING_TO_LEAVE_LINE]);
+  });
+
+  it("takes a place file it cannot read off this computer, and says it was broken", async () => {
+    const home = tmp("leave-broken");
+    const file = placeFilePath(home);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "not json");
+    const io = captured();
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    expect(existsSync(file)).toBe(false);
+    expect(io.lines[0]).toBe(brokenPlaceLeftLine(file));
+    expect(io.lines.join("\n")).toContain(file);
   });
 
   it("stops the agent in both scopes before its unit file goes, reloads the manager after, and says it stopped it", async () => {
