@@ -180,7 +180,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     {
       kind: "action",
       value: "action:settings",
-      searchTerms: ["settings", "preferences", "computers", "projects", "devices", "account", "keybindings", "appearance", "theme", "sidebar width", "terminal size"],
+      searchTerms: ["settings", "preferences", "computers", "projects", "devices", "account", "privacy", "keybindings", "appearance", "theme", "sidebar width", "terminal size"],
       icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
       title: SETTINGS_WORDS.title,
       description: groupNames(),

@@ -6,7 +6,7 @@
 // id in groupIds.ts, one entry here and its page module. A group marked empty
 // is not drawn, which is General today: no pick the record holds is a
 // behaviour yet.
-import { FolderIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { FolderIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
 import { aboutCards, aboutMeta } from "./about.js";
@@ -14,9 +14,10 @@ import { accountCards } from "./account.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
 import { devicesCards } from "./devices.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PROJECTS_WORDS, SETTINGS_WORDS } from "./format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS } from "./format.js";
 import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { keybindingsCards } from "./keybindings.js";
+import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
 import { projectSubPages, projectsCards } from "./projects.js";
 import { normalizeSearchText } from "../lib/utils.js";
 import { itemWords, type SettingsCardData, type SettingsItem } from "./rows.js";
@@ -47,6 +48,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
   account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },
+  privacy: { name: PRIVACY_WORDS.title, glyph: ShieldIcon, restore: { off: privacyOffDefaults, patch: PRIVACY_DEFAULTS }, cards: privacyCards },
   keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, cards: keybindingsCards },
   about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards, meta: aboutMeta },
 };

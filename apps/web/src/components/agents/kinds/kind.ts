@@ -13,8 +13,9 @@ export type GroupBy = "none" | "agent" | "source" | "scope";
 /** Which host draws the manager: a task's panel or a computer's page, where a kind can group by default otherwise. */
 export type AgentsShell = "panel" | "page";
 
-/** What leads a row or a detail's head: an agent's own mark, a server's box, or the kind's glyph. */
-export type Lead = { readonly kind: "agent"; readonly agent: string; readonly faded?: boolean } | { readonly kind: "box"; readonly icon: LucideIcon } | { readonly kind: "glyph"; readonly icon: LucideIcon };
+/** What leads a row or a detail's head: an agent's own mark, a server's box with its own icon where it has a host, or
+ * the kind's glyph. */
+export type Lead = { readonly kind: "agent"; readonly agent: string; readonly faded?: boolean } | { readonly kind: "box"; readonly icon: LucideIcon; readonly host?: string } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
 /** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked. */
 export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown";

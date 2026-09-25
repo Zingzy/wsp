@@ -130,6 +130,17 @@ export interface ServersActs {
   toggle(on: AgentsOn, ask: ServerAsk & { on: boolean }): Promise<{ file: string }>;
 }
 
+/** A remote MCP server's icon by its host, asked by this host alone: a data url, or nothing where there is none or
+ * the host may not be asked for. */
+export interface ServerIcons {
+  /** Where the icons are kept, the folder forget deletes. */
+  readonly folder: string;
+  /** on is asked again before an answer is kept, so an ask that outlives the person's switch keeps nothing. */
+  icon(host: string, refresh?: boolean, on?: () => Promise<boolean>): Promise<string | null>;
+  /** Every icon kept on this computer deleted, and no ask still running keeps its answer. */
+  forget(): void;
+}
+
 /** The refusal for a runtime served without the readers. */
 export const NO_AGENTS_READER = "this runtime carries no agents reader; the host that serves the app wires one";
 
@@ -151,6 +162,8 @@ export interface AgentsReadOptions<Caller> {
   acts?: AgentsActs;
   skills?: SkillsActs;
   servers?: ServersActs;
+  /** Absent, or with the person's switch off, every server draws its glyph and nothing is asked. */
+  icons?: ServerIcons;
   /** One channel to the target's daemon: this computer's, a joined computer's over its link, or a workspace's. */
   channel: (target: AgentsTarget, onEvent: (event: Record<string, unknown>) => void, origin?: Caller) => Promise<DaemonChannel>;
   /** Something written changed what a report reads there; no target is every report. */
@@ -193,6 +206,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   serversAdd(target: AgentsTarget, ask: ServerAdd, origin?: Caller): Promise<{ file: string }>;
   serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
   serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
+  serversIcon(host: string, refresh?: boolean): Promise<string | null>;
 } {
   /** A write in one project of a computer changes the computer's report, which is the one a page reads. */
   const changed = (target?: AgentsTarget): void => o.changed(target === undefined || !("placeId" in target) ? target : { placeId: target.placeId });
@@ -439,6 +453,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     },
     serversAdd: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.add(on, ask)),
     serversRemove: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.remove(on, ask)),
+    serversIcon: async (host, refresh) => (o.icons === undefined ? null : o.icons.icon(host, refresh)),
     serversToggle: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.toggle(on, ask)),
     async addTools(target, agent, origin) {
       const acts = actsOf();

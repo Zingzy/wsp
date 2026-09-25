@@ -5,8 +5,9 @@
 // what it is drawn on, and the screen is photographed under wsp-render/themes. The Mac's glass is the window's and
 // no page shot carries it, so in the Mac's window every line of words in the chat column, the right panel and the
 // sidebar is measured over the glass as it reads over a white desktop, mid grey, the lightest it shows, and each
-// region's share is held to the theme's ground. Runs only when asked for (WSP_RENDER=1) and skips without
-// Playwright's Chromium.
+// region's share is held to the theme's ground. The theme picker on either side draws each of its pictures in that
+// picture's own theme and keeps one height across its segments, and its tooltip wears the shared skin. Runs only
+// when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -131,6 +132,63 @@ describe.skipIf(renderSkipped !== undefined)("every theme on the main screens", 
       }
       expect(low, JSON.stringify(low)).toEqual([]);
       await page.screenshot({ path: join(SHOTS, `${id}-${name}${mac ? "-mac" : ""}.png`) });
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  it.each(["light", "dark"] as const)("the picker on the %s side draws each theme's picture in that theme's own tokens and holds its height across the segments", async side => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: side, reducedMotion: "reduce" });
+    try {
+      await page.goto(`${base}/test/wireframe/index.html?theme=${side}&screen=settings-appearance`);
+      await page.waitForSelector("[data-k=theme-picker]");
+      const heights: number[] = [];
+      for (const segment of ["light", "dark", "system"] as const) {
+        await page.click(`[data-k=theme-picker] [data-segment=${segment}]`);
+        const shown = segment === "system" ? side : segment;
+        const drawn = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>("[data-theme-option]")].map(cell => {
+            const id = cell.dataset["themeOption"]!;
+            const probe = document.createElement("div");
+            probe.dataset["theme"] = id;
+            probe.style.cssText = "background: var(--background); color: var(--primary); border-color: var(--sidebar)";
+            document.body.append(probe);
+            const want = getComputedStyle(probe);
+            const fill = (part: string): string => getComputedStyle(cell.querySelector(`[data-part=${part}]`)!).fill;
+            const out = { id, ground: [fill("ground"), want.backgroundColor], primary: [fill("keycap"), want.color], sidebar: [fill("sidebar"), want.borderTopColor] };
+            probe.remove();
+            return out;
+          }),
+        );
+        expect(drawn.map(d => d.id)).toEqual(THEMES.filter(t => t.side === shown).map(t => t.id));
+        for (const d of drawn) for (const [got, want] of [d.ground, d.primary, d.sidebar]) expect(got, d.id).toBe(want);
+        heights.push(await page.evaluate(() => document.querySelector("[data-k=theme-picker]")!.getBoundingClientRect().height));
+      }
+      expect(new Set(heights).size, JSON.stringify(heights)).toBe(1);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  it.each(["light", "dark"] as const)("in the %s theme a cell's tooltip is 13 px words that fade and slide, never scale, with no arrow", async side => {
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: side });
+    try {
+      await page.goto(`${base}/test/wireframe/index.html?theme=${side}&screen=settings-appearance`);
+      await page.waitForSelector("[data-k=theme-picker]");
+      await page.hover("[data-theme-option]");
+      const tip = page.locator("[data-slot=tooltip-popup]");
+      await tip.waitFor();
+      const skin = await tip.evaluate(el => {
+        const s = getComputedStyle(el);
+        return { size: s.fontSize, transition: s.transitionProperty.split(", "), arrows: el.querySelectorAll("[data-slot*=arrow], svg").length };
+      });
+      expect(skin.size).toBe("13px");
+      expect(skin.transition).toContain("translate");
+      expect(skin.transition).toContain("opacity");
+      expect(skin.transition).not.toContain("scale");
+      expect(skin.arrows).toBe(0);
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: join(SHOTS, `tooltip-${side}.png`) });
     } finally {
       await page.close();
     }

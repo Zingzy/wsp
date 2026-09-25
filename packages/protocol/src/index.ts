@@ -1896,6 +1896,9 @@ export const Preferences = z.object({
   /** How each computer is drawn, by place id. Defaulted rather than required, so a record from a host that kept no
    * icons still parses on the wire and does not blank every other preference. */
   computerLook: z.record(z.string(), ComputerLook).default({}),
+  /** Whether the host asks Google for each remote MCP server's icon by its host name. On unless the person turns it
+   * off; defaulted so a record from a host older than the switch reads as on. */
+  serverIcons: z.boolean().default(true),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1922,7 +1925,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1953,11 +1956,16 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     access: perWorkspace(current.access, patch.access),
     projectLook: perWorkspace(current.projectLook, patch.projectLook),
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
+    serverIcons: patch.serverIcons ?? current.serverIcons,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
   };
 }
+
+/** What a set that turned server icons off answers when their folder would not go: the record is kept all the same. */
+export const serverIconsLeftLine = (folder: string, reason: string): string =>
+  `Server icons are off, but ${folder} could not be deleted: ${reason}. Delete it by hand.`;
 
 /** The host's record changed, by any client; every socket gets the whole record. */
 export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
@@ -5383,6 +5391,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
    * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
   z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
+  /** Replies with { icon: string | null }: a remote MCP server's icon by its host (the report's `transport.host`) as a
+   * data url, asked of Google's favicon service by this host alone and kept 30 days, `refresh` asking again. Null
+   * where there is none, where the host is an address or a private name, and always while the person's
+   * `serverIcons` preference is off, when nothing is asked. */
+  z.object({ id: reqId, op: z.literal("servers.icon"), host: z.string().min(1).max(260), refresh: z.boolean().optional() }),
   /** Replies with { signInId } once the agent's own sign-in runs in a pty there, as that computer's login, or joins
    * the one already running for that agent there, one per agent per target; its progress is pushed as agents.signIn
    * events to the sockets following it alone, which is what a page and its code are for, and the sign-in stops when
@@ -5476,7 +5489,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.cancel") }),
   /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */
   z.object({ id: reqId, op: z.literal("preferences.get") }),
-  /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
+  /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with
+   * { preferences: Preferences, notice? }, the notice a sentence on what the set kept but could not finish. */
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
   /** Replies with { release: ReleaseView }: the newest release as this host last read it, asking nobody. */
   z.object({ id: reqId, op: z.literal("release.get") }),

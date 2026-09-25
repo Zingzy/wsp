@@ -1,82 +1,85 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The theme as three pictures of the app, one per pick: the window drawn small in
-// the side it would take, a sidebar of bars beside a panel of bars. The
-// pictures carry fixed light and dark inks, since each shows its side whatever
-// the app is on now; the chosen one takes the ring.
-import { ThemePreference } from "@wsp/protocol";
+// The theme as a side and a pick on that side: the segments write the side, and
+// under them one picture of the app per registered theme of the side shown, each
+// drawn by carrying the theme's own mark, so a picture reads its theme's tokens
+// and no hex is written twice. System shows the side this computer is on now.
+import { Radio as RadioPrimitive } from "@base-ui/react/radio";
+import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
+import type { PreferencesPatch, ThemePreference } from "@wsp/protocol";
+import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { cn } from "../lib/utils.js";
-import { THEME_WORDS } from "./format.js";
+import { THEMES, type Theme, type ThemeSide } from "../themes/index.js";
+import { SegmentedControl } from "../components/ui/segmented-control.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { SETTINGS_WORDS, THEME_WORDS } from "./format.js";
+import { SYSTEM_DARK_QUERY, type ThemePicks } from "./theme.js";
 
-type Side = "light" | "dark";
+const MODES = (["light", "dark", "system"] as const satisfies readonly ThemePreference[]).map(value => ({ value, label: THEME_WORDS[value] }));
 
-/** Each side's inks: the window's ground, the panel inside it, the first bar of a column (its title) and the rest. */
-const SIDE_INK: Record<Side, { ground: string; panel: string; head: string; bar: string }> = {
-  light: { ground: "bg-neutral-100", panel: "bg-white border-neutral-200", head: "bg-neutral-400", bar: "bg-neutral-300" },
-  dark: { ground: "bg-neutral-950", panel: "bg-black border-neutral-800", head: "bg-neutral-600", bar: "bg-neutral-700" },
-};
+const PICK_FIELD = { light: "lightTheme", dark: "darkTheme" } as const satisfies Record<ThemeSide, keyof ThemePicks>;
 
-function Bars({ widths, ink }: { widths: readonly number[]; ink: { head: string; bar: string } }) {
+// One row for either side, as wide as the fuller side, so a flip of the segments never moves the card's height.
+const COLUMNS = Math.max(...(["light", "dark"] as const).map(side => THEMES.filter(t => t.side === side).length));
+
+const HAIRLINE = { strokeWidth: 1, vectorEffect: "non-scaling-stroke" } as const;
+
+/** The app drawn small in one theme: a sidebar of bars, a header under a hairline, and a card with its title, two
+ * lines of muted text and the primary button. */
+function Picture({ theme }: { theme: Theme }) {
   return (
-    <>
-      {widths.map((w, at) => (
-        <span key={at} className={cn("h-1.5 shrink-0 rounded-full", at === 0 ? ink.head : ink.bar)} style={{ width: `${w}%` }} />
+    <svg data-theme={theme.id} viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden className="block size-full">
+      <rect data-part="ground" width="160" height="100" className="fill-background" />
+      <rect data-part="sidebar" width="40" height="100" className="fill-sidebar" />
+      <line x1="40.5" y1="0" x2="40.5" y2="100" className="stroke-border" {...HAIRLINE} />
+      {[22, 16, 19].map((w, at) => (
+        <rect key={at} x="8" y={14 + at * 10} width={w} height="4" rx="2" className="fill-sidebar-muted-foreground/60" />
       ))}
-    </>
+      <rect x="50" y="7" width="26" height="4" rx="2" className="fill-muted-foreground/60" />
+      <line x1="40" y1="18.5" x2="160" y2="18.5" className="stroke-border" {...HAIRLINE} />
+      <rect x="50.5" y="28.5" width="99" height="60" rx="5" className="fill-card stroke-border" {...HAIRLINE} />
+      <rect x="59" y="38" width="42" height="4" rx="2" className="fill-foreground" />
+      <rect x="59" y="48" width="72" height="4" rx="2" className="fill-muted-foreground/70" />
+      <rect x="59" y="56" width="56" height="4" rx="2" className="fill-muted-foreground/70" />
+      <rect data-part="keycap" x="115" y="72" width="26" height="9" rx="2.5" className="fill-primary" />
+    </svg>
   );
 }
 
-function Window({ side, split = false, className }: { side: Side; split?: boolean; className?: string }) {
-  const ink = SIDE_INK[side];
+export function ThemePicker({ picks, onChange }: { picks: ThemePicks; onChange: (patch: PreferencesPatch) => void }) {
+  const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
+  const shown: ThemeSide = picks.theme === "system" ? (systemDark ? "dark" : "light") : picks.theme;
+  const field = PICK_FIELD[shown];
   return (
-    <div className={cn("flex h-full gap-3 p-3", ink.ground, className)}>
-      <div className={cn("flex shrink-0 flex-col gap-2.5 pt-2", split ? "w-[28%]" : "w-[14%]")}>
-        <Bars widths={[70, 100, 85, 100]} ink={ink} />
-      </div>
-      <div className={cn("flex flex-1 flex-col gap-2.5 rounded-[6px] border p-3.5", ink.panel)}>
-        <Bars widths={split ? [40, 72, 60, 32] : [55, 77, 67, 45]} ink={ink} />
-      </div>
-    </div>
-  );
-}
-
-function Picture({ theme }: { theme: ThemePreference }) {
-  if (theme !== "system") return <Window side={theme} />;
-  return (
-    <div className="flex h-full">
-      <Window side="light" split className="w-1/2 overflow-hidden" />
-      <Window side="dark" split className="w-1/2 overflow-hidden" />
-    </div>
-  );
-}
-
-export function ThemePicker({ value, onChange }: { value: ThemePreference; onChange: (theme: ThemePreference) => void }) {
-  return (
-    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-4 max-sm:gap-2" data-k="theme-picker">
-      {ThemePreference.options.map(theme => {
-        const chosen = theme === value;
-        return (
-          <button
-            key={theme}
-            type="button"
-            role="radio"
-            aria-checked={chosen}
-            data-theme-option={theme}
-            onClick={() => onChange(theme)}
-            className="group flex cursor-pointer flex-col items-center gap-2.5 outline-none"
-          >
-            <span
-              className={cn(
-                "block aspect-[16/10] w-full overflow-hidden rounded-[10px] border border-border ring-offset-2 ring-offset-background transition-shadow duration-150",
-                chosen ? "ring-2 ring-primary" : "group-hover:ring-1 group-hover:ring-border",
-                "group-focus-visible:ring-2 group-focus-visible:ring-ring",
-              )}
-            >
-              <Picture theme={theme} />
-            </span>
-            <span className={cn("text-[13px] transition-colors duration-150", chosen ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")}>{THEME_WORDS[theme]}</span>
-          </button>
-        );
-      })}
+    <div data-k="theme-picker" className="flex flex-col gap-4">
+      <SegmentedControl aria-label={SETTINGS_WORDS.theme} value={picks.theme} segments={MODES} onChange={theme => onChange({ theme })} className="self-start" />
+      <RadioGroupPrimitive
+        aria-label={SETTINGS_WORDS.themesOf(THEME_WORDS[shown])}
+        value={picks[field]}
+        onValueChange={id => onChange({ [field]: id })}
+        className="grid gap-4 max-sm:gap-2"
+        style={{ gridTemplateColumns: `repeat(${COLUMNS}, minmax(0, 1fr))` }}
+      >
+        {THEMES.filter(t => t.side === shown).map(theme => {
+          const chosen = theme.id === picks[field];
+          return (
+            <Tooltip key={theme.id}>
+              <TooltipTrigger render={<RadioPrimitive.Root value={theme.id} data-theme-option={theme.id} className="group flex min-w-0 cursor-pointer flex-col items-center gap-2 outline-none" />}>
+                <span
+                  className={cn(
+                    "block aspect-[16/10] w-full overflow-hidden rounded-lg border border-border ring-offset-2 ring-offset-background transition-shadow duration-150",
+                    chosen ? "ring-2 ring-primary" : "group-hover:ring-1 group-hover:ring-border",
+                    "group-focus-visible:ring-2 group-focus-visible:ring-ring",
+                  )}
+                >
+                  <Picture theme={theme} />
+                </span>
+                <span className={cn("truncate text-[13px] leading-4 transition-colors duration-150", chosen ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")}>{theme.word}</span>
+              </TooltipTrigger>
+              <TooltipPopup sideOffset={6}>{theme.line}</TooltipPopup>
+            </Tooltip>
+          );
+        })}
+      </RadioGroupPrimitive>
     </div>
   );
 }

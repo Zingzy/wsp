@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { skillsSearchEmptyRefusal } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { shownText, skillHitLines } from "../src/verbs.js";
-import { checkSkillFiles, getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "../src/skills-sh.js";
+import { capped, checkSkillFiles, getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "../src/skills-sh.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -66,6 +66,7 @@ describe("skills.sh, asked by this host alone", () => {
     expect(pulled).toBeLessThan(40);
     const claims: SkillsFetch = async () => new Response("{}", { headers: { "content-length": String(64 * 1024 * 1024) } });
     await expect(getSkill(claims, "a/b/c")).rejects.toThrow("skills.sh answered over 12 MB, which is not read.");
+    await expect(capped(new Response(new Uint8Array(64 * 1024 + 1)), 64 * 1024, "Google")).rejects.toThrow("Google answered over 64 KB, which is not read.");
   });
 
   it("reads a skill by its owner, repo and name, and refuses an id of any other shape before asking", async () => {

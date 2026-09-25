@@ -9,7 +9,7 @@
 import { isSystemSkill } from "@wsp/catalog";
 import { skillMdFrontmatter } from "@wsp/collect";
 import { tarOf, type TarEntry } from "@wsp/engine";
-import { SKILL_PREVIEW_BYTES, SkillHit, hasControlChar, skillsSearchEmptyRefusal, type SkillPreview } from "@wsp/protocol";
+import { SKILL_PREVIEW_BYTES, SkillHit, fmtBytes, hasControlChar, skillsSearchEmptyRefusal, type SkillPreview } from "@wsp/protocol";
 import { z } from "zod";
 
 export const SKILLS_SH = "https://skills.sh";
@@ -49,8 +49,8 @@ export function skillIdOf(id: string): { owner: string; repo: string; skill: str
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
 /** An answer's body read up to `max` bytes, the read stopped and refused the moment it goes past. */
-async function capped(res: Response, max: number): Promise<Uint8Array> {
-  const over = (): Error => new Error(`skills.sh answered over ${Math.round(max / 1024 / 1024)} MB, which is not read.`);
+export async function capped(res: Response, max: number, source = "skills.sh"): Promise<Uint8Array> {
+  const over = (): Error => new Error(`${source} answered over ${fmtBytes(max)}, which is not read.`);
   if (Number(res.headers.get("content-length") ?? 0) > max) {
     await res.body?.cancel();
     throw over();
