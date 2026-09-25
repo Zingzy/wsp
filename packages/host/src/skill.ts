@@ -4,10 +4,9 @@
 // install writes cannot drift apart.
 /// <reference path="./markdown.d.ts" />
 import text from "../../../skills/wsp/SKILL.md";
-import { THREAD_AGENTS } from "@wsp/catalog";
+import { THREAD_AGENTS, WSP_SKILL_NAME } from "@wsp/catalog";
 
-/** The skill's folder name under every agent's skills directory, and its frontmatter name. */
-export const SKILL_NAME = "wsp";
+export const SKILL_NAME = WSP_SKILL_NAME;
 
 export const WSP_SKILL: string = text;
 

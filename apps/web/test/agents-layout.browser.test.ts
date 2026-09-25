@@ -1,55 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Agents, Skills and Servers list in a real Chromium, since jsdom lays
-// nothing out, at the widths the design measured: the page's card (696), the
-// switch's edge (675), a phone's page (358), the panel (380) and its floor
-// (360). Above a 672 px container every row of every segment stands at 96 px
-// on one chip line; under it at 80 px, the chip line the container less its
-// padding (324, 348, 328) and never a second line, the slot clear of the
-// title, and the disclosure a real box that Tab reaches row by row with its
-// ring drawn. Open lines stand at 44 and 56. Then the real right panel on the
-// task on the box, and both photographed in both themes. Vite serves
-// test/wireframe, so like the other render tests it runs only when asked for
-// (WSP_RENDER=1) and skips without Playwright's Chromium.
+// The agents manager in a real Chromium, since jsdom lays nothing out. The
+// probe measures the tab control's three shapes with the app's fonts and the
+// classes as built, and checks them against the thresholds the stylesheet
+// carries. Then, at every width the shape changes over, the control never
+// scrolls and takes the shape the rule gives; the toolbar stands on the 32 px
+// ladder; every row of a tab stands at the tab's one height; the head, the
+// tabs, the search, the first group label, the first row's mark and a
+// detail's first label share one left edge, and on the computer page the
+// page's own edges; labels and rows keep one rhythm; the head, tabs and
+// toolbar stay pinned while the list scrolls; a tab's tooltip opens only
+// while its word is hidden; Tab reaches every row with its ring drawn.
+// Photographs of every tab, a detail of each kind and an agent not installed
+// at 360, 480 and 696 in both themes, and the real right panel and computer
+// page. Vite serves test/wireframe, so like the other render tests it runs
+// only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { TAB_WIDTHS } from "../src/components/agents/agentsWidths";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
-/** Each width with the row height it takes and, under the switch, the chip line's width the design measured. */
-const WIDTHS = [
-  { width: 696, row: 96, chipLine: null },
-  { width: 675, row: 96, chipLine: null },
-  { width: 358, row: 80, chipLine: 324 },
-  { width: 380, row: 80, chipLine: 348 },
-  { width: 360, row: 80, chipLine: 328 },
+const WIDTHS = [760, 696, 358, 520, 480, 380, 360] as const;
+const TABS = ["Agents", "MCP servers", "Skills"] as const;
+/** The rows of each tab stand at one height: 56, 72 where an agent's state takes a third line, 84 where a server's badge does. */
+const ROW_HEIGHT: Record<(typeof TABS)[number], number> = { Agents: 72, "MCP servers": 84, Skills: 56 };
+const DETAILS = [
+  { tab: "Agents", row: "agent-claude" },
+  { tab: "MCP servers", row: "server-global-notion-http-mcp.notion.com" },
+  { tab: "Skills", row: "skill-user-frontend-design" },
 ] as const;
-const SEGMENTS = ["Agents", "Skills", "Servers"] as const;
-
-interface RowRead {
-  id: string;
-  row: number;
-  chipsHeight: number;
-  chipsWidth: number;
-  chipsTop: number;
-  chipTops: number[];
-  trigger: { w: number; h: number };
-  titleRight: number;
-  slotLeft: number;
-  slotTop: number;
-  slotBottom: number;
-  titleTop: number;
-  titleBottom: number;
-}
 
 if (renderSkipped !== undefined) console.info(`agents layout render test skipped: ${renderSkipped}`);
 
-describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -63,7 +52,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
   }, 60_000);
   afterAll(() => stopRender(browser, vite?.child));
 
-  const open = async (query: string, viewport = { width: 900, height: 4200 }): Promise<Page> => {
+  const open = async (query: string, viewport = { width: 900, height: 5200 }): Promise<Page> => {
     await page?.close();
     // The system's side matches the one the query names, since a settings screen follows the system's.
     page = await browser!.newPage({ viewport, colorScheme: query.includes("theme=light") ? "light" : "dark" });
@@ -71,219 +60,308 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
     await page.goto(`${base}?${query}`);
     return page;
   };
+  const at = (width: number) => page!.locator(`[data-agents-width="${width}"]`);
+  const pickTab = async (width: number, name: string): Promise<void> => {
+    await at(width).locator("[data-segment]").filter({ has: page!.locator(`[aria-label="${name}"]`) }).click();
+  };
 
-  const readRows = (width: number): Promise<RowRead[]> =>
-    page!.locator(`[data-agents-width="${width}"] [data-agents-row]`).evaluateAll(rows =>
-      rows.map(row => {
-        const box = (el: Element | null) => el?.getBoundingClientRect() ?? new DOMRect();
-        const chips = row.querySelector("[data-row-chips]")!;
-        const title = row.querySelector("[data-row-title]")!;
-        const slot = row.querySelector("[data-row-slot]")!;
-        const trigger = row.querySelector("[data-row-trigger]")!;
-        const visible = [...chips.querySelectorAll("[data-chip]")].filter(c => getComputedStyle(c).display !== "none");
+  it("measures the tab control's shapes and finds the stylesheet's thresholds at them", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    const measured = await at(760)
+      .locator("[data-slot=segmented-control]")
+      .evaluate(control => {
+        const probe = control.cloneNode(true) as HTMLElement;
+        probe.style.cssText = "position:absolute;left:0;top:0;width:max-content;visibility:hidden";
+        control.ownerDocument.body.appendChild(probe);
+        const segments = [...probe.querySelectorAll<HTMLElement>("[data-segment]")];
+        const show = (sel: string, on: boolean) => probe.querySelectorAll<HTMLElement>(sel).forEach(el => (el.style.display = on ? "inline" : "none"));
+        for (const s of segments) s.style.flex = "none";
+        // Counts at three figures, the widest a computer here has shown (366 skills); the figures are tabular.
+        probe.querySelectorAll<HTMLElement>("[data-segment-count]").forEach(el => (el.textContent = "366"));
+        show("[data-segment-word]", true);
+        show("[data-segment-count]", true);
+        const w1 = probe.getBoundingClientRect().width;
+        show("[data-segment-count]", false);
+        const w2 = probe.getBoundingClientRect().width;
+        show("[data-segment-word]", false);
+        show("[data-segment-count]", true);
+        for (const s of segments) s.style.paddingInline = "10px";
+        const w3 = probe.getBoundingClientRect().width;
+        probe.remove();
+        return { w1: Math.ceil(w1), w2: Math.ceil(w2), w3: Math.ceil(w3) };
+      });
+    console.info(`agents tabs measured: W1 ${measured.w1}, W2 ${measured.w2}, W3 ${measured.w3}; thresholds full ${TAB_WIDTHS.full}, words ${TAB_WIDTHS.words}`);
+    // The container's width at each switch is the control's plus the 16 px on both sides.
+    expect(TAB_WIDTHS.full).toBe(measured.w1 + 32);
+    expect(TAB_WIDTHS.words).toBe(measured.w2 + 32);
+    expect(measured.w3 + 32).toBeLessThanOrEqual(360);
+  });
+
+  it("never scrolls the tabs, and takes the shape the rule gives at every width", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of WIDTHS) {
+      // Agents has no search and so no toolbar; the count the tabs drop stands in the toolbar of a tab that has one.
+      await pickTab(width, "Skills");
+      const read = await at(width)
+        .locator("[data-slot=segmented-control]")
+        .evaluate(control => ({
+          scroll: control.scrollWidth,
+          client: control.clientWidth,
+          words: [...control.querySelectorAll("[data-segment-word]")].map(el => getComputedStyle(el).display !== "none"),
+          counts: [...control.querySelectorAll("[data-segment-count]")].map(el => getComputedStyle(el).display !== "none"),
+          fontSize: getComputedStyle(control.querySelector("[data-segment]")!).fontSize,
+        }));
+      const counted = await at(width).locator("[data-k=agents-count]").evaluate(el => getComputedStyle(el).display !== "none");
+      console.info(`agents tabs at ${width}: ${read.client}/${read.scroll}, words ${read.words.every(Boolean)}, counts ${read.counts.every(Boolean)}, toolbar count ${counted}`);
+      expect(read.scroll, `${width}`).toBeLessThanOrEqual(read.client);
+      expect(read.fontSize).toBe("14px");
+      const full = width >= TAB_WIDTHS.full;
+      const words = width >= TAB_WIDTHS.words;
+      for (const w of read.words) expect(w, `${width} words`).toBe(words);
+      for (const c of read.counts) expect(c, `${width} counts`).toBe(full || !words);
+      // The count the tabs drop stands in the toolbar.
+      expect(counted, `${width} toolbar count`).toBe(words && !full);
+    }
+  });
+
+  it("stands the toolbar on the 32 px ladder and every row of a tab at its one height", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of WIDTHS) {
+      for (const name of TABS) {
+        await pickTab(width, name);
+        const heights = await at(width).evaluate(el => {
+          const h = (sel: string) => [...el.querySelectorAll<HTMLElement>(sel)].map(n => Math.round(n.getBoundingClientRect().height));
+          return { control: h("[data-slot=segmented-control]"), search: h("[data-agents-toolbar] [data-slot=input-group]"), view: h("[data-k=agents-view]"), add: h("[data-k=agents-add]"), rows: h("[data-agents-row]") };
+        });
+        expect(heights.control, `${width} ${name}`).toEqual([32]);
+        if (name === "Agents") expect([heights.search, heights.add]).toEqual([[], []]);
+        else expect([heights.search, heights.view, heights.add]).toEqual([[32], [32], [32]]);
+        expect(heights.rows.length).toBeGreaterThan(0);
+        for (const h of heights.rows) expect(h, `${width} ${name}`).toBe(ROW_HEIGHT[name]);
+      }
+    }
+  }, 120_000);
+
+  it("keeps one left edge for the head, the tabs, the search field, the first group label, the first row's mark and a detail's first label", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [360, 696]) {
+      await pickTab(width, "MCP servers");
+      const list = await at(width).evaluate(el => {
+        const left = el.getBoundingClientRect().left;
+        const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - left);
+        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group]"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
+      });
+      await at(width).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-trigger]').click();
+      const detail = await at(width).evaluate(el => Math.round(el.querySelector("[data-fact-label]")!.getBoundingClientRect().left - el.getBoundingClientRect().left));
+      console.info(`agents left edge at ${width}: ${JSON.stringify({ ...list, detail })}`);
+      // The panel's 16 px; the page's 21, the cards' hairline and px-5.
+      const edge = width === 360 ? 16 : 21;
+      expect([list.line, list.tabs, list.search, list.label, list.mark, detail]).toEqual([edge, edge, edge, edge, edge, edge]);
+      await at(width).locator("[data-k=agents-back]").click();
+    }
+  });
+
+  it("keeps one rhythm down the list, labels and rows 2 px apart alike with a label's words centred, and 12 px from the tabs to the search", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [360, 696]) {
+      for (const name of ["Agents", "MCP servers"] as const) {
+        await pickTab(width, name);
+        const read = await at(width).evaluate(el => {
+          const items = [...el.querySelectorAll<HTMLElement>("[data-agents-rows] [data-group-label], [data-agents-rows] [data-agents-row]")].map(n => n.getBoundingClientRect());
+          const gaps = items.slice(1).map((r, i) => Math.round(r.top - items[i]!.bottom));
+          const labels = [...el.querySelectorAll<HTMLElement>("[data-agents-rows] [data-group-label]")].map(l => {
+            const box = l.getBoundingClientRect();
+            const words = l.querySelector("span")!.getBoundingClientRect();
+            return Math.round(words.top - box.top - (box.bottom - words.bottom));
+          });
+          const tabs = el.querySelector("[data-slot=segmented-control]")!.getBoundingClientRect();
+          const toolbar = el.querySelector("[data-agents-toolbar]")?.getBoundingClientRect();
+          return { gaps, labels, toSearch: toolbar === undefined ? undefined : Math.round(toolbar.top - tabs.bottom) };
+        });
+        console.info(`agents rhythm at ${width} ${name}: ${JSON.stringify(read)}`);
+        expect(read.labels.length, `${width} ${name}`).toBeGreaterThan(0);
+        for (const g of read.gaps) expect(g, `${width} ${name}`).toBe(2);
+        for (const off of read.labels) expect(Math.abs(off), `${width} ${name}`).toBeLessThanOrEqual(1);
+        if (name !== "Agents") expect(read.toSearch).toBe(12);
+      }
+    }
+  });
+
+  it("pins the head, the tabs and the toolbar at the top while the list scrolls, in the panel and on the page", async () => {
+    await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
+    await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
+    const surface = page!.locator("[data-k=agents-surface]");
+    await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
+    // The pinned block wears the surface it stands on, so nothing under it shows and no seam is drawn.
+    const under = (el: Element): { color: string; image: string } => {
+      for (let at = el.parentElement; at !== null; at = at.parentElement) {
+        const style = getComputedStyle(at);
+        if (style.backgroundColor !== "rgba(0, 0, 0, 0)") return { color: style.backgroundColor, image: style.backgroundImage };
+      }
+      return { color: "", image: "" };
+    };
+    const panel = await surface.evaluate((el, underSrc) => {
+      const underOf = new Function(`return ${underSrc}`)() as typeof under;
+      el.scrollTop = 300;
+      const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
+      const style = getComputedStyle(top);
+      return { scrolled: el.scrollTop, offset: Math.round(top.getBoundingClientRect().top - el.getBoundingClientRect().top), bg: { color: style.backgroundColor, image: style.backgroundImage }, under: underOf(top) };
+    }, under.toString());
+    expect(panel.scrolled).toBeGreaterThan(0);
+    expect(panel.offset).toBe(0);
+    expect(panel.bg).toEqual(panel.under);
+    expect(await page!.locator("[data-k=agents-surface] [data-k=agents-line]").count()).toBe(0);
+    await open("screen=settings-computer&theme=dark", { width: 1280, height: 600 });
+    await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
+    const card = page!.locator("[data-settings-card='agents']");
+    await card.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
+    const onPage = await card.evaluate((el, underSrc) => {
+      const underOf = new Function(`return ${underSrc}`)() as typeof under;
+      let scroller = el.parentElement;
+      while (scroller !== null && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+      const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
+      scroller!.scrollTop = el.getBoundingClientRect().top - scroller!.getBoundingClientRect().top + scroller!.scrollTop + 200;
+      const style = getComputedStyle(top);
+      return { offset: Math.round(top.getBoundingClientRect().top - scroller!.getBoundingClientRect().top), bg: { color: style.backgroundColor, image: style.backgroundImage }, under: underOf(top) };
+    }, under.toString());
+    expect(onPage.offset).toBe(0);
+    expect(onPage.bg).toEqual(onPage.under);
+  });
+
+  it("stands on the computer page's edges: its outer edge on the section labels and card borders, its content on the cards' text", async () => {
+    await open("screen=settings-computer&theme=dark", { width: 1280, height: 1800 });
+    await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
+    const read = async () =>
+      page!.evaluate(() => {
+        const x = (el: Element | null | undefined) => Math.round(el?.getBoundingClientRect().left ?? NaN);
+        const manager = document.querySelector("[data-settings-card='agents'] [data-agents-manager]");
+        const card = document.querySelector("[data-settings-card]:not([data-settings-card='agents']) [data-settings-row]")?.parentElement;
         return {
-          id: (row as HTMLElement).dataset["agentsRow"] ?? "",
-          row: Math.round(box(row.querySelector("[data-row-box]")).height * 10) / 10,
-          chipsHeight: Math.round(box(chips).height),
-          chipsWidth: Math.round(box(chips).width),
-          chipsTop: Math.round(box(chips).top),
-          chipTops: visible.map(c => Math.round(box(c).top)),
-          trigger: { w: Math.round(box(trigger).width), h: Math.round(box(trigger).height) },
-          titleRight: Math.round(box(title).right),
-          slotLeft: Math.round(box(slot).left),
-          slotTop: Math.round(box(slot).top),
-          slotBottom: Math.round(box(slot).bottom),
-          titleTop: Math.round(box(title).top),
-          titleBottom: Math.round(box(title).bottom),
+          sectionLabel: x(document.querySelector("[data-settings-head]")),
+          cardBorder: x(card),
+          cardText: x(card?.querySelector("[data-settings-title]")),
+          manager: x(manager),
+          line: x(manager?.querySelector("[data-k=agents-line]")),
+          label: x(manager?.querySelector("[data-group-label] span")),
+          mark: x(manager?.querySelector("[data-agents-row] [data-row-trigger] > *")),
+          detail: x(manager?.querySelector("[data-fact-label]")),
         };
-      }),
-    );
-
-  it("stands every row of every segment at one height per width, the chips on one line, the slot clear of the title", async () => {
-    await open("screen=agents-widths&theme=dark");
-    await page!.waitForSelector("[data-agents-row]");
-    for (const w of WIDTHS) {
-      for (const segment of SEGMENTS) {
-        await page!.locator(`[data-agents-width="${w.width}"] [data-segment]`).filter({ hasText: new RegExp(`^${segment}`) }).click();
-        const rows = await readRows(w.width);
-        console.info(`agents ${w.width} ${segment}: ${rows.map(r => `${r.id} ${r.row}/${r.chipsWidth}`).join(", ")}`);
-        expect(rows.length).toBeGreaterThan(0);
-        for (const r of rows) {
-          expect(r.row, `${w.width} ${r.id}`).toBe(w.row);
-          // One chip line: 24 px tall, every chip on it.
-          expect(r.chipsHeight, `${w.width} ${r.id}`).toBe(24);
-          for (const top of r.chipTops) expect(top).toBe(r.chipsTop);
-          if (w.chipLine !== null) {
-            expect(r.chipsWidth, `${w.width} ${r.id}`).toBe(w.chipLine);
-            // The slot stands on the title line, centred on it, and the title stops short of it.
-            expect(r.titleRight).toBeLessThanOrEqual(r.slotLeft);
-            expect(Math.abs((r.slotTop + r.slotBottom) / 2 - (r.titleTop + r.titleBottom) / 2)).toBeLessThanOrEqual(1);
-            // A real box for the disclosure, the title line over the chip line.
-            expect(r.trigger.w).toBe(w.chipLine);
-            expect(r.trigger.h).toBe(52);
-          } else {
-            expect(r.titleRight).toBeLessThanOrEqual(r.slotLeft);
-            expect(r.trigger.h).toBeGreaterThan(40);
-          }
-        }
-      }
-    }
-  }, 120_000);
-
-  it("draws the two chips of each kind at two lines and three on the page, in their order", async () => {
-    await open("screen=agents-widths&theme=dark");
-    await page!.waitForSelector("[data-agents-row]");
-    const chipsAt = (width: number, id: string) =>
-      page!.locator(`[data-agents-width="${width}"] [data-agents-row="${id}"] [data-chip]`).evaluateAll(els => els.filter(el => getComputedStyle(el).display !== "none").map(el => el.textContent));
-    expect(await chipsAt(696, "agent-claude")).toEqual(["2.1.281", "wsp tools", "recipe"]);
-    expect(await chipsAt(360, "agent-claude")).toEqual(["2.1.281", "wsp tools"]);
+      });
+    const list = await read();
+    await page!.locator("[data-settings-card='agents'] [data-agents-row='agent-claude'] [data-row-trigger]").click();
+    const { detail } = await read();
+    console.info(`agents page edges: ${JSON.stringify({ ...list, detail })}`);
+    expect(list.cardBorder).toBe(list.sectionLabel);
+    expect(list.manager).toBe(list.sectionLabel);
+    expect([list.line, list.mark, detail]).toEqual([list.cardText, list.cardText, list.cardText]);
+    await page!.locator("[data-settings-card='agents'] [data-k=agents-back]").click();
+    await page!.locator("[data-settings-card='agents'] [data-segment]").filter({ has: page!.locator('[aria-label="Skills"]') }).click();
+    expect((await read()).label).toBe(list.cardText);
   });
 
-  it("lets Tab reach every row's disclosure at the panel's floor with its ring drawn, and opens the row on Enter", async () => {
+  it("opens a tab's tooltip only while its word is hidden", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
-    const triggers = page!.locator('[data-agents-width="360"] [data-row-trigger]');
-    const count = await triggers.count();
-    await page!.locator('[data-agents-width="360"] [data-k=agents-read-again]').focus();
-    const reached: string[] = [];
-    for (let i = 0; i < count + 2 && reached.length < count; i++) {
-      await page!.keyboard.press("Tab");
-      const focused = await page!.evaluate(() => {
-        const el = document.activeElement as HTMLElement | null;
-        if (el?.dataset["rowTrigger"] === undefined) return null;
-        const b = el.getBoundingClientRect();
-        const ring = getComputedStyle(el, "::before").boxShadow;
-        return { id: el.closest<HTMLElement>("[data-agents-row]")?.dataset["agentsRow"] ?? "", w: b.width, h: b.height, ring, visible: el.matches(":focus-visible") };
-      });
-      if (focused === null) continue;
-      expect(focused.w).toBeGreaterThan(0);
-      expect(focused.h).toBeGreaterThan(0);
-      expect(focused.visible).toBe(true);
-      expect(focused.ring).not.toBe("none");
-      reached.push(focused.id);
-    }
-    expect(reached).toHaveLength(count);
+    const label = at(696).locator('[data-segment-label][aria-label="Skills"]');
+    await label.hover();
+    await page!.waitForTimeout(1200);
+    expect(await page!.locator("[data-slot=tooltip-popup]").count()).toBe(0);
+    await page!.mouse.move(0, 0);
+    await label.evaluate(el => ((el.querySelector("[data-segment-word]") as HTMLElement).style.display = "none"));
+    await label.hover();
+    await page!.locator("[data-slot=tooltip-popup]").waitFor({ timeout: 3000 });
+    expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Skills");
+  });
+
+  it("lets Tab reach the rows with the ring drawn, the arrows move over them, and Enter open one", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    // From the tabs, Tab passes the held Add and lands on the list's one row in the Tab order.
+    await at(360).locator("[data-segment][data-checked]").focus();
+    await page!.keyboard.press("Tab");
+    const first = await page!.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      return { row: el.closest<HTMLElement>("[data-agents-row]")?.dataset["agentsRow"], ring: getComputedStyle(el, "::before").boxShadow, visible: el.matches(":focus-visible") };
+    });
+    expect(first.row).toBe("agent-claude");
+    expect(first.visible).toBe(true);
+    expect(first.ring).not.toBe("none");
+    await page!.keyboard.press("ArrowDown");
+    await page!.keyboard.press("ArrowDown");
     await page!.keyboard.press("Enter");
-    const opened = page!.locator('[data-agents-width="360"] [data-agents-row][data-open="true"]');
-    expect(await opened.count()).toBe(1);
+    expect(await at(360).locator("[data-agents-detail] [data-k=detail-title]").textContent()).toBe("OpenCode");
+    await page!.keyboard.press("Escape");
+    expect(await page!.evaluate(() => (document.activeElement as HTMLElement).closest<HTMLElement>("[data-agents-row]")?.dataset["agentsRow"])).toBe("agent-opencode");
   });
 
-  it("opens a row from its chevron, which lets the pointer through to the disclosure, and not from the slot's button", async () => {
-    await open("screen=agents-widths&theme=dark");
-    await page!.waitForSelector("[data-agents-row]");
-    for (const width of [696, 360]) {
-      const row = page!.locator(`[data-agents-width="${width}"] [data-agents-row="agent-opencode"]`);
-      const chevron = (await row.locator("[data-row-slot] svg").boundingBox())!;
-      await page!.mouse.click(chevron.x + chevron.width / 2, chevron.y + chevron.height / 2);
-      expect(await row.getAttribute("data-open")).toBe("true");
-      const codex = page!.locator(`[data-agents-width="${width}"] [data-agents-row="agent-codex"]`);
-      await codex.locator("[data-row-slot] [data-k=act-sign-in]").click({ force: true });
-      expect(await codex.getAttribute("data-open")).toBe("false");
-    }
-  });
-
-  it("stands the open row's lines at 44 on the page and 56 at two lines", async () => {
-    await open("screen=agents-widths&theme=dark");
-    await page!.waitForSelector("[data-agents-row]");
-    for (const [width, height] of [
-      [696, 44],
-      [360, 56],
-    ] as const) {
-      await page!.locator(`[data-agents-width="${width}"] [data-agents-row="agent-claude"] [data-row-trigger]`).click();
-      const heights = await page!.locator(`[data-agents-width="${width}"] [data-agents-row="agent-claude"] [data-open-line]`).evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      expect(heights.length).toBe(4);
-      for (const h of heights) expect(h).toBe(height);
-    }
-  });
-
-  it("lists a server's tools under its open row on the page and at the panel's floor, the lines held to two, and photographs both themes", async () => {
-    for (const theme of ["dark", "light"] as const) {
-      await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
-      const card = page!.locator("[data-settings-card='agents']");
-      await card.locator("[data-agents-row]").first().waitFor();
-      await card.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
-      for (const name of ["airtable", "github"]) {
-        const row = card.locator(`[data-agents-row$="-${name}"]`);
-        await row.locator("[data-row-trigger]").click();
-        await row.locator("[data-k=act-list-tools]").click();
-        await row.locator("[data-k=server-tools]").waitFor();
-      }
-      const airtable = card.locator('[data-agents-row$="-airtable"]');
-      expect(await airtable.locator("[data-k=server-tools-count]").textContent()).toBe("3 tools");
-      // A description clamps at two 16 px lines; a name stands on one.
-      const heights = await airtable.locator("[data-tool] > span").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      expect(Math.max(...heights)).toBeLessThanOrEqual(32);
-      expect(await card.locator('[data-agents-row$="-github"] [data-k=server-tools-refused]').textContent()).toBe("Did not answer in 20 s.");
-      expect(await card.locator('[data-agents-row$="-github"] [data-row-word]').textContent()).toBe("failed");
-      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
-      await card.screenshot({ path: join(SHOTS_DIR, `agents-tools-page-${theme}.png`) });
-      // The panel's floor: the tools stand inside the row at 360.
-      await open(`screen=agents-widths&theme=${theme}`);
-      const panel = page!.locator('[data-agents-width="360"]');
-      await panel.locator("[data-agents-row]").first().waitFor();
-      await panel.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
-      const row = panel.locator('[data-agents-row$="-airtable"]');
-      await row.locator("[data-row-trigger]").click();
-      await row.locator("[data-k=act-list-tools]").click();
-      await row.locator("[data-tool]").first().waitFor();
-      const within = await row.evaluate(el => {
-        const r = el.getBoundingClientRect();
-        return [...el.querySelectorAll("[data-tool] span")].every(s => s.getBoundingClientRect().right <= r.right + 0.5);
-      });
-      expect(within).toBe(true);
-      await panel.screenshot({ path: join(SHOTS_DIR, `agents-tools-panel-${theme}.png`) });
-    }
-  }, 120_000);
-
-  it("draws a device sign-in, a pasted answer and a token's paste inside their rows on the page, and photographs both themes", async () => {
-    for (const theme of ["dark", "light"] as const) {
-      await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 2400 });
-      const card = page!.locator("[data-settings-card='agents']");
-      await card.locator("[data-agents-row]").first().waitFor();
-      const codex = card.locator('[data-agents-row="agent-codex"]');
-      await codex.locator("[data-row-slot] [data-k=act-sign-in]").click();
-      await codex.locator("[data-k=sign-in-code]").waitFor();
-      expect(await codex.locator("[data-row-word]").textContent()).toBe("waiting on you");
-      // The two lines stand at 40 px each, reserved from the press.
-      const lines = await codex.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      expect(lines).toEqual([40, 40]);
-      const claude = card.locator('[data-agents-row="agent-claude"]');
-      await claude.locator("[data-row-trigger]").click();
-      await claude.locator("[data-row-region] [data-k=act-sign-in]").click();
-      await claude.locator("[data-k=sign-in-key]").fill("sk-ant-api03-nope");
-      await claude.locator("[data-k=sign-in-save]").click();
-      await claude.locator("[data-k=sign-in-refused]").filter({ hasText: "That is not a Claude Code token." }).waitFor();
-      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
-      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`) });
-      await card.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
-      const linear = card.locator('[data-agents-row$="-linear"]');
-      await linear.locator("[data-row-slot] [data-k=act-sign-in]").click();
-      await linear.locator("[data-k=code-field]").waitFor();
-      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-server-${theme}.png`) });
-    }
-  }, 120_000);
-
-  it("photographs the list at every width and the task's panel on Agents, in both themes", async () => {
+  it("photographs every tab and a detail of each kind at 360, 480 and 696 in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);
       await page!.waitForSelector("[data-agents-row]");
-      await page!.screenshot({ path: join(SHOTS_DIR, `agents-widths-${theme}.png`), fullPage: true });
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      for (const width of [360, 480, 696]) {
+        for (const name of TABS) {
+          await pickTab(width, name);
+          await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-${name.replace(" ", "-").toLowerCase()}-${theme}.png`), animations: "disabled" });
+        }
+        for (const d of DETAILS) {
+          await pickTab(width, d.tab);
+          await at(width).locator(`[data-agents-row="${d.row}"] [data-row-trigger]`).click();
+          await at(width).locator("[data-agents-detail]").waitFor();
+          await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-detail-${d.tab.replace(" ", "-").toLowerCase()}-${theme}.png`), animations: "disabled" });
+          await at(width).locator("[data-k=agents-back]").click();
+        }
+        await pickTab(width, "Agents");
+        await at(width).locator('[data-agents-row="agent-pi"] [data-row-trigger]').click();
+        await at(width).locator("[data-agents-detail]").waitFor();
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-detail-available-${theme}.png`), animations: "disabled" });
+        await at(width).locator("[data-k=agents-back]").click();
+      }
+      // A server's tools and one tool, at the panel's floor.
+      await pickTab(360, "MCP servers");
+      await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-row-trigger]').click();
+      await at(360).locator("[data-k=act-list-tools]").click();
+      await at(360).locator("[data-k=act-view-tools]").click();
+      await at(360).locator("[data-agents-under] [data-under-row]").first().waitFor();
+      await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tools-${theme}.png`), animations: "disabled" });
+      await at(360).locator("[data-under-row=list_records] button").click();
+      await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tool-${theme}.png`), animations: "disabled" });
+    }
+  }, 180_000);
+
+  it("draws a device sign-in under the detail's acts with Cancel first, and photographs both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
+      const card = page!.locator("[data-settings-card='agents']");
+      await card.locator("[data-agents-row]").first().waitFor();
+      await card.locator('[data-agents-row="agent-codex"] [data-row-slot] [data-k=act-sign-in]').click();
+      await card.locator("[data-k=sign-in-code]").waitFor();
+      expect(await card.locator("[data-detail-acts] button").first().textContent()).toBe("Cancel");
+      const lines = await card.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      expect(lines).toEqual([40, 40]);
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`), animations: "disabled" });
+    }
+  }, 120_000);
+
+  it("photographs the task's panel on Agents and the computer's page, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
       await open(`screen=panel-agents&theme=${theme}`, { width: 1280, height: 800 });
       await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
-      const list = await page!.locator("[data-k=agents-surface] [data-agents-list]").evaluate(el => Math.round(el.getBoundingClientRect().width));
-      const rows = await page!.locator("[data-k=agents-surface] [data-row-box]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      console.info(`panel agents ${theme}: list ${list}, rows ${rows.join(", ")}`);
-      expect(list).toBeLessThan(672);
-      for (const h of rows) expect(h).toBe(80);
-      expect(await page!.locator("[data-k=agents-computer]").textContent()).toBe("spoo");
-      await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-${theme}.png`) });
+      expect(await page!.locator("[data-k=agents-surface] [data-k=agents-title]").textContent()).toMatch(/^On spoo, for /);
+      const rows = await page!.locator("[data-k=agents-surface] [data-agents-row]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      for (const h of rows) expect(h).toBe(72);
+      expect(await page!.locator("[data-k=agents-surface] [data-k=agents-project]").getAttribute("title")).toMatch(/^[~/]/);
+      await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-${theme}.png`), animations: "disabled" });
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
       await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
-      // The settings screens follow the system's side, so the shot is only of the theme it names once asserted.
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
-      const pageRows = await page!.locator("[data-settings-card='agents'] [data-row-box]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      for (const h of pageRows) expect(h).toBe(96);
-      await page!.screenshot({ path: join(SHOTS_DIR, `agents-page-${theme}.png`), fullPage: true });
+      await page!.screenshot({ path: join(SHOTS_DIR, `agents-page-${theme}.png`), fullPage: true, animations: "disabled" });
     }
   }, 120_000);
 });

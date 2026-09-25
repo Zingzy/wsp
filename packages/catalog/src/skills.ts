@@ -2,6 +2,7 @@
 // Where each agent loads skills from. An agent entry names its own folders
 // here; the reader lists every folder of every entry, so an agent the catalog
 // gains needs nothing in the reader.
+import { SKILL_NAME } from "./context.js";
 
 /** One folder an agent loads skills from, one folder per skill with a SKILL.md inside: `~/`-relative for the
  * person's own, project-relative for a project's. `lands` is how an install puts a skill there: its files, or a
@@ -57,3 +58,10 @@ export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
 
 /** The folder the agent's own skills go in, where the wsp skill is written. */
 export const skillsDirOf = (a: { skillRoots: SkillRoots }): string => a.skillRoots.user[0].dir;
+
+/** The skill's folder name under every agent's skills directory on the person's own computer, and its frontmatter name. */
+export const WSP_SKILL_NAME = "wsp";
+
+/** A skill wsp writes and rewrites itself, on the person's computer or on a machine it made: never the person's to
+ * turn off or remove, since the next start puts it back. */
+export const isSystemSkill = (name: string): boolean => name === WSP_SKILL_NAME || name === SKILL_NAME;
