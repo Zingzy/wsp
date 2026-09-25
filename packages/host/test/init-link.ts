@@ -20,18 +20,19 @@ export function scriptedLink(state: { signedIn: boolean; hold: boolean; missing:
       link.exit(pty, 0);
       return;
     }
-    if (state.missing && line.startsWith("exec ")) {
-      link.data(pty, `bash: exec: ${line.split(" ")[1]}: not found\r\n`);
+    const typed = line.includes("; exec bash -c ");
+    if (state.missing && typed) {
+      link.data(pty, `bash: line 1: ${line.split("$'")[1]!.split(" ")[0]}: command not found\r\n`);
       link.exit(pty, 127);
       return;
     }
     // A held login that is typed into: the code from its page, which the tool takes before it ends. A bare Enter is
     // the relay answering a question the row declares, and no tool ends on that.
-    if (state.hold && line !== "" && !line.startsWith("exec ")) {
+    if (state.hold && line !== "" && !typed) {
       link.exit(pty, 0);
       return;
     }
-    if (line.includes("exec gemini")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${GEMINI_URL}\x1b\\${GEMINI_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
+    if (line.includes("exec bash -c $'gemini")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${GEMINI_URL}\x1b\\${GEMINI_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
     else link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
     if (!state.hold) link.exit(pty, state.signedIn ? 0 : 1);
   };

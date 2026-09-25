@@ -147,15 +147,27 @@ function ptyIdOf(reply: Record<string, unknown>): string {
   return id;
 }
 
-/** The one line the pty's shell runs. exec, so the pty ends with the tool whatever way it ends: an
- * interactive shell drops the rest of a `cmd; exit` line on Ctrl-C and comes back to its prompt.
- * Leading NAME=value words stay in front of exec; a command the shell cannot find exits the pty too. */
+/** What the pty prints the moment the typed line has run and the tool starts: everything before it is the shell's
+ * prompt and its echo of the line, which are not the tool's words. */
+export const TOOL_STARTS = "\x1e";
+
+/** The command as the inside of bash's $'...': every byte the line editor would act on rather than insert, and the
+ * quote, the backslash and history's `!`, spelled as the escape that turns back into it. */
+function ansiC(command: string): string {
+  let out = "";
+  for (const byte of Buffer.from(command, "utf8")) {
+    const c = String.fromCharCode(byte);
+    out += byte < 0x20 || byte > 0x7e || c === "'" || c === "\\" || c === "!" ? `\\x${byte.toString(16).padStart(2, "0")}` : c;
+  }
+  return out;
+}
+
+/** The one line typed into the pty's bash: the command handed whole to `bash -c` as one $'...' word of printable
+ * characters, so a control character in a name is data and never a key the line editor obeys, and exec'd, so the pty
+ * ends with the tool whatever way it ends. */
 export function shellLine(command: string | undefined): string | undefined {
   if (command === undefined) return undefined;
-  const words = command.split(" ");
-  let i = 0;
-  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!)) i++;
-  return `${[...words.slice(0, i), "exec", ...words.slice(i)].join(" ")} || exit\r`;
+  return `printf '\\036'; exec bash -c $'${ansiC(command)}'\r`;
 }
 
 export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {

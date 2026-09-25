@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { SIGN_IN_DEFERRED_WORD, initRowFailed, initSignInOutcome } from "@wsp/protocol";
+import { shellLine } from "../src/signin-relay.js";
 import { describe, expect, it } from "vitest";
 import { CALLBACK_DISPLAY, cadence, codeIn, handoffStage, rowFinish, signInEnv, type HandoffOptions } from "../src/init-handoff.js";
 import { SIGN_IN_CAP_MS, SignInCodes, flowHooks, type SignInFlow } from "../src/init-signin.js";
@@ -139,7 +140,7 @@ describe("the sign-in hand-off", () => {
     expect(text).toContain("GitHub CLI login: signed in");
     // Two checks: the first said no, the second said yes, and the login's own pty was killed once it had.
     expect(link.ptys.filter(p => p.writes[0]?.includes("WSP_STATUS"))).toHaveLength(2);
-    expect(link.ptys[0]!.writes[0]).toBe(`exec ${GH_LOGIN} || exit\r`);
+    expect(link.ptys[0]!.writes[0]).toBe(shellLine(GH_LOGIN));
     expect(link.ptys.every(p => p.killed)).toBe(true);
   });
 
@@ -214,14 +215,14 @@ describe("the sign-in hand-off", () => {
         link.exit(pty, 0);
         return;
       }
-      if (!line.startsWith("exec ")) return;
+      if (!line.includes("; exec bash -c ")) return;
       login = pty;
       link.data(pty, ASKED.ghWeb.replace(/\n/g, "\r\n"));
     };
     const st = stage(link, { deadlineMs: 120, pollMs: 20 });
     await st.run;
     // The command line, then the Enter gh waits on before it opens anything; nothing else is ever typed at it.
-    expect(login!.writes).toEqual([`exec ${GH_LOGIN} || exit\r`, "\r"]);
+    expect(login!.writes).toEqual([shellLine(GH_LOGIN), "\r"]);
     // The code and the page gh printed beside that question still reach the person.
     expect(st.json[1]).toMatchObject({ browserUrl: DEVICE, code: "72F3-072B" });
   });
@@ -234,7 +235,7 @@ describe("the sign-in hand-off", () => {
         link.exit(pty, 0);
         return;
       }
-      if (!line.startsWith("exec ")) return;
+      if (!line.includes("; exec bash -c ")) return;
       link.data(pty, `${ASKED.awsSso}`);
     };
     const started = Date.now();
@@ -247,7 +248,7 @@ describe("the sign-in hand-off", () => {
     expect(st.json.at(-1)).toMatchObject({ event: "sign-in-result", state: "not-signed-in" });
     expect(link.ptys[0]!.killed).toBe(true);
     // Nothing was typed at it: the answer is the person's and no guess belongs on their terminal.
-    expect(link.ptys[0]!.writes).toEqual([`exec ${loginOf("aws")} || exit\r`]);
+    expect(link.ptys[0]!.writes).toEqual([shellLine(loginOf("aws"))]);
   });
 
   it("says the page again when the code lands after it, so a row whose tool prints them in that order still shows both", async () => {
@@ -258,7 +259,7 @@ describe("the sign-in hand-off", () => {
         link.exit(pty, 0);
         return;
       }
-      if (!line.startsWith("exec ")) return;
+      if (!line.includes("; exec bash -c ")) return;
       // doppler prints its page one line before its code, and the pty hands them over as two chunks.
       link.data(pty, "Complete authorization at https://dashboard.doppler.com/workplace/auth/cli\r\n");
       setTimeout(() => link.data(pty, "Your auth code is:\r\narugula_backpack_termite_sea_lannister\r\n\r\nWaiting...\r\n"), 5);

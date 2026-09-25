@@ -13,6 +13,9 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
+  deviceHeldRefusal,
+  noSignInRefusal,
+  SIGN_IN_LINE_REFUSAL,
   AGENTS_KEY_REFUSAL,
   PLACE_LOGIN_REFUSED_KIND,
   PLACE_KEY_REFUSAL,
@@ -4079,7 +4082,7 @@ describe("the agents on a computer you own", () => {
   it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {
     const typed: string[] = [];
     const keys: string[] = [];
-    let ended = false;
+    let ended = 0;
     const acts: AgentsActs = {
       signInLine: async () => ({ command: "codex login --device-auth" }),
       signIn: async on => async run => {
@@ -4088,7 +4091,7 @@ describe("the agents on a computer you own", () => {
         run.typing(async code => void typed.push(code));
         run.emit({ state: "waiting", url: "https://auth.openai.com/codex/device", code: String(made["ptyId"]), paste: false });
         await run.stop;
-        ended = true;
+        ended += 1;
       },
       key: async (agent, key) => void keys.push(`${agent} ${key}`),
       addTools: async () => ({ file: "~/.codex/config.toml" }),
@@ -4131,7 +4134,33 @@ describe("the agents on a computer you own", () => {
     // The change goes on the one stream every socket follows; the page and the code went to the asker alone.
     await until(() => other.events.some(e => e.type === "agents.changed"));
     expect(other.events.some(e => e.type === "agents.signIn")).toBe(false);
+    // Only a socket following the sign-in types into it or stops it; its stop ends it at once.
+    expect(await other.request("agents.signInCode", { signInId, code: "x" })).toMatchObject({ ok: false, error: noSignInRefusal });
+    expect(await other.request("agents.signInStop", { signInId })).toMatchObject({ ok: false, error: noSignInRefusal });
+    expect(ended).toBe(0);
+    expect((await c.request("agents.signInStop", { signInId })).ok).toBe(true);
+    await until(() => ended === 1);
+    // A paired computer asks for neither a key nor a sign-in's line; the host's own socket asks for the line.
+    const redeemer = await WsClient.connect(srv!.port);
+    sockets.push(redeemer.ws);
+    const redeemed = await redeemer.request("pair.redeem", { code: await code(), name: "the phone" });
+    const device = await WsClient.connect(srv!.port, { token: String(redeemed["deviceToken"]) });
+    sockets.push(device.ws);
+    expect(await device.request("agents.key", { agent: "claude", key: "sk-ant-oat01-y" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.key") });
+    expect(await device.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.signInLine") });
+    // The owner's own browser on this computer is a device too: the line and the key are the host's alone.
+    const hereCode = String((await c.request("pair.issue", { here: true }))["code"]);
+    const browserRedeem = await WsClient.connect(srv!.port);
+    sockets.push(browserRedeem.ws);
+    const browser = await WsClient.connect(srv!.port, { token: String((await browserRedeem.request("pair.redeem", { code: hereCode, name: "this Mac's browser" }))["deviceToken"]) });
+    sockets.push(browser.ws);
+    expect(await browser.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: SIGN_IN_LINE_REFUSAL });
+    expect(await browser.request("agents.key", { agent: "claude", key: "sk-ant-oat01-z" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
+    expect(keys).toEqual(["claude sk-ant-oat01-x"]);
+    expect((await c.request("agents.signInLine", { target: { placeId }, agent: "codex" }))["line"]).toEqual({ command: "codex login --device-auth" });
+    // A window that goes stops what it alone followed.
+    expect((await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).ok).toBe(true);
     c.close();
-    await until(() => ended);
+    await until(() => ended === 2);
   });
 });

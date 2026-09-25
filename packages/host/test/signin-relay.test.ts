@@ -94,10 +94,11 @@ describe("URL detection", () => {
     expect(hyperlink("https://a.b/c")).toBe("\x1b]8;;https://a.b/c\x1b\\https://a.b/c\x1b]8;;\x1b\\");
   });
 
-  it("execs the command so the pty ends with it, keeps an env prefix in front, exits on a command the shell cannot find; a bare shell gets no line", () => {
-    expect(shellLine("gh auth login")).toBe("exec gh auth login || exit\r");
-    expect(shellLine("NO_BROWSER=true gemini")).toBe("NO_BROWSER=true exec gemini || exit\r");
-    expect(shellLine("codex login --device-auth")).toBe("exec codex login --device-auth || exit\r");
+  it("hands the whole command to an exec'd bash -c as one word of printable characters, after the byte that marks the tool starting; a bare shell gets no line", () => {
+    expect(shellLine("gh auth login")).toBe("printf '\\036'; exec bash -c $'gh auth login'\r");
+    expect(shellLine("NO_BROWSER=true gemini")).toBe("printf '\\036'; exec bash -c $'NO_BROWSER=true gemini'\r");
+    expect(shellLine("claude mcp login 'a\x15b!' --x\\y é")).toBe("printf '\\036'; exec bash -c $'claude mcp login \\x27a\\x15b\\x21\\x27 --x\\x5cy \\xc3\\xa9'\r");
+    expect(shellLine("a\r\nb\x03\x1b[A")!.slice(0, -1)).toMatch(/^[\x20-\x7e]+$/);
     expect(shellLine(undefined)).toBeUndefined();
   });
 });
@@ -112,7 +113,7 @@ describe("relayPty", () => {
     expect(pty.created).toEqual({ cols: 120, rows: 40, shell: "bash" });
     await tick();
     expect(pty.attached).toBe(true);
-    expect(pty.writes[0]).toBe("exec gh auth login || exit\r");
+    expect(pty.writes[0]).toBe(shellLine("gh auth login"));
     expect(term.raw).toEqual([true]);
 
     link.data(pty, "? Authenticate Git with your GitHub credentials? (Y/n) ");
@@ -345,7 +346,7 @@ describe("the questions a row declares", () => {
       const link = fakePtyLink();
       const seen: string[] = [];
       link.script = (pty: FakePty, line: string) => {
-        if (!line.startsWith("exec ")) return;
+        if (!line.includes("; exec bash -c ")) return;
         link.data(pty, `! First copy your one-time code: 72F3-072B\r\n`);
         link.data(pty, `Press Enter to open https://github.com/login/device in your browser... `);
         link.data(pty, `SSO session name (Recommended): `);
@@ -353,9 +354,9 @@ describe("the questions a row declares", () => {
       await watchPty({ link, command: "gh auth login --web", timeoutMs: 100, questions, onQuestion: a => seen.push(a.matched) });
       return { writes: link.ptys[0]!.writes, seen };
     };
-    expect(await run([ENTER])).toEqual({ writes: ["exec gh auth login --web || exit\r", "\r"], seen: ["Press Enter to open"] });
-    expect(await run([THEIRS])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: ["SSO session name (Recommended)"] });
-    expect(await run([])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: [] });
+    expect(await run([ENTER])).toEqual({ writes: [shellLine("gh auth login --web"), "\r"], seen: ["Press Enter to open"] });
+    expect(await run([THEIRS])).toEqual({ writes: [shellLine("gh auth login --web")], seen: ["SSO session name (Recommended)"] });
+    expect(await run([])).toEqual({ writes: [shellLine("gh auth login --web")], seen: [] });
   });
 });
 
@@ -365,7 +366,7 @@ describe("watchPty", () => {
     const seen: string[] = [];
     const chunks: string[] = [];
     link.script = (pty, line) => {
-      if (!line.startsWith("exec ")) return;
+      if (!line.includes("; exec bash -c ")) return;
       link.data(pty, `visit https://github.com/login/device to sign in\r\n`);
       link.data(pty, `still https://github.com/login/device, then https://github.com/settings\r\n`);
       link.exit(pty, 0);
@@ -375,7 +376,7 @@ describe("watchPty", () => {
     expect(seen).toEqual(["https://github.com/login/device", "https://github.com/settings"]);
     expect(chunks.join("")).toContain("visit https://github.com/login/device");
     expect(link.ptys[0]!.created).toMatchObject({ cols: 200, rows: 50, shell: "bash" });
-    expect(link.ptys[0]!.writes).toEqual(["exec gh auth login || exit\r"]);
+    expect(link.ptys[0]!.writes).toEqual([shellLine("gh auth login")]);
     expect(link.ptys[0]!.killed).toBe(true);
   });
 
@@ -383,7 +384,7 @@ describe("watchPty", () => {
     const held = () => {
       const link = fakePtyLink();
       link.script = (pty, line) => {
-        if (line.startsWith("exec ")) link.data(pty, "waiting for you...\r\n");
+        if (line.includes("; exec bash -c ")) link.data(pty, "waiting for you...\r\n");
       };
       return link;
     };

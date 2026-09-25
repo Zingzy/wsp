@@ -12,6 +12,7 @@ import type { AgentActs, SignInFlow, SignInStart } from "./agentsRows.js";
 interface Running {
   readonly signInId?: string;
   readonly stop?: () => void;
+  readonly off?: () => void;
 }
 
 const said = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -25,6 +26,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
   const current = useRef(targetKey);
   useEffect(() => {
     current.current = targetKey;
+    setFlows(f => (f.targetKey === targetKey ? f : { targetKey, of: {} }));
     const held = running.current;
     return () => {
       for (const run of held.values()) run.stop?.();
@@ -56,13 +58,13 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       put(rowId, () => ({ kind: "run", state: "running" }));
       const step = (e: AgentsSignInEvent): void => {
         if (e.state === "signed-in") {
-          running.current.get(rowId)?.stop?.();
+          running.current.get(rowId)?.off?.();
           running.current.delete(rowId);
           return put(rowId, undefined);
         }
         const state = e.state;
         if (state === "failed") {
-          running.current.get(rowId)?.stop?.();
+          running.current.get(rowId)?.off?.();
           running.current.delete(rowId);
         }
         put(rowId, was => ({

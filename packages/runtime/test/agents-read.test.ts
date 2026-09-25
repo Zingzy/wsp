@@ -156,10 +156,58 @@ describe("the sign-ins on a computer or a workspace", () => {
     await expect(napping.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {})).rejects.toThrow(nappingSignInRefusal("landing"));
     expect(napping.planned).toEqual([]);
     const seen: Record<string, unknown>[] = [];
-    const { stop } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
-    stop();
+    const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
+    leave();
     await tick();
     expect(t.ch.shut).toBe(1);
+  });
+
+  it("run one sign-in per agent or server on a target: a second start joins the running one, which ends once nobody follows it", async () => {
+    const t = acting({ now: "running" });
+    const a: Record<string, unknown>[] = [];
+    const b: Record<string, unknown>[] = [];
+    const [first, second] = await Promise.all([
+      t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void a.push(e)),
+      t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void b.push(e)),
+    ]);
+    expect(second.signInId).toBe(first.signInId);
+    expect(t.planned).toHaveLength(1);
+    await tick();
+    t.ch.push({ url: "https://auth.openai.com/codex/device" });
+    // One who joins late is shown where it stands.
+    const c: Record<string, unknown>[] = [];
+    const third = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void c.push(e));
+    expect(third.signInId).toBe(first.signInId);
+    expect(c).toEqual([{ type: "agents.signIn", signInId: first.signInId, state: "waiting", url: "https://auth.openai.com/codex/device" }]);
+    expect([a, b].map(x => x.length)).toEqual([1, 1]);
+    // Another server, or another target, is a sign-in of its own.
+    const other = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+    expect(other.signInId).not.toBe(first.signInId);
+    other.leave();
+    first.leave();
+    second.leave();
+    await tick();
+    expect(t.ch.shut).toBe(1);
+    third.leave();
+    await tick();
+    expect(t.ch.shut).toBe(2);
+  });
+
+  it("stop a sign-in by its id for everyone following it, so the next start runs fresh, and refuse an id that is not running", async () => {
+    const t = acting({ now: "running" });
+    const seen: Record<string, unknown>[] = [];
+    const first = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
+    const joined = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {});
+    t.api.signInStop(first.signInId);
+    const fresh = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {});
+    expect(fresh.signInId).not.toBe(first.signInId);
+    expect(t.planned).toHaveLength(2);
+    await tick();
+    expect(t.ch.shut).toBe(1);
+    expect(seen.at(-1)).toMatchObject({ signInId: first.signInId, state: "signed-in" });
+    expect(() => t.api.signInStop(first.signInId)).toThrow(noSignInRefusal);
+    joined.leave();
+    fresh.leave();
   });
 
   it("hand a key and the wsp tools to the host, and say what changed: every report for a key, the one target for the tools", async () => {

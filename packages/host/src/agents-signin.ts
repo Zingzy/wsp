@@ -11,6 +11,8 @@ import { CATALOG_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsTo
 import { asLogin, targetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
+  controlSignInRefusal,
+  hasControlChar,
   lastLine,
   noVaultKeyRefusal,
   notTokenRefusal,
@@ -27,7 +29,7 @@ import { writeEnvFile } from "./env-keys.js";
 import { STOPPED_NOTE, cadence, codeIn } from "./init-handoff.js";
 import { installMcp } from "./mcp-install.js";
 import { BOX_SIGN_IN_MS } from "./place-signin.js";
-import { runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
+import { TOOL_STARTS, runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
 
 /** One sign-in as the watched pty runs it: the line, the questions the row answers, the shape of the code it prints,
  * whether what its page hands back is typed into it, and the tool's own status check. */
@@ -42,7 +44,7 @@ export interface SignInPlan {
 const STATUS_MS = 60_000;
 const POLL_MS = 5_000;
 const GRACE_MS = 2_000;
-/** What is kept of the tool's output for the code and its last words. */
+/** What is kept of the tool's output: its first part for the code, its last for its last words. */
 const TEXT_CAP = 16 * 1024;
 
 function agentOf(id: string): (typeof CATALOG_AGENTS)[number] {
@@ -61,6 +63,7 @@ async function wrapFor(on: AgentsOn): Promise<(line: string) => string> {
 /** The sign-in as it runs where it stands. `terminal`: the person's own terminal runs it, so a row that asks them to
  * pick is theirs to answer; the app refuses it, since nobody there can. */
 export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: boolean } = {}): Promise<SignInPlan> {
+  if (hasControlChar(ask.agent) || (ask.server !== undefined && hasControlChar(ask.server))) throw new Error(controlSignInRefusal);
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
     const road = serverSignInRoad(entry.id, ask.server, on.kind === "here");
@@ -86,13 +89,13 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
 }
 
-/** The last thing the tool said, with the terminal's escapes taken out and the pty's echo of what was typed into it
- * (the command line, a code from a page) left out, since those are not the tool's words. */
-function lastSaid(text: string, typed: readonly string[]): string | undefined {
+/** The last thing the tool said, with the terminal's escapes taken out and the tool's echo of a code a page handed
+ * back left out, since that is not the tool's words either. */
+function lastSaid(text: string, codes: readonly string[]): string | undefined {
   const lines = text
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
     .split(/\r?\n|\r/)
-    .filter(l => !typed.some(t => l.includes(t)));
+    .filter(l => !codes.some(t => l.includes(t)));
   return lastLine(lines.join("\n"));
 }
 
@@ -106,7 +109,8 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (line.prepare !== undefined) await link.op("exec", { cmd: line.prepare });
   run.emit({ state: "running" });
   let seen = "";
-  const typed: string[] = [line.command];
+  let said: string | undefined;
+  const codes: string[] = [];
   let told: { url: string; code?: string } | undefined;
   const page = (url: string): void => {
     const code = codeIn(seen, plan.code);
@@ -129,6 +133,9 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
     ...(o.flushMs !== undefined ? { flushMs: o.flushMs } : {}),
     onData: chunk => {
       if (seen.length < TEXT_CAP) seen += chunk;
+      const at = said === undefined ? chunk.indexOf(TOOL_STARTS) : -1;
+      if (said === undefined && at < 0) return;
+      said = ((said ?? "") + (at < 0 ? chunk : chunk.slice(at + TOOL_STARTS.length))).slice(-TEXT_CAP);
     },
     onUrl: page,
     onScanned: () => {
@@ -139,7 +146,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
         write === undefined
           ? undefined
           : code => {
-              typed.push(code);
+              codes.push(code);
               return write(`${code}\r`);
             },
       ),
@@ -172,7 +179,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (outcome.dropped) return void run.emit({ state: "failed", said: "the computer's terminal link dropped" });
   const through = plan.status === undefined ? outcome.exitCode === 0 : await asked();
   if (through) return void run.emit({ state: "signed-in" });
-  run.emit({ state: "failed", said: lastSaid(seen, typed) ?? `it ended with exit ${outcome.exitCode}` });
+  run.emit({ state: "failed", said: lastSaid(said ?? "", codes) ?? `it ended with exit ${outcome.exitCode}` });
 }
 
 export interface HostActsOptions {

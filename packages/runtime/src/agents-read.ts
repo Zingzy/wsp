@@ -107,8 +107,9 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport>;
   tools(target: AgentsTarget, ask: { agent: string; name: string; refresh?: boolean }, origin?: Caller): Promise<ServerToolsAnswer>;
   forget(workspaceId: string): void;
-  signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; stop(): void }>;
+  signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; leave(): void }>;
   signInCode(signInId: string, code: string): Promise<void>;
+  signInStop(signInId: string): void;
   signInLine(target: AgentsTarget, ask: SignInAsk, origin?: Caller): Promise<SignInLine>;
   key(agent: string, key: string): Promise<void>;
   addTools(target: AgentsTarget, agent: string, origin?: Caller): Promise<{ file: string }>;
@@ -124,8 +125,30 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     if (o.acts === undefined) throw new Error(NO_AGENTS_READER);
     return o.acts;
   };
-  /** The code writer of each sign-in running, by its id. */
-  const running = new Map<string, { type?: (code: string) => Promise<void> }>();
+  /** Each sign-in running, by its id: its code writer, who follows its steps, the last step for one who joins, and
+   * its stop. */
+  interface Running {
+    type?: (code: string) => Promise<void>;
+    readonly followers: Set<(event: AgentsSignInEvent) => void>;
+    last?: AgentsSignInEvent;
+    stop(): void;
+  }
+  const running = new Map<string, Running>();
+  /** The one sign-in of an agent, or of one server, on a target, by that pair: a second start joins it. */
+  const starting = new Map<string, Promise<{ signInId: string; run: Running }>>();
+  const keyOf = (target: AgentsTarget, ask: SignInAsk): string => JSON.stringify([target, ask.agent, ask.server ?? null]);
+  const follow = (signInId: string, run: Running, emit: (event: AgentsSignInEvent) => void): { signInId: string; leave(): void } => {
+    if (!run.followers.has(emit)) {
+      run.followers.add(emit);
+      if (run.last !== undefined) emit(run.last);
+    }
+    return {
+      signInId,
+      leave: () => {
+        if (run.followers.delete(emit) && run.followers.size === 0) run.stop();
+      },
+    };
+  };
   /** Where a target's lines run, or the napping workspace's name. */
   const onOf = async (target: AgentsTarget, origin?: Caller): Promise<AgentsOn | Napping> => {
     if ("placeId" in target) {
@@ -168,39 +191,71 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     /** A removed workspace's last report goes with it. */
     forget: workspaceId => void last.delete(workspaceId),
     async signIn(target, ask, emit, origin) {
-      const acts = actsOf();
-      const on = await onOf(target, origin);
-      if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
-      const run = await acts.signIn(on, ask);
-      const signInId = `si_${randomBytes(6).toString("hex")}`;
-      const readers = new Set<(e: Record<string, unknown>) => void>();
-      const channel = await o.channel(target, e => readers.forEach(read => read(e)), origin);
-      let stop: () => void = () => {};
-      const stopped = new Promise<void>(r => (stop = r));
-      const slot: { type?: (code: string) => Promise<void> } = {};
-      running.set(signInId, slot);
-      const link: PtyLink = {
-        op: async (op, extra) => (await channel.send({ op, ...extra } as DaemonFrame)) as Record<string, unknown>,
-        onEvent: fn => {
-          readers.add(fn);
-          return () => readers.delete(fn);
-        },
-        closed: channel.closed,
-      };
-      const step = (s: Omit<AgentsSignInEvent, "type" | "signInId">): void => emit({ type: "agents.signIn", signInId, ...s });
-      void run({ link, emit: step, typing: write => (write === undefined ? delete slot.type : (slot.type = write)), stop: stopped })
-        .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
-        .finally(() => {
-          running.delete(signInId);
-          channel.close();
-          o.changed(target);
-        });
-      return { signInId, stop };
+      const key = keyOf(target, ask);
+      const held = starting.get(key);
+      if (held !== undefined) {
+        const { signInId, run } = await held;
+        return follow(signInId, run, emit);
+      }
+      const begun = (async () => {
+        const acts = actsOf();
+        const on = await onOf(target, origin);
+        if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
+        const plan = await acts.signIn(on, ask);
+        const signInId = `si_${randomBytes(6).toString("hex")}`;
+        const readers = new Set<(e: Record<string, unknown>) => void>();
+        const channel = await o.channel(target, e => readers.forEach(read => read(e)), origin);
+        let settle: () => void = () => {};
+        const stopped = new Promise<void>(r => (settle = r));
+        const run: Running = {
+          followers: new Set([emit]),
+          stop: () => {
+            if (starting.get(key) === begun) starting.delete(key);
+            settle();
+          },
+        };
+        running.set(signInId, run);
+        const link: PtyLink = {
+          op: async (op, extra) => (await channel.send({ op, ...extra } as DaemonFrame)) as Record<string, unknown>,
+          onEvent: fn => {
+            readers.add(fn);
+            return () => readers.delete(fn);
+          },
+          closed: channel.closed,
+        };
+        const step = (s: Omit<AgentsSignInEvent, "type" | "signInId">): void => {
+          const event: AgentsSignInEvent = { type: "agents.signIn", signInId, ...s };
+          run.last = event;
+          for (const tell of run.followers) tell(event);
+        };
+        void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped })
+          .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
+          .finally(() => {
+            running.delete(signInId);
+            if (starting.get(key) === begun) starting.delete(key);
+            channel.close();
+            o.changed(target);
+          });
+        return { signInId, run };
+      })();
+      starting.set(key, begun);
+      try {
+        const { signInId, run } = await begun;
+        return follow(signInId, run, emit);
+      } catch (e) {
+        if (starting.get(key) === begun) starting.delete(key);
+        throw e;
+      }
     },
     async signInCode(signInId, code) {
       const type = running.get(signInId)?.type;
       if (type === undefined) throw usage(noSignInRefusal);
       await type(code);
+    },
+    signInStop(signInId) {
+      const run = running.get(signInId);
+      if (run === undefined) throw usage(noSignInRefusal);
+      run.stop();
     },
     async signInLine(target, ask, origin) {
       const acts = actsOf();

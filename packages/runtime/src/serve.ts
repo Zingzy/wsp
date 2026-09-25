@@ -38,6 +38,8 @@ import {
   DEVICE_REVOKED_REFUSAL,
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
+  noSignInRefusal,
+  SIGN_IN_LINE_REFUSAL,
   HOST_RESTART_TICKET_REFUSAL,
   HOST_NO_RESTART_LINE,
   HERE_PLACE_ID,
@@ -503,6 +505,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const channels = new Map<string, DaemonChannel>();
     /** The workspaces this socket already reads this computer's own figures for. */
     const watchedSys = new Set<string>();
+    /** The sign-ins this socket started or joined: the only ones it may type a code into or stop. */
+    const signIns = new Set<string>();
     detaches.push(() => {
       for (const ch of channels.values()) ch.close();
       channels.clear();
@@ -1394,8 +1398,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "agents.signIn":
             case "servers.signIn": {
-              // A sign-in on one of the person's computers is theirs alone, and its page and code go to the socket
-              // that asked and to no other: they are what finishes that login.
+              // A sign-in on one of the person's computers is theirs alone, and its page and code go to the sockets
+              // following it and to no other: they are what finishes that login.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
                 return;
@@ -1406,10 +1410,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 else if (ws.readyState === ws.OPEN) send(event);
               };
               const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent };
-              const { signInId, stop } = await rt.agents.signIn(msg.target, ask, emit, origin);
-              detaches.push(stop);
+              const { signInId, leave } = await rt.agents.signIn(msg.target, ask, emit, origin);
+              signIns.add(signInId);
+              detaches.push(leave);
               if (ws.readyState !== ws.OPEN) {
-                stop();
+                leave();
                 return;
               }
               send({ id: msg.id, ok: true, signInId });
@@ -1419,16 +1424,23 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "agents.signInCode":
+            case "agents.signInStop":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
                 return;
               }
-              await rt.agents.signInCode(msg.signInId, msg.code);
+              if (!signIns.has(msg.signInId)) {
+                send({ id: msg.id, ok: false, error: noSignInRefusal, kind: "usage" });
+                return;
+              }
+              if (msg.op === "agents.signInCode") await rt.agents.signInCode(msg.signInId, msg.code);
+              else rt.agents.signInStop(msg.signInId);
               send({ id: msg.id, ok: true });
               return;
             case "agents.signInLine":
-              if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+              // It carries paths and commands only, and only the host's own command line runs one.
+              if (!ownRoad() || me?.kind !== "host") {
+                send({ id: msg.id, ok: false, error: ownRoad() ? SIGN_IN_LINE_REFUSAL : PLACES_TICKET_REFUSAL });
                 return;
               }
               send({ id: msg.id, ok: true, line: await rt.agents.signInLine(msg.target, { agent: msg.agent, ...(msg.name !== undefined ? { server: msg.name } : {}) }, origin) });

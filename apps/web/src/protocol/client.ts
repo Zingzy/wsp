@@ -420,9 +420,10 @@ export interface Api {
   /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
    * answer an hour unless `refresh`. A client without it holds List tools. */
   serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
-  /** Runs an agent's sign-in there, or one server's with `server`, in a watched pty; each step reaches `onStep` alone,
-   * and `stop` stops listening once the last one has come. A client without it holds Sign in. */
-  agentsSignIn?(target: AgentsTarget, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void): Promise<{ signInId: string; stop(): void }>;
+  /** Runs an agent's sign-in there, or one server's with `server`, in a watched pty, or joins the one running; each
+   * step reaches `onStep`. `stop` ends it on the host and stops listening; `off` only stops listening, once the last
+   * step has come. A client without it holds Sign in. */
+  agentsSignIn?(target: AgentsTarget, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void): Promise<{ signInId: string; stop(): void; off(): void }>;
   /** Types what a sign-in's page handed back into that sign-in's pty. */
   agentsSignInCode?(signInId: string, code: string): Promise<void>;
   /** Puts an agent's token or key into the host's vault; refused off the host's own socket. */
@@ -792,7 +793,15 @@ export function makeApi(c: ProtocolClient): Api {
         const started = await c.request<{ signInId?: unknown }>(server === undefined ? "agents.signIn" : "servers.signIn", { target, agent, ...(server === undefined ? {} : { name: server }) });
         signInId = String(started.signInId);
         for (const step of early) if (step.signInId === signInId) onStep(step);
-        return { signInId, stop: off };
+        const id = signInId;
+        return {
+          signInId: id,
+          off,
+          stop: () => {
+            off();
+            c.request("agents.signInStop", { signInId: id }).catch(() => undefined);
+          },
+        };
       } catch (e) {
         off();
         throw e;

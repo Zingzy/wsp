@@ -13,7 +13,7 @@ import { AgentsList } from "../src/components/agents/AgentsList.js";
 import { AGENTS_LIST_WORDS, type AgentsWhere } from "../src/components/agents/agentsRows.js";
 import { useAgentActs } from "../src/components/agents/useAgentActs.js";
 import { forgetAgentsReports, useAgentsReport } from "../src/components/agents/useAgentsReport.js";
-import type { Api } from "../src/protocol/client.js";
+import { makeApi, type Api, type ProtocolClient } from "../src/protocol/client.js";
 import type { ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
@@ -47,10 +47,12 @@ function host(o: { key?: (agent: string, key: string) => Promise<void> } = {}) {
   const codes: [string, string][] = [];
   const keys: [string, string][] = [];
   const added: [AgentsTarget, string][] = [];
+  const stopped: string[] = [];
+  const offs: string[] = [];
   const agentsSignIn = async (target: AgentsTarget, agent: string, server: string | undefined, onStep: (e: AgentsSignInEvent) => void) => {
     const signInId = `si_${started.length + 1}`;
     started.push({ target, agent, server, step: e => onStep({ type: "agents.signIn", signInId, ...e }) });
-    return { signInId, stop: () => {} };
+    return { signInId, stop: () => void stopped.push(signInId), off: () => void offs.push(signInId) };
   };
   useStore.setState({
     api: {
@@ -60,7 +62,7 @@ function host(o: { key?: (agent: string, key: string) => Promise<void> } = {}) {
       agentsAddTools: async (target: AgentsTarget, agent: string) => (added.push([target, agent]), { file: "~/.config/opencode/opencode.json" }),
     } as unknown as Api,
   });
-  return { started, codes, keys, added };
+  return { started, codes, keys, added, stopped, offs };
 }
 
 const settle = async (): Promise<void> => {
@@ -104,6 +106,28 @@ describe("signing an agent in from its row", () => {
     expect(opened).toHaveBeenCalledWith("https://auth.openai.com/codex/device", "_blank", "noopener,noreferrer");
     act(() => h.started[0]!.step({ state: "signed-in" }));
     expect(region("agent-codex")!.querySelector("[data-k=sign-in-flow]")).toBeNull();
+  });
+
+  it("stops the sign-in on the host when the target changes or the panel closes, holds Sign in while one runs, and only stops listening to one that ended", async () => {
+    const h = host();
+    const { rerender, unmount } = render(<List />);
+    const press = async (): Promise<void> => {
+      fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+      await settle();
+    };
+    await press();
+    act(() => h.started[0]!.step({ state: "failed", said: "Not logged in" }));
+    expect([h.stopped, h.offs]).toEqual([[], ["si_1"]]);
+    // Pressed again after a failure: a fresh run, and while it runs a press starts nothing.
+    await press();
+    await press();
+    expect(h.started).toHaveLength(2);
+    rerender(<List report={{ ...AGENTS_REPORT, target: { placeId: "p_other" } }} />);
+    expect(h.stopped).toEqual(["si_2"]);
+    rerender(<List />);
+    await press();
+    unmount();
+    expect(h.stopped).toEqual(["si_2", "si_3"]);
   });
 
   it("types a code the page handed back into the tool, and a failure says what the tool said", async () => {
@@ -223,5 +247,25 @@ describe("the wsp tools and the report after a write", () => {
     act(() => push({ type: "agents.changed", seq: 3 } as ProtocolEvent));
     await settle();
     expect(reads).toHaveLength(3);
+  });
+});
+
+describe("the sign-in on the socket", () => {
+  it("stop asks the host to end that sign-in and stops listening; off only stops listening", async () => {
+    const asked: [string, Record<string, unknown> | undefined][] = [];
+    const listeners = new Set<(e: ProtocolEvent) => void>();
+    let n = 0;
+    const c = {
+      request: async (op: string, params?: Record<string, unknown>) => (asked.push([op, params]), op === "agents.signIn" ? { signInId: `si_${++n}` } : {}),
+      subscribe: (fn: (e: ProtocolEvent) => void) => (listeners.add(fn), () => void listeners.delete(fn)),
+    } as unknown as ProtocolClient;
+    const api = makeApi(c);
+    const a = await api.agentsSignIn!({ placeId: "p_spoo" }, "codex", undefined, () => {});
+    a.off();
+    expect(listeners.size).toBe(0);
+    const b = await api.agentsSignIn!({ placeId: "p_spoo" }, "codex", undefined, () => {});
+    b.stop();
+    expect(listeners.size).toBe(0);
+    expect(asked.map(([op, p]) => [op, p?.["signInId"]])).toEqual([["agents.signIn", undefined], ["agents.signIn", undefined], ["agents.signInStop", "si_2"]]);
   });
 });

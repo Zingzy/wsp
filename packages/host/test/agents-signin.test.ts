@@ -6,9 +6,10 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellLine } from "../src/signin-relay.js";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
-import { HERE_PLACE_ID, addToolsHereRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
 import { hostActs, planSignIn, watchSignIn } from "../src/agents-signin.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
@@ -65,6 +66,17 @@ describe("the line a sign-in runs where it stands", () => {
     await expect(planSignIn(rootBox(), { agent: "codex", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Codex", "codex mcp login 'notion'", "callback"));
     await expect(planSignIn({ kind: "here" }, { agent: "gemini", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Gemini CLI", "/mcp auth notion", "inside"));
   });
+
+  it("refuses a server or agent named with a control character before anything is planned or dialled", async () => {
+    let probed = 0;
+    const box = rootBox();
+    const counted: AgentsOn = { ...box, machine: { exec: async (...a: Parameters<Pick<Machine, "exec">["exec"]>) => (probed++, (box as { machine: Pick<Machine, "exec"> }).machine.exec(...a)) } } as AgentsOn;
+    for (const ask of [{ agent: "claude", server: "notion\x15echo hi; #" }, { agent: "claude", server: "notion\r" }, { agent: "codex\x03" }]) {
+      await expect(planSignIn(counted, ask)).rejects.toThrow(controlSignInRefusal);
+      await expect(planSignIn(counted, ask, { terminal: true })).rejects.toThrow(controlSignInRefusal);
+    }
+    expect(probed).toBe(0);
+  });
 });
 
 describe("a watched sign-in", () => {
@@ -94,7 +106,7 @@ describe("a watched sign-in", () => {
     expect(t.link.ops[0]).toEqual({ op: "exec", extra: { cmd: "mkdir -p '/var/lib/wsp/logins/codex'" } });
     const [flow] = t.link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(flow!.writes[0]).toBe("exec codex login --device-auth || exit\r");
+    expect(flow!.writes[0]).toBe(shellLine("codex login --device-auth"));
     expect(t.steps[0]).toEqual({ state: "running" });
     expect(t.steps).toContainEqual({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false });
     expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
@@ -237,7 +249,7 @@ describe("the sign-in lines at the person's terminal", () => {
     expect(await runVerb(verb, ["agents", "signin", "gemini"], io, () => "/tmp/state.json", { env: {}, dial: async () => client, terminal: terminal(), open: async () => false })).toBe(1);
     expect(asked.find(a => a.op === "agents.signInLine")?.params).toEqual({ target: { placeId: HERE_PLACE_ID }, agent: "gemini" });
     expect(asked.find(a => a.op === "daemon.open")?.params).toEqual({ placeId: HERE_PLACE_ID });
-    expect(link.ptys[0]!.writes[0]).toBe("exec gemini --skip-trust || exit\r");
+    expect(link.ptys[0]!.writes[0]).toBe(shellLine("gemini --skip-trust"));
     expect(io.lines).toEqual(["Gemini CLI is not signed in on this computer."]);
   });
 

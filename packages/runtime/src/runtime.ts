@@ -1261,11 +1261,14 @@ export interface Runtime {
     read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport>;
     /** One MCP server there, started or asked once for its tools on the person's ask; a napping workspace is refused. */
     tools(target: AgentsTarget, ask: { agent: string; name: string; refresh?: boolean }, origin?: Caller): Promise<ServerToolsAnswer>;
-    /** Runs an agent's sign-in, or one server's, in a watched pty there; each step goes to `emit` alone, and `stop`
-     * ends it. A napping workspace is refused. */
-    signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; stop(): void }>;
+    /** Runs an agent's sign-in, or one server's, in a watched pty there, or joins the one already running for that
+     * agent or server there; each step goes to `emit` and to nobody outside the sign-in, and `leave` stops following
+     * it, which ends it once nobody follows it. A napping workspace is refused. */
+    signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; leave(): void }>;
     /** Types what a page handed back into that sign-in's pty. */
     signInCode(signInId: string, code: string): Promise<void>;
+    /** Ends that sign-in and kills its pty, for everyone following it. */
+    signInStop(signInId: string): void;
     /** The sign-in as the line the person's own terminal runs there. */
     signInLine(target: AgentsTarget, ask: SignInAsk, origin?: Caller): Promise<SignInLine>;
     /** Writes an agent's token or key into this host's vault. */

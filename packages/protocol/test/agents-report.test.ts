@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, THREAD_OPS, DEVICE_OPS, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
+import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
 
 const report = {
   target: { placeId: "here" },
@@ -58,6 +58,7 @@ describe("the agents report on the wire", () => {
       { id: "5", op: "agents.signInLine", target: { placeId: "here" }, agent: "claude", name: "notion" },
       { id: "6", op: "agents.key", agent: "claude", key: "sk-ant-oat01-x" },
       { id: "7", op: "agents.addTools", target: { placeId: "here" }, agent: "codex" },
+      { id: "8", op: "agents.signInStop", signInId: "si_1" },
     ];
     for (const act of acts) {
       expect(RuntimeRequest.parse(act)).toEqual(act);
@@ -68,6 +69,13 @@ describe("the agents report on the wire", () => {
     expect(requestSecrets(acts[2])).toEqual(["ABCD-1234"]);
     expect(requestSecrets(acts[5])).toEqual(["sk-ant-oat01-x"]);
     expect(() => RuntimeRequest.parse({ id: "8", op: "agents.signIn", target: { placeId: "p" } })).toThrow();
+  });
+
+  it("a name holding a control character is caught by one predicate, whichever one it holds, and refused in one sentence naming its file", () => {
+    for (const c of ["\x00", "\x03", "\x15", "\r", "\n", "\x1b", "\x7f"]) expect(hasControlChar(`notion${c}echo hi`)).toBe(true);
+    expect(hasControlChar("notion-2 (work)")).toBe(false);
+    expect(hasControlChar("ünïcode")).toBe(false);
+    expect(controlNameRefusal("~/.claude.json")).toBe("~/.claude.json names a server with a control character in its name, which was left out.");
   });
 
   it("a sign-in's progress carries the page, the code it printed and whether a code goes back, and the change event rides the stream", () => {

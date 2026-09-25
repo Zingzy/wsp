@@ -570,7 +570,7 @@ describe("the init job, manual road", () => {
     expect(initStageCount(initBuildRows(done.rows).rows)).toMatchObject({ done: initBuildRows(done.rows).rows.filter(r => r.kind === "stage").length });
     expect(done.progress).toEqual({ done: done.progress.total, total: done.progress.total });
     // Nothing ran on the machine for either deferred row: the only ptys are the build's own quiet runs.
-    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.startsWith("exec "))).toEqual([]);
+    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.includes("; exec bash -c "))).toEqual([]);
     expect(done.golden).toEqual({ version: 1 });
   });
 
@@ -824,7 +824,7 @@ describe("the init job, manual road", () => {
     // A login on the callback road runs with a browser to find, so its page can return to the machine instead.
     expect(held.ptys.some(p => (p.created["env"] as Record<string, string> | undefined)?.["DISPLAY"] !== undefined)).toBe(true);
     await f.jobs.signInCode({ tool: "gemini", code: PASTED });
-    const login = held.ptys.find(p => p.writes[0]?.includes("exec gemini"))!;
+    const login = held.ptys.find(p => p.writes[0]?.includes("exec bash -c $'gemini"))!;
     expect(login.writes.slice(1)).toContain(`${PASTED}\r`);
     await f.settled();
     const done = f.jobs.view()!;
@@ -869,7 +869,7 @@ describe("the init job, manual road", () => {
     expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ ...initSignInOutcome("signed-in", "darwin"), detail: "token held on this computer" });
     // Nothing of the token is on the view, and no pty ran for it.
     expect(JSON.stringify(f.events)).not.toContain(TOKEN);
-    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.startsWith("exec "))).toEqual([]);
+    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.includes("; exec bash -c "))).toEqual([]);
   });
 
   it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with that sentence, never the raw error", async () => {

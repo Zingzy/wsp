@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A daemon link whose ptys are scripted: every op is recorded, typed bytes are
 // kept per pty, a complete line (ending in \r) is echoed back the way a tty
-// would and handed to the script, and the test pushes output and exits.
-import type { PtyLink } from "../src/signin-relay.js";
+// would, followed by what a sign-in line prints as its tool starts, and handed
+// to the script, and the test pushes output and exits.
+import { TOOL_STARTS, shellLine, type PtyLink } from "../src/signin-relay.js";
+
+/** How a sign-in line starts as typed; the fake's shell prints what that line's printf prints once it runs. */
+const TYPED_PREFIX = shellLine("")!.split("exec")[0]!;
 
 export interface FakePty {
   id: string;
@@ -85,6 +89,7 @@ export function fakePtyLink(): FakePtyLink {
           partial.set(pty.id, lines.pop() ?? "");
           for (const line of lines) {
             link.data(pty, `${line}\r\n`);
+            if (line.startsWith(TYPED_PREFIX)) link.data(pty, TOOL_STARTS);
             link.script?.(pty, line);
           }
           return { ok: true };

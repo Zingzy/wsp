@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_ROWS, sharedLoginOf } from "@wsp/catalog";
 import { BOX_SIGN_IN_MS, placeLink, relaySignIn, sharedAgentsOn, sharedOn, targetLink } from "../src/place-signin.js";
-import type { RelayTerminal } from "../src/signin-relay.js";
+import { shellLine, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import type { HostClient } from "../src/verbs.js";
 import type { SignInLine } from "@wsp/protocol";
@@ -57,7 +57,7 @@ describe("the sign-in the host planned, run on that computer's terminal and show
     expect(link.ops.filter(o => o.op === "exec").map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
     const [flow, status] = link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(flow!.writes[0]).toBe("exec codex login --device-auth || exit\r");
+    expect(flow!.writes[0]).toBe(shellLine("codex login --device-auth"));
     expect(status!.created["env"]).toMatchObject({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
     expect(status!.writes[0]).toContain("codex login status");
     expect(answer).toEqual({ signedIn: true });

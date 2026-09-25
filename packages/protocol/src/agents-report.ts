@@ -186,11 +186,25 @@ export const serverSignInCopyRefusal = (agent: string, line: string, why: "insid
 /** Why the wsp tools go only into an agent's config on this computer: a thread elsewhere is handed them on every turn. */
 export const addToolsHereRefusal = "The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.";
 
+/** A C0 control character or DEL: what an interactive terminal acts on rather than shows, so a name holding one is
+ * never a name wsp runs anything by. */
+export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f]/.test(s);
+
+/** Why a server a config names was left out of the report. */
+export const controlNameRefusal = (file: string): string => `${file} names a server with a control character in its name, which was left out.`;
+
+/** Why a sign-in naming a server or an agent with a control character in it was not run. */
+export const controlSignInRefusal = "That name holds a control character, so no sign-in runs for it.";
+
 /** The sign-in a code was sent to is not running. */
 export const noSignInRefusal = "That sign-in is not running any more.";
 
 /** Why a napping workspace ran no sign-in: nothing here wakes a machine. */
 export const nappingSignInRefusal = (name: string): string => `${name} is napping, and a sign-in runs there only while it runs; wake it to sign in`;
+
+/** Why agents.signInLine was refused: the line is for the host's own command line, which runs it in the person's
+ * terminal. */
+export const SIGN_IN_LINE_REFUSAL = "only the host's own command line asks for a sign-in's line; run wsp agents signin on the computer the host runs on";
 
 /** Why agents.key was refused: a token goes into the vault only from a socket holding this host's own token. */
 export const AGENTS_KEY_REFUSAL = "only a socket holding this host's own token may put a key in its vault; use the app on the computer the host runs on, or wsp agents key there";

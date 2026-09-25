@@ -5262,15 +5262,18 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
    * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
   z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
-  /** Replies with { signInId } once the agent's own sign-in runs in a pty there, as that computer's login; its
-   * progress is pushed as agents.signIn events to this socket alone, which is what a page and its code are for, and
-   * the sign-in stops when this socket goes. Refused for a row that asks the person to pick, which runs in their
-   * terminal, and for a row whose login is a token or key this host keeps. */
+  /** Replies with { signInId } once the agent's own sign-in runs in a pty there, as that computer's login, or joins
+   * the one already running for that agent there, one per agent per target; its progress is pushed as agents.signIn
+   * events to the sockets following it alone, which is what a page and its code are for, and the sign-in stops when
+   * the last of them goes. Refused for a row that asks the person to pick, which runs in their terminal, for a row
+   * whose login is a token or key this host keeps, and for a name holding a control character. */
   z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string() }),
   /** The same for one MCP server of that agent's config, by the harness's own command for it. */
   z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string() }),
   /** Types what a sign-in's page handed back into that sign-in's own pty, with the Enter the person would press. */
   z.object({ id: reqId, op: z.literal("agents.signInCode"), signInId: z.string(), code: z.string().min(1) }),
+  /** Stops a sign-in this socket started or joined, killing its pty for everyone following it. */
+  z.object({ id: reqId, op: z.literal("agents.signInStop"), signInId: z.string() }),
   /** Replies with { line: SignInLine }: the sign-in, or one server's with `name`, as the line the person's own
    * terminal runs there over its daemon channel. */
   z.object({ id: reqId, op: z.literal("agents.signInLine"), target: AgentsTarget, agent: z.string(), name: z.string().optional() }),
