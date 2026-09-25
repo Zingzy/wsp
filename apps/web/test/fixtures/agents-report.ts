@@ -64,7 +64,7 @@ export const AGENTS_REPORT: AgentsReport = {
  * github that did not answer in time. */
 export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
   airtable: {
-    auth: "open",
+    auth: "connected",
     readAt: "2026-09-24T12:00:00.000Z",
     tools: [
       { name: "list_records", description: "List records in a table, filtered by a formula and sorted by any field, a page of up to one hundred records at a time with the offset for the next page." },

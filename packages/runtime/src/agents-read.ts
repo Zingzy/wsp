@@ -4,13 +4,13 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type WorkspacePhase } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 
 /** What the host reads off a target: the report less what the runtime stamps on it. */
-export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale">;
+export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach">;
 
 /** Where a read runs: this computer, with a project's folder when a workspace here is the target; a computer you
  * joined, over its link, with the login and the sign-ins and versions its own report carries; or any other machine,
@@ -18,7 +18,12 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale">;
 export type AgentsOn =
   | { kind: "here"; project?: string }
   | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string }
-  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string };
+  /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
+  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
+
+/** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
+ * planned by and the report tells the app. */
+export const pageReachOf = (on: AgentsOn): PageReach => (on.kind === "here" ? "here" : on.kind === "machine" && on.relayed === true ? "relay" : "none");
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -32,7 +37,10 @@ export interface ServerToolsAsk {
 /** How the host reads the agents off a target, and asks one server there for its tools. Absent on a runtime wired
  * without it, where every read is refused. */
 export interface AgentsReader {
-  read(on: AgentsOn): Promise<AgentsRead>;
+  /** `key` names the target, which what a read checks is kept under. */
+  read(on: AgentsOn, key?: string): Promise<AgentsRead>;
+  /** Drops what was kept for the target, which a sign-in there has just changed. */
+  forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
 }
 
@@ -112,6 +120,11 @@ export interface AgentsReadOptions<Caller> {
   /** Something written changed what a report reads there; no target is every report. */
   changed: (target?: AgentsTarget) => void;
   now: () => number;
+  /** Whether this host forwards a workspace's sign-in callback port from this computer, which is the relay's own
+   * answer for every workspace. */
+  relayed?: () => boolean;
+  /** The host's log: each sign-in's start and end, never its page, code or token. */
+  log?: (line: string) => void;
 }
 
 /** How many hits a search asks skills.sh for where the asker names no number. */
@@ -143,7 +156,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
 } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
-  const stamped = (target: AgentsTarget, read: AgentsRead): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
+  const stamped = (target: AgentsTarget, read: AgentsRead & { reach: PageReach }): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
   const readerOf = (): AgentsReader => {
     if (o.reader === undefined) throw new Error(NO_AGENTS_READER);
     return o.reader;
@@ -212,7 +225,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
-    return ws.local ? { kind: "here", project: ws.project } : { kind: "machine", machine: ws.machine, project: ws.project };
+    return ws.local ? { kind: "here", project: ws.project } : { kind: "machine", machine: ws.machine, project: ws.project, ...(o.relayed?.() === true ? { relayed: true } : {}) };
   };
   return {
     async read(target, origin) {
@@ -223,7 +236,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const report = stamped(target, await reader.read(on));
+      const report = stamped(target, { ...(await reader.read(on, JSON.stringify(target))), reach: pageReachOf(on) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;
     },
@@ -242,12 +255,19 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         const { signInId, run } = await held;
         return follow(signInId, run, emit);
       }
+      const log = o.log ?? (line => console.warn(line));
+      const what = `${withoutControlChars(ask.agent)}${ask.server !== undefined ? `, server ${withoutControlChars(ask.server)}` : ""}, on ${"workspaceId" in target ? `workspace ${target.workspaceId}` : `computer ${target.placeId}`}`;
       const begun = (async () => {
         const acts = actsOf();
         const on = await onOf(target, origin);
         if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
-        const plan = await acts.signIn(on, ask);
+        const plan = await acts.signIn(on, ask).catch((e: unknown) => {
+          log(`sign-in refused: ${what}: ${e instanceof Error ? e.message : String(e)}`);
+          throw e;
+        });
         const signInId = `si_${randomBytes(6).toString("hex")}`;
+        log(`sign-in ${signInId} started: ${what}`);
+        let stoppedBy = false;
         const readers = new Set<(e: Record<string, unknown>) => void>();
         const channel = await o.channel(target, e => readers.forEach(read => read(e)), origin);
         let settle: () => void = () => {};
@@ -256,6 +276,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           followers: new Set([emit]),
           stop: () => {
             if (starting.get(key) === begun) starting.delete(key);
+            stoppedBy = true;
             settle();
           },
         };
@@ -279,6 +300,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
             running.delete(signInId);
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();
+            log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
+            o.reader?.forget?.(JSON.stringify(target));
             o.changed(target);
           });
         return { signInId, run };

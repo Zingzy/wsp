@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import type { AgentsReport } from "@wsp/protocol";
 import type { DocState, FlowView, RowAct, RowsContext } from "../agentsRows.js";
 
-export type GroupBy = "none" | "agent" | "source" | "scope" | "state";
+export type GroupBy = "none" | "agent" | "source" | "scope";
 
 /** Which host draws the manager: a task's panel or a computer's page, where a kind can group by default otherwise. */
 export type AgentsShell = "panel" | "page";
@@ -15,10 +15,10 @@ export type AgentsShell = "panel" | "page";
 /** What leads a row or a detail's head: an agent's own mark, a server's box, or the kind's glyph. */
 export type Lead = { readonly kind: "agent"; readonly agent: string; readonly faded?: boolean } | { readonly kind: "box"; readonly icon: LucideIcon } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
-/** A server's state as its one badge says it, the one badge in the feature. */
-export type ServerState = "connected" | "needs-sign-in" | "failed" | "off" | "unknown";
+/** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked. */
+export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown";
 
-export interface StatusBadge {
+export interface ServerStatus {
   readonly state: ServerState;
   readonly words: string;
   readonly hover?: string;
@@ -34,7 +34,7 @@ export interface RowView {
   readonly subtext?: string;
   /** Not on the computer: the name faded and the subtext the catalog's sentence, not a fact. */
   readonly available?: boolean;
-  readonly badge?: StatusBadge;
+  readonly status?: ServerStatus;
   /** A second line under the subtext in the muted mono: an agent's sign-in state. */
   readonly state?: string;
   /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
@@ -49,7 +49,7 @@ export interface Fact {
   readonly label: string;
   readonly value?: string;
   readonly agent?: string;
-  readonly badge?: StatusBadge;
+  readonly status?: ServerStatus;
   readonly fact?: string;
   readonly hover?: string;
   /** The value is a line somebody would paste: a Copy glyph stands beside it on hover. */

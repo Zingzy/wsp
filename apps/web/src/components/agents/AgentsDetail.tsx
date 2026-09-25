@@ -18,7 +18,7 @@ import { Checkbox } from "../ui/checkbox.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group.js";
 import { SegmentedControl } from "../ui/segmented-control.js";
 import { Spinner } from "../ui/spinner.js";
-import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
+import { ActButton, AgentMarks, LeadMark, ServerStatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import type { AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
@@ -128,7 +128,7 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
       <span className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1">
         <span className="flex min-w-0 max-w-full items-center gap-2">
           {fact.agent === undefined ? null : <HarnessMark harness={fact.agent} label={agentName(fact.agent)} className="size-3.5" />}
-          {fact.badge === undefined ? null : <ServerBadge badge={fact.badge} />}
+          {fact.status === undefined ? null : <ServerStatusView status={fact.status} />}
           {fact.value === undefined ? null : fact.line === true ? (
             <CopyRow k={`fact-${fact.id}`} value={fact.value} whole />
           ) : fact.href !== undefined ? (

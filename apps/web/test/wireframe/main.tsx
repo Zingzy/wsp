@@ -69,6 +69,9 @@
 //                    card's width and a phone's (760, 696, 358) and as the
 //                    panel at the widths its shape changes over (520, 480,
 //                    380 and its 360 floor)
+//   agents-states    the manager on this Mac at the panel's floor and the
+//                    page's card, its servers in every state the report
+//                    reads, a Sign in waiting on the browser
 //   panel-agents     the task on the box selected, its panel open on Agents
 //   skill-preview    agents-widths with every SKILL.md a hostile one, for the
 //                    restricted renderer's render test
@@ -81,6 +84,7 @@ import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
 import { useServerTools } from "../../src/components/agents/useServerTools";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
+import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
@@ -398,9 +402,11 @@ const api = {
   agentsRead: async () => AGENTS_REPORT,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
-  agentsSignIn: async (_target: unknown, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
-    const url = server === undefined ? "https://auth.openai.com/codex/device" : "https://claude.ai/oauth/authorize?code=true";
-    setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: true }) }), 30);
+  // On this Mac a server's harness opens the browser itself and nothing is pasted back.
+  agentsSignIn: async (target: { placeId?: string }, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
+    const here = target.placeId === "here";
+    const url = server === undefined ? "https://auth.openai.com/codex/device" : here ? "https://mcp.notion.com/authorize?client_id=wsp" : "https://claude.ai/oauth/authorize?code=true";
+    setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: !here }) }), 30);
     return { signInId: `si_${agent}`, stop: () => {} };
   },
   agentsSignInCode: async () => {},
@@ -532,6 +538,36 @@ function AgentsWidths() {
   );
 }
 
+/** This Mac's report with a server in every state the report reads: no sign-in needed, connected, signed in by its
+ * harness, needs sign-in and failed. */
+const STATES_REPORT = {
+  ...AGENTS_REPORT,
+  target: { placeId: "here" },
+  servers: AGENTS_REPORT.servers.map(s => (s.name === "github" ? { ...s, auth: "connected" as const } : s.name === "linear" ? { ...s, auth: "signed-in" as const } : s.name === "sentry" ? { ...s, enabled: true, auth: "failed" as const } : s)),
+};
+function AgentsStates() {
+  const tools = useServerTools(STATES_REPORT.target);
+  const acts = useAgentActs(STATES_REPORT.target);
+  return (
+    <div className="flex flex-col gap-10 bg-background p-4">
+      {([{ shell: "panel", width: 360 }, { shell: "page", width: 696 }] as const).map(w => (
+        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
+          <AgentsManager
+            shell={w.shell}
+            head={w.shell === "panel" ? { title: "On this Mac, for wsp" } : { line: "Agents, MCP servers and skills on this Mac." }}
+            report={STATES_REPORT}
+            reading={false}
+            on="this Mac"
+            ctx={{ where: "here", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
+            onRefresh={() => {}}
+            now={Date.parse(AGENTS_REPORT.readAt)}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
 
@@ -577,6 +613,8 @@ createRoot(document.getElementById("root")!).render(
   <>
     {screen === "agents-widths" || screen === "skill-preview" ? (
       <AgentsWidths />
+    ) : screen === "agents-states" ? (
+      <AgentsStates />
     ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">
         <FirstRun />

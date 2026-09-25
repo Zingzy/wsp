@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One sign-in as it stands, drawn under an agent's or a server's acts in its
-// detail: a watched run holds two lines from the press, the code the tool printed
-// with Open, then the field a page's answer goes back through where the tool
-// takes one; a token or key is pasted under the line that mints it; a row
-// only the person can finish shows the line for their terminal. A failure
+// detail: a watched run holds two lines from the press, the code the tool
+// printed with Open, then the field a page's answer goes back through where
+// the tool takes one, or the wait on the browser where the harness takes the
+// redirect itself; a token or key is pasted under the line that mints it; a
+// row only the person can finish shows the line for their terminal. A failure
 // lands in the refusal slot in the tool's own words.
 import { CheckIcon, ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
@@ -22,7 +23,9 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
   if (flow.kind === "copy") {
     return (
       <div data-k="sign-in-flow" className="flex flex-col gap-2">
-        <span className={LABEL}>{AGENTS_LIST_WORDS.runInTerminal}</span>
+        <span data-k="sign-in-why" className={LABEL}>
+          {flow.why ?? AGENTS_LIST_WORDS.runInTerminal}
+        </span>
         <CopyRow k="sign-in-line" value={flow.line} />
       </div>
     );
@@ -68,10 +71,26 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
       </div>
     );
   }
+  const openPage = (word: string) =>
+    flow.url === undefined ? null : (
+      <Button data-k="sign-in-open" size="xs" variant="outline" onClick={() => void window.open(flow.url, "_blank", "noopener,noreferrer")}>
+        <ExternalLinkIcon aria-hidden className="size-3.5" />
+        {word}
+      </Button>
+    );
+  const browser = flow.finish === "callback" && flow.state !== "failed";
   return (
     <div data-k="sign-in-flow" className="flex flex-col gap-2">
       <div data-sign-in-line className="flex h-10 items-center gap-3">
-        {flow.url === undefined ? (
+        {browser ? (
+          <>
+            <Spinner className="size-3.5 text-muted-foreground" />
+            <span data-k="sign-in-browser" className="text-xs text-muted-foreground">
+              {AGENTS_LIST_WORDS.finishInBrowser}
+            </span>
+            {openPage(AGENTS_LIST_WORDS.openPage)}
+          </>
+        ) : flow.url === undefined ? (
           flow.state === "running" ? <Spinner className="size-3.5 text-muted-foreground" /> : null
         ) : (
           <>
@@ -80,15 +99,12 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
                 {flow.code}
               </span>
             )}
-            <Button data-k="sign-in-open" size="xs" variant="outline" onClick={() => void window.open(flow.url, "_blank", "noopener,noreferrer")}>
-              <ExternalLinkIcon aria-hidden className="size-3.5" />
-              {AGENTS_LIST_WORDS.open}
-            </Button>
+            {openPage(AGENTS_LIST_WORDS.open)}
           </>
         )}
       </div>
       <div data-sign-in-line className="flex h-10 items-center">
-        {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} /> : null}
+        {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish === "address" ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
       </div>
       <RefusalSlot k="sign-in-refused" {...(flow.state === "failed" && flow.said !== undefined ? { said: flow.said } : {})} />
     </div>

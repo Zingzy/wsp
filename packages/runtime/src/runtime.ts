@@ -9035,6 +9035,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return onLink;
     },
     changed: target => bus.emit({ type: "agents.changed", ...(target !== undefined ? { target } : {}) }),
+    relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),
   });
   bus.on("workspace.deleted", e => {

@@ -71,7 +71,7 @@ type Level =
 /** How long the add level's search waits after the last key before it asks. */
 const ASK_AFTER_MS = 250;
 
-const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope", state: "State" };
+const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope" };
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 
 /** The nearest box that scrolls, whose place the list keeps while a detail stands over it. */
@@ -99,7 +99,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const tab = kinds.find(k => k.id === tabId) ?? kinds[0]!;
   const paused = pausedReport(report);
   const held = given.heldWhy ?? (paused ? W.paused : null);
-  const ctx: RowsContext = { ...given, on, ...(held === null ? {} : { heldWhy: held }) };
+  const ctx: RowsContext = { ...given, on, ...(held === null ? {} : { heldWhy: held }), ...(report?.reach === undefined ? {} : { reach: report.reach }) };
   const staleWord = paused ? W.paused : given.heldWhy !== null && given.heldWhy !== undefined ? W.away : undefined;
   const dim = reading || held !== null;
   const page = shell === "page";

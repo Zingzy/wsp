@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, SkillHit, SkillPreview, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
+import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, SkillHit, SkillPreview, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, withoutControlChars, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
 
 const report = {
   target: { placeId: "here" },
@@ -72,7 +72,8 @@ describe("the agents report on the wire", () => {
   });
 
   it("a name holding a control character is caught by one predicate, whichever one it holds, and refused in one sentence naming its file", () => {
-    for (const c of ["\x00", "\x03", "\x15", "\r", "\n", "\x1b", "\x7f"]) expect(hasControlChar(`notion${c}echo hi`)).toBe(true);
+    for (const c of ["\x00", "\x03", "\x15", "\r", "\n", "\x1b", "\x7f", "\x80", "\x9b", "\x9f"]) expect(hasControlChar(`notion${c}echo hi`)).toBe(true);
+    expect(withoutControlChars("no\x1b[2Jti\x9b31mon\x85\x7f ü")).toBe("no[2Jti31mon ü");
     expect(hasControlChar("notion-2 (work)")).toBe(false);
     expect(hasControlChar("ünïcode")).toBe(false);
     expect(controlNameRefusal("~/.claude.json")).toBe("~/.claude.json names a server with a control character in its name, which was left out.");
