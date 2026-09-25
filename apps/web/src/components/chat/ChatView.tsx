@@ -206,7 +206,7 @@ export function ChatView({
         data-chat-composer-dock
         data-at-end={!showTranscript || atEnd || undefined}
         data-centred={(thread.hydrated && empty) || undefined}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:94%] [--glass-blur:20px] transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
       >
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />
         {children?.(thread)}
@@ -226,7 +226,7 @@ function ScrollToEnd({ hidden, onClick }: { hidden: boolean; onClick: () => void
         tabIndex={hidden ? -1 : 0}
         onClick={onClick}
         className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-popover/95 px-3 text-xs text-muted-foreground shadow-[0_8px_20px_-8px_rgb(0_0_0/45%),0_2px_4px_-2px_rgb(0_0_0/30%)] backdrop-blur-sm transition-[opacity,translate,color] duration-200 ease-out hover:text-foreground motion-reduce:transition-none",
+          "inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-popover/95 px-3 text-xs text-muted-foreground shadow-[0_8px_20px_-8px_rgb(0_0_0/45%),0_2px_4px_-2px_rgb(0_0_0/30%)] glass-backdrop transition-[opacity,translate,color] duration-200 ease-out hover:text-foreground motion-reduce:transition-none",
           hidden ? "pointer-events-none translate-y-1 opacity-0" : "pointer-events-auto translate-y-0 opacity-100",
         )}
       >
