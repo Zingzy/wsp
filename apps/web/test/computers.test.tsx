@@ -7,11 +7,12 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
-import { makeApi, ProtocolClient, RequestError, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
+import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { AddComputer, useSshRun } from "../src/settings/AddComputer.js";
+import { AddComputer } from "../src/settings/AddComputer.js";
+import { useAdds } from "../src/settings/adds.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
@@ -181,7 +182,7 @@ describe("the Computers list", () => {
     const saved: unknown[] = [];
     const api = computersApi({
       initGet: async () => setupOf({ keys }),
-      placesList: async () => places,
+      placesList: async () => ({ places, adds: [] }),
       initKeys: async (asked: unknown) => {
         saved.push(asked);
         keys = { ...keys, box: true };
@@ -463,6 +464,23 @@ describe("a computer's own page", () => {
     expect(rowOf("answered")?.querySelector("[data-settings-description]")?.className).toContain("truncate");
   });
 
+  it("draws a refused Try now in the refusal slot with the host's fix, and leaves the Answered row's description as it was", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    useStore.setState({ places: [here, vps] });
+    const refused = { dialPlace: async () => Promise.reject(new RequestError("wsp holds no login for vps. Add it again over ssh.", undefined, "Add it again over ssh.")) } as unknown as Partial<Api>;
+    await mountComputers(computersApi(refused).api, { kind: "computer", id: "p_3" });
+    fireEvent.click(document.querySelector("[data-k='dial']")!);
+    const slot = await waitFor(() => {
+      const found = document.querySelector("[data-settings-page] [data-k='dial-refusal']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(slot.textContent).toBe("wsp holds no login for vps. Add it again over ssh.");
+    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Add it again over ssh.");
+    expect(descriptionOf("answered")).toBe(said);
+  });
+
   it("offers no dial where there is no road to dial over, says why in the description, and words the button for the road there is", async () => {
     const said = placeNoDialLine("old-macbook");
     const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
@@ -499,6 +517,26 @@ describe("a computer's own page", () => {
     await waitFor(() => expect(removed).toEqual(["p_1"]));
     // The page that was about the removed computer goes back to the list.
     await waitFor(() => expect(pageAt()).toBe("computers"));
+  });
+
+  it("draws a refused remove in the refusal slot, the host's fix in the fix ink, and a remove the host did not make in that same slot", async () => {
+    useStore.setState({ places: [here, { ...laptop, present: true }] });
+    let answer: () => Promise<unknown> = async () => Promise.reject(new RequestError("old-macbook still holds a running workspace. Stop it first, then remove again.", undefined, "Stop it first, then remove again."));
+    await mountComputers(computersApi({ removePlace: async () => answer() } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
+    fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    const slot = await waitFor(() => {
+      const found = document.querySelector("[data-k='remove-refusal']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(slot.textContent).toBe("old-macbook still holds a running workspace. Stop it first, then remove again.");
+    expect(slot.className).toContain("text-destructive-foreground");
+    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Stop it first, then remove again.");
+    answer = async () => ({ removed: false, swept: [], note: "old-macbook was not removed: its record is locked" });
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook was not removed: its record is locked"));
+    expect(document.querySelector("[data-k='remove-refusal'] span.text-foreground")).toBeNull();
   });
 
   it("gives a computer that is answering no line to run by hand: the host sweeps it over the link", async () => {
@@ -603,18 +641,38 @@ describe("the cloud's page", () => {
 });
 
 describe("Add a computer on the page", () => {
-  const IDLE_RUN = { user: "", host: "", port: "", refusal: null, stages: null, installed: null };
   const open = async (road: "ssh" | "cloud" | "code" | null, over: Partial<Api> = {}, setup: InitSetup | null = null) => {
-    useSshRun.setState(IDLE_RUN);
     const fake = settingsApi(over);
     useStore.setState({ api: fake.api, places: [here] });
     render(<AddComputer setup={setup} now={() => NOW} />);
     if (road !== null) fireEvent.click(document.querySelector(`[data-add-road='${road}']`)!);
     return fake;
   };
+  /** An installer that never answers on its own: the case answers or refuses it, and the steps ride the store's
+   * events under the stream the sheet minted, as the host's do. */
+  const pending = () => {
+    const at: { login?: SshLogin; addId?: string; answer: (p: PlaceView) => void; refuse: (e: Error) => void } = { answer: () => {}, refuse: () => {} };
+    const api = {
+      addComputerOverSsh: (login: SshLogin, addId: string) =>
+        new Promise<PlaceView>((ok, no) => {
+          Object.assign(at, { login, addId, answer: ok, refuse: no });
+        }),
+    } as unknown as Partial<Api>;
+    return { at, api };
+  };
+  const stage = (addId: string, step: PlaceAddStep, state: "running" | "done" | "failed", note?: string): void =>
+    act(() => useStore.getState().applyEvent({ type: "place.stage", addId, step, state, ...(note === undefined ? {} : { note }) } as EventUnion));
+  const refuseWith = async (at: { refuse: (e: Error) => void }, e: Error): Promise<void> => {
+    await act(async () => {
+      at.refuse(e);
+      await Promise.resolve();
+    });
+  };
   const host = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k='road-ssh'] [data-k='login']")!;
   const user = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k='ssh-user']")!;
+  const slot = (): string => document.querySelector("[data-k='ssh-refusal']")?.textContent ?? "";
   const plan = (): [string | null, string | null][] => [...document.querySelectorAll("[data-k='plan'] li")].map(l => [l.textContent, l.getAttribute("data-state")]);
+  const job = (over: Partial<PlaceAddJob>): PlaceAddJob => ({ addId: "a_host", address: "root@spoo", startedAt: "2026-09-12T11:59:00.000Z", state: "running", steps: [], ...over });
 
   it("offers the three roads as pictures with none picked, and draws no flow until one is", async () => {
     await open(null);
@@ -643,113 +701,188 @@ describe("Add a computer on the page", () => {
     await open("ssh");
     fireEvent.change(host(), { target: { value: "65.21.4.12" } });
     expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("data-held")).toBe(true);
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.noRoad);
+    expect(slot()).toBe(ADD_COMPUTER_WORDS.noRoad);
   });
 
-  it("sends user@host and a port other than 22, and fills the same lines in as the installer reports them", async () => {
-    let report: ((stage: InstallStage) => void) | undefined;
-    let asked: SshLogin | undefined;
-    await open("ssh", { addComputerOverSsh: (login: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => ((asked = login), (report = onStage))) } as unknown as Partial<Api>);
+  it("sends user@host and a port other than 22, and fills the lines in as the host's steps arrive", async () => {
+    const { at, api } = pending();
+    await open("ssh", api);
     fireEvent.change(user(), { target: { value: "root" } });
     fireEvent.change(host(), { target: { value: "65.21.4.12" } });
     fireEvent.change(document.querySelector("[data-k='ssh-port']")!, { target: { value: "2222" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(host().disabled).toBe(true));
-    expect(asked).toEqual({ address: "root@65.21.4.12", port: 2222 });
-    act(() => {
-      report?.({ step: "connect", word: "connected · Ubuntu 24.04", state: "done" });
-      report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "running" });
-    });
-    expect(plan()[0]).toEqual(["connected · Ubuntu 24.04", "done"]);
+    expect(at.login).toEqual({ address: "root@65.21.4.12", port: 2222 });
+    stage(at.addId!, "connect", "done", "Ubuntu 24.04");
+    stage(at.addId!, "wsp", "running", "x86_64");
+    expect(plan()[0]).toEqual([`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"]);
     const wsp = PlaceAddStep.options.indexOf("wsp");
-    expect(plan()[wsp]).toEqual([`${wsp + 1}installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"]);
+    expect(plan()[wsp]).toEqual([`${wsp + 1}${placeAddSheetWord("wsp", "running")}x86_64`, "running"]);
+    // A stream this sheet did not mint is not its own.
+    stage("a_else", "reach", "done");
+    expect(plan()[PlaceAddStep.options.indexOf("reach")]![1]).toBe("waiting");
   });
 
   it("shows the spinner inside the Adding button while an add runs, and not before or after", async () => {
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", { addComputerOverSsh: () => new Promise<PlaceView>((_ok, no) => (refuse = no)) } as unknown as Partial<Api>);
+    const { at, api } = pending();
+    await open("ssh", api);
     const spinner = (): Element | null => document.querySelector("[data-k='ssh-add'] [data-k='adding-spinner']");
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     expect(spinner()).toBeNull();
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(spinner()).not.toBeNull());
     expect(document.querySelector("[data-k='ssh-add']")?.textContent).toBe(ADD_COMPUTER_WORDS.adding);
-    await act(async () => {
-      refuse?.(new RequestError("root@65.21.4.12 did not answer on port 22"));
-      await Promise.resolve();
-    });
+    await refuseWith(at, new RequestError("root@65.21.4.12 did not answer on port 22"));
     expect(spinner()).toBeNull();
   });
 
-  it("on a failed add keeps the finished steps ticked, marks the step that was running as failed, and leaves the rest waiting", async () => {
-    let report: ((stage: InstallStage) => void) | undefined;
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", {
-      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
-        new Promise<PlaceView>((_ok, no) => {
-          report = onStage;
-          refuse = no;
-        }),
-    } as unknown as Partial<Api>);
+  it("on a failed add keeps the finished steps ticked, marks the step the host failed, and leaves the rest waiting", async () => {
+    const { at, api } = pending();
+    await open("ssh", api);
     fireEvent.change(host(), { target: { value: "root@spoo" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    await act(async () => {
-      report?.({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
-      report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
-      report?.({ step: "reach", word: placeAddSheetWord("reach", "running"), state: "running" });
-      refuse?.(new RequestError("spoo cannot reach this computer at any of its addresses"));
-      await Promise.resolve();
-    });
+    stage(at.addId!, "connect", "done");
+    stage(at.addId!, "host-key", "done");
+    stage(at.addId!, "reach", "running");
+    stage(at.addId!, "reach", "failed", "spoo cannot reach this computer at any of its addresses");
+    await refuseWith(at, new RequestError("spoo cannot reach this computer at any of its addresses"));
     const states = plan().map(([, state]) => state);
     expect(states).toEqual(["done", "done", "failed", ...PlaceAddStep.options.slice(3).map(() => "waiting")]);
     const failed = document.querySelector("[data-k='plan'] li[data-state='failed']")!;
-    expect(failed.querySelector("[data-k='step-failed']")).not.toBeNull();
     expect(failed.querySelector("[data-k='step-failed']")?.className).toContain("destructive");
     expect(document.querySelectorAll("[data-k='plan'] li[data-state='done'] svg")).toHaveLength(2);
     expect(host().disabled).toBe(false);
   });
 
-  it("marks the first step failed when the add is refused before any step reported", async () => {
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", { addComputerOverSsh: () => new Promise<PlaceView>((_ok, no) => (refuse = no)) } as unknown as Partial<Api>);
+  it("marks the first step failed when the add is refused before the host kept any step", async () => {
+    const { at, api } = pending();
+    await open("ssh", api);
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    await act(async () => {
-      refuse?.(new RequestError("ssh refused the login (publickey).", PLACE_LOGIN_REFUSED_KIND));
-      await Promise.resolve();
-    });
+    await refuseWith(at, new RequestError("wsp add refuses a loopback address"));
     expect(plan().map(([, state]) => state)).toEqual(["failed", ...PlaceAddStep.options.slice(1).map(() => "waiting")]);
+    expect(slot()).toBe("wsp add refuses a loopback address");
   });
 
-  it("keeps the run when the person switches roads and comes back, since the host keeps installing", async () => {
-    let report: ((stage: InstallStage) => void) | undefined;
-    await open("ssh", { addComputerOverSsh: (_l: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);
+  it("draws an add the host is running when the page opens after a reload: its address in the fields, its steps, Add held", async () => {
+    useAdds.setState({ jobs: { a_host: job({ address: "maya@spoo", sshPort: 2222, steps: [{ step: "connect", state: "done", note: "Debian 12" }, { step: "wsp", state: "running" }] }) } });
+    await open("ssh", { addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    expect(user().value).toBe("maya");
+    expect(host().value).toBe("spoo");
+    expect(document.querySelector<HTMLInputElement>("[data-k='ssh-port']")!.value).toBe("2222");
+    expect(plan()[0]).toEqual([`${placeAddSheetWord("connect", "done")}Debian 12`, "done"]);
+    expect(plan()[PlaceAddStep.options.indexOf("wsp")]![1]).toBe("running");
+    expect(document.querySelector("[data-k='ssh-add'] [data-k='adding-spinner']")).not.toBeNull();
+    expect(host().disabled).toBe(true);
+  });
+
+  it("draws the refusal the host kept, in its two halves, when the page opens after the add failed", async () => {
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", steps: [{ step: "connect", state: "done" }, { step: "wsp", state: "failed", note: "spoo has no curl" }], said: "spoo has no curl or wget on its PATH.", fix: "Install one of them there, then add again." }) } });
+    await open("ssh", { addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    const refusal = document.querySelector("[data-k='ssh-refusal']")!;
+    expect(refusal.textContent).toBe("spoo has no curl or wget on its PATH. Install one of them there, then add again.");
+    expect(refusal.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Install one of them there, then add again.");
+    expect(plan()[PlaceAddStep.options.indexOf("wsp")]![1]).toBe("failed");
+    expect(host().value).toBe("spoo");
+  });
+
+  it("draws the add asked here over one the host kept, whatever the two clocks stamped them", async () => {
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", startedAt: "2099-01-01T00:00:00.000Z", said: "an old refusal" }) } });
+    const { at, api } = pending();
+    await open("ssh", api);
+    expect(slot()).toBe("an old refusal");
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    act(() => report?.({ step: "connect", word: "connected · Ubuntu 24.04", state: "done" }));
+    await waitFor(() => expect(host().disabled).toBe(true));
+    stage(at.addId!, "connect", "done");
+    expect(slot()).toBe("");
+    expect(plan()[0]![1]).toBe("done");
+  });
+
+  it("gives the login fix to a login the host refused, and to nothing else", async () => {
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", steps: [{ step: "connect", state: "failed" }], said: "maya@spoo: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND }) } });
+    await open("ssh");
+    expect(slot()).toBe(`maya@spoo: Permission denied (publickey). ${ADD_COMPUTER_WORDS.refusedFix}`);
+    cleanup();
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", steps: [{ step: "connect", state: "failed" }], said: "root@spoo runs zsh as root's shell" }) } });
+    await open("ssh");
+    expect(slot()).toBe("root@spoo runs zsh as root's shell");
+  });
+
+  it("clears a refusal the moment the person changes what they typed", async () => {
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", steps: [{ step: "connect", state: "failed" }], said: "root@spoo did not answer on port 22" }) } });
+    await open("ssh", { addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    expect(slot()).toBe("root@spoo did not answer on port 22");
+    expect(host().getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(document.querySelector("[data-k='ssh-port']")!, { target: { value: "2222" } });
+    expect(slot()).toBe("");
+    expect(host().hasAttribute("aria-invalid")).toBe(false);
+    expect(host().value).toBe("spoo");
+  });
+
+  it("keeps what was typed and not sent in this window when the person leaves the page, and through another window's add, and never sends it", async () => {
+    const asked: SshLogin[] = [];
+    await open("ssh", { addComputerOverSsh: async (login: SshLogin) => (asked.push(login), box) } as unknown as Partial<Api>);
+    fireEvent.change(user(), { target: { value: "maya" } });
+    fireEvent.change(host(), { target: { value: "hetzner" } });
+    fireEvent.change(document.querySelector("[data-k='ssh-port']")!, { target: { value: "2200" } });
+    cleanup();
+    render(<AddComputer setup={null} now={() => NOW} />);
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    expect([user().value, host().value, document.querySelector<HTMLInputElement>("[data-k='ssh-port']")!.value]).toEqual(["maya", "hetzner", "2200"]);
+    // Another window's add takes the form while it runs, and hands it back as it ends.
+    act(() => useAdds.setState(s => ({ jobs: { ...s.jobs, a_other: job({ addId: "a_other", address: "root@elsewhere" }) } })));
+    stage("a_other", "connect", "running");
+    expect([host().value, host().disabled]).toEqual(["elsewhere", true]);
+    stage("a_other", "connect", "failed", "root@elsewhere did not answer on port 22");
+    expect([user().value, host().value, document.querySelector<HTMLInputElement>("[data-k='ssh-port']")!.value]).toEqual(["maya", "hetzner", "2200"]);
+    expect(asked).toEqual([]);
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await settle();
+    expect(asked).toEqual([{ address: "maya@hetzner", port: 2200 }]);
+    expect(useAdds.getState().draft).toBeNull();
+  });
+
+  it("keeps the run when the person switches roads or leaves the page and comes back, since the host keeps installing", async () => {
+    const { at, api } = pending();
+    await open("ssh", api);
+    fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    stage(at.addId!, "connect", "done", "Ubuntu 24.04");
     fireEvent.click(document.querySelector("[data-add-road='cloud']")!);
     expect(document.querySelector("[data-k='road-ssh']")).toBeNull();
     fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
-    expect(host().value).toBe("root@65.21.4.12");
-    expect(plan()[0]).toEqual(["connected · Ubuntu 24.04", "done"]);
+    expect(user().value).toBe("root");
+    expect(host().value).toBe("65.21.4.12");
+    expect(plan()[0]![1]).toBe("done");
+    cleanup();
+    render(<AddComputer setup={null} now={() => NOW} />);
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    await refuseWith(at, new RequestError("root@65.21.4.12 did not answer on port 22"));
+    expect(slot()).toBe("root@65.21.4.12 did not answer on port 22");
   });
 
-  it("reads the box as joined once the installer answers with it, drawing its computer row", async () => {
+  it("reads the box as joined once the host says it joined, drawing its computer row, and Add another clears it", async () => {
     await open("ssh", { addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    useStore.setState({ places: [here, box] });
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='joined'] [data-place-row='p_2']")).toBeTruthy());
     expect(document.querySelector("[data-k='joined'] [data-settings-title]")?.textContent).toBe("hetzner");
+    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.another }));
+    expect(document.querySelector("[data-k='joined']")).toBeNull();
+    expect(host().value).toBe("");
   });
 
   it("runs the whole road on the client this app builds: Add sends places.add and the stages that ride it draw", async () => {
-    useSshRun.setState(IDLE_RUN);
     ScriptedSocket.instances.length = 0;
     ScriptedSocket.reply = (f: Frame) => (f["op"] === "places.add" || f["op"] === "places.sshHosts" ? undefined : { id: f["id"], ok: true });
     const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
     await client.connect();
     const sock = ScriptedSocket.instances[0]!;
-    useStore.setState({ api: makeApi(client), places: [here] });
+    const api = makeApi(client);
+    api.subscribe(e => useStore.getState().applyEvent(e));
+    useStore.setState({ api, places: [here] });
     render(<AddComputer setup={null} now={() => NOW} />);
     fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
@@ -764,41 +897,139 @@ describe("Add a computer on the page", () => {
     });
     expect(plan()[0]![1]).toBe("done");
     await act(async () => {
-      sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: true, addId, place: box }) });
+      sock.onmessage?.({ data: JSON.stringify({ type: "place.joined", place: box, from: "65.21.4.12" }) });
+      sock.onmessage?.({ data: JSON.stringify({ type: "place.stage", addId, step: "join", state: "done", placeId: "p_2" }) });
       await Promise.resolve();
     });
     await waitFor(() => expect(document.querySelector("[data-k='joined']")?.textContent).toContain("hetzner"));
   });
 
-  it("puts what ssh refused in the slot with the fix, and leaves the fields as they were", async () => {
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", { addComputerOverSsh: () => new Promise<PlaceView>((_ok, no) => (refuse = no)) } as unknown as Partial<Api>);
-    fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
-    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    await act(async () => {
-      refuse?.(new RequestError("ssh refused the login (publickey).", PLACE_LOGIN_REFUSED_KIND));
-      await Promise.resolve();
-    });
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain("ssh refused the login (publickey).");
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.refusedFix);
-    expect(host().value).toBe("root@65.21.4.12");
+  it("carries the host's fix off the wire into the slot, and the login fix off the refusal's own kind", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.reply = (f: Frame) => (f["op"] === "places.add" || f["op"] === "places.sshHosts" ? undefined : { id: f["id"], ok: true });
+    const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
+    await client.connect();
+    const sock = ScriptedSocket.instances[0]!;
+    useStore.setState({ api: makeApi(client), places: [here] });
+    render(<AddComputer setup={null} now={() => NOW} />);
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    const refuse = async (reply: Record<string, unknown>): Promise<string> => {
+      const before = sock.frames("places.add").length;
+      fireEvent.change(host(), { target: { value: "spoo" } });
+      fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+      await waitFor(() => expect(sock.frames("places.add").length).toBe(before + 1));
+      const asked = sock.frames("places.add").at(-1)!;
+      await act(async () => {
+        sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: false, ...reply }) });
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(slot()).not.toBe(""));
+      return slot();
+    };
+    expect(await refuse({ error: "spoo is neither a login like root@host nor an alias your ssh config gives a HostName", kind: PLACE_LOGIN_REFUSED_KIND })).toContain(ADD_COMPUTER_WORDS.refusedFix);
+    expect(await refuse({ error: "wsp add refuses a loopback address" })).toBe("wsp add refuses a loopback address");
+    expect(await refuse({ error: "spoo has no curl or wget on its PATH. Install one of them there, then add again.", fix: "Install one of them there, then add again." })).toBe("spoo has no curl or wget on its PATH. Install one of them there, then add again.");
+    expect(document.querySelector("[data-k='ssh-refusal'] span.text-foreground")?.textContent?.trim()).toBe("Install one of them there, then add again.");
   });
 
-  it("lists every provider with its own key field, saves each on its own, and says key saved once the host holds it", async () => {
+  // Each is thrown with the connect step still running, as the host throws them: the login stood and the box said no.
+  it.each([
+    ["the box already in another wsp", "root@spoo already belongs to the wsp on studio at http://10.0.0.2:4640; wsp leave on it frees it"],
+    ["root's shell", "root@spoo runs zsh as root's shell, and wsp runs only under bash or sh there"],
+    ["the chip", "root@spoo runs on riscv64, and wsp builds no daemon for that chip"],
+    ["the host key mismatch", "root@spoo answered with a key other than the one you pinned"],
+  ])("says a refusal after the login stood (%s) with no login fix", async (_what, sentence) => {
+    const { at, api } = pending();
+    await open("ssh", api);
+    fireEvent.change(host(), { target: { value: "root@spoo" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    stage(at.addId!, "connect", "running");
+    stage(at.addId!, "host-key", "done");
+    stage(at.addId!, "connect", "failed", sentence);
+    await refuseWith(at, new RequestError(sentence));
+    expect(slot()).toBe(sentence);
+  });
+
+  it("says a box that took wsp and did not connect back in the box's one sentence, with no ssh login fix and no script", async () => {
+    const { at, api } = pending();
+    await open("ssh", api);
+    fireEvent.change(host(), { target: { value: "root@178.156.161.168" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
+    stage(at.addId!, "connect", "done", "Ubuntu 24.04");
+    stage(at.addId!, "wsp", "done");
+    stage(at.addId!, "service", "running");
+    await refuseWith(at, new Error(sentence));
+    // The login stood and the bytes landed, so a fix about the user, the address or a key would send them the wrong way.
+    expect(slot()).toBe(sentence);
+    expect(slot()).not.toContain('case "$(uname -m)"');
+  });
+
+  it("lists every provider with its own key field, saves each on its own, and says key saved once the host lists that cloud", async () => {
     const asked: { provider?: string; key?: string }[] = [];
-    await open("cloud", { initKeys: async (k: { provider?: string; key?: string }) => (asked.push(k), setupOf({ keys: { solari: false, box: k.provider === "box" } })) } as unknown as Partial<Api>, setupOf({ keys: { solari: false, box: false } }));
+    let places: PlaceView[] = [here];
+    await open(
+      "cloud",
+      {
+        initKeys: async (k: { provider?: string; key?: string }) => {
+          asked.push(k);
+          places = [here, ascii];
+          return setupOf({ keys: { solari: false, box: k.provider === "box" } });
+        },
+        placesList: async () => ({ places, adds: [] }),
+      } as unknown as Partial<Api>,
+      setupOf({ keys: { solari: false, box: false } }),
+    );
     const blocks = [...document.querySelectorAll("[data-k='road-cloud'] [data-provider]")];
     expect(blocks.map(b => b.getAttribute("data-provider"))).toEqual(["box", "solari"]);
     // Each provider by the name the protocol gives it, and the picker's line names the same ones.
     expect(blocks.map(b => b.querySelector("span.text-\\[14px\\]")?.textContent)).toEqual([PROVIDER_KEY_WORDS["box"]!.name, PROVIDER_KEY_WORDS["solari"]!.name]);
     expect(document.querySelector("[data-add-road='cloud']")?.textContent).toContain(`${PROVIDER_KEY_WORDS["box"]!.name} or ${PROVIDER_KEY_WORDS["solari"]!.name}`);
     expect(document.body.textContent).not.toContain("no key");
-    const box = blocks[0]!;
-    fireEvent.change(box.querySelector("[data-k='cloud-key']")!, { target: { value: "k-123" } });
-    fireEvent.click(box.querySelector("[data-k='cloud-save']")!);
-    await waitFor(() => expect(box.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keySaved));
+    const boxKey = blocks[0]!;
+    fireEvent.change(boxKey.querySelector("[data-k='cloud-key']")!, { target: { value: "k-123" } });
+    fireEvent.click(boxKey.querySelector("[data-k='cloud-save']")!);
+    await waitFor(() => expect(boxKey.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keySaved));
     expect(asked).toEqual([{ provider: "box", key: "k-123" }]);
     expect(blocks[1]!.querySelector("[data-k='key-state']")).toBeNull();
+  });
+
+  it("says a key the host kept with no cloud row as kept and no computer yet, never as saved", async () => {
+    await open(
+      "cloud",
+      { initKeys: async () => setupOf({ keys: { solari: false, box: true } }), placesList: async () => ({ places: [here], adds: [] }) } as unknown as Partial<Api>,
+      setupOf({ keys: { solari: false, box: false } }),
+    );
+    const boxKey = document.querySelector("[data-k='road-cloud'] [data-provider='box']")!;
+    fireEvent.change(boxKey.querySelector("[data-k='cloud-key']")!, { target: { value: "k-123" } });
+    fireEvent.click(boxKey.querySelector("[data-k='cloud-save']")!);
+    await waitFor(() => expect(boxKey.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keyKept));
+    await settle();
+    expect(boxKey.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keyKept);
+  });
+
+  it("says a key the host did not take as that cloud refusing it, with where to check it, and a refused save in the host's two halves", async () => {
+    let refuse: Error | undefined;
+    await open(
+      "cloud",
+      { initKeys: async () => (refuse !== undefined ? Promise.reject(refuse) : setupOf({ keys: { solari: false, box: false } })), placesList: async () => ({ places: [here], adds: [] }) } as unknown as Partial<Api>,
+      setupOf({ keys: { solari: false, box: false } }),
+    );
+    const boxKey = document.querySelector("[data-k='road-cloud'] [data-provider='box']")!;
+    const save = async (): Promise<string> => {
+      fireEvent.change(boxKey.querySelector("[data-k='cloud-key']")!, { target: { value: "k-123" } });
+      fireEvent.click(boxKey.querySelector("[data-k='cloud-save']")!);
+      await settle();
+      return boxKey.querySelector("[data-k='cloud-refusal']")?.textContent ?? "";
+    };
+    const words = ADD_COMPUTER_WORDS.keyRefused(PROVIDER_KEY_WORDS["box"]!);
+    expect(await save()).toBe(`${words.said} ${words.fix}`);
+    expect(words.said).toBe(`${PROVIDER_KEY_WORDS["box"]!.name} refused that key.`);
+    expect(words.fix).toBe(`Check it at ${PROVIDER_KEY_WORDS["box"]!.keyConsole} and paste it again.`);
+    expect(boxKey.querySelector("[data-k='key-state']")).toBeNull();
+    refuse = new RequestError("Box refused. Check it and paste it again.", "auth", "Check it and paste it again.");
+    expect(await save()).toBe("Box refused. Check it and paste it again.");
+    expect(boxKey.querySelector("[data-k='cloud-refusal'] span.text-foreground")?.textContent?.trim()).toBe("Check it and paste it again.");
   });
 
   it("draws the ssh hosts the host suggests as it answered them, and asks again once the computers change", async () => {
@@ -810,6 +1041,17 @@ describe("Add a computer on the page", () => {
     await waitFor(() => expect([...document.querySelectorAll("[data-ssh-host]")].map(b => b.getAttribute("data-ssh-host"))).toEqual(["hetzner"]));
   });
 
+  it("says the ssh config was not read where its hosts would be, and says nothing for a socket that may not ask", async () => {
+    await open("ssh", { addComputerOverSsh: async () => box, sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied", undefined, undefined)) } as unknown as Partial<Api>);
+    await settle();
+    expect(document.querySelector("[data-k='ssh-hosts-refused']")?.textContent).toBe(ADD_COMPUTER_WORDS.hostsNotRead("~/.ssh/config: permission denied"));
+    expect(document.querySelector("[data-k='ssh-hosts']")).toBeNull();
+    cleanup();
+    await open("ssh", { addComputerOverSsh: async () => box, sshHosts: async () => Promise.reject(new RequestError(PLACES_TICKET_REFUSAL, "ticket")) } as unknown as Partial<Api>);
+    await settle();
+    expect(document.querySelector("[data-k='ssh-hosts-refused']")).toBeNull();
+  });
+
   it("mints the join line, counts the code down, and holds New code where this wsp mints none", async () => {
     await open("code", { mintJoin: async () => ({ joins: [{ url: "http://10.0.0.2:4640", line: "wsp join http://10.0.0.2:4640 --code AB12-CD34.fp" }], expiresAt: new Date(NOW + 600_000).toISOString() }) } as unknown as Partial<Api>);
     await waitFor(() => expect(document.querySelector("[data-k='join-line'] code")?.textContent).toBe("wsp join http://10.0.0.2:4640 --code AB12-CD34.fp"));
@@ -819,84 +1061,20 @@ describe("Add a computer on the page", () => {
     await open("code");
     expect(document.querySelector("[data-k='code-left']")?.textContent).toBe(ADD_COMPUTER_WORDS.noMint);
   });
-  it("carries the login fix off the refusal's own kind on the wire, and a refusal without it gets none", async () => {
-    useSshRun.setState(IDLE_RUN);
-    ScriptedSocket.instances.length = 0;
-    ScriptedSocket.reply = (f: Frame) => (f["op"] === "places.add" || f["op"] === "places.sshHosts" ? undefined : { id: f["id"], ok: true });
-    const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
-    await client.connect();
-    const sock = ScriptedSocket.instances[0]!;
-    useStore.setState({ api: makeApi(client), places: [here] });
-    render(<AddComputer setup={null} now={() => NOW} />);
-    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
-    const refuseWith = async (reply: Record<string, unknown>): Promise<string> => {
-      const before = sock.frames("places.add").length;
-      fireEvent.change(host(), { target: { value: "spoo" } });
-      fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-      await waitFor(() => expect(sock.frames("places.add").length).toBe(before + 1));
-      const asked = sock.frames("places.add").at(-1)!;
-      await act(async () => {
-        sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: false, ...reply }) });
-        await Promise.resolve();
-      });
-      await waitFor(() => expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(String(reply["error"])));
-      return document.querySelector("[data-k='ssh-refusal']")?.textContent ?? "";
-    };
-    expect(await refuseWith({ error: "spoo is neither a login like root@host nor an alias your ssh config gives a HostName", kind: PLACE_LOGIN_REFUSED_KIND })).toContain(ADD_COMPUTER_WORDS.refusedFix);
-    expect(await refuseWith({ error: "wsp add refuses a loopback address" })).not.toContain(ADD_COMPUTER_WORDS.refusedFix);
-  });
 
-  // Each is thrown with the connect step still running, as the host throws them: the login stood and the box said no.
-  it.each([
-    ["the box already in another wsp", "root@spoo already belongs to the wsp on studio at http://10.0.0.2:4640; wsp leave on it frees it"],
-    ["root's shell", "root@spoo runs zsh as root's shell, and wsp runs only under bash or sh there"],
-    ["the chip", "root@spoo runs on riscv64, and wsp builds no daemon for that chip"],
-    ["the host key mismatch", "root@spoo answered with a key other than the one you pinned"],
-  ])("says a refusal after the login stood (%s) with no login fix", async (_what, sentence) => {
-    let report: ((stage: InstallStage) => void) | undefined;
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", {
-      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
-        new Promise<PlaceView>((_ok, no) => {
-          report = onStage;
-          refuse = no;
-        }),
-    } as unknown as Partial<Api>);
-    fireEvent.change(host(), { target: { value: "root@spoo" } });
-    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    await act(async () => {
-      report?.({ step: "connect", word: placeAddSheetWord("connect", "running"), state: "running" });
-      report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
-      refuse?.(new RequestError(sentence));
-      await Promise.resolve();
-    });
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(sentence);
-  });
-
-  it("says a box that took wsp and did not connect back in the box's one sentence, with no ssh login fix and no script", async () => {
-    let report: ((stage: InstallStage) => void) | undefined;
-    let refuse: ((e: Error) => void) | undefined;
-    await open("ssh", {
-      addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) =>
-        new Promise<PlaceView>((_ok, no) => {
-          report = onStage;
-          refuse = no;
-        }),
-    } as unknown as Partial<Api>);
-    fireEvent.change(host(), { target: { value: "root@178.156.161.168" } });
-    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
-    const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
-    await act(async () => {
-      report?.({ step: "connect", word: "connected", state: "done", fact: "Ubuntu 24.04" });
-      report?.({ step: "wsp", word: "wsp installed", state: "done" });
-      report?.({ step: "service", word: "starting its agent", state: "running" });
-      refuse?.(new Error(sentence));
-      await Promise.resolve();
-    });
-    const slot = document.querySelector("[data-k='ssh-refusal']")?.textContent ?? "";
-    // The login stood and the bytes landed, so a fix about the user, the address or a key would send them the wrong way.
-    expect(slot).toBe(sentence);
-    expect(slot).not.toContain('case "$(uname -m)"');
+  it("says not copied beside a line the clipboard refused, for a moment", async () => {
+    const write = navigator.clipboard?.writeText;
+    Object.assign(navigator, { clipboard: { writeText: () => Promise.reject(new Error("Document is not focused.")) } });
+    try {
+      await open("code", { mintJoin: async () => ({ joins: [], expiresAt: new Date(NOW + 600_000).toISOString() }) } as unknown as Partial<Api>);
+      const line = document.querySelector("[data-k='install-line']")!;
+      fireEvent.click(line.querySelector("button")!);
+      await waitFor(() => expect(line.querySelector("[data-k='not-copied']")?.textContent).toBe(ADD_COMPUTER_WORDS.notCopied));
+      expect(line.querySelector("button")?.getAttribute("aria-label")).toBe(ADD_COMPUTER_WORDS.notCopied);
+      await waitFor(() => expect(line.querySelector("[data-k='not-copied']")).toBeNull(), { timeout: 2500 });
+    } finally {
+      Object.assign(navigator, { clipboard: { writeText: write } });
+    }
   });
 });
 

@@ -4,7 +4,7 @@
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PLACE_ADD_WORDS, RuntimeRequest } from "@wsp/protocol";
-import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type InstallStage, type ProtocolClientOptions } from "../src/protocol/client.js";
+import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { caps } from "./caps.js";
 
@@ -296,42 +296,33 @@ describe("makeApi wrappers", () => {
     await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toThrow("The host answered with no reason. Try again.");
   });
 
-  it("addComputerOverSsh sends places.add with a stream of its own, reads the stages that ride it in the runtime's words, and answers the computer", async () => {
+  it("addComputerOverSsh sends places.add under the stream its caller minted, with a port other than 22, and answers the computer", async () => {
     const { api, sock, lastSent } = await connect();
-    const stages: InstallStage[] = [];
     ScriptedSocket.reply = f => (f["op"] === "places.add" ? { id: f["id"], ok: true, addId: f["addId"], place: box } : { id: f["id"], ok: true });
-    const road = api.addComputerOverSsh!({ address: "root@65.21.4.12", port: 2222 }, stage => stages.push(stage));
+    const road = api.addComputerOverSsh!({ address: "root@65.21.4.12", port: 2222 }, "a_mine");
     await until(() => sock.frames("places.add").length === 1);
-    const sent = lastSent();
-    expect(sent).toMatchObject({ op: "places.add", address: "root@65.21.4.12", sshPort: 2222, addId: expect.any(String) });
-    const addId = String(sent["addId"]);
-    push(sock, { type: "place.stage", addId, step: "connect", state: "running" });
-    push(sock, { type: "place.stage", addId, step: "connect", state: "done", note: "Ubuntu 24.04" });
-    // Another install running on the same wsp: its stages belong to its own list and never to this one.
-    push(sock, { type: "place.stage", addId: "a_other", step: "node", state: "running" });
-    // The step an install stopped on: the sentence lands as the road's own refusal, so it draws no line here.
-    push(sock, { type: "place.stage", addId, step: "join", state: "failed", note: "it never dialled back" });
-    await until(() => stages.length === 2);
-    expect(stages).toEqual([
-      { step: "connect", word: PLACE_ADD_WORDS.connect, state: "running" },
-      { step: "connect", word: PLACE_ADD_WORDS.connect, state: "done", fact: "Ubuntu 24.04" },
-    ]);
+    expect(lastSent()).toMatchObject({ op: "places.add", address: "root@65.21.4.12", sshPort: 2222, addId: "a_mine" });
     expect(await road).toEqual(box);
   });
 
-  it("addComputerOverSsh leaves the port out when nothing was typed, refuses a place the wire type does not vouch for, and stops reading stages once it settles", async () => {
-    const { api, sock, lastSent } = await connect();
-    const stages: InstallStage[] = [];
+  it("addComputerOverSsh leaves the port out when nothing was typed, and refuses a place the wire type does not vouch for", async () => {
+    const { api, lastSent } = await connect();
     ScriptedSocket.reply = f => (f["op"] === "places.add" ? { id: f["id"], ok: true, place: box } : { id: f["id"], ok: true });
-    await api.addComputerOverSsh!({ address: "root@65.21.4.12" }, stage => stages.push(stage));
-    const sent = lastSent();
-    expect(sent["sshPort"]).toBeUndefined();
-    push(sock, { type: "place.stage", addId: String(sent["addId"]), step: "node", state: "running" });
-    await replied();
-    expect(stages).toEqual([]);
-
+    await api.addComputerOverSsh!({ address: "root@65.21.4.12" }, "a_mine");
+    expect(lastSent()["sshPort"]).toBeUndefined();
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, place: { ...box, kind: "toaster" } });
-    await expect(api.addComputerOverSsh!({ address: "root@65.21.4.12" }, () => {})).rejects.toThrow();
+    await expect(api.addComputerOverSsh!({ address: "root@65.21.4.12" }, "a_mine")).rejects.toThrow();
+  });
+
+  it("placesList reads the computers and the adds off one places.list, no adds from a host that sends none, and refuses a step the wire type does not vouch for", async () => {
+    const { api } = await connect();
+    const job = { addId: "a_1", address: "root@spoo", startedAt: "2026-09-25T09:00:00.000Z", state: "failed", steps: [{ step: "wsp", state: "failed", note: "no curl" }], said: "spoo has no curl.", fix: "Install it." };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [job] });
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [job] });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box] });
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [] });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [{ ...job, steps: [{ step: "node", state: "running" }] }] });
+    await expect(api.placesList!()).rejects.toThrow();
   });
 });
 

@@ -7,15 +7,16 @@
 // state is read off what the host answered.
 import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { create } from "zustand";
-import { PLACES_WORDS, PLACE_INSTALL, PLACE_LOGIN_REFUSED_KIND, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { cn, errorText } from "../lib/utils.js";
+import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { RequestError, type Api, type InstallStage } from "../protocol/client.js";
+import { NO_REASON, type Api } from "../protocol/client.js";
+import { failureOf, type Failure } from "../protocol/failure.js";
+import { addFix, addOverSsh, useAdds, useShownAdd, type SshDraft } from "./adds.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
 import { ComputerRow } from "./computers.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -29,15 +30,18 @@ type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
 type StepLine = { word: string; state: "waiting" | "running" | "done" | "failed"; fact?: string };
 
-/** A failed add marks the step that was running, or the first step not done when none had reported. */
-function planLines(stages: readonly InstallStage[], failed: boolean): StepLine[] {
-  const done = (step: PlaceAddStep): boolean => stages.some(stage => stage.step === step && stage.state === "done");
-  const failedStep = failed ? (stages.find(stage => stage.state === "running")?.step ?? PlaceAddStep.options.find(step => !done(step))) : undefined;
+/** Every step of the add as the host kept it. A failed add the host kept no failed step for, refused before its
+ * install began, marks the step that was running, or the first step not done. */
+function planLines(job: PlaceAddJob | undefined): StepLine[] {
+  const steps = job?.steps ?? [];
+  const done = (step: PlaceAddStep): boolean => steps.some(s => s.step === step && s.state === "done");
+  const failedStep = job?.state === "failed" && !steps.some(s => s.state === "failed") ? (steps.find(s => s.state === "running")?.step ?? PlaceAddStep.options.find(step => !done(step))) : undefined;
   return PlaceAddStep.options.map(step => {
-    const reported = stages.find(stage => stage.step === step);
-    const fact = reported?.fact ?? PLAN_FACTS[step];
-    const state = step === failedStep ? "failed" : (reported?.state ?? "waiting");
-    return { word: reported?.word ?? placeAddSheetWord(step, "running"), state, ...(fact === undefined ? {} : { fact }) };
+    const kept = steps.find(s => s.step === step);
+    const state = step === failedStep ? "failed" : (kept?.state ?? "waiting");
+    // A failed step's note is the refusal the slot says whole; the line keeps the step's own words.
+    const fact = kept?.state === "failed" ? PLAN_FACTS[step] : (kept?.note ?? PLAN_FACTS[step]);
+    return { word: placeAddSheetWord(step, kept?.state === "done" ? "done" : "running"), state, ...(fact === undefined ? {} : { fact }) };
   });
 }
 
@@ -122,20 +126,26 @@ function RoadPicker({ value, onChange }: { value: AddRoad | null; onChange: (roa
 }
 
 function CopyLine({ text, k }: { text: string; k: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"copied" | "not" | null>(null);
   const copy = (): void => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    const said = (outcome: "copied" | "not"): void => {
+      setCopied(outcome);
+      setTimeout(() => setCopied(null), 1500);
+    };
+    void navigator.clipboard.writeText(text).then(() => said("copied"), () => said("not"));
   };
-  const Icon = copied ? CheckIcon : CopyIcon;
+  const Icon = copied === "copied" ? CheckIcon : copied === "not" ? XIcon : CopyIcon;
   return (
     <div data-k={k} className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/40 py-1 ps-3 pe-1">
       <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={text}>
         {text}
       </code>
-      <Button size="icon-xs" variant="ghost" aria-label={copied ? MINE.copied : MINE.copy} onClick={copy}>
+      {copied === "not" ? (
+        <span data-k="not-copied" className="shrink-0 font-mono text-[11px] text-destructive-foreground">
+          {MINE.notCopied}
+        </span>
+      ) : null}
+      <Button size="icon-xs" variant="ghost" aria-label={copied === "copied" ? MINE.copied : copied === "not" ? MINE.notCopied : MINE.copy} onClick={copy}>
         <Icon className="size-3.5" />
       </Button>
     </div>
@@ -198,57 +208,63 @@ function Steps({ lines }: { lines: readonly StepLine[] }) {
   );
 }
 
-/** The ssh road's run, kept outside the panel: the host keeps installing when the panel closes, so the lines must be
- * there when it opens again. */
-interface SshRun {
-  user: string;
-  host: string;
-  port: string;
-  refusal: { said: string; fix?: string } | null;
-  stages: InstallStage[] | null;
-  installed: PlaceView | null;
+/** The fields as an add typed them: user@host splits at its first @, and a port of 22 is left unsaid. */
+function loginOf(job: PlaceAddJob | undefined): SshDraft {
+  if (job === undefined) return { user: "", host: "", port: "" };
+  const at = job.address.indexOf("@");
+  return { user: at === -1 ? "" : job.address.slice(0, at), host: at === -1 ? job.address : job.address.slice(at + 1), port: job.sshPort === undefined ? "" : String(job.sshPort) };
 }
-export const useSshRun = create<SshRun>(() => ({ user: "", host: "", port: "", refusal: null, stages: null, installed: null }));
-const setRun = (patch: Partial<SshRun> | ((run: SshRun) => Partial<SshRun>)): void => useSshRun.setState(patch);
 
 function SshRoad({ now }: { now: () => number }) {
-  const api = useStore(s => s.api);
   const places = useStore(s => s.places);
-  const { user, host, port, refusal, stages, installed } = useSshRun();
-  const setUser = (user: string): void => setRun({ user });
-  const setHost = (host: string): void => setRun({ host });
-  const setPort = (port: string): void => setRun({ port });
-  const setRefusal = (refusal: SshRun["refusal"]): void => setRun({ refusal });
-  const setInstalled = (installed: PlaceView | null): void => setRun({ installed });
-  const setStages = (next: InstallStage[] | null | ((held: InstallStage[] | null) => InstallStage[] | null)): void =>
-    setRun(run => ({ stages: typeof next === "function" ? next(run.stages) : next }));
-  const [hosts, setHosts] = useState<SshHost[] | null>(null);
-  const placeIds = places.map(p => p.id).join(" ");
-  useEffect(() => {
-    void api?.sshHosts?.().then(setHosts, () => setHosts([]));
-  }, [api, placeIds]);
-  const add = (login: { user: string; host: string; port: string }): void => {
-    if (login.host.trim() === "" || api?.addComputerOverSsh === undefined) return;
-    setUser(login.user);
-    setHost(login.host);
-    setPort(login.port);
-    setRefusal(null);
-    setStages([]);
-    const address = login.user.trim() === "" ? login.host.trim() : `${login.user.trim()}@${login.host.trim()}`;
-    const n = Number.parseInt(login.port, 10);
-    api.addComputerOverSsh({ address, ...(Number.isFinite(n) && n !== 22 ? { port: n } : {}) }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage])).then(setInstalled, (e: unknown) => {
-      const loginRefused = e instanceof RequestError && e.kind === PLACE_LOGIN_REFUSED_KIND;
-      setRefusal({ said: errorText(e), ...(loginRefused ? { fix: MINE.refusedFix } : {}) });
-    });
-  };
-  if (installed !== null) {
+  const job = useShownAdd();
+  const joined = job?.state === "done" ? places.find(p => p.id === job.placeId) : undefined;
+  if (joined !== undefined) {
     return (
       <RoadBody>
-        <Joined place={installed} now={now()} onAgain={() => { setInstalled(null); setStages(null); setHost(""); setUser(""); setPort(""); }} />
+        <Joined place={joined} now={now()} onAgain={() => useAdds.setState({ putAway: job!.addId })} />
       </RoadBody>
     );
   }
-  const running = stages !== null && refusal === null;
+  return <SshForm job={job?.state === "done" ? undefined : job} />;
+}
+
+/** The fields hold a running add's login, else what this window typed and has not sent, else the login of the add
+ * shown. Typing writes the draft, which is what clears a refusal: it was about what was asked, not what is typed. */
+function SshForm({ job }: { job: PlaceAddJob | undefined }) {
+  const api = useStore(s => s.api);
+  const places = useStore(s => s.places);
+  const draft = useAdds(s => s.draft);
+  const running = job?.state === "running";
+  const login = running ? loginOf(job) : (draft ?? loginOf(job));
+  const setLogin = (next: SshDraft): void => useAdds.setState({ draft: next });
+  const { user, host, port } = login;
+  const [hosts, setHosts] = useState<SshHost[] | null>(null);
+  const [hostsRefused, setHostsRefused] = useState<Failure | null>(null);
+  const placeIds = places.map(p => p.id).join(" ");
+  useEffect(() => {
+    void api?.sshHosts?.().then(
+      found => {
+        setHosts(found);
+        setHostsRefused(null);
+      },
+      (e: unknown) => {
+        const failure = failureOf(e);
+        setHosts([]);
+        // A socket that may not ask is not a fault, and a lost one is said by the banner.
+        setHostsRefused(failure.kind === "ticket" || failure.disconnected ? null : failure);
+      },
+    );
+  }, [api, placeIds]);
+  const add = (asked: { user: string; host: string; port: string }): void => {
+    if (asked.host.trim() === "" || api?.addComputerOverSsh === undefined) return;
+    const address = asked.user.trim() === "" ? asked.host.trim() : `${asked.user.trim()}@${asked.host.trim()}`;
+    const n = Number.parseInt(asked.port, 10);
+    addOverSsh(api, { address, ...(Number.isFinite(n) && n !== 22 ? { port: n } : {}) });
+  };
+  const failed = job?.state === "failed" && draft === null ? job : undefined;
+  const fix = failed === undefined ? undefined : addFix(failed);
+  const refusal = failed === undefined ? null : { said: failed.said ?? NO_REASON, ...(fix === undefined ? {} : { fix }) };
   const held = api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
   const suggested = hosts ?? [];
   const enter = (e: React.KeyboardEvent): void => {
@@ -276,20 +292,23 @@ function SshRoad({ now }: { now: () => number }) {
     >
       <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_minmax(0,6rem)] gap-3 max-sm:grid-cols-1">
         <Field label={MINE.user} icon={UserIcon}>
-          <Input data-k="ssh-user" nativeInput autoComplete="off" spellCheck={false} autoCapitalize="off" disabled={running} value={user} placeholder="root" onChange={e => setUser(e.target.value)} onKeyDown={enter} className={INPUT} />
+          <Input data-k="ssh-user" nativeInput autoComplete="off" spellCheck={false} autoCapitalize="off" disabled={running} value={user} placeholder="root" onChange={e => setLogin({ ...login, user: e.target.value })} onKeyDown={enter} className={INPUT} />
         </Field>
         <Field label={MINE.host} icon={ServerIcon}>
-          <Input data-k="login" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" disabled={running} value={host} placeholder={MINE.hostPlaceholder} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setHost(e.target.value)} onKeyDown={enter} className={INPUT} />
+          <Input data-k="login" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" disabled={running} value={host} placeholder={MINE.hostPlaceholder} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setLogin({ ...login, host: e.target.value })} onKeyDown={enter} className={INPUT} />
         </Field>
         <Field label={MINE.port} icon={HashIcon}>
-          <Input data-k="ssh-port" nativeInput inputMode="numeric" autoComplete="off" disabled={running} value={port} placeholder="22" onChange={e => setPort(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={enter} className={INPUT} />
+          <Input data-k="ssh-port" nativeInput inputMode="numeric" autoComplete="off" disabled={running} value={port} placeholder="22" onChange={e => setLogin({ ...login, port: e.target.value.replace(/[^0-9]/g, "") })} onKeyDown={enter} className={INPUT} />
         </Field>
       </div>
       {refusal !== null || held !== undefined ? <RefusalSlot k="ssh-refusal" {...(refusal === null ? { waiting: held } : refusal)} /> : null}
       <div className="flex flex-col gap-3">
         <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-[0.12em]">{MINE.whatHappens}</span>
-        <Steps lines={planLines(stages ?? [], refusal !== null && stages !== null)} />
+        <Steps lines={planLines(job)} />
       </div>
+      {!running && hostsRefused !== null ? (
+        <RefusalSlot k="ssh-hosts-refused" said={MINE.hostsNotRead(hostsRefused.said)} {...(hostsRefused.fix === undefined ? {} : { fix: hostsRefused.fix })} />
+      ) : null}
       {!running && suggested.length > 0 ? (
         <div className="flex flex-col gap-3" data-k="ssh-hosts">
           <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-[0.12em]">{MINE.suggested}</span>
@@ -312,29 +331,38 @@ function SshRoad({ now }: { now: () => number }) {
 }
 
 function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean }) {
-  const api = useStore(s => s.api);
+  const canSave = useStore(s => s.api?.initKeys !== undefined);
+  const listed = useStore(s => s.places.some(p => p.kind === "provider" && p.id === id));
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const has = held || saved;
+  const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
+  const [kept, setKept] = useState(false);
+  const has = held || kept;
   const save = (): void => {
-    if (key.trim() === "" || api?.initKeys === undefined) return;
+    if (key.trim() === "" || !canSave) return;
     setBusy(true);
-    setSaid(null);
-    api.initKeys({ provider: id, key: key.trim() }).then(
-      next => {
-        setBusy(false);
-        if (next.keys[id] === true) {
-          setSaved(true);
-          setKey("");
-        } else setSaid(MINE.keyRefused);
-      },
-      (e: unknown) => {
-        setBusy(false);
-        setSaid(errorText(e));
-      },
-    );
+    setRefusal(null);
+    // Through the store, which reads the places again: "key saved" waits for the row that save makes.
+    useStore
+      .getState()
+      .saveKeys({ provider: id, key: key.trim() })
+      .then(
+        next => {
+          setBusy(false);
+          if (next.keys[id] === true) {
+            setKept(true);
+            setKey("");
+          } else {
+            setKept(false);
+            setRefusal(MINE.keyRefused(words));
+          }
+        },
+        (e: unknown) => {
+          setBusy(false);
+          const failure = failureOf(e);
+          setRefusal({ said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }) });
+        },
+      );
   };
   return (
     <div data-provider={id} className="flex flex-col gap-3 py-5 first:pt-0 last:pb-0">
@@ -343,8 +371,8 @@ function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_
         <span className="text-[14px] text-foreground">{words.name}</span>
         {has ? (
           <span data-k="key-state" className="inline-flex items-center gap-1 font-mono text-[11px] text-foreground/70">
-            <CheckIcon aria-hidden className="size-3" />
-            {MINE.keySaved}
+            {listed ? <CheckIcon aria-hidden className="size-3" /> : null}
+            {listed ? MINE.keySaved : MINE.keyKept}
           </span>
         ) : null}
         {words.keyConsole === undefined ? null : (
@@ -357,13 +385,13 @@ function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_
       <div className="flex items-center gap-2">
         <span className="relative block min-w-0 flex-1">
           <KeyRoundIcon aria-hidden className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(said === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
+          <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
         </span>
         <Button data-k="cloud-save" variant={has ? "outline" : "default"} className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
           {busy ? MINE.checking : has ? MINE.replace : MINE.save}
         </Button>
       </div>
-      {said !== null ? <RefusalSlot k="cloud-refusal" said={said} /> : null}
+      {refusal !== null ? <RefusalSlot k="cloud-refusal" {...refusal} /> : null}
     </div>
   );
 }
@@ -384,14 +412,14 @@ function CodeRoad({ now }: { now: () => number }) {
   const api = useStore(s => s.api);
   const places = useStore(s => s.places);
   const [mint, setMint] = useState<JoinLines | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Failure | null>(null);
   const before = useRef<ReadonlySet<string> | null>(null);
   const [, tick] = useState(0);
   const again = (): void => {
-    setSaid(null);
+    setRefused(null);
     setMint(null);
     before.current = new Set(places.map(p => p.id));
-    void api?.mintJoin?.().then(setMint, (e: unknown) => setSaid(errorText(e)));
+    void api?.mintJoin?.().then(setMint, (e: unknown) => setRefused(failureOf(e)));
   };
   useEffect(again, [api]);
   useEffect(() => {
@@ -433,7 +461,7 @@ function CodeRoad({ now }: { now: () => number }) {
           </div>
         ))}
       </Step>
-      {said !== null ? <RefusalSlot k="code-refusal" said={said} /> : null}
+      {refused !== null ? <RefusalSlot k="code-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} /> : null}
     </RoadBody>
   );
 }

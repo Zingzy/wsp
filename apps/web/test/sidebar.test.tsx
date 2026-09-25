@@ -83,7 +83,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     listWorkspaces: vi.fn(async () => workspaces),
     // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on,
     // which is the row the New workspace dialog checks.
-    placesList: vi.fn(async () => PLACES),
+    placesList: vi.fn(async () => ({ places: PLACES, adds: [] })),
     projectsList: vi.fn(async () => PROJECTS),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async (_project: string, name: string) => view("ws_new", name)),

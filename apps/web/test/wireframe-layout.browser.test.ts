@@ -848,4 +848,42 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     expect(new Set(phone.fields.map(f => f.x)).size).toBe(1);
     await shot("add-computer-390-dark", "[data-k=add-computer]");
   }, 90_000);
+
+  it("Computers draws each refusal where its control is, in the host's two halves: the add this window watched fail under its fields, the places read above Add a computer, the ssh config where its hosts would be", async () => {
+    const slotRead = (k: string) =>
+      page!.evaluate(key => {
+        const slot = document.querySelector<HTMLElement>(`[data-k=${key}]`)!;
+        const panel = document.querySelector<HTMLElement>("[data-settings-page]")!.getBoundingClientRect();
+        const b = slot.getBoundingClientRect();
+        return { text: slot.textContent, fix: slot.querySelector("span.text-foreground")?.textContent?.trim() ?? null, inside: b.left >= panel.left && b.right <= panel.right + 0.5, h: Math.round(b.height) };
+      }, k);
+    for (const theme of THEMES) {
+      await open("settings-add-computer-failed", theme, "[data-k=ssh-refusal]");
+      const add = await slotRead("ssh-refusal");
+      console.info(`add refused ${theme}: ${JSON.stringify(add)}`);
+      expect(add.text).toBe("spoo has no curl or wget on its PATH. Install one of them there, then add again.");
+      expect(add.fix).toBe("Install one of them there, then add again.");
+      expect(add.inside).toBe(true);
+      expect(add.h).toBeGreaterThanOrEqual(36);
+      expect(await page!.locator("[data-k=road-ssh] [data-k=plan] li[data-state=failed]").count()).toBe(1);
+      expect(await page!.locator("[data-k=road-ssh] [data-k=login]").inputValue()).toBe("spoo");
+      await page!.waitForTimeout(400);
+      await shot(`add-computer-refused-${theme}`, "[data-k=add-computer]");
+
+      await open("settings-computers-refused", theme, "[data-k=ssh-hosts-refused]");
+      const places = await slotRead("places-refused");
+      const hosts = await slotRead("ssh-hosts-refused");
+      console.info(`computers refused ${theme}: ${JSON.stringify({ places, hosts })}`);
+      expect(places.fix).toBe("Fix or move ~/.wsp/state.json, then start wsp again.");
+      expect(places.inside).toBe(true);
+      expect(hosts.text).toBe("Hosts from your ssh config not read: ~/.ssh/config: permission denied");
+      expect(hosts.inside).toBe(true);
+      // The page that draws the refusal is on screen, so no notice says it again.
+      expect(await page!.locator("[data-notice]").count()).toBe(0);
+      // The road opens with a 200 ms rise; the shots wait it out.
+      await page!.waitForTimeout(400);
+      await shot(`computers-refused-${theme}`);
+      await shot(`computers-refused-add-${theme}`, "[data-k=add-computer]");
+    }
+  }, 90_000);
 });

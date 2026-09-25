@@ -45,6 +45,36 @@ export function verbFailure(e: unknown): VerbFailure {
 export const refusal = (happened: string, fix: string, kind?: string): Error & { fix: string; kind?: string } =>
   Object.assign(new Error(refusalLine(happened, fix)), { fix }, kind !== undefined ? { kind } : {});
 
+/** What a refusal said before its fix: the message with the fix `refusal` joined on taken back off the end. */
+export const refusalSaid = (message: string, fix: string | undefined): string => (fix !== undefined && message.endsWith(` ${fix}`) ? message.slice(0, -fix.length - 1) : message);
+
+const stringProp = (e: object, key: "fix" | "kind"): string | undefined => {
+  const v = (e as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : undefined;
+};
+
+/** A rejection read into the halves a refusal was stamped with: the sentence before its fix, the fix, the kind. */
+export function refusalParts(e: unknown): { said: string; fix: string | undefined; kind: string | undefined } {
+  if (!(e instanceof Error)) return { said: String(e), fix: undefined, kind: undefined };
+  const fix = stringProp(e, "fix");
+  return { said: refusalSaid(e.message, fix), fix, kind: stringProp(e, "kind") };
+}
+
+/** How much of one line a refusal keeps where it outlives its answer, in a log or on a job every client reads:
+ * refusals repeat what they were sent, and a computer's own log lines carry no bound. */
+export const SAID_LINE_CHARS = 400;
+/** The lines a kept refusal keeps: its own sentence and the ten a computer's log adds under it. */
+const SAID_LINES = 11;
+
+export const markedCut = (line: string, max = SAID_LINE_CHARS): string => (line.length > max ? `${line.slice(0, max)} (cut ${line.length - max} characters)` : line);
+
+/** A refusal as a host keeps it for every client to read: each line cut, and the lines past the eleventh said as cut. */
+export function keptSaid(said: string): string {
+  const lines = said.split("\n");
+  const kept = lines.slice(0, SAID_LINES).map(line => markedCut(line));
+  return (lines.length > SAID_LINES ? [...kept, `(cut ${lines.length - SAID_LINES} lines)`] : kept).join("\n");
+}
+
 /** A line refused before anything ran: a missing argument, a flag or a value nothing takes. */
 export const usageRefusal = (happened: string, fix: string): Error => refusal(happened, fix, "usage");
 

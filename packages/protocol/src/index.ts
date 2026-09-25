@@ -2628,6 +2628,37 @@ export const PlaceStageEvent = z.object({
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
+/** One install over ssh as the host keeps it while it runs and for a while after, so a window opened later, or the
+ * same one after a reload, reads the steps and the refusal the window that asked read. `said` and `fix` are the
+ * refusal's two halves; `kind` is the one it was stamped with. */
+export const PlaceAddJob = z.object({
+  addId: z.string(),
+  address: z.string(),
+  sshPort: z.number().int().optional(),
+  startedAt: z.string(),
+  state: z.enum(["running", "done", "failed"]),
+  steps: z.array(z.object({ step: PlaceAddStep, state: z.enum(["running", "done", "failed"]), note: z.string().optional() })),
+  said: z.string().optional(),
+  fix: z.string().optional(),
+  kind: z.string().optional(),
+  /** The computer the add made, once it joined. */
+  placeId: z.string().optional(),
+});
+export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
+
+/** The job with one more step said, the one rule the host and the app both keep it by: the step's line replaced
+ * where it stands, the job done once the computer joined, failed once a step failed. The recipe that runs on
+ * behind a join rides the same stream and is the computer's row's to say, not the add's. */
+export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId">): PlaceAddJob {
+  if (e.step === "provision") return job;
+  const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}) };
+  const at = job.steps.findIndex(s => s.step === e.step);
+  const steps = at === -1 ? [...job.steps, line] : job.steps.map((s, i) => (i === at ? line : s));
+  if (e.step === "join" && e.state === "done") return { ...job, steps, state: "done", ...(e.placeId !== undefined ? { placeId: e.placeId } : {}) };
+  if (e.state === "failed") return { ...job, steps, state: "failed", ...(job.said === undefined && e.note !== undefined ? { said: e.note } : {}) };
+  return { ...job, steps };
+}
+
 /** One line of the doctor's computer road as the host that holds that computer's link says it, keyed by the id the
  * terminal minted for its own run: a road's lines ride the events channel to whoever asked for them, under the
  * stream they were said on. A host source's event and no member of the runtime's own union: it carries no sequence,
@@ -5002,8 +5033,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   PlaceAuthRequest,
   /** The second frame of either road: once it verifies, this socket stops being a client's and is the place link. */
   PlaceProveRequest,
-  /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on.
-   * Answers `{ places: PlaceView[] }`. */
+  /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on, beside
+   * every add over ssh still running and the last that finished. Answers `{ places: PlaceView[], adds: PlaceAddJob[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
   /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
    * the install used, waits for that computer to dial back running it, and then runs the recipe on it. The

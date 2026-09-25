@@ -10,30 +10,32 @@
 import { useState } from "react";
 import { placeDialRoad, type PlaceDialRoad, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
-import { errorText } from "../lib/utils.js";
+import { failureOf, type Failure } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { WHERE_WORDS } from "./format.js";
 
-/** One dial and what it came to, for the two slots that offer it. The line is the host's own where it answered
- * and the client's where the ask itself failed, so the slot always says something a person can act on. A wsp that
- * cannot dial at all says so in that same slot rather than on the held button, since no tooltip carries a reason.
- * The road is the host's own reading of it: nothing comes back for a computer there is no road to, and the slot
- * draws no button rather than one whose only answer is that it had nowhere to dial. */
-export function useDialPlace(place: Pick<PlaceView, "id" | "present" | "road">): { dial: () => void; busy: boolean; line: string | null; held: boolean; heldWhy: string | null; road: PlaceDialRoad | undefined } {
+/** One dial and what it came to. The line is the host's own where it answered,
+ * and a refusal comes back whole, with the host's fix, for the refusal slot under the row. A wsp that cannot dial
+ * at all says so in the row's own slot rather than on the held button, since no tooltip carries a reason. The road
+ * is the host's own reading of it: nothing comes back for a computer there is no road to, and the slot draws no
+ * button rather than one whose only answer is that it had nowhere to dial. */
+export function useDialPlace(place: Pick<PlaceView, "id" | "present" | "road">): { dial: () => void; busy: boolean; line: string | null; refused: Failure | null; held: boolean; heldWhy: string | null; road: PlaceDialRoad | undefined } {
   const dialPlace = useStore(s => s.dialPlace);
   const road = placeDialRoad(place);
   const held = useStore(s => s.api?.dialPlace === undefined);
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Failure | null>(null);
   const dial = (): void => {
     setBusy(true);
     setLine(null);
+    setRefused(null);
     void dialPlace(place.id).then(
       answer => setLine(answer.line),
-      (e: unknown) => setLine(errorText(e)),
+      (e: unknown) => setRefused(failureOf(e)),
     ).finally(() => setBusy(false));
   };
-  return { dial, busy, line, held, heldWhy: held && road !== undefined ? WHERE_WORDS.cannotDial : null, road };
+  return { dial, busy, line, refused, held, heldWhy: held && road !== undefined ? WHERE_WORDS.cannotDial : null, road };
 }
 
 /** The button itself, drawn the same in both slots: an extra-small outline that keeps its variant while it waits
