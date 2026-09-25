@@ -4,6 +4,7 @@ import { noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, nappingAgentsRe
 import { describe, expect, it } from "vitest";
 import { NO_AGENTS_READER, agentsReads, pageReachOf, projectOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
+import { until } from "./until.js";
 
 const LANDING = { id: "pr_landing", name: "landing", path: "/root/landing" };
 
@@ -118,14 +119,14 @@ describe("the sign-ins on a computer or a workspace", () => {
       list: async () => [{ id: "pl_1", name: "spoo", kind: "computer" }],
       reportOf: async () => undefined,
       signInsAt: () => undefined,
+      loginLanded: async () => {},
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     }) as unknown as PlaceDoor;
 
-  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor, read: AgentsRead = READ) {
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor, read: AgentsRead = READ, changed: (AgentsTarget | undefined)[] = []) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
     const handed: (SignInForward | undefined)[] = [];
-    const changed: (AgentsTarget | undefined)[] = [];
     const codes: string[] = [];
     let finish: () => void = () => {};
     const acts: AgentsActs = {
@@ -278,6 +279,31 @@ describe("the sign-ins on a computer or a workspace", () => {
     expect(t.changed).toEqual([{ workspaceId: "ws_1" }]);
     // Once it is over its code writer is gone with it.
     await expect(t.api.signInCode(signInId, "ABCD-1234")).rejects.toThrow(noSignInRefusal);
+  });
+
+  it("note an agent's landed login on a joined computer before saying its agents changed, and nothing for a server's or a workspace's", async () => {
+    const landed: string[] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const door = {
+      ...spoo(),
+      loginLanded: async (placeId: string, agent: string) => {
+        await tick();
+        landed.push(`${placeId} ${agent} after ${changed.length} changes`);
+      },
+    } as unknown as PlaceDoor;
+    const t = acting({ now: "running" }, undefined, door, READ, changed);
+    const finished = async (target: AgentsTarget, ask: SignInAsk): Promise<void> => {
+      const before = changed.length;
+      await t.api.signIn(target, ask, () => {});
+      await tick();
+      t.finish();
+      await until(() => changed.length > before);
+    };
+    await finished({ placeId: "pl_1" }, { agent: "codex" });
+    await finished({ placeId: "pl_1" }, { agent: "claude", server: "linear" });
+    await finished({ workspaceId: "ws_1" }, { agent: "codex" });
+    expect(landed).toEqual(["pl_1 codex after 0 changes"]);
+    expect(changed).toEqual([{ placeId: "pl_1" }, { placeId: "pl_1" }, { workspaceId: "ws_1" }]);
   });
 
   it("refuse a sign-in the host will not plan before any channel opens, never wake a napping workspace, and stop one whose asker went", async () => {
@@ -474,6 +500,7 @@ describe("the projects a computer's report covers", () => {
     list: async () => [{ id: "pl_1", name: "box", kind: "computer" }],
     reportOf: async () => undefined,
     signInsAt: () => undefined,
+    loginLanded: async () => {},
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
   } as unknown as PlaceDoor;
   function computer(held: Record<string, readonly (typeof SPOO)[]> = { pl_1: [SPOO, WWW], here: [WWW] }) {

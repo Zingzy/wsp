@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, guestEnv, installEnv, installHomes, sharedLoginOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -2326,7 +2326,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * The catalog names both the home and the file, and an agent with no shared login has no file to stand. Only a
    * login kept as a file is seen: one a tool put in this computer's keyring reads here as none. */
   const sharedLoginUnder = (home: string, agentId: string): boolean => {
-    const shared = sharedLoginOf(CATALOG_AGENTS.find(a => a.id === agentId)?.signIn ?? { kind: "shell" });
+    const shared = sharedOn(agentId);
     return shared !== undefined && existsSync(join(home, shared.file));
   };
   /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind

@@ -4,8 +4,9 @@
 // under them. Over ssh the host logs in, installs wsp and waits for the box
 // to dial back; a cloud is its provider's key, each provider on its own; a
 // computer already running wsp types the join line this host mints. Once a
-// computer is added the panel goes on to its image, the card its own page
-// draws. Every state is read off what the host answered.
+// computer is added the panel goes on to the sign-ins that live on it and to
+// its image, the card its own page draws. Every state is read off what the
+// host answered.
 import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, HashIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
@@ -21,6 +22,7 @@ import { failureOf, type Failure } from "../protocol/failure.js";
 import { addFix, addOverSsh, useAdds, useShownAdd, type SshDraft } from "./adds.js";
 import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
 import { ComputerRow } from "./computers.js";
+import { ComputerSignIns } from "./ComputerSignIns.js";
 import { IMAGE_WORDS } from "./image.js";
 import { useImageCard, useImageStanding } from "./ImageCard.js";
 import { isProviderPlace, placeName } from "./places.js";
@@ -182,6 +184,7 @@ function Joined({ place, now, onAgain }: { place: PlaceView; now: number; onAgai
           {MINE.another}
         </Button>
       </div>
+      <ComputerSignIns place={place} now={now} />
       <ImageNext place={place} />
     </div>
   );

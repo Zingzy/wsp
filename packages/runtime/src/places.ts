@@ -86,7 +86,7 @@ import {
   type PlaceProveRequest,
 } from "@wsp/protocol";
 import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
-import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedLoginOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -428,6 +428,9 @@ export interface PlaceDoor {
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
    * no record of and for a computer whose daemon lists no logins. */
   signInsAt(placeId: string): Record<string, AgentSignInState> | undefined;
+  /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
+   * writes is taken as listed, so every word read before that computer's next report says signed in. */
+  loginLanded(placeId: string, agent: string): Promise<void>;
   /** Which backend that computer offers, by the id of the row it serves; nothing until it has said. What a fork
    * standing there was forked by, so a row names a real provider and not the one this host happens to be wired
    * for. Answered without a read, since every view of every workspace asks it. */
@@ -634,15 +637,21 @@ export function signInsOf(
   const stands = new Set(report.logins);
   const words: Record<string, AgentSignInState> = {};
   for (const id of report.agents) {
-    const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
-    const shared = signIn === undefined ? undefined : sharedLoginOf(signIn);
-    if (shared !== undefined && stands.has(`${shared.dir}/${shared.file}`)) {
+    const file = sharedLoginFile(id);
+    if (file !== undefined && stands.has(file)) {
       words[id] = "signed-in";
       continue;
     }
     words[id] = vaultSignIn(id, vault);
   }
   return words;
+}
+
+/** The file under a computer's logins folder that an agent's shared login writes, named as the report lists it;
+ * nothing for an agent whose login no workspace shares. */
+function sharedLoginFile(agentId: string): string | undefined {
+  const shared = sharedOn(agentId);
+  return shared === undefined ? undefined : sharedFileIn(shared);
 }
 
 /** The word for an agent whose own login is not on the computer: this host's vault holds the token or the key it
@@ -1585,6 +1594,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     signInsAt: placeId => {
       const report = kept.get(placeId)?.report;
       return report === undefined ? undefined : signInsOf(report, opts.vault?.() ?? {});
+    },
+
+    async loginLanded(placeId, agent) {
+      const file = sharedLoginFile(agent);
+      // Read and written with no wait between, so a remove or a newer report landing meanwhile is never written over.
+      const record = kept.get(placeId);
+      const listed = record?.report.logins;
+      if (file === undefined || record === undefined || listed === undefined || listed.includes(file)) return;
+      await keep({ ...record, report: { ...record.report, logins: [...listed, file].sort() } });
     },
 
     offerOf: placeId => kept.get(placeId)?.backendFacts?.offer ?? (providerIds().includes(placeId) ? placeId : undefined),
