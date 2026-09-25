@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type AgentsTarget, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box, a fork at a cloud
  * (a copy, so every act is the image's), a cloud's own page (the image's rows), or a task standing on a box, whose
@@ -86,6 +86,8 @@ export const AGENTS_LIST_WORDS = {
   notAdded: "not added",
   description: "Description",
   path: "Path",
+  parameters: "Parameters",
+  required: "required",
   shared: "shared",
   command: "Command",
   url: "URL",
@@ -259,8 +261,13 @@ export interface ServerActs {
   refusedOf(key: string): string | undefined;
 }
 
-/** The key a skill's own state is kept under. */
-export const skillKey = (row: Pick<SkillRow, "scope" | "name">): string => `${row.scope}:${row.name}`;
+/** The key a skill's own state is kept under: a project's skill by its project too, since two projects may each keep
+ * one of a name. */
+export const skillKey = (row: Pick<SkillRow, "scope" | "name" | "project">): string => `${row.scope}:${row.project === undefined ? "" : `${row.project.id}:`}${row.name}`;
+
+/** Where an act on one row goes: a computer's read covers all its projects, so an act on a project's row names that
+ * project; a workspace names its own. */
+export const rowTarget = (target: AgentsTarget, project: AgentsProject | undefined): AgentsTarget => ("placeId" in target && project !== undefined ? { placeId: target.placeId, project: project.id } : target);
 
 /** The sign-ins and writes a list on one target takes, by the row's id. */
 export interface AgentActs {

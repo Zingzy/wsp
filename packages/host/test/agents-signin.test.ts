@@ -24,7 +24,7 @@ const rootBox = (): AgentsOn => ({
   login: { HOME: "/home/ada", PATH: "/usr/local/bin:/usr/bin" },
   logins: "/var/lib/wsp/logins",
 });
-const fork = (): AgentsOn => ({ kind: "machine", machine: { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as never, project: "/root/landing" });
+const fork = (): AgentsOn => ({ kind: "machine", machine: { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as never, projects: [{ id: "pr_landing", name: "landing", path: "/root/landing" }] });
 /** A workspace whose callback port this host forwards from this computer. */
 const relayed = (): AgentsOn => ({ ...fork(), relayed: true }) as AgentsOn;
 /** A joined computer whose daemon and home are root's, and whose callback port this host forwards from here. */

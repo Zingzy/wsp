@@ -766,12 +766,34 @@ export type Page = "front" | "agent" | "host" | "dev" | "app";
 
 /** A verb on both doors: the words that select it on the command line, its usage and one phrase on what it does in
  * every help, the page it prints on, the flags it reads beside COMMON, its run, and its tool. */
+/** One flag of a verb's table: the parser's own row, and `valueWith` where the flag's value is optional: alone it
+ * stands bare, and it takes the word after it as its value only on a line that also carries the flag named there. */
+export type FlagRow = NonNullable<ParseArgsConfig["options"]>[string] & { valueWith?: string };
+export type FlagTable = Readonly<Record<string, FlagRow>>;
+
+/** The line with each flag whose row makes its value optional written `--<flag>=` where it stands bare, so the parser
+ * reads it alone: where its row's other flag is not on the line, or no word follows it. */
+export function optionalValues(argv: readonly string[], table: FlagTable): string[] {
+  const cut = argv.indexOf("--");
+  const words = cut === -1 ? argv : argv.slice(0, cut);
+  const has = (name: string): boolean => words.some(w => w === `--${name}` || w.startsWith(`--${name}=`));
+  const bare = new Set<number>();
+  for (const [name, row] of Object.entries(table)) {
+    if (row.valueWith === undefined) continue;
+    const alone = !has(row.valueWith);
+    words.forEach((w, i) => {
+      if (w === `--${name}` && (alone || words[i + 1] === undefined || words[i + 1]!.startsWith("-"))) bare.add(i);
+    });
+  }
+  return argv.map((w, i) => (bare.has(i) ? `${w}=` : w));
+}
+
 export interface CliVerb {
   name: string;
   usage: string;
   about: string;
   page: Page;
-  options: NonNullable<ParseArgsConfig["options"]>;
+  options: FlagTable;
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
   readsHere?: string;
@@ -2684,12 +2706,40 @@ async function drawRows(ctx: VerbContext, words: string, frame: (client: HostCli
 /** The computer or workspace a list of what stands there names: a workspace by its name, a computer by the name
  * wsp computers shows it under, and this computer where neither is given. Refused where both are, since a workspace
  * already names the computer it is on. */
-async function agentsTarget(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string): Promise<AgentsTarget> {
+async function agentsTarget(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string, project?: string): Promise<AgentsTarget> {
   if (workspace !== undefined && on !== undefined) throw usageRefusal("A workspace already names its computer; give the workspace or --on <computer>, not both.", usage);
   if (workspace !== undefined) return { workspaceId: (await workspaceOf(client, workspace)).id };
-  if (on !== undefined) return { placeId: (await placeNamed(client, on)).id };
+  if (on !== undefined) return { placeId: (await placeNamed(client, on)).id, ...(project !== undefined ? { project } : {}) };
   return { placeId: HERE_PLACE_ID };
 }
+
+/** A line's --project, or a tool's project, as the act reads it: absent, not a project's; bare or true, the
+ * workspace's own project; a name, with --on, that computer's project of the name. */
+interface ProjectAsked {
+  project: boolean;
+  name?: string;
+}
+
+/** Reads --project against the target the line names: a name needs --on, since a workspace names its own project,
+ * and --on needs a name, since a computer holds several. */
+function projectAsked(value: string | boolean | undefined, workspace: string | undefined, on: string | undefined, usage: string): ProjectAsked {
+  if (value === undefined || value === false) return { project: false };
+  if (value === true || value === "") {
+    if (on !== undefined) throw usageRefusal("--project with --on names the project: --project <name>, as wsp projects shows it.", usage);
+    return { project: true };
+  }
+  if (on === undefined) throw usageRefusal(`--project ${value} names a project on a computer, which --on names; a workspace's own project is --project alone.`, usage);
+  return { project: true, name: value };
+}
+
+/** The project a server's tools are asked in: only by name, with --on, since a workspace finds its own project's
+ * servers by itself. */
+function toolsProject(value: string | undefined, workspace: string | undefined, on: string | undefined, usage: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (value === "") throw usageRefusal("--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers.", usage);
+  return projectAsked(value, workspace, on, usage).name;
+}
+
 
 /** One read of what stands on a computer or workspace, which each of the three lists prints its own part of. */
 async function agentsReport(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string): Promise<AgentsReport> {
@@ -2701,8 +2751,8 @@ async function agentsReport(client: HostClient, workspace: string | undefined, o
 const AGENTS_FRAME = AgentsReport.omit({ agents: true, skills: true, servers: true }).shape;
 
 /** The report's own facts, beside the rows one list prints. */
-function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "user" | "readAt" | "stale" | "refused"> {
-  return { target: r.target, home: r.home, user: r.user, readAt: r.readAt, ...(r.stale !== undefined ? { stale: r.stale } : {}), refused: r.refused };
+function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "user" | "readAt" | "stale" | "refused" | "projects"> {
+  return { target: r.target, home: r.home, user: r.user, readAt: r.readAt, ...(r.stale !== undefined ? { stale: r.stale } : {}), refused: r.refused, ...(r.projects !== undefined ? { projects: r.projects } : {}) };
 }
 
 /** The lines under every list: a napping workspace's report is the one it last had, and each reader that could not
@@ -2716,15 +2766,18 @@ function agentRowLines(r: AgentsReport): string[] {
   return [...table([["AGENT", "VERSION", "SIGN-IN", "WSP TOOLS", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", word(a), a.wspTools ? "yes" : "no", a.path ?? "-"])]), ...reportTail(r)];
 }
 
+/** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */
+const scopeWord = (row: { scope: string; project?: { name: string } }): string => (row.project !== undefined ? `project ${row.project.name}` : row.scope);
+
 function skillRowLines(r: AgentsReport): string[] {
   const where = (s: SkillRow): string => s.paths.map(p => (p.linkTo === undefined ? p.path : `${p.path} -> ${p.linkTo}`)).join(", ");
-  return [...(r.skills.length === 0 ? ["no skills"] : table([["SKILL", "KIND", "WHERE"], ...r.skills.map(s => [s.name, s.scope, where(s)])])), ...reportTail(r)];
+  return [...(r.skills.length === 0 ? ["no skills"] : table([["SKILL", "KIND", "WHERE"], ...r.skills.map(s => [s.name, scopeWord(s), where(s)])])), ...reportTail(r)];
 }
 
 function serverRowLines(r: AgentsReport): string[] {
   const reach = (s: McpRow): string => (s.transport.kind === "stdio" ? `stdio ${s.transport.line}` : `http ${s.transport.host}`);
   const state = (s: McpRow): string => [s.enabled ? s.auth : "disabled", ...(s.inRecipe === false ? ["not in recipe"] : [])].join(", ");
-  return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), reach(s), s.file, state(s)])])), ...reportTail(r)];
+  return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), scopeWord(s), reach(s), s.file, state(s)])])), ...reportTail(r)];
 }
 
 /** One server's tools as lines: its sign-in as the connect found it, then each tool, or why none came back. */
@@ -2735,14 +2788,14 @@ function toolLines(name: string, a: ServerToolsAnswer): string[] {
   return [head, ...(a.tools.length === 0 ? ["no tools"] : table([["TOOL", "DESCRIPTION"], ...a.tools.map((t: McpTool) => [t.name, (t.description ?? "-").split("\n")[0]!])]))];
 }
 
-async function serverToolsOf(client: HostClient, name: string, agent: string, workspace: string | undefined, on: string | undefined, refresh: boolean, usage: string): Promise<ServerToolsAnswer> {
-  const target = await agentsTarget(client, workspace, on, usage);
+async function serverToolsOf(client: HostClient, name: string, agent: string, workspace: string | undefined, on: string | undefined, refresh: boolean, usage: string, project?: string): Promise<ServerToolsAnswer> {
+  const target = await agentsTarget(client, workspace, on, usage, project);
   return ServerToolsAnswer.parse((await client.request<{ answer: unknown }>("servers.tools", { target, agent, name, ...(refresh ? { refresh } : {}) })).answer);
 }
 
 /** A server there added, removed or turned off or on; the answer names the file written. */
-async function serverChanged(client: HostClient, op: "servers.add" | "servers.remove" | "servers.toggle", body: Record<string, unknown>, workspace: string | undefined, on: string | undefined, usage: string): Promise<{ file: string }> {
-  const target = await agentsTarget(client, workspace, on, usage);
+async function serverChanged(client: HostClient, op: "servers.add" | "servers.remove" | "servers.toggle", body: Record<string, unknown>, workspace: string | undefined, on: string | undefined, usage: string, project?: string): Promise<{ file: string }> {
+  const target = await agentsTarget(client, workspace, on, usage, project);
   return z.object({ file: z.string() }).parse(await client.request(op, { target, ...body }));
 }
 
@@ -2774,17 +2827,23 @@ function serverCommand(line: string | undefined, usage: string): { command?: str
   return { command, args };
 }
 
-/** The scope a line names, which the wire checks too; nothing without it. */
-function serverScope(word: string | undefined, usage: string): { scope?: McpScope } {
-  if (word === undefined) return {};
+/** The scope a line names, which the wire checks too, and --project, which is the project scope; nothing without
+ * either. */
+function serverScope(word: string | undefined, usage: string, project: ProjectAsked = { project: false }): { scope?: McpScope } {
+  if (word === undefined) return project.project ? { scope: "project" } : {};
   const scope = McpScope.safeParse(word);
   if (!scope.success) throw usageRefusal(`--scope is user, home or project, not ${word}.`, usage);
+  if (project.project && scope.data !== "project") throw usageRefusal(`--project is the project scope, not ${word}; give one of the two.`, usage);
   return { scope: scope.data };
 }
 
 const ServerNameIn = z.string().describe("the server's name, as servers lists it");
 const ServerAgentIn = z.string().describe("the catalog id of the agent whose config names it, as servers lists it");
 const ServerScopeIn = McpScope.optional().describe("the scope servers lists it under: user, home or project; user without it");
+const ServerProjectIn = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .describe("the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on");
 const SERVER_CHANGE_WORDS =
   "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.";
 
@@ -2836,13 +2895,13 @@ export function skillHitLines(hits: readonly SkillHit[]): string[] {
 const onSkillsSh = (skill: string): boolean => skill.split("/").length === 3;
 
 /** A skill's SKILL.md: off skills.sh by its id, else off the target by its name. */
-async function skillShown(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, project: boolean, usage: string): Promise<SkillPreview> {
+async function skillShown(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, usage: string): Promise<SkillPreview> {
   if (onSkillsSh(skill)) {
-    if (workspace !== undefined || on !== undefined || project) throw usageRefusal(`${skill} is read off skills.sh, which names no computer or project.`, usage);
+    if (workspace !== undefined || on !== undefined || project.project) throw usageRefusal(`${skill} is read off skills.sh, which names no computer or project.`, usage);
     return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.get", { skill })).preview);
   }
-  const target = await agentsTarget(client, workspace, on, usage);
-  return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project ? { project } : {}) })).preview);
+  const target = await agentsTarget(client, workspace, on, usage, project.name);
+  return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project.project ? { project: true } : {}) })).preview);
 }
 
 export const shownText = (p: SkillPreview): string => {
@@ -2850,9 +2909,9 @@ export const shownText = (p: SkillPreview): string => {
   return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${Math.ceil(p.size / 1024)} KB)` : text;
 };
 
-async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: boolean, usage: string): Promise<SkillAdded> {
-  const target = await agentsTarget(client, workspace, on, usage);
-  return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project ? { project } : {}) })).added);
+async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: ProjectAsked, usage: string): Promise<SkillAdded> {
+  const target = await agentsTarget(client, workspace, on, usage, project.name);
+  return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project.project ? { project: true } : {}) })).added);
 }
 
 function addedLine(skill: string, a: SkillAdded): string {
@@ -2861,14 +2920,17 @@ function addedLine(skill: string, a: SkillAdded): string {
 }
 
 /** A skill there turned off, on, or removed, by its name. */
-async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: boolean, turn: boolean | undefined, usage: string): Promise<string[]> {
-  const target = await agentsTarget(client, workspace, on, usage);
-  const said = await client.request<{ removed?: unknown; paths?: unknown }>(op, { target, name, ...(project ? { project } : {}), ...(turn !== undefined ? { on: turn } : {}) });
+async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, turn: boolean | undefined, usage: string): Promise<string[]> {
+  const target = await agentsTarget(client, workspace, on, usage, project.name);
+  const said = await client.request<{ removed?: unknown; paths?: unknown }>(op, { target, name, ...(project.project ? { project: true } : {}), ...(turn !== undefined ? { on: turn } : {}) });
   return z.array(z.string()).parse(op === "skills.remove" ? said.removed : said.paths);
 }
 
 const SkillNameIn = z.string().describe("the skill's name, as skills lists it");
-const SkillProjectIn = z.boolean().optional().describe("the project's skill of that name, from a workspace, rather than the one that is not a project's");
+const SkillProjectIn = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .describe("the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on");
 const SKILL_CHANGE_WORDS =
   "The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.";
 
@@ -2969,14 +3031,14 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "skills show",
-    usage: "wsp skills show <skill> [<workspace>] [--on <computer>] [--project]",
+    usage: "wsp skills show <skill> [<workspace>] [--on <computer>] [--project [<name>]]",
     about: "prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill> before it is installed, or one already on this computer, a box you added or a workspace by its name",
     page: "agent",
-    options: { on: { type: "string" }, project: { type: "boolean" } },
+    options: { on: { type: "string" }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
       const [skill, workspace, ...rest] = ctx.args;
       if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills show takes one skill and one workspace at most.", usageIs(ctx));
-      const shown = await skillShown(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), ctx.flags["project"] === true, usageIs(ctx));
+      const shown = await skillShown(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx));
       ctx.out.emit(shown, shownText(shown));
       return 0;
     },
@@ -2985,22 +3047,22 @@ export const VERBS: readonly Verb[] = [
       input: { skill: z.string().describe("an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"), workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
       output: SkillPreview.shape,
       call: async ({ skill, workspace, on, project }, deps) => {
-        const shown = await skillShown(await deps.client(), skill, workspace, on, project === true, "skills_show takes a workspace or on, not both");
+        const shown = await skillShown(await deps.client(), skill, workspace, on, projectAsked(project, workspace, on, "skills_show"), "skills_show takes a workspace or on, not both");
         return asText(shownText(shown), shown);
       },
     }),
   },
   {
     name: "skills add",
-    usage: "wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]... [--project]",
+    usage: "wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]... [--project [<name>]]",
     about: "installs a skill off skills.sh by its <owner>/<repo>/<skill> into the shared skills folder, with a link or a copy for each agent named that does not read that folder; every file is checked first and lands as a plain file that runs nothing",
     page: "agent",
-    options: { on: { type: "string" }, agent: { type: "string", multiple: true }, project: { type: "boolean" } },
+    options: { on: { type: "string" }, agent: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
       const [skill, workspace, ...rest] = ctx.args;
       if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills add takes one skill and one workspace at most.", usageIs(ctx));
       const agents = flagList(ctx.flags, "agent");
-      const added = await skillAdded(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), agents.length > 0 ? agents : undefined, ctx.flags["project"] === true, usageIs(ctx));
+      const added = await skillAdded(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), agents.length > 0 ? agents : undefined, projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), usageIs(ctx));
       ctx.out.emit(added, addedLine(skill, added));
       return 0;
     },
@@ -3012,25 +3074,25 @@ export const VERBS: readonly Verb[] = [
         workspace: AgentsWorkspaceIn,
         on: AgentsOnIn,
         agent: z.array(z.string()).optional().describe("the catalog ids of the agents to put it in; every agent whose folder is there without it"),
-        project: z.boolean().optional().describe("put it in the workspace's project rather than the home"),
+        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project rather than the home: true for the workspace's own, or the project's name, as projects lists it, with on"),
       },
       output: SkillAdded.shape,
       call: async ({ skill, workspace, on, agent, project }, deps) => {
-        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, project === true, "skills_add takes a workspace or on, not both");
+        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, projectAsked(project, workspace, on, "skills_add"), "skills_add takes a workspace or on, not both");
         return asText(addedLine(skill, added), added);
       },
     }),
   },
   {
     name: "skills remove",
-    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project]",
+    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]]",
     about: "removes a skill by its name: every folder it lives in and every link to it, where a link's own folder elsewhere stays",
     page: "agent",
-    options: { on: { type: "string" }, project: { type: "boolean" } },
+    options: { on: { type: "string" }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one workspace at most.", usageIs(ctx));
-      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), ctx.flags["project"] === true, undefined, usageIs(ctx));
+      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), undefined, usageIs(ctx));
       ctx.out.emit({ removed }, `${name} is gone from ${removed.join(", ")}.`);
       return 0;
     },
@@ -3039,7 +3101,7 @@ export const VERBS: readonly Verb[] = [
       input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
       output: { removed: z.array(z.string()) },
       call: async ({ name, workspace, on, project }, deps) => {
-        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, project === true, undefined, "skills_remove takes a workspace or on, not both");
+        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, projectAsked(project, workspace, on, "skills_remove"), undefined, "skills_remove takes a workspace or on, not both");
         return asText(`${name} is gone from ${removed.join(", ")}.`, { removed });
       },
     }),
@@ -3054,7 +3116,7 @@ export const VERBS: readonly Verb[] = [
       run: async ctx => {
         const [name, workspace, ...rest] = ctx.args;
         if (name === undefined || rest.length > 0) throw usageRefusal(`wsp skills ${word} takes one skill's name and one workspace at most.`, usageIs(ctx));
-        const paths = await skillChanged(await ctx.client(), "skills.toggle", name, workspace, flag(ctx.flags, "on"), false, word === "enable", usageIs(ctx));
+        const paths = await skillChanged(await ctx.client(), "skills.toggle", name, workspace, flag(ctx.flags, "on"), { project: false }, word === "enable", usageIs(ctx));
         ctx.out.emit({ paths }, `${name} is ${word === "enable" ? "on" : "off"}.`);
         return 0;
       },
@@ -3063,7 +3125,7 @@ export const VERBS: readonly Verb[] = [
         input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn },
         output: { paths: z.array(z.string()) },
         call: async ({ name, workspace, on }, deps) => {
-          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, false, word === "enable", `skills_${word} takes a workspace or on, not both`);
+          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, { project: false }, word === "enable", `skills_${word} takes a workspace or on, not both`);
           return asText(`${name} is ${word === "enable" ? "on" : "off"}.`, { paths });
         },
       }),
@@ -3171,16 +3233,17 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "servers tools",
-    usage: "wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>] [--refresh]",
+    usage: "wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>] [--project <name>] [--refresh]",
     about: "starts one MCP server once where it is set up and lists its tools with their descriptions, and says whether it needs a sign-in",
     page: "agent",
-    options: { agent: { type: "string" }, on: { type: "string" }, refresh: { type: "boolean" } },
+    options: { agent: { type: "string" }, on: { type: "string" }, project: { type: "string", valueWith: "on" }, refresh: { type: "boolean" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers tools takes one server's name and one workspace at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers tools needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
-      const answer = await serverToolsOf(await ctx.client(), name, agent, workspace, flag(ctx.flags, "on"), ctx.flags["refresh"] === true, usageIs(ctx));
+      const project = toolsProject(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const answer = await serverToolsOf(await ctx.client(), name, agent, workspace, flag(ctx.flags, "on"), ctx.flags["refresh"] === true, usageIs(ctx), project);
       ctx.out.emit(answer, toolLines(name, answer).join("\n"));
       return 0;
     },
@@ -3191,21 +3254,23 @@ export const VERBS: readonly Verb[] = [
         agent: z.string().describe("the catalog id of the agent whose config names it, as servers lists it"),
         workspace: AgentsWorkspaceIn,
         on: AgentsOnIn,
+        project: z.string().optional().describe("the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"),
         refresh: z.boolean().optional().describe("start it again even where an answer from the last hour stands"),
       },
       output: ServerToolsAnswer.shape,
-      call: async ({ name, agent, workspace, on, refresh }, deps) => {
-        const answer = await serverToolsOf(await deps.client(), name, agent, workspace, on, refresh === true, "servers_tools takes a workspace or on, not both");
+      call: async ({ name, agent, workspace, on, project, refresh }, deps) => {
+        const usage = "servers_tools takes a workspace or on, not both";
+        const answer = await serverToolsOf(await deps.client(), name, agent, workspace, on, refresh === true, usage, toolsProject(project, workspace, on, usage));
         return asText(toolLines(name, answer).join("\n"), answer);
       },
     }),
   },
   {
     name: "servers add",
-    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" [--env <NAME>]... | --url <address> [--header <name>=<VARIABLE>]...) [--project]",
+    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" [--env <NAME>]... | --url <address> [--header <name>=<VARIABLE>]...) [--project [<name>]]",
     about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file alone",
     page: "agent",
-    options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "boolean" } },
+    options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
@@ -3214,8 +3279,9 @@ export const VERBS: readonly Verb[] = [
       const command = flag(ctx.flags, "command");
       const url = flag(ctx.flags, "url");
       const values = serverValues(ctx.env, flagList(ctx.flags, "env"), flagList(ctx.flags, "header"), usageIs(ctx));
-      const body = { agent, name, ...serverCommand(command, usageIs(ctx)), ...(url !== undefined ? { url } : {}), ...values, ...(ctx.flags["project"] === true ? { project: true } : {}) };
-      const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const body = { agent, name, ...serverCommand(command, usageIs(ctx)), ...(url !== undefined ? { url } : {}), ...values, ...(project.project ? { project: true } : {}) };
+      const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
       ctx.out.emit(added, `${name} is in ${added.file}.`);
       return 0;
     },
@@ -3230,40 +3296,44 @@ export const VERBS: readonly Verb[] = [
         env: z.array(z.string()).optional().describe("variables the server is given, each by its name, its value read off the same name in the environment the wsp tools run with"),
         url: z.string().optional().describe("the server's https address; or command"),
         header: z.array(z.string()).optional().describe("headers sent to the address, each <name>=<VARIABLE>, its value read off that variable in the environment the wsp tools run with"),
-        project: z.boolean().optional().describe("put it in the workspace's project file rather than the agent's own"),
+        project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project's file rather than the agent's own: true for the workspace's own project, or the project's name, as projects lists it, with on"),
       },
       output: { file: z.string() },
       call: async ({ name, agent, workspace, on, command, env, url, header, project }, deps) => {
         const usage = "servers_add takes a workspace or on, not both";
         const values = serverValues(deps.env, env ?? [], header ?? [], usage);
-        const body = { agent, name, ...serverCommand(command, usage), ...(url !== undefined ? { url } : {}), ...values, ...(project === true ? { project: true } : {}) };
-        const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage);
+        const asked = projectAsked(project, workspace, on, usage);
+        const body = { agent, name, ...serverCommand(command, usage), ...(url !== undefined ? { url } : {}), ...values, ...(asked.project ? { project: true } : {}) };
+        const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage, asked.name);
         return asText(`${name} is in ${added.file}.`, added);
       },
     }),
   },
   {
     name: "servers remove",
-    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>]",
+    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]",
     about: "takes one MCP server's entry out of an agent's own config, every other line of the file as it was",
     page: "agent",
-    options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" } },
+    options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
       const [name, workspace, ...rest] = ctx.args;
       const agent = flag(ctx.flags, "agent");
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers remove takes one server's name and one workspace at most.", usageIs(ctx));
       if (agent === undefined) throw usageRefusal("wsp servers remove needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
-      const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx));
-      const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
+      const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
       ctx.out.emit(removed, `${name} is gone from ${removed.file}.`);
       return 0;
     },
     tool: tool({
       description: `Takes one MCP server's entry out of one agent's own config on one computer or workspace, in the scope servers lists it under, every other server and line of the file as it was. ${SERVER_CHANGE_WORDS}`,
-      input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn },
+      input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
       output: { file: z.string() },
-      call: async ({ name, agent, workspace, on, scope }, deps) => {
-        const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...(scope !== undefined ? { scope } : {}) }, workspace, on, "servers_remove takes a workspace or on, not both");
+      call: async ({ name, agent, workspace, on, scope, project }, deps) => {
+        const usage = "servers_remove takes a workspace or on, not both";
+        const asked = projectAsked(project, workspace, on, usage);
+        const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...serverScope(scope, usage, asked) }, workspace, on, usage, asked.name);
         return asText(`${name} is gone from ${removed.file}.`, removed);
       },
     }),
@@ -3271,26 +3341,29 @@ export const VERBS: readonly Verb[] = [
   ...(["disable", "enable"] as const).map(
     (word): Verb => ({
       name: `servers ${word}`,
-      usage: `wsp servers ${word} <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>]`,
+      usage: `wsp servers ${word} <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]`,
       about: word === "disable" ? "turns one MCP server off by the switch its agent reads, so the agent leaves it out until it is turned on" : "turns an MCP server that was turned off on again",
       page: "agent",
-      options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" } },
+      options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" }, project: { type: "string", valueWith: "on" } },
       run: async ctx => {
         const [name, workspace, ...rest] = ctx.args;
         const agent = flag(ctx.flags, "agent");
         if (name === undefined || rest.length > 0) throw usageRefusal(`wsp servers ${word} takes one server's name and one workspace at most.`, usageIs(ctx));
         if (agent === undefined) throw usageRefusal(`wsp servers ${word} needs --agent, the agent whose config names the server, as wsp servers shows it.`, usageIs(ctx));
-        const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx));
-        const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+        const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+        const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
+        const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
         ctx.out.emit(changed, `${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`);
         return 0;
       },
       tool: tool({
         description: `Turns one MCP server ${word === "enable" ? "on again" : "off"} in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. ${SERVER_CHANGE_WORDS}`,
-        input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn },
+        input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
         output: { file: z.string() },
-        call: async ({ name, agent, workspace, on, scope }, deps) => {
-          const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...(scope !== undefined ? { scope } : {}), on: word === "enable" }, workspace, on, `servers_${word} takes a workspace or on, not both`);
+        call: async ({ name, agent, workspace, on, scope, project }, deps) => {
+          const usage = `servers_${word} takes a workspace or on, not both`;
+          const asked = projectAsked(project, workspace, on, usage);
+          const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...serverScope(scope, usage, asked), on: word === "enable" }, workspace, on, usage, asked.name);
           return asText(`${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`, changed);
         },
       }),
@@ -4437,32 +4510,36 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "skills disable on": AGENTS_ON_WORDS,
   "skills enable on": AGENTS_ON_WORDS,
   "skills search limit": "how many skills to answer, from 1 to 50; 20 without it",
-  "skills show project": "the project's skill of that name, from a workspace, rather than the one that is not a project's",
-  "skills remove project": "the project's skill of that name, from a workspace, rather than the one that is not a project's",
+  "skills show project": "the project's skill of that name rather than the one that is not a project's: alone from a workspace, or the project's name with --on",
+  "skills remove project": "the project's skill of that name rather than the one that is not a project's: alone from a workspace, or the project's name with --on",
   "skills add agent": "an agent to put the skill in, by its catalog id; repeats, and every agent whose folder is there without it",
-  "skills add project": "put it in the workspace's project rather than the home",
+  "skills add project": "put it in a project rather than the home: alone for the workspace's own, or the project's name with --on",
   "servers on": AGENTS_ON_WORDS,
   "servers tools on": AGENTS_ON_WORDS,
   "servers signin on": AGENTS_ON_WORDS,
   "servers signin agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools refresh": "start the server again even where an answer from the last hour stands",
+  "servers tools project": "the project on the computer --on names whose server it is, by name; a workspace finds its own project's servers",
   "servers add on": AGENTS_ON_WORDS,
   "servers add agent": "the agent whose config takes the server, by its catalog id",
   "servers add command": "the line the server runs, its program and arguments in one quoted value, split as a shell splits it and nothing expanded; or --url",
   "servers add env": "a variable the server is given, by its name, its value read off the same name in this terminal's environment; repeats",
   "servers add url": "the server's https address; or --command",
   "servers add header": "<name>=<VARIABLE>, a header sent to the address with its value read off that variable in this terminal's environment; repeats",
-  "servers add project": "put it in the workspace's project file rather than the agent's own",
+  "servers add project": "put it in a project's file rather than the agent's own: alone for the workspace's own project, or the project's name with --on",
   "servers remove on": AGENTS_ON_WORDS,
   "servers remove agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers remove scope": "user, home or project, as wsp servers shows it; user without it",
+  "servers remove project": "the project scope: alone for the workspace's own project, or the project's name with --on",
   "servers disable on": AGENTS_ON_WORDS,
   "servers disable agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers disable scope": "user, home or project, as wsp servers shows it; user without it",
+  "servers disable project": "the project scope: alone for the workspace's own project, or the project's name with --on",
   "servers enable on": AGENTS_ON_WORDS,
   "servers enable agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers enable scope": "user, home or project, as wsp servers shows it; user without it",
+  "servers enable project": "the project scope: alone for the workspace's own project, or the project's name with --on",
   repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
@@ -4602,7 +4679,7 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
   let flags: Flags;
   let args: string[];
   try {
-    const parsed = parseArgs({ args: argv.slice(verb.name.split(" ").length), options: { ...COMMON, ...verb.options }, allowPositionals: true });
+    const parsed = parseArgs({ args: optionalValues(argv.slice(verb.name.split(" ").length), verb.options), options: { ...COMMON, ...verb.options }, allowPositionals: true });
     flags = parsed.values as Flags;
     args = parsed.positionals;
     absoluteFolder(flag(flags, "cwd"));

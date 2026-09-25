@@ -4381,6 +4381,22 @@ describe("the agents on a computer you own", () => {
     },
   });
 
+  it("cover every project recorded on that computer, each at its checkout there, and an act names one of them", async () => {
+    const asked: AgentsOn[] = [];
+    const { hostKey } = await serving({ agentsReader: { read: async on => (asked.push(on), READ), tools: async on => (asked.push(on), { auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) }, vault: {} });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: c => forks(c, undefined, undefined, HOLDS_PROJECTS) });
+    sockets.push(client.ws);
+    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
+    const tools = await c.request("servers.tools", { target: { placeId, project: project.id }, agent: "claude", name: "db" });
+    expect(tools.ok, String(tools["error"])).toBe(true);
+    const at = { id: project.id, name: "landing", path: project.checkout };
+    expect(asked.map(on => on.projects)).toEqual([[at], [at]]);
+    expect(project.checkout).toBeDefined();
+  });
+
   it("are read over that computer's link with the login, sign-ins and versions its report carries, and answered stamped", async () => {
     const asked: AgentsOn[] = [];
     const said: string[] = [];
@@ -4406,11 +4422,11 @@ describe("the agents on a computer you own", () => {
     expect(answered.ok, String(answered["error"])).toBe(true);
     expect(answered["report"]).toMatchObject({ ...READ, target: { placeId } });
     expect(typeof (answered["report"] as { readAt: unknown }).readAt).toBe("string");
-    expect(asked).toEqual([{ kind: "box", machine: expect.anything(), login: { HOME: "/home/maya", PATH: "/usr/bin" }, signIns: { claude: "none" }, versions: { claude: "2.1.281 (Claude Code)" } }]);
+    expect(asked).toEqual([{ kind: "box", machine: expect.anything(), login: { HOME: "/home/maya", PATH: "/usr/bin" }, signIns: { claude: "none" }, versions: { claude: "2.1.281 (Claude Code)" }, projects: [] }]);
     expect(lines).toEqual(["id -un"]);
     expect(said).toEqual(["maya"]);
     expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);
-    expect(asked.at(-1)).toEqual({ kind: "here" });
+    expect(asked.at(-1)).toEqual({ kind: "here", projects: [] });
   });
 
   it("hand one server's tools ask to the reader over that computer's link, its stdin riding the frame, and refuse it on a ticket", async () => {

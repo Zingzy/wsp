@@ -366,6 +366,22 @@ export function UnderRowLevel({ row, back, backLabel }: { row: UnderRow; back: (
       <LevelHead back={back} backLabel={backLabel} title={row.title} headRef={headRef} />
       <div data-level-body className="px-4 pt-2">
         {row.body === undefined ? null : <p className="whitespace-pre-line break-words text-[13px] leading-5 text-foreground">{row.body}</p>}
+        {row.list === undefined ? null : (
+          <section data-k="under-list" aria-label={row.list.label} className={cn("flex flex-col gap-3", row.body !== undefined && "mt-5")}>
+            <h4 className="font-mono text-[11px] leading-4 tracking-[0.12em] text-muted-foreground uppercase">{row.list.label}</h4>
+            <ul className="flex flex-col gap-3">
+              {row.list.items.map(item => (
+                <li key={item.name} data-under-item={item.name} className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate font-mono text-xs leading-5 text-foreground">{item.name}</span>
+                    {item.fact === undefined ? null : <span className={cn(FACT, "shrink-0")}>{item.fact}</span>}
+                  </span>
+                  {item.about === undefined ? null : <span className="break-words text-xs leading-4 text-muted-foreground">{item.about}</span>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </div>
   );

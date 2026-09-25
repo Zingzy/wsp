@@ -18,7 +18,7 @@ import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HO
 const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, optionalValues, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
 
 interface Tool {
   name: string;
@@ -199,7 +199,7 @@ export function usageError(argv: readonly string[], lines: readonly CommandLine[
     .find(c => c.words.split(" ").every((w, i) => rest[i] === w)) ?? (rest[0]!.startsWith("-") ? lines.find(c => c.words === "up") : undefined);
   if (command === undefined) return `unknown command: ${argv.join(" ")}`;
   try {
-    parseArgs({ args: rest.slice(command.words === "up" && rest[0]!.startsWith("-") ? 0 : command.words.split(" ").length), options: command.options, allowPositionals: true, strict: true });
+    parseArgs({ args: optionalValues(rest.slice(command.words === "up" && rest[0]!.startsWith("-") ? 0 : command.words.split(" ").length), command.options), options: command.options, allowPositionals: true, strict: true });
     return undefined;
   } catch (e) {
     return `${argv.join(" ")}: ${e instanceof Error ? e.message : String(e)}`;

@@ -75,6 +75,7 @@
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
 //                         ready card and settings-cloud the cloud's copy behind
+//                         (&projects=1: the box's agents over the two projects it holds)
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
 //   bring-back-absent    the same on a workspace whose computer is not
@@ -102,7 +103,7 @@ import { useServerActs } from "../../src/components/agents/useServerActs";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -485,7 +486,7 @@ const api = {
             : { image: IMAGE, copies: IMAGE_COPIES, projects: [] },
   imageBuild: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => AGENTS_REPORT,
+  agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
   // On this Mac a server's harness opens the browser itself and nothing is pasted back.

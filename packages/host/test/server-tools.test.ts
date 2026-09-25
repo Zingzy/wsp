@@ -25,7 +25,7 @@ while IFS= read -r line; do
       if read -r -t 1 early; then echo "tools/list came before initialize was answered" >&2; exit 3; fi
       printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}' ;;
     *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"list_records","description":"List records in a base","inputSchema":{"type":"object"}},{"name":"token_%s"}]}}\\n' "\${#FAKE_TOKEN}" ;;
+      printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"list_records","description":"List records in a base","inputSchema":{"type":"object","properties":{"base":{"type":"string","description":"The base id"},"limit":{"type":["integer","null"]},"view":{}},"required":["base"]}},{"name":"token_%s"}]}}\\n' "\${#FAKE_TOKEN}" ;;
   esac
 done
 `;
@@ -202,7 +202,8 @@ describe("one MCP server's tools, on the person's ask", () => {
     const reader = agentsReader({ vault: () => ({}), here: () => here(f), now: () => now });
     const ask = { key: "here", agent: "claude", name: "airtable" };
     const first = await reader.tools({ kind: "here" }, ask);
-    expect(first).toEqual({ auth: "connected", tools: [{ name: "list_records", description: "List records in a base" }, { name: `token_${SECRET.length}` }], readAt: "2026-09-24T12:00:00.000Z" });
+    const params = [{ name: "base", type: "string", required: true, description: "The base id" }, { name: "limit", type: "integer or null", required: false }, { name: "view", required: false }];
+    expect(first).toEqual({ auth: "connected", tools: [{ name: "list_records", description: "List records in a base", params }, { name: `token_${SECRET.length}` }], readAt: "2026-09-24T12:00:00.000Z" });
     expect(starts(f)).toBe(1);
     now += 59 * 60_000;
     expect(await reader.tools({ kind: "here" }, ask)).toEqual(first);

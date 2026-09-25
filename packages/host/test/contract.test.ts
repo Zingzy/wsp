@@ -380,7 +380,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(two.code).toBe(EXIT_CODES.usage);
     const prose = await run("servers");
     expect(prose.code).toBe(0);
-    expect(prose.io.lines.join("\n")).toMatch(/airtable\s+Claude Code\s+stdio npx airtable-mcp-server\s+~\/\.claude\.json\s+open/);
+    expect(prose.io.lines.join("\n")).toMatch(/airtable\s+Claude Code\s+user\s+stdio npx airtable-mcp-server\s+~\/\.claude\.json\s+open/);
     expect(prose.io.lines.join("\n")).not.toContain("SECRET");
   });
 
