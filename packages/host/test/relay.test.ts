@@ -412,7 +412,10 @@ describe("callback relay over a fake daemon link", () => {
       workspaces: {
         ...rt.workspaces,
         servedByItsComputer: async () => true,
-        daemonChannel: async (_id, onEvent) => {
+        daemonChannel: async () => {
+          throw new Error("a client's channel carries no guest op");
+        },
+        guestChannel: async (_id, onEvent) => {
           push = onEvent;
           let end: (gone: { code: number; reason: string }) => void = () => {};
           return {

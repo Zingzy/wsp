@@ -36,6 +36,8 @@ import {
   placeDaemonBehind,
   placeServesDaemonLine,
   placeWatchesItselfLine,
+  forkProcsUnreadLine,
+  forkOpRefusedLine,
   placeNoChipLine,
   placeUpdateLine,
   placeAddSheetWord,
@@ -395,6 +397,14 @@ describe("the one word a row says about the daemon a place runs", () => {
 
   it("says whose the ports and the load are where a pane asks a workspace for readings its computer takes for itself", () => {
     expect(placeWatchesItselfLine("spoo")).toBe("spoo watches its own ports and load, which are that computer's rather than one workspace's");
+  });
+
+  it("says a workspace's processes on a computer somebody owns are not readable from here yet, naming both", () => {
+    expect(forkProcsUnreadLine("landing-a", "spoo")).toBe("landing-a's processes on spoo are not readable from here yet");
+  });
+
+  it("says a workspace on a computer somebody owns is driven from here by its shells, files and git alone, naming the op refused", () => {
+    expect(forkOpRefusedLine("exec", "landing-a", "spoo")).toBe("spoo answers landing-a's shells, files and git from here, not exec");
   });
 
   it("refuses a place already on this daemon and one whose chip this wsp builds none for, each naming what it read", () => {
