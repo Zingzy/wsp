@@ -16,7 +16,7 @@ import type { PluginSkills, SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
-import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, type KeyFiles, type SignIn } from "./signin.js";
+import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, sharedLoginOf, type KeyFiles, type SharedLogin, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
@@ -400,6 +400,18 @@ const LOGINS_RUNG = "logins/";
 export function loginSignIn(row: string): SignIn | undefined {
   const name = row.startsWith(LOGINS_RUNG) ? row.slice(LOGINS_RUNG.length) : row;
   return name.includes("/") ? undefined : loginRow(name)?.signIn;
+}
+
+/** What an agent's login shares from the computer that runs the workspaces, or nothing: an agent whose login lives
+ * there declares it, and that declaration is the only thing that makes a sign-in on that computer exist. */
+export function sharedOn(agent: string): SharedLogin | undefined {
+  const row = loginSignIn(agent);
+  return row === undefined ? undefined : sharedLoginOf(row);
+}
+
+/** Which of the agents a computer reported sign in there once rather than in the image, in the order it named them. */
+export function sharedAgentsOn(agents: readonly string[]): string[] {
+  return agents.filter(id => sharedOn(id) !== undefined);
 }
 
 /** Exits 0 once an entry is on the machine. */

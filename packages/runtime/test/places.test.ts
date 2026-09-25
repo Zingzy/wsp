@@ -68,6 +68,7 @@ import {
   providerAgentsRefusal,
   refusal,
   type HostFolderListing,
+  type AgentsSignInEvent,
   type GoldenStageEvent,
   type PlaceBack,
   type PlaceProvision,
@@ -4702,6 +4703,47 @@ describe("the agents on a computer you own", () => {
     expect((await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).ok).toBe(true);
     c.close();
     await until(() => ended === 2);
+  });
+
+  it("read an agent whose login lives on that computer as signed in once its sign-in there lands, on the row and the next read, without waiting for a redial", async () => {
+    const asked: AgentsOn[] = [];
+    const ends: Record<string, AgentsSignInEvent["state"]> = { codex: "signed-in", claude: "signed-in" };
+    const acts: AgentsActs = {
+      signInLine: async () => ({ command: "codex login --device-auth" }),
+      signIn: async (_on, ask) => async run => void run.emit({ state: ends[ask.agent]! }),
+      key: async () => {},
+      addTools: async () => ({ file: "~/.codex/config.toml" }),
+    };
+    const { hostKey } = await serving({ agentsReader: reading(asked, []), agentsActs: acts, vault: {} });
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }),
+      answers: c =>
+        c.onFrame(raw => {
+          const frame = raw as unknown as Record<string, unknown>;
+          if (typeof frame["op"] === "string") c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "maya", stderr: "", truncated: false });
+        }),
+    });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const landed = async (agent: string): Promise<void> => {
+      const before = c.events.filter(e => e.type === "agents.changed").length;
+      expect((await c.request("agents.signIn", { target: { placeId }, agent })).ok).toBe(true);
+      await until(() => c.events.filter(e => e.type === "agents.changed").length > before);
+    };
+    expect((await c.request("events.subscribe")).ok).toBe(true);
+    // A failed sign-in and a login kept in the home of that computer's login, which no workspace shares, change no word.
+    ends["codex"] = "failed";
+    await landed("codex");
+    await landed("claude");
+    expect((await placesOf()).find(p => p.id === placeId)!.signIns).toEqual({ claude: "none", codex: "none" });
+    ends["codex"] = "signed-in";
+    await landed("codex");
+    expect((await placesOf()).find(p => p.id === placeId)!.signIns).toEqual({ claude: "none", codex: "signed-in" });
+    expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
+    expect(asked.at(-1)).toMatchObject({ kind: "box", signIns: { claude: "none", codex: "signed-in" } });
   });
 });
 

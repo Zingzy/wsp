@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
 import type { AgentActs, SignInFlow, SignInStart } from "./agentsRows.js";
+import { agentRowId } from "./kinds/agents.js";
 
 interface Running {
   readonly signInId?: string;
@@ -60,7 +61,8 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       running.current.get(rowId)?.stop?.();
       const run = {};
       runs.current.set(rowId, run);
-      const finish = begin.finish === undefined ? {} : { finish: begin.finish };
+      // What the flow reserves room for rides every step, so its height holds whatever state the host reports.
+      const finish = { ...(begin.finish === undefined ? {} : { finish: begin.finish }), ...(begin.pastes === true ? { pastes: true } : {}) };
       put(rowId, () => ({ kind: "run", state: "running", ...finish }));
       const step = (e: AgentsSignInEvent): void => {
         if (runs.current.get(rowId) !== run) return;
@@ -90,7 +92,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
           running.current.set(rowId, handle);
         },
         (e: unknown) => {
-          if (runs.current.get(rowId) === run) put(rowId, () => ({ kind: "run", state: "failed", said: said(e) }));
+          if (runs.current.get(rowId) === run) put(rowId, () => ({ kind: "run", state: "failed", ...finish, said: said(e) }));
         },
       );
     },
@@ -139,7 +141,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       const done = (): void => setAdding(a => new Set([...a].filter(x => x !== agent)));
       api.agentsAddTools(JSON.parse(targetKey) as AgentsTarget, agent).then(done, (e: unknown) => {
         done();
-        put(`agent-${agent}`, () => ({ kind: "run", state: "failed", said: said(e) }));
+        put(agentRowId(agent), () => ({ kind: "run", state: "failed", said: said(e) }));
       });
     },
     [api, targetKey, put],
