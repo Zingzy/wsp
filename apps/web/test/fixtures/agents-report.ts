@@ -10,6 +10,9 @@
 // the wireframe.
 import type { AgentsReport, ServerToolsAnswer, SkillHit, SkillPreview } from "@wsp/protocol";
 
+/** The project a task on the box works, whose own skill and server the report carries. */
+const WSP_PROJECT = { id: "pr_wsp", name: "wsp", path: "~/wsp" };
+
 export const AGENTS_REPORT: AgentsReport = {
   target: { placeId: "p_spoo" },
   home: "/home/ada",
@@ -34,7 +37,7 @@ export const AGENTS_REPORT: AgentsReport = {
       ],
     },
     { name: "pdf", scope: "plugin", paths: [{ path: "~/.claude/plugins/cache/anthropics/skills/pdf", agent: "claude" }] },
-    { name: "wsp-review", scope: "project", paths: [{ path: "~/wsp/.agents/skills/wsp-review" }] },
+    { name: "wsp-review", scope: "project", paths: [{ path: "~/wsp/.agents/skills/wsp-review" }], project: WSP_PROJECT },
     { name: "wsp", description: "Run work on wsp workspaces from inside an agent.", scope: "user", paths: [{ path: "~/.claude/skills/wsp", agent: "claude" }] },
   ],
   servers: [
@@ -52,12 +55,28 @@ export const AGENTS_REPORT: AgentsReport = {
     },
     { agent: "codex", name: "notion", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.notion.com" }, envNames: ["Authorization"], auth: "unknown", enabled: true },
     { agent: "claude", name: "notion", scope: "user", file: "~/.claude.json", transport: { kind: "http", host: "mcp.notion.com" }, envNames: [], auth: "needs-sign-in", enabled: true },
-    { agent: "claude", name: "spoo-metrics", scope: "project", file: "~/wsp/.mcp.json", transport: { kind: "stdio", line: "node scripts/metrics-mcp.js --token ${METRICS_TOKEN}" }, envNames: ["METRICS_TOKEN"], auth: "open", enabled: true },
+    { agent: "claude", name: "spoo-metrics", scope: "project", file: "~/wsp/.mcp.json", transport: { kind: "stdio", line: "node scripts/metrics-mcp.js --token ${METRICS_TOKEN}" }, envNames: ["METRICS_TOKEN"], auth: "open", enabled: true, project: WSP_PROJECT },
     { agent: "claude", name: "linear", scope: "user", file: "~/.claude.json", transport: { kind: "http", host: "mcp.linear.app" }, envNames: [], auth: "needs-sign-in", enabled: true },
     { agent: "codex", name: "sentry", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.sentry.dev" }, envNames: [], auth: "failed", enabled: false },
     { agent: "claude", name: "wsp", scope: "user", file: "~/.claude.json", transport: { kind: "stdio", line: "wsp mcp" }, envNames: [], auth: "open", enabled: true },
   ],
   refused: ["skills: the answer was cut short, so the list is not whole", "~/.hermes/config.yaml is over 1 MB and was not read"],
+};
+
+/** The box's report as its page reads it, over the two projects it holds: wsp's rows, and spoo's own server and
+ * skill. */
+const SPOO_PROJECT = { id: "pr_spoo", name: "spoo", path: "~/spoo" };
+export const AGENTS_PAGE_REPORT: AgentsReport = {
+  ...AGENTS_REPORT,
+  projects: [SPOO_PROJECT, WSP_PROJECT],
+  skills: [
+    ...AGENTS_REPORT.skills,
+    { name: "release", description: "Cut a spoo release.", scope: "project", paths: [{ path: "~/spoo/.claude/skills/release", agent: "claude" }], project: SPOO_PROJECT },
+  ],
+  servers: [
+    ...AGENTS_REPORT.servers,
+    { agent: "claude", name: "postgres", scope: "project", file: "~/spoo/.mcp.json", transport: { kind: "stdio", line: "npx -y @modelcontextprotocol/server-postgres" }, envNames: ["DATABASE_URL"], auth: "open", enabled: true, project: SPOO_PROJECT },
+  ],
 };
 
 /** What List tools answers per server in the wireframe: airtable's tools, one description long enough to clamp;
@@ -67,7 +86,14 @@ export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
     auth: "connected",
     readAt: "2026-09-24T12:00:00.000Z",
     tools: [
-      { name: "list_records", description: "List records in a table, filtered by a formula and sorted by any field, a page of up to one hundred records at a time with the offset for the next page." },
+      { name: "list_records", description: "List records in a table, filtered by a formula and sorted by any field, a page of up to one hundred records at a time with the offset for the next page.",
+        params: [
+          { name: "baseId", type: "string", required: true, description: "The base the table is in, as appXXXXXXXXXXXXXX." },
+          { name: "tableId", type: "string", required: true, description: "The table's id or its name." },
+          { name: "filterByFormula", type: "string", required: false, description: "A formula a record has to answer true to." },
+          { name: "maxRecords", type: "integer", required: false },
+        ],
+      },
       { name: "create_record", description: "Create a record in a table." },
       { name: "list_bases" },
     ],

@@ -191,7 +191,7 @@ describe("the list grammar", () => {
     expect(quick(SERVER.airtable)).toBeNull();
     expect(quick(SERVER.sentry)?.textContent).toBe("Turn on");
     // The command as the file writes it, its placeholder kept as text.
-    expect(subtext("server-project-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}")).toBe("node scripts/metrics-mcp.js --token ${METRICS_TOKEN}");
+    expect(subtext("server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}")).toBe("node scripts/metrics-mcp.js --token ${METRICS_TOKEN}");
   });
 
   it("reads a server whose token comes from the environment as the environment's key, with a quiet dot and no Sign in", () => {
@@ -246,7 +246,7 @@ describe("the list grammar", () => {
     cleanup();
     draw({ shell: "page" });
     tab("Skills");
-    expect(groupLabels()).toEqual(["System", "Plugins", "Global", "Project"]);
+    expect(groupLabels()).toEqual(["System", "Plugins", "Global", "wsp~/wsp"]);
   });
 
   it("filters rows in place as the search is typed, counts what it shows, and says when nothing matches", () => {
@@ -526,7 +526,7 @@ describe("the detail", () => {
     expect(detail.querySelector("[data-fact=status] [data-fact-note]")?.textContent).toBe(W.keptCurrent);
     expect(acts(detail)).toEqual([]);
     fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    detail = openRow("skill-project-wsp-review");
+    detail = openRow("skill-project-pr_wsp-wsp-review");
     expect(detail.querySelector("[data-fact=status] [data-fact-note]")?.textContent).toBe(W.inRepo);
     expect(acts(detail)).toEqual(["Turn off", "Remove"]);
     expect(detail.querySelector("[data-act-hover=turn-off]")?.getAttribute("title")).toBe("lives in the repo at ~/wsp/.agents/skills/wsp-review");

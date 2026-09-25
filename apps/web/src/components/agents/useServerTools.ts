@@ -6,9 +6,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentsTarget, McpRow, ServerToolsAnswer } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
-import type { ServerTools, ToolsState } from "./agentsRows.js";
+import { rowTarget, type ServerTools, type ToolsState } from "./agentsRows.js";
 
-const keyOf = (row: Pick<McpRow, "agent" | "scope" | "name">): string => `${row.agent}\0${row.scope}\0${row.name}`;
+const keyOf = (row: Pick<McpRow, "agent" | "scope" | "name" | "project">): string => `${row.agent}\0${row.scope}\0${row.project?.id ?? ""}\0${row.name}`;
 
 export function useServerTools(target: AgentsTarget | null): ServerTools | undefined {
   const api = useStore(s => s.api);
@@ -32,7 +32,7 @@ export function useServerTools(target: AgentsTarget | null): ServerTools | undef
           return { targetKey, of: { ...of, [key]: next(of[key]) } };
         });
       put(was => ({ ...(was?.answer === undefined ? {} : { answer: was.answer }), listing: true }));
-      ask(JSON.parse(targetKey) as AgentsTarget, row.agent, row.name, refresh).then(
+      ask(rowTarget(JSON.parse(targetKey) as AgentsTarget, row.project), row.agent, row.name, refresh).then(
         (answer: ServerToolsAnswer) => put(() => ({ listing: false, answer })),
         (e: unknown) => put(was => ({ ...(was?.answer === undefined ? {} : { answer: was.answer }), listing: false, error: e instanceof Error ? e.message : String(e) })),
       );

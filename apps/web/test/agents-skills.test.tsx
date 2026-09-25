@@ -180,7 +180,7 @@ describe("a skill's detail", () => {
     openRow("skill-plugin-pdf");
     expect(acts()).toEqual([]);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    openRow("skill-project-wsp-review");
+    openRow("skill-project-pr_wsp-wsp-review");
     expect(actIn("turn-off").disabled).toBe(true);
     expect(detail().querySelector("[data-act-hover=turn-off]")?.getAttribute("title")).toBe("lives in the repo at ~/wsp/.agents/skills/wsp-review");
     fireEvent.click(actIn("turn-off"));

@@ -168,13 +168,46 @@ describe("the agents report off this computer and off a workspace", () => {
   it("reads a workspace's machine with its project's own skills and servers, running as it is where the home is its own", async () => {
     const at = fixture();
     const { machine, lines } = road(at);
-    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "machine", machine, project: at.project });
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "machine", machine, projects: [{ id: "pr_app", name: "app", path: at.project }] });
     expect(lines.slice(1).some(l => l.startsWith("runuser"))).toBe(false);
     expect(read.servers.filter(s => s.scope === "project")).toEqual([
-      { agent: "claude", name: "project-db", scope: "project", file: "~/code/app/.mcp.json", transport: { kind: "stdio", line: "npx db-mcp" }, envNames: [], auth: "open", enabled: true },
+      { agent: "claude", name: "project-db", scope: "project", file: "~/code/app/.mcp.json", transport: { kind: "stdio", line: "npx db-mcp" }, envNames: [], auth: "open", enabled: true, project: { id: "pr_app", name: "app", path: "~/code/app" } },
     ]);
     expect(read.skills.filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy", "lint"]);
     expect(read.agents.find(a => a.id === "claude")).toMatchObject({ signIn: "signed-in", version: "2.1.281" });
     nothingLeaked(at, read, lines);
+  });
+
+  it("reads every project a computer holds in one read, each project's rows naming it, and says which projects it covered", async () => {
+    const at = fixture();
+    const www = join(at.home, "code", "www");
+    mkdirSync(join(www, ".claude/skills/ship"), { recursive: true });
+    writeFileSync(join(www, ".claude/skills/ship/SKILL.md"), "---\nname: ship\ndescription: Ship www\n---\n");
+    writeFileSync(join(www, ".mcp.json"), JSON.stringify({ mcpServers: { "project-db": { command: "npx", args: ["other-db"] } } }));
+    const { machine, lines } = road(at);
+    const app = { id: "pr_app", name: "app", path: at.project };
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [app, { id: "pr_www", name: "www", path: www }] });
+    expect(read.projects).toEqual([
+      { id: "pr_app", name: "app", path: "~/code/app" },
+      { id: "pr_www", name: "www", path: "~/code/www" },
+    ]);
+    expect(read.servers.filter(s => s.scope === "project").map(s => [s.name, s.project?.id, s.file, s.transport])).toEqual([
+      ["project-db", "pr_app", "~/code/app/.mcp.json", { kind: "stdio", line: "npx db-mcp" }],
+      ["project-db", "pr_www", "~/code/www/.mcp.json", { kind: "stdio", line: "npx other-db" }],
+    ]);
+    expect(read.skills.filter(s => s.scope === "project").map(s => [s.name, s.project?.id])).toEqual([
+      ["deploy", "pr_app"],
+      ["lint", "pr_app"],
+      ["ship", "pr_www"],
+    ]);
+    expect(read.servers.filter(s => s.scope !== "project").every(s => s.project === undefined)).toBe(true);
+    nothingLeaked(at, read, lines);
+  });
+
+  it("a read that covers no project says so with an empty list, and one handed none says nothing of projects", async () => {
+    const at = fixture();
+    const reader = agentsReader({ vault: () => ({}), here: () => here(at) });
+    expect((await reader.read({ kind: "here", projects: [] })).projects).toEqual([]);
+    expect(await reader.read({ kind: "here" })).not.toHaveProperty("projects");
   });
 });

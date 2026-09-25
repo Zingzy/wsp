@@ -10,7 +10,7 @@ import { DownloadIcon, PowerIcon, PowerOffIcon, ScrollTextIcon, Trash2Icon } fro
 import { agentName, catalogEntry, isSystemSkill, ownSkillFolder, type AgentEntry } from "@wsp/catalog";
 import type { AgentsReport, SkillHit, SkillRow } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, compactCount, holdAll, notYet, onImage, skillKey, type RowAct, type RowsContext, type SkillActs, type SkillPicks } from "../agentsRows.js";
-import { byName, kind, matchesAny, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule } from "./kind.js";
 
 /** The folder a skill really lives in: the one that is no link, else the first. */
 const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0])?.path ?? "";
@@ -20,16 +20,15 @@ const agentsOf = (row: SkillRow): string[] => [...new Set(row.paths.flatMap(p =>
 /** Off where every folder it lives in is off: no agent loads it. */
 const isOff = (row: SkillRow): boolean => row.paths.every(p => p.off === true);
 
-const rowId = (row: SkillRow): string => `skill-${row.scope}-${row.name}`;
+const rowId = (row: SkillRow): string => rowKey(["skill", row.scope], row.project, row.name);
 
 type Source = "system" | "plugin" | "user" | "project";
 const sourceOf = (row: SkillRow): Source => (isSystemSkill(row.name) ? "system" : row.scope);
 
-const SOURCES: readonly { source: Source; label: string }[] = [
+const SOURCES: readonly { source: Exclude<Source, "project">; label: string }[] = [
   { source: "system", label: "System" },
   { source: "plugin", label: "Plugins" },
   { source: "user", label: "Global" },
-  { source: "project", label: "Project" },
 ];
 
 function actsOf(row: SkillRow, ctx: RowsContext): RowAct[] {
@@ -151,7 +150,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
   items: (report: AgentsReport) => [...report.skills].sort(byName),
   count: items => items.length,
   key: rowId,
-  matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), ...agentsOf(row).map(agentName)),
+  matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), row.project?.name, ...agentsOf(row).map(agentName)),
   groups: (items, by: GroupBy): GroupView<SkillRow>[] => {
     if (by === "agent") {
       const agents = [...new Set(items.flatMap(agentsOf))];
@@ -159,10 +158,11 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
       return [...agents.map(agent => ({ id: `agent-${agent}`, label: agentName(agent), items: items.filter(s => agentsOf(s).includes(agent)) })), ...(shared.length === 0 ? [] : [{ id: "shared", label: W.shared, items: shared }])];
     }
     if (by === "source") {
-      return SOURCES.flatMap(g => {
+      const sources = SOURCES.flatMap(g => {
         const hit = items.filter(s => sourceOf(s) === g.source);
         return hit.length === 0 ? [] : [{ id: `source-${g.source}`, label: g.label, items: hit }];
       });
+      return [...sources, ...projectGroups(items.filter(s => sourceOf(s) === "project"))];
     }
     return [{ id: "all", items }];
   },

@@ -195,8 +195,9 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
   );
 }
 
-/** What the agents manager's head says on a computer's page, and on a cloud's, whose rows are its image's. */
-const AGENTS_PAGE_LINE = (computer: string): string => `Agents, MCP servers and skills on ${computer}.`;
+/** What the agents manager's head says on a computer's page, naming its projects where it holds any, and on a cloud's,
+ * whose rows are its image's. */
+const AGENTS_PAGE_LINE = (computer: string, projects: boolean): string => `Agents, MCP servers and skills on ${computer}${projects ? " and in its projects" : ""}.`;
 const AGENTS_IMAGE_LINE = (cloud: string): string => `The agents in the image every copy at ${cloud} is made from.`;
 
 /** The agents, skills and MCP servers a computer reports, read when its page opens. Every act is held with the
@@ -212,7 +213,7 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
   return (
     <AgentsManager
       shell="page"
-      head={{ line: AGENTS_PAGE_LINE(name) }}
+      head={{ line: AGENTS_PAGE_LINE(name, (report?.projects?.length ?? 0) > 0) }}
       report={report}
       reading={reading}
       error={error}
