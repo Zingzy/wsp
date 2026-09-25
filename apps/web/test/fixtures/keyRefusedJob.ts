@@ -4,8 +4,8 @@
 // chose and the first workspace skipped as rows the build never reached. The
 // shape is pinned by the host's own test (packages/host/test/init-job.test.ts,
 // KEY_REFUSED_ROWS), which is where it comes from; every word here is the
-// protocol's, so neither side can reword it alone. The render fixture and the
-// dialog test both draw this, so what is photographed is what a person sees.
+// protocol's, so neither side can reword it alone. The wireframe and the Image
+// card's tests both draw this, so what is photographed is what a person sees.
 import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, NEVER_REACHED, SIGN_IN_NEVER_REACHED, savedKeyRefusedLine, type InitRow } from "@wsp/protocol";
 
 /** What the provider answered, as its own status and word. */

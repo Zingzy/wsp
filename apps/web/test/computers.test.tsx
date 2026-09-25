@@ -374,15 +374,17 @@ describe("a computer's own page", () => {
     ]);
   });
 
-  it("draws a cloud's agents off its image, with Edit image in Add's place", async () => {
+  it("draws a cloud's agents off its image, with Edit image in Add's place, which opens the recipe in the Image card on the same page", async () => {
     const image = { name: "default", version: 1, hash: "a".repeat(64), recipeHash: "r", pins: [{ id: "claude", tag: "2.1.280" }], logins: [], sealedAt: AT, sealedFrom: "this Mac" } as SealedImage;
-    useStore.setState({ places: [here, solari] });
-    await mountComputers(computersApi({ image: async () => ({ image, copies: [], projects: [] }) }, setupOf({ keys: { solari: true } })).api, { kind: "computer", id: "solari" });
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }] });
+    await mountComputers(computersApi({ image: async () => ({ image, copies: [], projects: [] }), initStart: async () => ({}) as InitJob }, setupOf({ keys: { solari: true } })).api, { kind: "computer", id: "solari" });
     expect(agentTitles()).toEqual(["Claude Code"]);
     expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=agents-add]")!);
-    expect(useStore.getState().setupOpen).toBe(true);
+    await settle();
+    expect(pageAt()).toBe("computer:solari");
+    expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
   });
 
   it("says how a copy is made there and what it has for a network as rows, off the row and off the landing's own flags", async () => {
@@ -617,8 +619,7 @@ describe("the cloud's page", () => {
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
     fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
     await settle();
-    // The recipe opens in the card, never the setup sheet.
-    expect(useStore.getState().setupOpen).toBe(false);
+    // The recipe opens in the card.
     expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
   });
 

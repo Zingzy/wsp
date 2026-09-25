@@ -15,8 +15,8 @@ const shellOwnsNotices = (): boolean => desktopBridge()?.needsYou !== undefined;
 
 /** Leave to notify, asked at most once a page and only where the browser owns the notifications. It rides a press
  * rather than an event on purpose: Safari ignores a request made outside a gesture and the others quieten it to a
- * prompt most people never see, so the ask goes on the one press every road to a build passes through, the sidebar's
- * own keycap. A shell with its own notifications needs no leave. */
+ * prompt most people never see, so the ask goes out as a build starts, which a press on the Image card's Build began.
+ * A shell with its own notifications needs no leave. */
 let asked = false;
 export function askToNotify(): void {
   if (asked || shellOwnsNotices() || typeof Notification === "undefined" || Notification.permission !== "default") return;

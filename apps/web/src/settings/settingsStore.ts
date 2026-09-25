@@ -74,6 +74,9 @@ interface SettingsState {
   readonly devicesAsked: number;
   /** The computer whose image build a card is drawing now, which is where that build's waits are said. */
   readonly buildShown: string | null;
+  /** The computer whose Image card opens its recipe when it is drawn: an Edit image pressed outside that card. Moving
+   * to another page drops it, so an ask no card took never opens a recipe later. */
+  readonly recipeAsked: string | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -82,6 +85,7 @@ interface SettingsState {
   rereadDevices(): void;
   showBuild(placeId: string): void;
   hideBuild(placeId: string): void;
+  askRecipe(placeId: string | null): void;
 }
 
 export const useSettingsStore = create<SettingsState>(set => ({
@@ -91,8 +95,9 @@ export const useSettingsStore = create<SettingsState>(set => ({
   addProjectAt: null,
   devicesAsked: 0,
   buildShown: null,
+  recipeAsked: null,
   go(at) {
-    set({ at, search: "" });
+    set({ at, search: "", recipeAsked: null });
     try {
       window.localStorage.setItem(AT_KEY, atId(at));
     } catch {
@@ -119,5 +124,8 @@ export const useSettingsStore = create<SettingsState>(set => ({
   },
   hideBuild(placeId) {
     set(s => (s.buildShown === placeId ? { buildShown: null } : {}));
+  },
+  askRecipe(placeId) {
+    set({ recipeAsked: placeId });
   },
 }));

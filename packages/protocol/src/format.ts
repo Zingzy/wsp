@@ -1801,7 +1801,7 @@ export const imageBuiltOnLine = (place: string): string => `your image is built 
 export const imageHomeKeptLine = (on: string | undefined, home: { id: string; name: string }): string | undefined =>
   on === undefined || namesPlace(home, on) ? undefined : `your image lives on ${home.name}, so it is built there and not on ${on}`;
 
-/** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
+/** Where a Solari key comes from, spelled once for the terminal's ask and the provider's key row. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 
 /** What a person calls a provider, its key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
@@ -1816,10 +1816,10 @@ export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string;
 /** A provider's name as its key rows say it, by its id; an id with no row reads as itself. */
 export const providerKeyName = (provider: string): string => PROVIDER_KEY_WORDS[provider]?.name ?? provider;
 
-/** Every word of the six screens that build the image, opened from Settings under the title the image section
- * gives them. Micro-labels are the caps mono words over a screen, headlines the one sentence under them, keycaps
- * the one primary button each screen has. Nothing here asks the person to run a command, and nothing here is a
- * word for a computer or a provider: those are PLACES_WORDS. */
+/** Every word of the steps that choose and build the image, drawn under a computer's Image card and, where a word is
+ * the host's, in the terminal too. Headlines are a step's title, tops the one sentence under it, keycaps the one
+ * primary button a step has. Nothing here asks the person to run a command, and nothing here is a word for a
+ * computer or a provider: those are PLACES_WORDS. */
 export const CLOUD_SETUP_WORDS = {
   choice: {
     headline: "What goes on your image",
@@ -1834,17 +1834,8 @@ export const CLOUD_SETUP_WORDS = {
     keycap: "Continue",
   },
   keys: {
-    headline: "Your Solari key",
-    top: "Solari runs the computers your tasks sit on",
-    solari: "API key",
-    /** The empty field's ghost: the start every Solari key has, and no more. */
-    placeholder: "slr_live_...",
-    where: "Get one at Solari",
-    /** Why Save is disabled, as its tooltip. */
-    pasteFirst: "paste the key first",
     saved: "saved",
     unset: "not set",
-    keycap: "Save",
     /** Under the field when the provider answered and refused what was typed; its own status and word follow. */
     refused: (provider: string): string => `${providerKeyName(provider)} refused this key`,
     /** The build's line for a key already saved that the provider refuses, read before the first stage, naming that
@@ -1852,17 +1843,12 @@ export const CLOUD_SETUP_WORDS = {
     refusedSaved: (provider: string): string => `${providerKeyName(provider)} refused the saved key`,
     /** Under the field when nothing came back about the key at all; what this computer saw follows. */
     unchecked: (provider: string): string => `${providerKeyName(provider)} could not be reached to check the key`,
-    /** What the Save keycap says after a check nothing answered, since pressing it again is worth something. */
-    retry: "Try again",
-    /** What the build offers when the saved key was refused: back to this step, not another build. */
+    /** What the build offers when the saved key was refused: that provider's key field, not another build. */
     changeKey: "Change the key",
-    /** The quiet link under a saved key's dots that empties the field for a new one. */
-    change: "Change",
   },
   screen: {
     keycap: "Continue",
     back: "Back",
-    build: "Build",
     again: "Start over",
     /** A sign-in row whose tool is off the image: its picker is fixed on skip. */
     notOnImage: "not on the image",
@@ -1870,19 +1856,6 @@ export const CLOUD_SETUP_WORDS = {
     leftAlone: "left alone",
     /** A sign-in row whose tool stops on a question nobody but the person can answer, so the machine is no road for it. */
     asksYou: "asks questions only you can answer",
-    /** The disk ring's name for the tooltip's reader. */
-    disk: "Disk on the image",
-  },
-  ask: {
-    headline: "Your first cloud workspace",
-    top: "A copy of the image as soon as the build finishes",
-    name: "Name",
-    folder: "Project folder",
-    optional: "optional",
-    choose: "Choose",
-    /** Why the build keycap is held while the name field is empty: without a name nothing is forked, so a folder
-     * typed beside it would have nowhere to land. */
-    needsName: "give the task a name",
   },
   build: {
     headline: "Building your image",
@@ -1896,20 +1869,16 @@ export const CLOUD_SETUP_WORDS = {
     retry: "Retry",
     codeAsk: "Paste the code from the page",
     codeSubmit: "Submit",
-    keeps: "You can close this. The build keeps going and wsp tells you when it needs you",
     cancel: "Cancel the build",
-    /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
+    /** Why Cancel is held while the seal runs: the host's refusal and the line under the build, one sentence. */
     cannotStop: "The image is being saved. The snapshot and the save cannot be stopped.",
     cancelSure: "Stop the build",
     cancelWhy: "The computer it was building on is thrown away and nothing is saved",
     cancelKeep: "Keep building",
     done: "Your image is ready",
-    /** The sentence under that title: the running one would say the machine is still being saved. */
-    doneTop: "Your image is built; every task starts from it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
-    keycap: "Open task",
     again: "Start over",
   },
   agent: {
@@ -1933,20 +1902,6 @@ export const CLOUD_SETUP_WORDS = {
     top: "What is installed here and what your agents used decides what the image starts with",
     /** The one row the card shows until the first fact lands, so the work reads as started. */
     first: "This computer",
-  },
-  needsYou: {
-    /** The one action on the toast and the one thing a system notification's click does. */
-    open: "Open",
-  },
-  create: {
-    /** Why a new cloud workspace is held back while the image is still being built; the stage count follows it. */
-    building: "the image is still building",
-    /** The same where no image is sealed and no build runs, which is a computer nothing has been built on. */
-    none: "build your image first",
-    /** The word beside that sentence, which opens the screens that build it. */
-    build: "Build your image",
-    /** The word beside the building sentence, which opens the build the count is of. */
-    open: "Open the build",
   },
 } as const;
 
@@ -2144,9 +2099,6 @@ export const wspToolsRowId = (agent: string): string => `wsp-tools/${agent}`;
  * field opens on, so the two roads cannot drift apart. */
 export const FIRST_WORKSPACE = "first";
 
-/** The sentence under the first workspace's title: when it comes and on what, from the recipe's own numbers. */
-export const initForkLine = (size: WorkspaceSize): string => `Forked from the image as soon as the build finishes, on a ${fmtSize(size)} machine`;
-
 /** What a sign-in row says when the run ended without reaching it. */
 export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
 /** What any other row says when the build ended with it unfinished, whether or not it had started. */
@@ -2306,13 +2258,6 @@ export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress
   return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
 }
 
-/** The facts the sidebar's button and the build screen's bar draw: the rows over as a fraction of the total (0 before
- * the build has rows), and whether the job waits on the person rather than on the machine, which is the host's own
- * needsYou field and nothing derived beside it. */
-export function initProgressState(job: Pick<InitJob, "progress" | "needsYou">): { fraction: number; waitingOnYou: boolean } {
-  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: job.needsYou !== undefined };
-}
-
 /** The id of the stage row the build's sign-ins fold into. */
 export const SIGN_IN_STAGE_ID = "stage/sign-ins";
 
@@ -2368,30 +2313,6 @@ export const initStepCounter = (at: number, total: number): string => `${at}/${t
 
 /** The count as words: `3 of 12`. */
 export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
-
-/** What a road to a new cloud workspace is held back with: the sentence every surface says and the word on the
- * action that opens the setup where the job stands. */
-export interface CloudCreateRefusal {
-  readonly line: string;
-  readonly word: string;
-}
-
-/** Why a new cloud workspace cannot be asked for yet, or null when it can. A workspace is forked from the sealed
- * image, so a computer with none has nothing to fork: while the build runs the person is told where it stands, and
- * with no build at all they are sent to the setup. A sealed image holds nothing back, whatever a later build does,
- * since its head is there to fork. */
-export function cloudCreateRefusal(state: { hasGolden: boolean | null; job: Pick<InitJob, "phase" | "rows"> | null }): CloudCreateRefusal | null {
-  if (state.hasGolden !== false) return null;
-  const words = CLOUD_SETUP_WORDS.create;
-  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: words.build };
-  return { line: `${words.building} · ${initStageCountLine(initStageCount(initBuildRows(state.job.rows).rows))}`, word: words.open };
-}
-
-/** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
- * otherwise. */
-export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress" | "needsYou">): string {
-  return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
-}
 
 /** The provider's own answer about a key: the status it replied with and the word it used, so a person reads whose
  * refusal they are looking at rather than ours. */

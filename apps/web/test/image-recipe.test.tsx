@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Choosing what goes on the image inside the Image card: the init job's road,
-// read and screens drawn in place, drafts and the disk tally the setup sheet's
-// own, Build sending init.build with this computer as the place and no first
-// workspace, what the image holds on every computer's card with Edit beside
-// it, and every press that would start a build held while one runs.
+// read and screens drawn in place with their drafts and disk tally, Build
+// sending init.build with this computer as the place and no first workspace,
+// what the image holds on every computer's card with Edit beside it, and every
+// press that would start a build held while one runs.
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, copyStoppedLine, initDiskOverLine, type InitJob, type InitScreen, type InitSetup, type PlaceView, type SealedImage, type SealedImageView } from "@wsp/protocol";
@@ -120,10 +120,11 @@ describe("the recipe in the Image card", () => {
     await settle();
     expect(recipeStep()).toBe("choice");
     expect(fake.calls.find(c => c.op === "get" && (c.o as { on?: string } | undefined)?.on === "p_2")).toBeDefined();
-    // The state row keeps its words and gives up its press while the recipe is the thing to press.
-    expect(statePress()).toBeNull();
+    // The state row gives way while the recipe is open: what to do now is on screen already.
+    expect(card().querySelector("[data-k='image-state']")).toBeNull();
     await press("recipe-primary");
-    expect(fake.calls.find(c => c.op === "start")?.o).toEqual({ road: "manual" });
+    // The job is this computer's from its start, so what it meets before a build is said on this card.
+    expect(fake.calls.find(c => c.op === "start")?.o).toEqual({ road: "manual", on: "p_2" });
     expect(recipeStep()).toBe("reading");
     fake.put(JOB);
     await settle();
@@ -141,9 +142,10 @@ describe("the recipe in the Image card", () => {
     expect(fake.calls.filter(c => c.op === "answer").map(c => (c.o as { screen: string }).screen)).toEqual(["agents", "tools", "logins", "wsp"]);
     expect(fake.calls.find(c => c.op === "answer" && (c.o as { screen: string }).screen === "wsp")?.o).toEqual({ screen: "wsp", ticks: ["wsp-tools/claude"] });
     expect(fake.calls.find(c => c.op === "build")?.o).toEqual({ on: "p_2" });
-    // The build closes the recipe; the state row draws the running build from the job.
+    // The build closes the recipe and stands under the card in the state row's place.
     expect(k("recipe")).toBeNull();
-    expect(card().querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("building");
+    expect(k("build")?.getAttribute("data-step")).toBe("building");
+    expect(card().querySelector("[data-k='image-state']")).toBeNull();
   });
 
   it("keeps each tick on the host as it happens and never drafts a typed key, which goes to the key store on Continue", async () => {
@@ -238,19 +240,19 @@ describe("the recipe in the Image card", () => {
     expect(fake.ops().filter(op => op === "cancel").length).toBe(cancels);
   });
 
-  it("opens the recipe from a first build that stopped here, with the host's sentence on the state row: Start over under the build, or Build once the build is closed", async () => {
+  it("opens the recipe from a first build that stopped here, the build saying why in the state row's place: Start over under the build, or Build once the build is closed", async () => {
     const failed: InitJob = { ...JOB, phase: "failed", place: { id: "p_2", name: "hetzner" }, error: copyStoppedLine("no room on hetzner") };
     useStore.setState({ initJob: failed });
     await open(host({ image: null, copies: [], projects: [] }, { job: failed }).api, "p_2");
-    expect(card().querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("stopped");
-    expect(card().querySelector("[data-k='image-state'] [data-settings-description]")?.textContent).toBe(copyStoppedLine("no room on hetzner"));
-    // The build under the card is the one thing to press, and does not say the sentence a second time.
-    expect(statePress()).toBeNull();
-    expect(k("build-sentence")).toBeNull();
+    expect(card().querySelector("[data-k='image-state']")).toBeNull();
+    expect(k("build-sentence")?.textContent).toBe(copyStoppedLine("no room on hetzner"));
     await press("build-primary");
     expect(recipeStep()).toBe("choice");
     await press("recipe-close");
     await press("build-close");
+    // Closed, the state row comes back with the state the build left.
+    expect(card().querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("stopped");
+    expect(card().querySelector("[data-k='image-state'] [data-settings-description]")?.textContent).toBe(copyStoppedLine("no room on hetzner"));
     expect(statePress()?.textContent).toBe(IMAGE_WORDS.buildHere);
     fireEvent.click(statePress()!);
     await settle();

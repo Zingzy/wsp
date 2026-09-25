@@ -14,7 +14,7 @@ import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { FIELD_LABEL, LONE_FIELD } from "../settings/recipe/rows.js";
-import { SetupScreen } from "../sidebar/cloud-setup/SetupScreen.js";
+import { SheetScreen } from "./SheetScreen.js";
 import { codeIsWhole, sentCode, shownCode } from "./pairingCode.js";
 
 const WORDS = HOST_WORDS.sheet;
@@ -147,7 +147,7 @@ export function ConnectHostSheet({ onClose }: { onClose: () => void }) {
     >
       <DialogSheet data-connect-host-dialog initialFocus={false}>
         <DialogTitle className="sr-only">{HOST_WORDS.hosts}</DialogTitle>
-        <SetupScreen
+        <SheetScreen
           k="connect"
           headline={WORDS.headline}
           top={WORDS.top}
@@ -170,7 +170,7 @@ export function ConnectHostSheet({ onClose }: { onClose: () => void }) {
               {road.fields.map((spec, index) => field(spec, index === 0))}
             </div>
           </div>
-        </SetupScreen>
+        </SheetScreen>
       </DialogSheet>
     </Dialog>
   );

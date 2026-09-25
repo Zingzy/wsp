@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Served by Vite to a real browser: the cloud setup sheet over a fake api at
-// each of its steps (?screen=choice|keys|keys-refused|keys-saved|agent|agent-stopped|
-// reading|agents|tools|also|logins|ask|building|signing|retry|done|failed|
-// failed-key|stopped|you-stopped|slot|over|sweeping|no-extras), in either theme
-// (?theme=light), so a test
-// can lay out and photograph every state the ticket names. The screens' data
-// is what the host hands over for a small laptop: three agents, the tools with
-// the base locked on and the rest by calls, a manager's rows, three sign-ins.
+// Served by Vite to a real browser: the Image card on a box's page in
+// Settings, over a fake api, with the recipe or the image's first build at each
+// of its steps (?screen=choice|agent|agent-stopped|reading|agents|tools|also|
+// logins|building|signing|retry|failed|failed-key|stopped|you-stopped|slot|
+// over|sweeping|no-extras|many-tools), in either theme (?theme=light), so a test can lay
+// out and photograph every row the card draws. The screens' data is what the
+// host hands over for a small laptop: four agents, the tools with the base
+// locked on and the rest by calls, a manager's rows, six sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, KEY_REFUSED, signInChoices, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, signInChoices, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, snapshotStageLine, type InitJob, type InitScreen, type InitSetup, type PlaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import { RequestError, type Api } from "../../src/protocol/client";
-import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
+import type { Api } from "../../src/protocol/client";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
-import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
+import { SettingsPage } from "../../src/settings/SettingsPage";
+import { useSettingsStore } from "../../src/settings/settingsStore";
 import "../../src/index.css";
 import "../../src/themes/index";
 import { caps } from "../caps.js";
@@ -117,7 +118,6 @@ const STAGES: InitJob["rows"] = [
   stage("promoting", "waiting"),
   stage("smoke-forking", "waiting"),
   stage("sealed", "waiting"),
-  { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
 ];
 const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { ...r, state: "done", detail: undefined } : r));
 /** The stages after the one a stopped build was on: still listed, still waiting, whatever they carry above. */
@@ -148,91 +148,57 @@ const FACTS: InitJob["rows"] = [
 ];
 
 const DISK = { fixed: 2.8 * GIB, total: 20 * GIB };
+/** The box whose page the card is on, and the cloud whose saved key a build found refused. */
+const BOX: PlaceView = { id: "p_2", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true, engine: "docker", buildsImages: true };
+const SOLARI: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true, buildsImages: true };
+const onPage = at === "failed-key" ? SOLARI : BOX;
+const place = { id: onPage.id, name: onPage.name };
 const base: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, disk: DISK, screens: SCREENS, rows: [], progress: { done: 0, total: 0 }, log: [] };
 const screenAt = SCREENS.findIndex(s => s.id === at);
 const THREAD = { id: "th_1", workspaceId: "ws_local", session: "turn_1", harness: "claude" };
+/** A build drawn under the card of the computer it runs on. */
+const build = (job: Partial<InitJob>): InitJob => ({ ...base, screens: [], place, ...job });
 const JOBS: Record<string, InitJob> = {
   reading: { ...base, phase: "reading", screens: [], rows: FACTS },
   agent: { ...base, road: "agent", phase: "agent", screens: [], line: "read /Users/zingzy/.claude/projects", thread: THREAD },
   "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Run: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
-  ask: { ...base, step: SCREENS.length },
-  // A Mac with no formula to offer: the host shows no Also screen, so the agents step is the first of four.
+  // A Mac with no formula to offer: the host shows no Also screen, so the agents step is the first of three.
   "no-extras": { ...base, screens: SCREENS.filter(s => s.id !== "also") },
-  building: { ...base, phase: "building", screens: [], rows: STAGES },
-  signing: {
-    ...base,
-    phase: "signing-in",
-    screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)]
-  },
-  // A sign-in that ran out while the seal runs: the list is back, its stage open on the sub-rows with Retry, and the cancel link disabled.
-  retry: {
-    ...base,
+  // A Mac with a long usage: the tools step holds 31 rows, taller than the window.
+  "many-tools": { ...base, step: 1, screens: SCREENS.map(s => (s.id === "tools" ? { ...s, items: Array.from({ length: 31 }, (_, i) => ({ id: `tool-${i}`, label: `tool ${i + 1}`, size: (i + 1) * MIB, group: i < 7 ? "always on the image" : "from your usage", detail: [], ...(i < 7 ? { lock: "on" as const } : {}) })), ticks: Array.from({ length: 31 }, (_, i) => `tool-${i}`) } : s)) },
+  building: build({ phase: "building", rows: STAGES }),
+  signing: build({ phase: "signing-in", rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)] }),
+  // A sign-in that ran out while the seal runs: the list is back, its stage open on the sub-rows with Retry, and Cancel held.
+  retry: build({
     phase: "sealing",
     stoppable: false,
-    screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("not-signed-in", "darwin"), detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)]
-  },
-  done: {
-    ...base,
-    phase: "done",
-    screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), ...done(STAGES.slice(9, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: "forked" }],
-    golden: { version: 1 },
-    workspace: { id: "ws_first", name: "first" },
-  },
-  failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("not-signed-in", "darwin"), detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)],
+  }),
+  failed: build({ phase: "failed", rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" }),
   // The saved key read before the first stage and refused, as the host leaves it: the first stage failed with the
-  // refusal on it and every row after it never reached, so the one way on is the step that takes a key.
-  "failed-key": { ...base, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, error: KEY_REFUSED_LINE, keyRefused: true },
+  // refusal on it and every row after it never reached, so the one way on is Change the key.
+  "failed-key": build({ phase: "failed", rows: KEY_REFUSED_ROWS, error: KEY_REFUSED_LINE, keyRefused: true }),
   // A build the network stopped: the list keeps its order and every row, the failed stage's block ends on the
   // sentence the head shows, and the stages after it still read waiting.
-  stopped: {
-    ...base,
-    phase: "failed",
-    stoppable: false,
-    screens: [],
-    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
-    error: NETWORK_LOST_LINE,
-  },
+  stopped: build({ phase: "failed", stoppable: false, rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13))], error: NETWORK_LOST_LINE }),
   // A build the person stopped: the run's own line for where it was and what became of the machine.
-  "you-stopped": {
-    ...base,
-    phase: "cancelled",
-    stoppable: false,
-    screens: [],
-    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
-    error: `${initStoppedAt("while installing the base tools")} ${MACHINE_GONE_LINE}`,
-  },
-  // The stop the provider would not take: the machine's own row rides on, and it rides on the next job too.
-  sweeping: {
-    ...base,
-    phase: "cancelled",
-    stoppable: false,
-    screens: [],
-    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }, machine(INIT_ROW_STATES.retrying, "getaddrinfo ENOTFOUND api.getsolari.com"), machine(INIT_ROW_STATES.gone, undefined, "b_dlbauaeb")],
-    error: `Stopped while installing the base tools. ${STOP_LEFT_MACHINE_LINE}`,
-  },
-  // Everything ticked past the image's disk: the ring is full in the danger tone and Continue refuses, which is
+  "you-stopped": build({ phase: "cancelled", stoppable: false, rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13))], error: `${initStoppedAt("while installing the base tools")} ${MACHINE_GONE_LINE}` }),
+  // The stop the provider would not take: the machine's own row rides on.
+  sweeping: build({ phase: "cancelled", stoppable: false, rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), machine(INIT_ROW_STATES.retrying, "getaddrinfo ENOTFOUND api.getsolari.com"), machine(INIT_ROW_STATES.gone, undefined, "b_dlbauaeb")], error: `Stopped while installing the base tools. ${STOP_LEFT_MACHINE_LINE}` }),
+  // Everything ticked past the image's disk: the meter is full in the danger tone and Continue refuses, which is
   // what the test presses to photograph the refusal line.
   over: { ...base, step: 2, disk: { fixed: 19.4 * GIB, total: 20 * GIB }, screens: SCREENS.map(x => (x.id === "also" ? { ...x, ticks: x.items.map(i => i.id) } : x)) },
   // The account is at its machine cap: the row says what it waits on and its block carries the runtime's own line.
-  slot: {
-    ...base,
-    phase: "building",
-    screens: [],
-    rows: [stage("creating", INIT_ROW_STATES.slot, { lines: ["sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed.", "sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed."] }), ...notYet(STAGES.slice(2, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: INIT_ROW_STATES.waiting }],
-  },
+  slot: build({ phase: "building", rows: [stage("creating", INIT_ROW_STATES.slot, { lines: ["sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed.", "sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed."] }), ...notYet(STAGES.slice(2, 13))] }),
 };
 
 /** The count the host puts on the view, from the rows themselves: one rule, so no fixture can say a number the
- * screen it feeds would not. */
+ * card it feeds would not. */
 const withProgress = (job: InitJob): InitJob => ({ ...job, progress: initStageCount(initBuildRows(job.rows).rows) });
 
+const job = at === "reading" ? withProgress({ ...JOBS.reading!, rows: [] }) : JOBS[at] !== undefined ? withProgress(JOBS[at]!) : screenAt >= 0 ? { ...base, step: screenAt } : null;
 const setup: InitSetup = {
-  // The saved-key state is the key step reached with a key in the home, one Continue past the choice like the others.
-  // The step reads what is held by the word the host says its own key belongs to, as a real host answers.
-  keys: { box: false, solari: at !== "keys" && at !== "keys-refused" },
+  keys: { box: false, solari: true },
   keyProvider: "solari",
   home: "/Users/zingzy",
   agents: [
@@ -240,50 +206,27 @@ const setup: InitSetup = {
     { id: "codex", name: "Codex", configured: false, takesTools: false },
   ],
   pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 },
-  job: at === "reading" ? withProgress({ ...JOBS.reading!, rows: [] }) : (JOBS[at] !== undefined ? withProgress(JOBS[at]!) : screenAt >= 0 ? { ...base, step: screenAt } : null),
+  place,
+  job,
 };
 
-const api: Api = {
-  listWorkspaces: async () => [],
-  getWorkspace: async () => {
-    throw new Error("none");
-  },
-  createWorkspace: async () => {
-    throw new Error("none");
-  },
-  watchStatuses: async () => [],
-  nap: async () => {
-    throw new Error("none");
-  },
-  wake: async () => {
-    throw new Error("none");
-  },
-  capabilities: async () => (caps({ templates: true })),
-  daemon: noDaemonApi,
-  portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-  startSession: async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" }),
-  listSessions: async () => [],
-  sessionHistory: async () => [],
-  getGolden: async () => undefined,
-  listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
-  snapshotStorage: async () => null,
-  rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
+const api = {
   subscribe: () => () => {},
+  preferences: async () => ({ ...DEFAULT_PREFERENCES, labs: false }),
+  image: async () => ({ image: null, copies: [], projects: [] }),
   initGet: async () => setup,
-  initKeys: async () => {
-    if (at === "keys-refused") throw new RequestError(keyRefusedLine("401 Unauthorized", "solari"), KEY_REFUSED);
-    return setup;
-  },
+  initKeys: async () => setup,
   initStart: async () => base,
   initAnswer: async () => base,
   initStep: async () => base,
+  initDraft: async () => base,
   initBuild: async () => JOBS["building"]!,
   initSignInCode: async () => JOBS["signing"]!,
   initCancel: async () => ({ ...base, phase: "cancelled" }),
-};
+} as unknown as Api;
 
-useStore.setState({ conn: "live", hasGolden: false, initJob: setup.job });
-useStore.getState().bind(api);
+useStore.setState({ api, conn: "live", ready: true, projectsRead: true, places: [BOX, SOLARI], initJob: job, settingsOpen: true, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+useSettingsStore.getState().go({ kind: "computer", id: onPage.id });
 
 // The reading step plays the read the runtime would send: a row lands every 600 ms with the spinner, then its word, and the next follows.
 if (at === "reading") {
@@ -296,13 +239,11 @@ if (at === "reading") {
   }, 600);
 }
 
-// The first-workspace step shows the desktop's Choose keycap, so the fixture stands in for the bridge there.
-if (at === "ask") window.wsp = { ...window.wsp, pickFolder: async () => "/Users/zingzy/code/app", droppedPath: file => `/Users/zingzy/${file.name}` };
-
-// The key screen is one press past the choice, as it is for a person: the fixture presses Continue once the choice is drawn.
-if (at === "keys" || at === "keys-refused" || at === "keys-saved") {
+// A card with no recipe being chosen opens it with its own press, as a person does: the road before any job, and an
+// agent step whose turn already ended.
+if (at === "choice" || at === "agent-stopped") {
   const press = setInterval(() => {
-    const key = document.querySelector<HTMLButtonElement>("[data-k=choice] [data-k=primary]");
+    const key = document.querySelector<HTMLButtonElement>("[data-settings-card=image] [data-k=image-press]");
     if (key !== null) {
       clearInterval(press);
       key.click();
@@ -310,28 +251,11 @@ if (at === "keys" || at === "keys-refused" || at === "keys-saved") {
   }, 20);
 }
 
-// The refused key is two more presses: a key typed into the field and Save, which the host answers with the
-// provider's own refusal. Never a real key: the field is fed a fake one and the shot shows dots anyway. The keycap
-// is looked up again after the typing, because it is remounted when it stops being the disabled one.
-if (at === "keys-refused") {
-  const type = setInterval(() => {
-    const field = document.querySelector<HTMLInputElement>("#setup-key-solari");
-    if (field === null) return;
-    clearInterval(type);
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    setValue.call(field, "slr_live_fake_wrong_key");
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-    const press = setInterval(() => {
-      const save = document.querySelector<HTMLButtonElement>("[data-k=keys] [data-k=primary]");
-      if (save === null || save.disabled) return;
-      clearInterval(press);
-      save.click();
-    }, 20);
-  }, 20);
-}
-
+// The page stands in a window-tall column, as the app's shell stands it, so the page is the one thing that scrolls.
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    <CloudSetupDialog onClose={() => {}} />
+    <div className="flex h-dvh flex-col">
+      <SettingsPage />
+    </div>
   </TooltipProvider>,
 );

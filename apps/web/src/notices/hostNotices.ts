@@ -7,7 +7,7 @@
 // and a build's need is said when its rows leave the screen with it standing.
 // The need, the prompt and a machine that came up also go out on the shell's
 // own road, which speaks only while the app is not in front of the person.
-import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type InitNeedsYou, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type InitNeedsYou, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -62,12 +62,9 @@ function threadOnScreen(e: { workspaceId: string; sessionId: string; threadId?: 
 
 const workspaceOnScreen = (workspaceId: string): boolean => !useStore.getState().settingsOpen && useStore.getState().selectedId === workspaceId;
 
-const setupOnScreen = (): boolean => useStore.getState().settingsOpen && useStore.getState().setupOpen;
-
-/** Whether a build's own rows are in front of the person: the sheet, or the Image card of the computer it runs on
- * drawing it. The Computers list shows no sign-in, so it is not the build's home. */
+/** Whether a build's own rows are in front of the person: the Image card of the computer it runs on drawing it. The
+ * Computers list shows no sign-in, so it is not the build's home. */
 function buildOnScreen(placeId: string | undefined): boolean {
-  if (setupOnScreen()) return true;
   return placeId !== undefined && useStore.getState().settingsOpen && useSettingsStore.getState().buildShown === placeId;
 }
 
@@ -84,7 +81,6 @@ const aboutOnScreen = (): boolean => {
 };
 
 const openThread = (workspaceId: string, threadId: string | undefined): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => useStore.getState().select(workspaceId, threadId ?? null) });
-const openSetup: NoticeAction = { word: CLOUD_SETUP_WORDS.needsYou.open, run: () => useStore.getState().openSetup() };
 const openComputer = (placeId: string | undefined): NoticeAction => ({
   word: HOST_NOTICE_WORDS.open,
   run: () => {
@@ -92,9 +88,6 @@ const openComputer = (placeId: string | undefined): NoticeAction => ({
     useStore.getState().openSettings();
   },
 });
-/** Where a build's notice opens: the page of the computer it runs on, whose card draws it; the sheet for a job the
- * host has named no place for. */
-const openBuild = (placeId: string | undefined): NoticeAction => (placeId === undefined ? openSetup : openComputer(placeId));
 
 interface Absence {
   said?: string;
@@ -128,7 +121,7 @@ function sayOutside(held: Held, opens: () => void, need: InitNeedsYou): void {
 
 function sayNeed(held: Held, what: string, placeId: string | undefined): void {
   held.need = what;
-  addNotice({ kind: "waiting", key: NEED_KEY, text: initNeedsYouLine(what), action: openBuild(placeId) });
+  addNotice({ kind: "waiting", key: NEED_KEY, text: initNeedsYouLine(what), action: openComputer(placeId) });
 }
 
 /** The build's rows came into view or left it: a need they carried is said once they are gone, and ended once they
@@ -254,7 +247,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   },
   "job.needs-you": (e, held) => {
     const at = useStore.getState().initJob?.place?.id;
-    sayOutside(held, () => openBuild(at).run(), e.needsYou);
+    sayOutside(held, () => openComputer(at).run(), e.needsYou);
     if (buildOnScreen(at)) return;
     sayNeed(held, e.needsYou.what, at);
   },
@@ -266,7 +259,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     held.jobsEnded.add(id);
     const at = e.job.place?.id;
     if (buildOnScreen(at)) return;
-    if (phase === "failed") addNotice({ kind: "error", text: HOST_NOTICE_WORDS.imageNotBuilt(e.job.error), action: openBuild(at) });
+    if (phase === "failed") addNotice({ kind: "error", text: HOST_NOTICE_WORDS.imageNotBuilt(e.job.error), action: openComputer(at) });
     else addNotice({ kind: "done", text: HOST_NOTICE_WORDS.imageSealed(e.job.golden?.version) });
   },
   "workspace.gone": e => {
@@ -286,7 +279,7 @@ export function useHostNotices(): void {
   // A build waiting on a sign-in and a thread stopped on a permission prompt are the same fact to a person looking
   // somewhere else, so the window's own title carries the mark for either.
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
-  const held = useRef<Held>({ road: null, opens: () => useStore.getState().openSetup(), need: undefined, shown: false, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
+  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad(() => h.opens());
