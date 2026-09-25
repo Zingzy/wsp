@@ -94,6 +94,10 @@ export const backTakenLine = (login: string, port: number): string => `another p
 export const backNoDoorLine = (login: string): string =>
   `this host serves beyond its own loopback, so it holds no forward back from ${login.slice(0, 64)}; start it without --listen, or link it to your relay`;
 
+/** Why a hold was refused on a wsp that serves no host: nothing hands the holder a door, so nothing would stand. */
+export const backNoHostLine = (login: string): string =>
+  `no wsp host serves on this computer, so nothing holds a forward back from ${login.slice(0, 64)}; start one with wsp up and try again`;
+
 /** The line for a forward whose up line never came. */
 const backSlowLine = (login: string): string => `${login} did not stand the forward back to this computer within ${BACK_UP_MS / 1000}s`;
 
@@ -203,8 +207,13 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
    * where that one is taken, and the read of where sshd put it. A port that moved goes into the box's place file
    * before anyone hears of it. */
   const once = async (h: Held): Promise<BackForward> => {
-    await doorHanded;
-    stillHeld(h);
+    while (doorAt === undefined) {
+      await new Promise<void>(done => {
+        h.wake = done;
+        void doorHanded.then(done);
+      });
+      stillHeld(h);
+    }
     const doorPort = await doorAt!();
     stillHeld(h);
     if (doorPort === undefined) throw new BackCutError(backNoDoorLine(h.login.ssh));
@@ -321,6 +330,19 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
     h.wake?.();
   };
 
+  /** A hold made before any door was handed refuses at the bound, since a wsp that serves no host never hands one;
+   * the loop goes on waiting, so a host that was only slow to hand it still stands the forward. */
+  const bounded = (login: PlaceLogin, pending: Promise<PlaceBack>): Promise<PlaceBack> => {
+    if (doorAt !== undefined) return pending;
+    let timer: NodeJS.Timeout | undefined;
+    const refused = new Promise<never>((_, fail) => {
+      timer = setTimeout(() => fail(new BackCutError(backNoHostLine(login.ssh))), upMs);
+      timer.unref?.();
+    });
+    void doorHanded.then(() => clearTimeout(timer));
+    return Promise.race([pending, refused]).finally(() => clearTimeout(timer));
+  };
+
   return {
     hold(login, back, on, moved) {
       const standing = held.get(login.ssh);
@@ -328,13 +350,13 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
         if (moved !== undefined) standing.moved = moved;
         // A loop waiting out a failure tries again now, so this caller hears a fresh try rather than the old one.
         standing.wake?.();
-        return standing.now.done;
+        return bounded(login, standing.now.done);
       }
       const h: Held = { login, back, home: on.home, ...(moved !== undefined ? { moved } : {}), released: false, now: freshTry(), said: new Set() };
       held.set(login.ssh, h);
       const first = h.now.done;
       void keep(h);
-      return first;
+      return bounded(login, first);
     },
     release,
     door(at) {

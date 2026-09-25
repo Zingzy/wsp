@@ -12,7 +12,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { placeDaemonPaths, placeFileText, type PlaceBack } from "@wsp/protocol";
 import { keyFingerprint, type HeldChild, type SshCarried, type SshTransport } from "@wsp/engine";
-import { backBindLine, backBindScript, backBinds, backNoDoorLine, backTakenLine, heldPlaceScript, placeBackHolder } from "../src/place-back.js";
+import { backBindLine, backBindScript, backBinds, backNoDoorLine, backNoHostLine, backTakenLine, heldPlaceScript, placeBackHolder } from "../src/place-back.js";
 
 /** Waits for a condition the holder reaches on its own, on the loop's own turns. */
 const until = (ok: () => boolean): Promise<void> => vi.waitFor(() => expect(ok()).toBe(true), { timeout: 5_000, interval: 5 });
@@ -234,6 +234,32 @@ describe("the door a forward lands on", () => {
     children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
     await expect(first).resolves.toEqual(AT_DOOR);
     holder.close();
+  });
+
+  it("refuses a hold in one sentence at the bound where no host hands a door, and stands once one does", async () => {
+    const children = spawner();
+    const { transport } = box(loopback);
+    const said: string[] = [];
+    const holder = placeBackHolder({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, upMs: 30 });
+    await expect(holder.hold(LOGIN, AT_DOOR, { home: "/root" })).rejects.toThrow(backNoHostLine("root@spoo"));
+    expect(backNoHostLine("root@spoo").split(". ")).toHaveLength(1);
+    expect(children.started).toHaveLength(0);
+    holder.door(async () => 4700);
+    await until(() => children.started.length === 1);
+    expect(said).toEqual([]);
+    holder.close();
+  });
+
+  it("settles a hold still waiting for the door once it is released", async () => {
+    const children = spawner();
+    const { transport } = box(loopback);
+    const holder = placeBackHolder({ hostKey: keyFingerprint(HOST_KEY), carry, log: () => {}, spawn: children.spawn, transport, waitMs: () => 5 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
+    holder.release(LOGIN);
+    await expect(Promise.race([first, new Promise((_, fail) => setTimeout(() => fail(new Error("still pending")), 200))])).rejects.toThrow("the forward back from root@spoo was let go");
+    holder.door(async () => 4700);
+    await new Promise(r => setTimeout(r, 50));
+    expect(children.started).toHaveLength(0);
   });
 
   it("holds nothing on a host with no door of its own", async () => {

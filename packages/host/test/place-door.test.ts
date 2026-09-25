@@ -52,11 +52,11 @@ function testRuntime(): Runtime {
 
 /** Holds a port the way the door holds one: the wildcard, since a loopback bind and a wildcard bind on the same
  * port are a clash on Linux and are not one on macOS, and this test must read the same on both. */
-const hold = (port: number): Promise<Server | undefined> =>
+const hold = (port: number, address: string = WILDCARD): Promise<Server | undefined> =>
   new Promise(done => {
     const server = createServer((_req, res) => res.end("mine"));
     server.once("error", () => done(undefined));
-    server.listen(port, WILDCARD, () => done(server));
+    server.listen(port, address, () => done(server));
   });
 
 const letGo = (server: Server | undefined): Promise<void> => (server === undefined ? Promise.resolve() : new Promise(done => server.close(() => done())));
@@ -72,7 +72,9 @@ async function freePair(): Promise<number> {
     if (port + PLACE_PORT_OFFSET >= 65_535) continue;
     const beside = await hold(port + PLACE_PORT_OFFSET);
     await letGo(beside);
-    if (beside !== undefined) return port;
+    const besideLoopback = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
+    await letGo(besideLoopback);
+    if (beside !== undefined && besideLoopback !== undefined) return port;
   }
   throw new Error("no free app port whose door port is free beside it");
 }
@@ -181,6 +183,18 @@ describe("the door a forward back from a box lands on", () => {
     expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
     await handle!.door.close();
     expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
+  });
+
+  it("refuses a door port another program holds on this computer's loopback, so no forward lands on that program", async () => {
+    const port = await freePair();
+    held = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
+    expect(held).toBeDefined();
+    const kept = doorKept();
+    const h = await up({ port, back: kept.back });
+    await expect(h.door.open()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
+    await expect(kept.door()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
+    expect(h.door.port()).toBeUndefined();
+    expect(await (await fetch(`http://${LOOPBACK}:${port + PLACE_PORT_OFFSET}/`)).text()).toBe("mine");
   });
 
   it("is nothing on a host with no door of its own, whose main port a forward would land on", async () => {

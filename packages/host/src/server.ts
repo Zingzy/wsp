@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
@@ -225,6 +225,20 @@ function originAllows(req: IncomingMessage): boolean {
 function bearerOf(header: string | undefined): string | undefined {
   const match = /^Bearer\s+(\S+)$/i.exec(header ?? "");
   return match?.[1];
+}
+
+function listenOn(server: Server, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -563,9 +577,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
+  // macOS lets a wildcard bind share a port another process holds on 127.0.0.1, and a dial to the loopback reaches
+  // that process, so the door holds the loopback itself; Linux refuses both binds together and the wildcard alone.
+  const doorLoopback = platform() === "linux" ? undefined : createServer(handler(() => false));
+  const doorListeners = doorLoopback === undefined ? [doorServer] : [doorServer, doorLoopback];
   // Held per socket rather than read off the port, so a socket the door let in stays the door's after it closes.
   const doorSockets = new WeakSet<Socket>();
-  doorServer.on("connection", socket => doorSockets.add(socket));
+  for (const listener of doorListeners) listener.on("connection", socket => doorSockets.add(socket));
   let doorAt: number | undefined;
   let doorOpening: Promise<DoorAt> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
@@ -585,21 +603,25 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     // A host that already answers beyond this computer needs no second listener: it names its own port instead.
     if (!boundHere) return viewOf(port, address);
     if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
-    doorOpening ??= new Promise<DoorAt>((resolve, reject) => {
-      const failed = (e: NodeJS.ErrnoException): void => {
-        doorOpening = undefined;
-        reject(e.code === "EADDRINUSE" ? new Error(doorPortHeldLine(doorPort)) : e);
-      };
-      doorServer.once("error", failed);
-      doorServer.listen(doorPort, WILDCARD, () => {
-        doorServer.off("error", failed);
+    doorOpening ??= (async () => {
+      let at = doorPort;
+      try {
+        await listenOn(doorServer, doorPort, WILDCARD);
         const bound = doorServer.address();
-        doorAt = typeof bound === "object" && bound !== null ? bound.port : doorPort;
-        // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
-        if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
-        resolve(viewOf(doorAt, WILDCARD));
-      });
-    });
+        at = typeof bound === "object" && bound !== null ? bound.port : doorPort;
+        if (doorLoopback !== undefined) await listenOn(doorLoopback, at, LOOPBACK).catch(async (e: unknown) => {
+          await closeServer(doorServer);
+          throw e;
+        });
+      } catch (e) {
+        doorOpening = undefined;
+        throw (e as NodeJS.ErrnoException).code === "EADDRINUSE" ? new Error(doorPortHeldLine(at)) : e;
+      }
+      doorAt = at;
+      // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
+      if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
+      return viewOf(at, WILDCARD);
+    })();
     return doorOpening;
   };
 
@@ -644,7 +666,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     rtServer = await serveRuntime(rt, {
       port: opts.wsPort ?? DEFAULT_WS_PORT,
       host: address,
-      attach: [server, doorServer],
+      attach: [server, ...doorListeners],
       originAllowed: originAllows,
       ownRoad: req => ownRoad(req, doorSockets),
       door: { open: openDoor },
@@ -735,8 +757,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         if (doorAt === undefined) return;
         doorAt = undefined;
         doorOpening = undefined;
-        doorServer.closeAllConnections();
-        await new Promise<void>((resolve, reject) => doorServer.close(err => (err ? reject(err) : resolve())));
+        for (const listener of doorListeners) {
+          listener.closeAllConnections();
+          if (listener.listening) await closeServer(listener);
+        }
       },
     },
     addProject,
@@ -752,9 +776,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
       // what sends a waiting client the stopping code instead of cutting the socket under it.
       await rtServer.close();
-      for (const held of [doorServer, server]) {
+      for (const held of [...doorListeners, server]) {
         held.closeAllConnections();
-        if (held.listening) await new Promise<void>((resolve, reject) => held.close(err => (err ? reject(err) : resolve())));
+        if (held.listening) await closeServer(held);
       }
       // Last: with the servers gone nothing can record another event, so the
       // flush this waits on is the final word in the store.
