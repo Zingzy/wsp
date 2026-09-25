@@ -7,6 +7,7 @@ import { imageChips, imageState, type ImageState } from "./imageState.js";
 const NOW = Date.parse("2026-09-25T14:30:00.000Z");
 const AT = "2026-09-25T14:02:00.000Z";
 const HASH = "a".repeat(64);
+const texts = (chips: readonly { text: string }[]): string[] => chips.map(chip => chip.text);
 
 const box: PlaceView = { id: "box", kind: "provider", name: "box", default: false, takesForks: true, buildsImages: true };
 const srv: PlaceView = { id: "p_1", kind: "computer", name: "srv", default: false, takesForks: true, buildsImages: true };
@@ -122,12 +123,17 @@ describe("one reading of a computer's image", () => {
 });
 
 describe("the chips a state is drawn with", () => {
-  it("a ready copy: the version, the size, what it carries, when it was built and from where", () => {
-    expect(imageChips({ kind: "ready", image, copy: copyAt("box") }, NOW)).toEqual(["v3", "4.2 GB", "2 agents", "1 tool", "1 sign-in", `built ${builtWhen(AT, NOW)}`, "from this Mac"]);
+  it("a ready copy: the version, the size, the sign-ins it holds and when it was built", () => {
+    expect(texts(imageChips({ kind: "ready", image, copy: copyAt("box") }, NOW))).toEqual(["v3", "4.2 GB", "1 sign-in", `built ${builtWhen(AT, NOW)}`]);
   });
 
   it("a stale copy says which version it is behind and when it was built", () => {
-    expect(imageChips({ kind: "stale", image, copy: copyAt("box", "c".repeat(64)) }, NOW)).toEqual(["behind your image v3", `built ${builtWhen(AT, NOW)}`]);
+    expect(texts(imageChips({ kind: "stale", image, copy: copyAt("box", "c".repeat(64)) }, NOW))).toEqual(["behind your image v3", `built ${builtWhen(AT, NOW)}`]);
+  });
+
+  it("every chip carries its own glyph, as a computer's chips on the Computers page do", () => {
+    const chips = [...imageChips({ kind: "ready", image, copy: copyAt("box") }, NOW), ...imageChips({ kind: "stale", image, copy: copyAt("box", "c".repeat(64)) }, NOW)];
+    expect(chips.every(chip => chip.icon !== undefined)).toBe(true);
   });
 
   it("a state with no copy standing has no chips", () => {

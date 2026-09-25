@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
 import { CLOUD_NAMES } from "./providers.js";
 
@@ -107,6 +107,10 @@ export function landingName(places: readonly PlaceView[], landing: { readonly pl
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the
  * word rather than the id, so one predicate answers for both. */
 export const placeNamed = (place: PlaceView, word: string): boolean => namesPlace(place, word);
+
+/** The first project whose workspaces land on this place, by the rule the host forks by: the project a task started
+ * here is made of, and the one whose landing says what a copy there has. */
+export const projectOn = (place: PlaceView, projects: readonly ProjectView[]): ProjectView | undefined => projects.find(project => landsOn(project.computer, place));
 
 /** Whether workspaces can stand on this row at all, off the one fact the row carries: a provider and a computer
  * somebody joined both fork, and the computer the app itself runs on does not, since its local mode is the one
