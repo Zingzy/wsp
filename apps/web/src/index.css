@@ -2122,18 +2122,30 @@ code {
   background: transparent;
 }
 
+.desktop-mac:is(.dark, [data-theme="dark"]) {
+  --material-centre: 72%;
+  --material-panel: 60%;
+  --material-sidebar: 0%;
+  --material-line: 8%;
+  --material-card: 2%;
+}
+
+.desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inner"] {
+  background: rgb(6 6 6 / var(--material-sidebar));
+}
+
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] {
-  background: rgb(6 6 6 / 72%);
+  background: rgb(6 6 6 / var(--material-centre));
 }
 
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
-  background: rgb(6 6 6 / 60%);
+  background: rgb(6 6 6 / var(--material-panel));
   border-color: var(--contrast-border);
   --background: transparent;
-  --card: rgb(255 255 255 / 2%);
-  --muted: rgb(255 255 255 / 3%);
-  --contrast-border: rgb(255 255 255 / 8%);
-  --contrast-input: rgb(255 255 255 / 14%);
+  --card: rgb(255 255 255 / var(--material-card));
+  --muted: rgb(255 255 255 / calc(var(--material-card) + 1%));
+  --contrast-border: rgb(255 255 255 / var(--material-line));
+  --contrast-input: rgb(255 255 255 / calc(var(--material-line) + 6%));
 }
 
 /* The window paints the glass behind the page, so the page's own canvas is
