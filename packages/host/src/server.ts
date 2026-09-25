@@ -452,6 +452,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     runtime: rt,
     openUrl: opts.openUrl ?? systemOpener(),
     log,
+    places: true,
     ...(guest !== undefined ? { guest } : {}),
     ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
     ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),

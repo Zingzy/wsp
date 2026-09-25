@@ -2,7 +2,8 @@
 import type { Machine } from "@wsp/engine";
 import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward } from "../src/agents-read.js";
+import type { PlaceDoor } from "../src/places.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -60,7 +61,7 @@ describe("the agents in a workspace", () => {
     expect((await on(false, true).read({ workspaceId: "ws_1" })).reach).toBe("relay");
     expect((await on(false, false).read({ workspaceId: "ws_1" })).reach).toBe("none");
     expect((await on(false, false).read({ placeId: "here" })).reach).toBe("here");
-    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} })]).toEqual(["here", "relay", "none", "none"]);
+    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} }), pageReachOf({ kind: "box", machine, login: {}, relayed: true })]).toEqual(["here", "relay", "none", "none", "relay"]);
   });
 
   it("forgets a workspace's last report once the workspace is removed, so nothing holds it for the host's life", async () => {
@@ -109,9 +110,19 @@ describe("the sign-ins on a computer or a workspace", () => {
     };
   }
 
-  function acting(phase: { now: WorkspacePhase }, relayed?: boolean) {
+  /** One joined computer, spoo, as the place door lists it, with nothing reported yet. */
+  const spoo = (): PlaceDoor =>
+    ({
+      list: async () => [{ id: "pl_1", name: "spoo", kind: "computer" }],
+      reportOf: async () => undefined,
+      signInsAt: () => undefined,
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    }) as unknown as PlaceDoor;
+
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
+    const handed: (SignInForward | undefined)[] = [];
     const changed: (AgentsTarget | undefined)[] = [];
     const codes: string[] = [];
     let finish: () => void = () => {};
@@ -121,6 +132,7 @@ describe("the sign-ins on a computer or a workspace", () => {
         planned.push({ on, ask });
         if (ask.agent === "opencode") throw new Error("opencode asks you to pick");
         return async run => {
+          handed.push(run.forward);
           // What the host's watched pty does: a frame down the link, an event back up, the code writer handed over.
           await run.link.op("pty.create", {});
           run.link.onEvent(e => run.emit({ state: "waiting", url: String(e["url"]) }));
@@ -141,13 +153,13 @@ describe("the sign-ins on a computer or a workspace", () => {
       log: line => void logged.push(line),
       ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
-      places: () => undefined,
+      places: () => places,
       workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
       channel: async (_target, onEvent) => ch.open(onEvent),
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
     });
-    return { api, ch, planned, changed, codes, forgot, logged, finish: () => finish() };
+    return { api, ch, planned, handed, changed, codes, forgot, logged, finish: () => finish() };
   }
 
   it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
@@ -157,6 +169,33 @@ describe("the sign-ins on a computer or a workspace", () => {
       expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), project: "/root/landing", ...(relayed ? { relayed: true } : {}) });
       leave();
     }
+  });
+
+  it("tell the host a joined computer is relayed once the host's relay holds a link to it, and hand the sign-in that forward", async () => {
+    const t = acting({ now: "running" }, undefined, spoo());
+    const target = { placeId: "pl_1" };
+    const first = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[0]!.on).not.toHaveProperty("relayed");
+    expect(t.handed).toEqual([undefined]);
+    expect((await t.api.read(target)).reach).toBe("none");
+    t.api.signInStop(first.signInId);
+    await tick();
+    const forward: SignInForward = { arm: async () => true, deliver: async () => undefined };
+    const asked: unknown[] = [];
+    const unregister = t.api.forwards({ of: at => (asked.push(at), "placeId" in at && at.placeId === "pl_1" ? forward : undefined) });
+    const second = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[1]!.on).toMatchObject({ kind: "box", relayed: true });
+    expect((await t.api.read(target)).reach).toBe("relay");
+    expect(t.handed[1]).toBe(forward);
+    expect(asked).toContainEqual(target);
+    t.api.signInStop(second.signInId);
+    await tick();
+    unregister();
+    await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[2]!.on).not.toHaveProperty("relayed");
   });
 
   it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {

@@ -127,6 +127,8 @@ export function placeDaemonPaths(home: string): {
   profileFile: string;
   unitDir: string;
   binDir: string;
+  /** The browser shim: what BROWSER names there, posting each page to the daemon's socket. */
+  openShim: string;
   rootsPath: string;
   /** What a computer joined as a place keeps beside the daemon's own files: the wsp it belongs to, the key it
    * proves itself with, and what its agent has printed. They sit in the same folder as everything else wsp keeps
@@ -151,6 +153,7 @@ export function placeDaemonPaths(home: string): {
     profileFile: `${wsp}/profile.sh`,
     unitDir: `${at}/.config/systemd/user`,
     binDir: `${at}/.local/bin`,
+    openShim: `${at}/.local/bin/wsp-open`,
     rootsPath: rootsPathIn(at),
     placeFile: `${wsp}/place.json`,
     placeKey: `${wsp}/place-key.pem`,
@@ -195,7 +198,7 @@ export function placeOwnedPaths(home: string): string[] {
     at.openSocket,
     at.runDir,
     at.portFile,
-    `${at.binDir}/wsp-open`,
+    at.openShim,
     `${at.binDir}/xdg-open`,
     at.wsp,
   ];

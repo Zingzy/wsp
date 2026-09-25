@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
 import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
-import type { AgentsOn } from "@wsp/runtime";
+import type { AgentsOn, SignInForward } from "@wsp/runtime";
 import { hostActs, pagesOnPty, planSignIn, watchSignIn } from "../src/agents-signin.js";
 import { openerCommand } from "../src/relay.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
@@ -27,6 +27,13 @@ const rootBox = (): AgentsOn => ({
 const fork = (): AgentsOn => ({ kind: "machine", machine: { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as never, project: "/root/landing" });
 /** A workspace whose callback port this host forwards from this computer. */
 const relayed = (): AgentsOn => ({ ...fork(), relayed: true }) as AgentsOn;
+/** A joined computer whose daemon and home are root's, and whose callback port this host forwards from here. */
+const relayedBox = (): AgentsOn => ({
+  kind: "box",
+  machine: { exec: async () => ({ exitCode: 0, stdout: "Linux\n0\nroot\nroot\n1\n/root\n/usr/bin\n", stderr: "" }) } as unknown as Pick<Machine, "exec">,
+  login: { HOME: "/root", PATH: "/usr/bin" },
+  relayed: true,
+});
 
 describe("the line a sign-in runs where it stands", () => {
   it("runs a login that is not shared as the owner of the home on a root box, with no DISPLAY anywhere so the tool takes its paste road", async () => {
@@ -85,6 +92,20 @@ describe("the line a sign-in runs where it stands", () => {
     await expect(planSignIn({ kind: "here" }, { agent: "gemini", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Gemini CLI", "/mcp auth notion", "inside"));
   });
 
+  it("runs every harness's browser sign-in on a joined computer the relay reaches, with that computer's own shim as BROWSER", async () => {
+    for (const [agent, command] of [["claude", "claude mcp login 'notion'"], ["codex", "codex mcp login 'notion'"], ["opencode", "opencode mcp auth 'notion'"]] as const) {
+      const plan = await planSignIn(relayedBox(), { agent, server: "notion" });
+      expect(plan.line.command).toBe(`export HOME='/root' PATH='/usr/bin'; cd "$HOME" 2>/dev/null; ${pagesOnPty(command)}`);
+      expect(plan.line.env).toEqual({ DISPLAY: ":0", BROWSER: "/root/.local/bin/wsp-open" });
+      expect(plan.paste("https://mcp.notion.com/authorize")).toBe(false);
+    }
+    // A line handed to another login can open neither the pty's device nor the root daemon's socket, so the page there
+    // never reaches this computer: Claude Code keeps the pasted address and the others the line to run there.
+    const handedOn = { ...rootBox(), relayed: true } as AgentsOn;
+    expect((await planSignIn(handedOn, { agent: "claude", server: "notion" })).line.command).toContain("--no-browser");
+    await expect(planSignIn(handedOn, { agent: "codex", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Codex", "codex mcp login 'notion'", "callback"));
+  });
+
   it("refuses a server or agent named with a control character before anything is planned or dialled", async () => {
     let probed = 0;
     const box = rootBox();
@@ -98,14 +119,14 @@ describe("the line a sign-in runs where it stands", () => {
 });
 
 describe("a watched sign-in", () => {
-  const run = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, plan: Awaited<ReturnType<typeof planSignIn>>, banner?: string) => {
+  const run = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, plan: Awaited<ReturnType<typeof planSignIn>>, banner?: string, forward?: SignInForward) => {
     const link = fakePtyLink();
     if (banner !== undefined) link.banner = banner;
     link.script = (pty, line) => script(link, pty, line);
     const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
     let type: ((code: string) => Promise<void>) | undefined;
     let stop: () => void = () => {};
-    const done = watchSignIn(plan, { link, emit: s => void steps.push(s), typing: w => (type = w), stop: new Promise<void>(r => (stop = r)) }, { pollMs: 20, graceMs: 10, flushMs: 10 });
+    const done = watchSignIn(plan, { link, emit: s => void steps.push(s), typing: w => (type = w), stop: new Promise<void>(r => (stop = r)), ...(forward !== undefined ? { forward } : {}) }, { pollMs: 20, graceMs: 10, flushMs: 10 });
     return { link, steps, done, type: (code: string) => type?.(code), stop: () => stop() };
   };
 
@@ -255,6 +276,43 @@ describe("a watched sign-in", () => {
     expect(out).toContain("https://mcp.test/a]0;xb[2Jc\r\n");
     expect(out).not.toMatch(/[\x07\x1b]/);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("arms the relay's forward for the page's callback port, and where this computer cannot listen on it carries the landed address there instead", async () => {
+    const page = "https://mcp.notion.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
+    const plan = await planSignIn(relayedBox(), { agent: "codex", server: "notion" });
+    for (const bound of [true, false]) {
+      const armed: string[] = [];
+      const delivered: string[] = [];
+      const forward: SignInForward = { arm: async url => (armed.push(url), bound), deliver: async landed => void delivered.push(landed) };
+      let finish: () => void = () => {};
+      const t = await run(
+        (l, pty, line) => {
+          if (!line.includes("codex mcp login")) return;
+          l.data(pty, `Authorize by opening this URL: ${page}\r\n`);
+          finish = () => l.exit(pty, 0);
+        },
+        plan,
+        undefined,
+        forward,
+      );
+      await new Promise(r => setTimeout(r, 60));
+      expect(armed).toEqual([page]);
+      const waiting = t.steps.filter(s => s.state === "waiting");
+      if (bound) expect(waiting).toEqual([{ state: "waiting", url: page, paste: false }]);
+      else {
+        expect(waiting).toEqual([
+          { state: "waiting", url: page, paste: false },
+          { state: "waiting", url: page, paste: true },
+        ]);
+        await t.type("http://localhost:43117/callback?code=LANDED");
+        expect(delivered).toEqual(["http://localhost:43117/callback?code=LANDED"]);
+        expect(t.link.ptys[0]!.writes.join("")).not.toContain("LANDED");
+      }
+      finish();
+      await t.done;
+      expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
+    }
   });
 
   it("waits on the browser here, with the page offered and nothing to paste, and runs with this computer's own opener", async () => {

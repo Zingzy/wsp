@@ -1254,6 +1254,7 @@ describe("daemon files and diff ops", () => {
       profileFile: "/home/maya/.wsp/profile.sh",
       unitDir: "/home/maya/.config/systemd/user",
       binDir: "/home/maya/.local/bin",
+      openShim: "/home/maya/.local/bin/wsp-open",
       rootsPath: "/home/maya/.wsp/roots",
       // A computer joined as a place keeps these three beside the daemon's own, so one sweep takes the lot.
       placeFile: "/home/maya/.wsp/place.json",

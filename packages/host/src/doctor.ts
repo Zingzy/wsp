@@ -368,7 +368,7 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     preflight: [...DAEMON_PREFLIGHT, NO_LINGER_CHECK],
     runDir: at.runDir,
     binDir: at.binDir,
-    openShim: `${at.binDir}/wsp-open`,
+    openShim: at.openShim,
     openSocket: at.openSocket,
     manifestPath: at.manifestPath,
     profileFile: at.profileFile,

@@ -282,6 +282,27 @@ describe("signing an agent in from its row", () => {
     expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
     expect(detail().querySelector("[data-k=sign-in-why]")?.textContent).toBe("Its page returns to localhost, which wsp does not carry back to spoo yet. Run this in a terminal on spoo:");
   });
+
+  it("runs a server's sign-in on a joined computer the host relays and waits on the browser, taking the landed address only when the host asks", async () => {
+    const h = host();
+    render(<List report={{ ...AGENTS_REPORT, reach: "relay" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    openRow(NOTION);
+    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
+    await settle();
+    expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[AGENTS_REPORT.target, "codex", "notion"]]);
+    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
+    expect(flow.querySelector("[data-k=sign-in-line]")).toBeNull();
+    const page = "https://mcp.notion.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
+    act(() => h.started[0]!.step({ state: "waiting", url: page, paste: false }));
+    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(flow.querySelector("[data-k=sign-in-open]")?.textContent).toBe("Open the page");
+    expect(flow.querySelector("[data-k=code-field]")).toBeNull();
+    // This computer could not listen on the page's port, so the host asks for the address the browser landed on.
+    act(() => h.started[0]!.step({ state: "waiting", url: page, paste: true }));
+    const field = flow.querySelector<HTMLInputElement>("[data-k=code-field]")!;
+    expect(field.getAttribute("aria-label") ?? field.placeholder).toContain(AGENTS_LIST_WORDS.landedAddress);
+  });
 });
 
 describe("a server's sign-in road", () => {

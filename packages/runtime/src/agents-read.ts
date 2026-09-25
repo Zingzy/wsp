@@ -17,13 +17,14 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "rea
  * with the project's folder on it. */
 export type AgentsOn =
   | { kind: "here"; project?: string }
-  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string }
+  /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
+  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
 
 /** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
  * planned by and the report tells the app. */
-export const pageReachOf = (on: AgentsOn): PageReach => (on.kind === "here" ? "here" : on.kind === "machine" && on.relayed === true ? "relay" : "none");
+export const pageReachOf = (on: AgentsOn): PageReach => (on.kind === "here" ? "here" : on.relayed === true ? "relay" : "none");
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -60,12 +61,27 @@ export interface SignInAsk {
 }
 
 /** What one watched sign-in is handed: the link its pty runs over, where its steps go, where it hands the writer a
- * code from a page is typed with (nothing once it is gone), and the stop from whoever started it. */
+ * code from a page is typed with (nothing once it is gone), the stop from whoever started it, and the host's callback
+ * forward to the target where the host holds one. */
 export interface SignInRun {
   link: PtyLink;
   emit(step: Omit<AgentsSignInEvent, "type" | "signInId">): void;
   typing(write: ((code: string) => Promise<void>) | undefined): void;
   stop: Promise<void>;
+  forward?: SignInForward;
+}
+
+/** The host's callback relay as one sign-in uses it: the port the page returns to listened on here and carried to
+ * the target, false where this computer could not listen on it; and then the address the browser landed on,
+ * carried to that port as the one request the browser would have made. */
+export interface SignInForward {
+  arm(url: string): Promise<boolean>;
+  deliver(landed: string): Promise<void>;
+}
+
+/** The relay's forward for a target, where it holds a link to it that carries callbacks. */
+export interface CallbackForwards {
+  of(target: AgentsTarget): SignInForward | undefined;
 }
 
 /** What the host writes and runs for the agents on a target, beside reading them. */
@@ -126,9 +142,19 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   signInLine(target: AgentsTarget, ask: SignInAsk, origin?: Caller): Promise<SignInLine>;
   key(agent: string, key: string): Promise<void>;
   addTools(target: AgentsTarget, agent: string, origin?: Caller): Promise<{ file: string }>;
+  forwards(relay: CallbackForwards): () => void;
 } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
+  /** The host's callback relays, which register once they hold their links. */
+  const relays = new Set<CallbackForwards>();
+  const forwardOf = (target: AgentsTarget): SignInForward | undefined => {
+    for (const relay of relays) {
+      const forward = relay.of(target);
+      if (forward !== undefined) return forward;
+    }
+    return undefined;
+  };
   const stamped = (target: AgentsTarget, read: AgentsRead & { reach: PageReach }): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
   const readerOf = (): AgentsReader => {
     if (o.reader === undefined) throw new Error(NO_AGENTS_READER);
@@ -176,7 +202,15 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const signIns = door.signInsAt(row.id);
       const machine = { exec: (cmd: string, opts?: { timeoutMs?: number; stdin?: Uint8Array }) => door.exec(row.id, cmd, opts ?? {}) };
       const login = { ...(report?.login["HOME"] !== undefined ? { HOME: report.login["HOME"] } : {}), ...(report?.login["PATH"] !== undefined ? { PATH: report.login["PATH"] } : {}) };
-      return { kind: "box", machine, login, ...(signIns !== undefined ? { signIns } : {}), ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}), ...(row.logins !== undefined ? { logins: row.logins } : {}) };
+      return {
+        kind: "box",
+        machine,
+        login,
+        ...(signIns !== undefined ? { signIns } : {}),
+        ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
+        ...(row.logins !== undefined ? { logins: row.logins } : {}),
+        ...(forwardOf(target) !== undefined ? { relayed: true } : {}),
+      };
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
@@ -249,7 +283,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           run.last = event;
           for (const tell of run.followers) tell(event);
         };
-        void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped })
+        const forward = forwardOf(target);
+        void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped, ...(forward !== undefined ? { forward } : {}) })
           .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
           .finally(() => {
             running.delete(signInId);
@@ -297,6 +332,10 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const added = await acts.addTools(on, agent);
       o.changed(target);
       return added;
+    },
+    forwards: relay => {
+      relays.add(relay);
+      return () => void relays.delete(relay);
     },
   };
 }
