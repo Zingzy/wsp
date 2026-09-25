@@ -4,11 +4,11 @@
 // defines, places the wsp server in a fresh file or beside what the person
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
-import type { McpServerSpec } from "@wsp/protocol";
-import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpEditLib, type McpFormat, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, mcpSwitch, parseJsonc, type McpEditLib, type McpFormat, type McpServer, type McpTransport } from "../src/index.js";
 
 const HOME = "/Users/dev";
-const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };
+const SERVER = { kind: "stdio", command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"], env: {} } satisfies McpTransport;
+const stdio = (command: string, args: string[]): McpTransport => ({ kind: "stdio", command, args, env: {} });
 
 describe("the catalog's MCP configs", () => {
   it("are registered from the agent entries that have one, each naming its format module and files among the entry's own config paths", () => {
@@ -129,21 +129,35 @@ describe("place", () => {
     expect(placed).toEqual({ $schema: "https://opencode.ai/config.json", theme: "x", mcp: { wsp: { type: "local", command: [SERVER.command, ...SERVER.args], enabled: true } } });
   });
 
-  it("a settings file with comments and a trailing comma (OpenCode's jsonc, Gemini CLI's settings) is placed into with its other servers intact; the rewrite is plain JSON", () => {
+  it("a settings file with comments and a trailing comma (OpenCode's jsonc, Gemini CLI's settings) is placed into in place: its comments stay, its other servers intact", () => {
     const jsonc = '{\n  // servers I use\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    /* memory */ "other": { "type": "local", "command": ["x"], "enabled": true },\n  },\n}\n';
-    const { text: placed, commentsDropped } = OPENCODE_JSON.place(jsonc, "wsp", SERVER);
-    expect(commentsDropped).toBe(true);
-    expect(JSON.parse(placed)).toEqual({
+    const placed = OPENCODE_JSON.place(jsonc, "wsp", SERVER).text;
+    expect(parseJsonc(placed)).toEqual({
       $schema: "https://opencode.ai/config.json",
       mcp: { other: { type: "local", command: ["x"], enabled: true }, wsp: { type: "local", command: [SERVER.command, ...SERVER.args], enabled: true } },
     });
-    expect(placed).not.toContain("servers I use");
-    const gemini = MCP_SERVERS_JSON.place('{ "theme": "dark", // the look\n "mcpServers": { "docs": { "url": "https://docs.example/mcp" }, }, }', "wsp", SERVER);
-    expect(gemini.commentsDropped).toBe(true);
-    expect(JSON.parse(gemini.text)).toEqual({ theme: "dark", mcpServers: { docs: { url: "https://docs.example/mcp" }, wsp: { command: SERVER.command, args: SERVER.args } } });
-    const url = OPENCODE_JSON.place('{ "mcp": { "ctx": { "type": "remote", "url": "https://ctx.example/*/mcp" } }, }', "wsp", SERVER);
-    expect((JSON.parse(url.text) as { mcp: { ctx: { url: string } } }).mcp.ctx.url).toBe("https://ctx.example/*/mcp");
-    expect(url.commentsDropped).toBe(false);
+    expect(placed).toContain("// servers I use\n");
+    expect(placed).toContain('/* memory */ "other": {');
+    const gemini = MCP_SERVERS_JSON.place('{ "theme": "dark", // the look\n "mcpServers": { "docs": { "url": "https://docs.example/mcp" }, }, }', "wsp", SERVER).text;
+    expect(gemini).toContain("// the look\n");
+    expect(parseJsonc(gemini)).toEqual({ theme: "dark", mcpServers: { docs: { url: "https://docs.example/mcp" }, wsp: { command: SERVER.command, args: SERVER.args } } });
+    const url = OPENCODE_JSON.place('{ "mcp": { "ctx": { "type": "remote", "url": "https://ctx.example/*/mcp" } }, }', "wsp", SERVER).text;
+    expect((parseJsonc(url) as { mcp: { ctx: { url: string } } }).mcp.ctx.url).toBe("https://ctx.example/*/mcp");
+  });
+
+  it("an add goes on a line of its own after the last server, so the comment at the end of that server's line stays its own", () => {
+    const text = '{\n  "mcpServers": { // header\n    "a": { "command": "x" } // note on a\n  }\n}\n';
+    const placed = MCP_SERVERS_JSON.place(text, "w", stdio("n", [])).text;
+    expect(placed).toBe('{\n  "mcpServers": { // header\n    "a": { "command": "x" }, // note on a\n    "w": {\n      "command": "n",\n      "args": []\n    }\n  }\n}\n');
+    const empty = MCP_SERVERS_JSON.remove(placed, ["a", "w"]).text;
+    expect(empty).toBe('{\n  "mcpServers": { // header\n  }\n}\n');
+    expect(MCP_SERVERS_JSON.place(empty, "w", stdio("n", [])).text).toBe('{\n  "mcpServers": { // header\n    "w": {\n      "command": "n",\n      "args": []\n    }\n  }\n}\n');
+  });
+
+  it("a file that holds the servers' key twice is refused rather than edited into something it was not meant to read as", () => {
+    const twice = '{ "mcpServers": { "a": { "command": "x" } }, // mine\n "mcpServers": { "b": { "command": "y" } } }';
+    expect(() => MCP_SERVERS_JSON.place(twice, "wsp", SERVER)).toThrow("the file could not be changed in place, which keeps its comments; change it by hand");
+    expect(() => MCP_SERVERS_JSON.remove(twice, ["b"])).toThrow("the file could not be changed in place, which keeps its comments; change it by hand");
   });
 
   it("Codex's TOML: a fresh file is one table; an existing file gets the table appended; a rerun replaces the table and leaves its neighbours", () => {
@@ -152,13 +166,13 @@ describe("place", () => {
     const existing = 'model = "gpt-5"\n\n[projects."/Users/me/proj"]\ntrust_level = "trusted"\n';
     const appended = CODEX_TOML.place(existing, "wsp", SERVER).text;
     expect(appended).toBe(`${existing}\n${table}`);
-    const rerun = CODEX_TOML.place(`${appended}\n[mcp_servers.other]\ncommand = "x"\n`, "wsp", { command: "/new/node", args: ["a"] }).text;
+    const rerun = CODEX_TOML.place(`${appended}\n[mcp_servers.other]\ncommand = "x"\n`, "wsp", stdio("/new/node", ["a"])).text;
     expect(rerun).toBe(`${existing}\n[mcp_servers.wsp]\ncommand = "/new/node"\nargs = ["a"]\n\n[mcp_servers.other]\ncommand = "x"\n`);
-    expect(CODEX_TOML.place(rerun, "wsp", { command: "/new/node", args: ["a"] }).text).toBe(rerun);
+    expect(CODEX_TOML.place(rerun, "wsp", stdio("/new/node", ["a"])).text).toBe(rerun);
   });
 
   it("Codex's TOML quotes a path with a quote or a backslash in it as a basic string", () => {
-    const placed = CODEX_TOML.place(undefined, "wsp", { command: 'C:\\node "x".exe', args: [] }).text;
+    const placed = CODEX_TOML.place(undefined, "wsp", stdio('C:\\node "x".exe', [])).text;
     expect(placed).toContain('command = "C:\\\\node \\"x\\".exe"');
   });
 
@@ -169,11 +183,101 @@ describe("place", () => {
     const spaced = CODEX_TOML.place("[other]\nx = 1\n", "my server", SERVER).text;
     expect(spaced).toContain('[mcp_servers."my server"]\n');
     expect(CODEX_TOML.read(spaced, "/home/u").map(s => s.name)).toEqual(["my server"]);
-    const rerun = CODEX_TOML.place(spaced, "my server", { command: "/new/node", args: [] }).text;
+    const rerun = CODEX_TOML.place(spaced, "my server", stdio("/new/node", [])).text;
     expect(rerun.match(/\[mcp_servers\./g)?.length).toBe(1);
     expect(rerun).toContain('command = "/new/node"');
   });
 });
+
+describe("place, every transport a person adds", () => {
+  const WITH_ENV: McpTransport = { kind: "stdio", command: "npx", args: ["-y", "@acme/mcp", "--flag"], env: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } };
+  const REMOTE: McpTransport = { kind: "http", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } };
+  const BARE_REMOTE: McpTransport = { kind: "http", url: "https://mcp.plain.example/mcp", headers: {} };
+  const FORMATS: [string, McpFormat][] = [["Claude Code", MCP_SERVERS_JSON], ["Gemini CLI", GEMINI_SETTINGS_JSON], ["OpenCode", OPENCODE_JSON], ["Codex", CODEX_TOML]];
+
+  it("each format reads back what it placed: a command with its arguments and variables, and an address with its headers", () => {
+    for (const [agent, format] of FORMATS) {
+      for (const t of [WITH_ENV, REMOTE, BARE_REMOTE, SERVER]) {
+        const placed = format.place(undefined, "acme", t).text;
+        expect(format.read(placed, HOME).map(s => s.transport), `${agent} ${t.kind}`).toEqual([t]);
+      }
+    }
+  });
+
+  it("Claude Code writes an address as an http entry, Gemini CLI as httpUrl, each with its headers, and a command with its env only where it has one", () => {
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcpServers: { acme: { type: "http", url: REMOTE.url, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", BARE_REMOTE).text)).toEqual({ mcpServers: { acme: { type: "http", url: BARE_REMOTE.url } } });
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcpServers: { acme: { httpUrl: REMOTE.url, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", WITH_ENV).text)).toEqual({ mcpServers: { acme: { command: "npx", args: ["-y", "@acme/mcp", "--flag"], env: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } } } });
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.place(undefined, "wsp", SERVER).text)).toEqual({ mcpServers: { wsp: { command: SERVER.command, args: SERVER.args } } });
+  });
+
+  it("OpenCode writes a command's variables as its environment and an address as a remote entry, both enabled", () => {
+    expect(JSON.parse(OPENCODE_JSON.place(undefined, "acme", WITH_ENV).text)).toEqual({ mcp: { acme: { type: "local", command: ["npx", "-y", "@acme/mcp", "--flag"], enabled: true, environment: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } } } });
+    expect(JSON.parse(OPENCODE_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcp: { acme: { type: "remote", url: REMOTE.url, enabled: true, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+  });
+
+  it("Codex writes a command's variables and an address's headers as inline tables, every key and value quoted", () => {
+    expect(CODEX_TOML.place(undefined, "acme", WITH_ENV).text).toBe('[mcp_servers.acme]\ncommand = "npx"\nargs = ["-y", "@acme/mcp", "--flag"]\nenv = { "ACME_KEY" = "sk-acme-x", "ACME_ORG" = "o 1" }\n');
+    expect(CODEX_TOML.place(undefined, "acme", REMOTE).text).toBe('[mcp_servers.acme]\nurl = "https://mcp.acme.example/mcp"\nhttp_headers = { "Authorization" = "Bearer tok-x", "X-Org" = "acme" }\n');
+    const tricky: McpTransport = { kind: "stdio", command: "x", args: [], env: { K: 'a "quoted" \\ value' } };
+    expect(CODEX_TOML.read(CODEX_TOML.place(undefined, "t", tricky).text, HOME)[0]!.transport).toEqual(tricky);
+  });
+
+  it("a server placed beside others leaves every other server in the file as it was", () => {
+    const claude = JSON.stringify({ numStartups: 2, mcpServers: { mine: { command: "m", args: [] } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(claude, "acme", REMOTE).text).mcpServers.mine).toEqual({ command: "m", args: [] });
+    const codex = '[mcp_servers.mine]\ncommand = "m"\n';
+    expect(CODEX_TOML.read(CODEX_TOML.place(codex, "acme", REMOTE).text, HOME).map(s => s.name)).toEqual(["mine", "acme"]);
+  });
+});
+
+describe("enable", () => {
+  it("OpenCode turns a server off and on by its enabled field, and the read says so", () => {
+    const text = OPENCODE_JSON.place(OPENCODE_JSON.place(undefined, "a", SERVER).text, "b", REMOTE_B).text;
+    const off = OPENCODE_JSON.enable!(text, "a", false);
+    expect(OPENCODE_JSON.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", true], ["b", false]]);
+    const on = OPENCODE_JSON.enable!(off.text, "a", true);
+    expect(OPENCODE_JSON.read(on.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", false], ["b", false]]);
+  });
+
+  it("Codex turns a server off with an enabled line in its own table and on by taking that line out, every other line byte for byte", () => {
+    const text = `${CODEX_OWN}\n[mcp_servers.a]\ncommand = "x"\n\n[mcp_servers.a.env]\nK = "v"\n\n[mcp_servers.b]\ncommand = "y"\n`;
+    const off = CODEX_TOML.enable!(text, "a", false);
+    expect(off.text).toBe(`${CODEX_OWN}\n[mcp_servers.a]\nenabled = false\ncommand = "x"\n\n[mcp_servers.a.env]\nK = "v"\n\n[mcp_servers.b]\ncommand = "y"\n`);
+    expect(CODEX_TOML.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["mine", false], ["a", true], ["b", false]]);
+    expect(CODEX_TOML.enable!(off.text, "a", true).text).toBe(text);
+    const written = text.replace('[mcp_servers.a]\ncommand = "x"', '[mcp_servers.a]\ncommand = "x"\nenabled = true # mine');
+    expect(CODEX_TOML.enable!(written, "a", false).text).toBe(written.replace("enabled = true # mine", "enabled = false"));
+  });
+
+  it("Gemini CLI turns a server off by its name in mcp.excluded and on by taking it out; the read says so", () => {
+    const text = JSON.stringify({ theme: "dark", mcp: { allowed: ["b"] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+    const off = GEMINI_SETTINGS_JSON.enable!(text, "a", false);
+    expect(JSON.parse(off.text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: ["a"] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+    expect(GEMINI_SETTINGS_JSON.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", true], ["b", false]]);
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.enable!(off.text, "a", true).text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: [] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+  });
+
+  it("OpenCode and Gemini CLI flip a switch in place, so a jsonc file keeps its comments", () => {
+    const opencode = '{\n  // mine\n  "mcp": { "a": { "type": "local", "command": ["x"], "enabled": true } }\n}\n';
+    const off = OPENCODE_JSON.enable!(opencode, "a", false).text;
+    expect(off).toBe(opencode.replace('"enabled": true', '"enabled": false'));
+    const gemini = '{\n  // mine\n  "mcpServers": { "a": { "command": "x" } }\n}\n';
+    const excluded = GEMINI_SETTINGS_JSON.enable!(gemini, "a", false).text;
+    expect(excluded).toContain("// mine\n");
+    expect(parseJsonc(excluded)).toEqual({ mcpServers: { a: { command: "x" } }, mcp: { excluded: ["a"] } });
+    expect(parseJsonc(GEMINI_SETTINGS_JSON.enable!(excluded, "a", true).text)).toEqual({ mcpServers: { a: { command: "x" } }, mcp: { excluded: [] } });
+  });
+
+  it("Claude Code keeps no switch a person turns per server, so its format has none, and the agent reads as having none", () => {
+    expect(MCP_SERVERS_JSON.enable).toBeUndefined();
+    expect(MCP_AGENTS.map(a => [a.id, mcpSwitch(a.id)])).toEqual([["claude", false], ["codex", true], ["gemini", true], ["opencode", true]]);
+    expect(mcpSwitch("pi")).toBe(false);
+  });
+});
+
+const REMOTE_B: McpTransport = { kind: "http", url: "https://b.example/mcp", headers: {} };
 
 const CODEX_OWN = [
   'model = "gpt-5"',
@@ -370,8 +474,6 @@ describe("remove", () => {
     expect(root.projects["/root"]!.mcpServers).toEqual({ zed: { command: "/root/.local/bin/zed", args: [] } });
     const both = MCP_SERVERS_JSON.remove(gone, ["zed"], "/root");
     expect((JSON.parse(both.text) as { projects: Record<string, { mcpServers: Record<string, unknown> }> }).projects["/root"]!.mcpServers).toEqual({});
-    // Nothing of this file was ever a comment, so the rewrite lost none.
-    expect([...[MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]), both].map(r => r.commentsDropped)]).toEqual([false, false]);
 
     // A name the file does not define, a scope it has nothing under, and a file with no servers at all: the text
     // stands as it is rather than being rewritten for nothing.
@@ -381,28 +483,83 @@ describe("remove", () => {
     expect(() => MCP_SERVERS_JSON.remove("[]", ["gsc"])).toThrow("the file is not a JSON object");
   });
 
-  it("OpenCode's JSON: the named keys go from under its own key and the rest of the file is written back as the merge writes it", () => {
+  it("OpenCode's JSON: the named keys go from under its own key, every other byte of the file where it was", () => {
     const own = '{\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] }, "mine": { "type": "local", "command": ["mine"] } }\n}\n';
     const gone = OPENCODE_JSON.remove(own, ["wsp"]);
     expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
-    expect(gone.commentsDropped).toBe(false);
+    expect(gone.text).toBe('{\n  "theme": "x",\n  "mcp": { "mine": { "type": "local", "command": ["mine"] } }\n}\n');
     expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
   });
 
-  it("a jsonc file says the comments its rewrite could not keep, the same loss a merge into it answers, and says nothing of them where it takes no key out", () => {
-    const own = '{\n  // my own servers\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] } }\n}\n';
-    const gone = OPENCODE_JSON.remove(own, ["wsp"]);
-    expect(gone.commentsDropped).toBe(true);
-    expect(gone.text).not.toContain("my own servers");
-    expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: {} });
-    // A name that file does not define leaves it byte for byte, comments and all, so nothing is lost and nothing said.
-    expect(OPENCODE_JSON.remove(own, ["nobody"])).toEqual({ text: own, commentsDropped: false });
+  it("a jsonc file keeps its comments when a key comes out of it", () => {
+    const own = '{\n  // my own servers\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] } } // the rest\n}\n';
+    const gone = OPENCODE_JSON.remove(own, ["wsp"]).text;
+    expect(gone).toContain("// my own servers\n");
+    expect(gone).toContain("// the rest\n");
+    expect(parseJsonc(gone)).toEqual({ theme: "x", mcp: {} });
+    expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
+  });
+
+  it("a remove takes out the server's own lines, its comment lines above it and the comment at the end of its line, and no neighbour's comment", () => {
+    const claude = [
+      "{ // my settings",
+      '  "mcpServers": { // header for all my servers',
+      "    // about a",
+      '    "a": { "command": "x" }, // note on a',
+      "    // about b",
+      '    "b": { "command": "y" } // note on b',
+      "  } // end of servers",
+      "}",
+      "",
+    ].join("\n");
+    expect(MCP_SERVERS_JSON.remove(claude, ["b"]).text).toBe(
+      ["{ // my settings", '  "mcpServers": { // header for all my servers', "    // about a", '    "a": { "command": "x" } // note on a', "  } // end of servers", "}", ""].join("\n"),
+    );
+    expect(MCP_SERVERS_JSON.remove(claude, ["a"]).text).toBe(
+      ["{ // my settings", '  "mcpServers": { // header for all my servers', "    // about b", '    "b": { "command": "y" } // note on b', "  } // end of servers", "}", ""].join("\n"),
+    );
+    const middle = '{\n  "mcpServers": {\n    "a": { "command": "x" }, // note on a\n\n    // section two\n    "b": { "command": "y" }, /* note on b */\n    "c": { "command": "z" } // note on c\n  }\n}\n';
+    expect(MCP_SERVERS_JSON.remove(middle, ["b"]).text).toBe('{\n  "mcpServers": {\n    "a": { "command": "x" }, // note on a\n\n    "c": { "command": "z" } // note on c\n  }\n}\n');
+    const blank = '{\n  "mcpServers": {\n    // my servers\n\n    "a": { "command": "x" }\n  }\n}\n';
+    expect(MCP_SERVERS_JSON.remove(blank, ["a"]).text).toBe('{\n  "mcpServers": {\n    // my servers\n\n  }\n}\n');
+  });
+
+  it("Gemini CLI turns a server on, and takes a removed one out of mcp.excluded, by that one name, every other name's comment kept", () => {
+    const text = [
+      "{",
+      '  "mcp": {',
+      '    "excluded": [ // switched off',
+      '      "s", // trying it',
+      '      "other" // keep off',
+      "    ]",
+      "  },",
+      '  "mcpServers": { "s": { "command": "x" }, "other": { "command": "y" }, "t": { "command": "z" } }',
+      "}",
+      "",
+    ].join("\n");
+    const kept = ['    "excluded": [ // switched off', '      "other" // keep off', "    ]"].join("\n");
+    expect(GEMINI_SETTINGS_JSON.enable!(text, "s", true).text).toContain(kept);
+    expect(GEMINI_SETTINGS_JSON.remove(text, ["s"]).text).toContain(kept);
+    const off = GEMINI_SETTINGS_JSON.enable!(text, "t", false).text;
+    expect(off).toContain(['      "s", // trying it', '      "other", // keep off', '      "t"', "    ]"].join("\n"));
+    expect(GEMINI_SETTINGS_JSON.enable!('{ "mcp": { "excluded": ["s"] }, "mcpServers": { "t": {} } }', "t", false).text).toBe('{ "mcp": { "excluded": ["s", "t"] }, "mcpServers": { "t": {} } }');
+    expect(GEMINI_SETTINGS_JSON.read(off, HOME).map(s => [s.name, s.disabled === true])).toEqual([["s", true], ["other", true], ["t", true]]);
+  });
+
+  it("Gemini CLI takes a removed server's name out of mcp.excluded too, so a later server of that name is not born off", () => {
+    const text = '{\n  // mine\n  "mcp": { "excluded": ["s", "t"] },\n  "mcpServers": { "s": { "command": "x" }, "t": { "command": "y" } }\n}\n';
+    const gone = GEMINI_SETTINGS_JSON.remove(text, ["s"]).text;
+    expect(parseJsonc(gone)).toEqual({ mcp: { excluded: ["t"] }, mcpServers: { t: { command: "y" } } });
+    expect(gone).toContain("// mine\n");
+    const again = GEMINI_SETTINGS_JSON.place(gone, "s", SERVER).text;
+    expect(GEMINI_SETTINGS_JSON.read(again, HOME).map(s => [s.name, s.disabled === true])).toEqual([["t", true], ["s", false]]);
+    expect(GEMINI_SETTINGS_JSON.remove(text, ["nobody"]).text).toBe(text);
   });
 
   it("Codex's TOML: the named tables go with their sub-tables, and the person's trust tables, hooks state and own server stay byte for byte", () => {
     const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
     expect(landed).toContain("[mcp_servers.context7.env]");
-    expect(CODEX_TOML.remove(landed, ["context7"])).toEqual({ text: CODEX_OWN, commentsDropped: false });
+    expect(CODEX_TOML.remove(landed, ["context7"]).text).toBe(CODEX_OWN);
     // A name no table stands for leaves the file exactly as it was, comments and spacing with it.
     expect(CODEX_TOML.remove(landed, ["nobody"]).text).toBe(landed);
     expect(CODEX_TOML.remove(landed, ["mine"]).text).not.toContain("[mcp_servers.mine]");

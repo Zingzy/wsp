@@ -451,6 +451,8 @@ export type McpAgent = AgentEntry & { mcp: McpConfig };
 export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is McpAgent => a.mcp !== undefined);
 /** Those agents' ids as one line, for the usage, the help and the refusal that all name the same set. */
 export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
+/** Whether an agent keeps a switch per server that wsp turns: its format module has one. */
+export const mcpSwitch = (id: string): boolean => MCP_AGENTS.find(a => a.id === id)?.mcp.format.enable !== undefined;
 
 /** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an
  * agent with none. */

@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerAdd, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box, a fork at a cloud
  * (a copy, so every act is the image's), a cloud's own page (the image's rows), or a task standing on a box, whose
@@ -130,6 +130,23 @@ export const AGENTS_LIST_WORDS = {
   firstOf: (shown: number, all: number): string => `shows the first ${shown} KB of ${all} KB`,
   removeTitle: (name: string): string => `Remove ${name}?`,
   removeBody: (computer: string): string => `Its folder and every link to it leave ${computer}.`,
+  leavesFiles: (files: readonly string[], computer: string): string => `It leaves ${files.join(" and ")} on ${computer}.`,
+  noSwitch: (agent: string): string => `${agent} turns a server off per folder, in its own /mcp`,
+  addServer: "Add an MCP server",
+  agent: "Agent",
+  serverName: "Name",
+  reachedBy: "Reached by",
+  byCommand: "Command",
+  byAddress: "Address",
+  variables: "Variables",
+  addVariable: "Add a variable",
+  addHeader: "Add a header",
+  value: "value",
+  removePair: (name: string): string => (name === "" ? "Remove this line" : `Remove ${name}`),
+  addServerGo: "Add server",
+  adding: "Adding",
+  twoPairsOneName: (road: "command" | "address"): string => (road === "command" ? "Two variables have the same name; keep one of them." : "Two headers have the same name; keep one of them."),
+  noServerAgents: (computer: string): string => `No agent on ${computer} keeps MCP servers in a file wsp writes.`,
 } as const;
 
 /** Compact counts the way skills.sh draws them: 3.6M, 201K, 12. */
@@ -231,6 +248,17 @@ export interface SkillActs {
   refusedOf(key: string): string | undefined;
 }
 
+/** The servers road of one target: a server added, whose values the form alone holds until the host takes them,
+ * and one entry's rows removed or turned off or on, each by the entry's key, with what is running and why the last
+ * ask was refused. */
+export interface ServerActs {
+  add(ask: ServerAdd): Promise<unknown>;
+  remove(key: string, rows: readonly McpRow[]): void;
+  toggle(key: string, rows: readonly McpRow[], on: boolean): void;
+  busyOf(key: string): boolean;
+  refusedOf(key: string): string | undefined;
+}
+
 /** The key a skill's own state is kept under. */
 export const skillKey = (row: Pick<SkillRow, "scope" | "name">): string => `${row.scope}:${row.name}`;
 
@@ -257,6 +285,7 @@ export interface RowsContext {
   readonly tools?: ServerTools;
   readonly acts?: AgentActs;
   readonly skills?: SkillActs;
+  readonly servers?: ServerActs;
   /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
   readonly typeInTerminal?: (line: string) => void;
   /** The project a task's panel reads beside the computer's own rows, which names the project group. */

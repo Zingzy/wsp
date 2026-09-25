@@ -85,7 +85,7 @@ import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprin
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type SkillsActs } from "../src/agents-read.js";
+import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServersActs, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -130,7 +130,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -141,11 +141,12 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
     ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
     ...(opts.skillsActs === undefined ? {} : { skillsActs: opts.skillsActs }),
+    ...(opts.serversActs === undefined ? {} : { serversActs: opts.serversActs }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
-  srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }) });
+  srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }), ...(serve.log === undefined ? {} : { log: serve.log }) });
   return { hostKey, store };
 }
 
@@ -4511,6 +4512,53 @@ describe("the agents on a computer you own", () => {
       expect(await device.request(op, extra), op).toMatchObject({ ok: false, error: deviceHeldRefusal(op) });
     }
     expect(asked).toHaveLength(6);
+  });
+
+  it("add, turn off and remove a server from the host's own socket alone, each on the computer named, and never log the values an add carried", async () => {
+    const asked: string[] = [];
+    const acts: ServersActs = {
+      add: async (on, ask) => {
+        asked.push(`add ${on.kind} ${ask.agent} ${ask.name} ${ask.url ?? ask.command} ${ask.project === true}`);
+        if (ask.name === "echo") throw Object.assign(new Error(`refused ${JSON.stringify(ask.headers)} ${JSON.stringify(ask.env)}`), { kind: "usage" });
+        return { file: "~/.claude.json" };
+      },
+      remove: async (on, ask) => (asked.push(`remove ${on.kind} ${ask.agent} ${ask.name} ${ask.scope}`), { file: "~/.claude.json" }),
+      toggle: async (on, ask) => (asked.push(`toggle ${on.kind} ${ask.agent} ${ask.name} ${ask.on}`), { file: "~/.codex/config.toml" }),
+    };
+    const lines: string[] = [];
+    const { hostKey } = await serving({ agentsReader: reading([], []), serversActs: acts }, { log: line => void lines.push(line) });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    await c.request("events.subscribe");
+    const box = { placeId };
+    expect(await c.request("servers.add", { target: { placeId: HERE_PLACE_ID }, agent: "claude", name: "acme", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-acme-x" } })).toMatchObject({ ok: true, file: "~/.claude.json" });
+    expect(await c.request("servers.toggle", { target: box, agent: "codex", name: "acme", on: false })).toMatchObject({ ok: true, file: "~/.codex/config.toml" });
+    expect(await c.request("servers.remove", { target: box, agent: "claude", name: "acme", scope: "home" })).toMatchObject({ ok: true, file: "~/.claude.json" });
+    expect(asked).toEqual(["add here claude acme https://mcp.acme.example/mcp false", "toggle box codex acme false", "remove box claude acme home"]);
+    await until(() => c.events.filter(e => e.type === "agents.changed").length === 3);
+    expect(await c.request("servers.add", { target: box, agent: "claude", name: "echo", command: "npx", env: { ACME_KEY: "sk-acme-env-x" }, headers: { Authorization: "Bearer tok-acme-hdr-x" } })).toMatchObject({ ok: false });
+    const refused = lines.filter(l => l.startsWith("refused servers.add"));
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).not.toContain("sk-acme-env-x");
+    expect(refused[0]).not.toContain("tok-acme-hdr-x");
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    const redeemer = await WsClient.connect(srv!.port);
+    sockets.push(redeemer.ws);
+    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    sockets.push(device.ws);
+    for (const [op, extra] of [
+      ["servers.add", { target: box, agent: "claude", name: "acme", command: "npx" }],
+      ["servers.toggle", { target: box, agent: "codex", name: "acme", on: true }],
+      ["servers.remove", { target: box, agent: "claude", name: "acme" }],
+    ] as const) {
+      expect(await ticketed.request(op, extra), op).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+      expect(await device.request(op, extra), op).toMatchObject({ ok: false, error: deviceHeldRefusal(op) });
+    }
+    expect(asked).toHaveLength(4);
   });
 
   it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {

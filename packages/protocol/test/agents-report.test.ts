@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, SkillHit, SkillPreview, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, withoutControlChars, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
+import { AgentsChangedEvent, AgentsReport, commandWords, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, SkillHit, SkillPreview, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, withoutControlChars, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
 
 const report = {
   target: { placeId: "here" },
@@ -105,6 +105,33 @@ describe("the agents report on the wire", () => {
     }
     expect(() => RuntimeRequest.parse({ id: "1", op: "skills.search", q: "pdf", limit: 500 })).toThrow();
     expect(() => RuntimeRequest.parse({ id: "6", op: "skills.toggle", target: { placeId: "here" }, name: "pdf" })).toThrow();
+  });
+
+  it("the server acts name a target, an agent and a server; the values an add carries are the request's secrets; all are shut to threads and paired devices", () => {
+    const acts = [
+      { id: "1", op: "servers.add", target: { placeId: "here" }, agent: "claude", name: "acme", command: "npx", args: ["-y", "@acme/mcp"], env: { ACME_KEY: "sk-acme-x" } },
+      { id: "2", op: "servers.add", target: { workspaceId: "ws_1" }, agent: "codex", name: "remote", project: true, url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-acme" } },
+      { id: "3", op: "servers.remove", target: { placeId: "p_spoo" }, agent: "claude", name: "acme", scope: "home" },
+      { id: "4", op: "servers.toggle", target: { placeId: "here" }, agent: "opencode", name: "acme", on: false },
+    ];
+    for (const act of acts) {
+      expect(RuntimeRequest.parse(act)).toEqual(act);
+      expect(THREAD_OPS).not.toContain(act.op);
+      expect(DEVICE_OPS).not.toContain(act.op);
+    }
+    expect(requestSecrets(acts[0])).toEqual(["sk-acme-x"]);
+    expect(requestSecrets(acts[1])).toEqual(["Bearer tok-acme"]);
+    expect(() => RuntimeRequest.parse({ ...acts[2], scope: "plugin" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: "4", op: "servers.toggle", target: { placeId: "here" }, agent: "opencode", name: "acme" })).toThrow();
+  });
+
+  it("a command line a person types splits into its words, quotes kept together and nothing expanded", () => {
+    expect(commandWords("npx -y @acme/mcp")).toEqual(["npx", "-y", "@acme/mcp"]);
+    expect(commandWords("  uvx  'a b'  \"c \\\" d\" e\\ f $HOME ")).toEqual(["uvx", "a b", 'c " d', "e f", "$HOME"]);
+    expect(commandWords("node '' x")).toEqual(["node", "", "x"]);
+    expect(commandWords("")).toEqual([]);
+    expect(commandWords('x "unclosed')).toBeUndefined();
+    expect(commandWords("x 'unclosed")).toBeUndefined();
   });
 
   it("a skill's folder can be off, a search hit is what skills.sh answers, and a preview carries the file's whole size beside its first part", () => {
