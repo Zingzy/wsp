@@ -326,6 +326,43 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   });
 
+  it("keeps a fact's note inside its line at the panel's floor, under the value and whole where it does not fit beside it", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [358, 360]) {
+      await at(width).locator('[data-agents-row="agent-claude"] [data-row-trigger]').click();
+      const note = at(width).locator("[data-fact=version] [data-fact-note]");
+      await note.waitFor();
+      const m = await note.evaluate(n => {
+        const value = n.closest("[data-fact]")!.querySelector("[data-fact-value]")!.getBoundingClientRect();
+        const box = n.getBoundingClientRect();
+        return { right: box.right, top: box.top, valueBottom: value.bottom, lineRight: n.closest("[data-fact]")!.getBoundingClientRect().right, cut: n.scrollWidth > n.clientWidth || n.scrollHeight > n.clientHeight + 1, title: n.getAttribute("title"), text: n.textContent };
+      });
+      expect(m.right, `${width}`).toBeLessThanOrEqual(m.lineRight);
+      expect(m.top, `${width}`).toBeGreaterThanOrEqual(m.valueBottom);
+      expect(m.cut, `${width}`).toBe(false);
+      expect(m.title, `${width}`).toBe(m.text);
+      await at(width).locator("[data-k=agents-back]").click();
+    }
+  });
+
+  it("holds every refused line under the list whole inside the panel at its floor, wrapped rather than cut", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [358, 360]) {
+      const words = at(width).locator("[data-refused-line] > span");
+      expect(await words.count(), `${width}`).toBeGreaterThan(0);
+      const m = await at(width).locator("[data-agents-refused]").evaluate(box => {
+        const edge = box.getBoundingClientRect().right;
+        return [...box.querySelectorAll<HTMLElement>("[data-refused-line] > span")].map(w => ({ text: w.textContent, past: w.getBoundingClientRect().right - edge, cut: w.scrollWidth > w.clientWidth }));
+      });
+      for (const w of m) {
+        expect(w.past, `${width} ${w.text}`).toBeLessThanOrEqual(0);
+        expect(w.cut, `${width} ${w.text}`).toBe(false);
+      }
+    }
+  });
+
   it("fades a copy line's right edge only while it overflows its box, and drops the fade once it is scrolled to its end", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");

@@ -1899,6 +1899,9 @@ export const Preferences = z.object({
   /** Whether the host asks Google for each remote MCP server's icon by its host name. On unless the person turns it
    * off; defaulted so a record from a host older than the switch reads as on. */
   serverIcons: z.boolean().default(true),
+  /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
+   * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
+  agentVersions: z.boolean().default(true),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1925,7 +1928,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1957,6 +1960,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     projectLook: perWorkspace(current.projectLook, patch.projectLook),
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
+    agentVersions: patch.agentVersions ?? current.agentVersions,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),

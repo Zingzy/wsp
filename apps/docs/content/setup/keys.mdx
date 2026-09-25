@@ -44,7 +44,13 @@ Every archive is checksummed on your computer and verified on the machine before
 - The contents of your agents' sessions. `wsp recipe scan` and `wsp init` read tool names and command words to count use, never a line's content.
 - Login values during detection. Presence is a `stat` or a Keychain lookup by service name without the password flag; no login file is read until you answer copy.
 
-One request does leave, and it carries nothing of yours. Thirty seconds after it starts, every six hours after that and when you open Settings > About, the host asks api.github.com for the latest wsp release, never more than once in ten minutes. The request names wsp's own version as its user agent and sends nothing else. The answer is kept in `release.json` beside the state file, which `wsp status` and `wsp doctor` read without asking again. To turn it off, set `WSP_UPDATE_CHECK=0` in the host's environment or on a line of `~/.wsp/.env`, which is the one the desktop app reads.
+Three kinds of request do leave, from the host alone, and none carries a key, a path or a file of yours.
+
+- **wsp's own release.** Thirty seconds after it starts, every six hours after that and when you open Settings > About, the host asks api.github.com for the latest wsp release, never more than once in ten minutes. The request names wsp's own version as its user agent and sends nothing else. The answer is kept in `release.json` beside the state file, which `wsp status` and `wsp doctor` read without asking again.
+- **Each agent's newest version.** When the agents list is read (the Agents tab, a computer's page, `wsp agents`) and the last answer is more than a day old, the host asks registry.npmjs.org for each npm agent's latest tag, api.github.com for the latest release of each agent the catalog installs from a GitHub release, and downloads.claude.ai for Claude Code's latest version. It asks for every agent in the catalog, whichever ones you have, so the requests say nothing about what is installed. Each request names wsp's own version as its user agent. An answer counts only if it came over https from the host it was asked of and is exactly a version number. A vendor that did not answer is not asked again for ten minutes. The answers are kept in `agent-latest.json` beside the state file. To turn this off, switch off Newest agent versions under Settings > Privacy.
+- **Server icons.** For each remote MCP server with a public host name, the host asks Google's favicon service for that name, unless you turn Server icons from Google off under Settings > Privacy.
+
+`WSP_UPDATE_CHECK=0` in the host's environment or on a line of `~/.wsp/.env`, which is the one the desktop app reads, turns off the first two whatever the Privacy page says.
 
 ## Tokens the host mints
 

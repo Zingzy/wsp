@@ -114,12 +114,12 @@ describe("makeApi wrappers", () => {
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     // A record from a host that kept no computer icons or theme picks reads as none and the side defaults rather than
     // failing the whole record.
-    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
-    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record, notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
-    expect(await api.setPreferences!({ serverIcons: false })).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite", notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
+    expect(await api.setPreferences!({ serverIcons: false })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, lightTheme: "paper", darkTheme: "graphite", notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, computerLook: { pl_1: { icon: "server" } } } });
     expect((await api.preferences!()).computerLook).toEqual({ pl_1: { icon: "server" } });
     // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.

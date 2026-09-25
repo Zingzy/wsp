@@ -85,10 +85,17 @@ export interface AgentAbout {
   license: string;
 }
 
+/** Where an agent's vendor publishes its newest version, which this host asks and no machine does: its npm package's
+ * latest tag, its GitHub repository's latest release, or an address whose whole answer is the version. */
+export type LatestSource = { from: "npm"; package: string } | { from: "github"; repo: string } | { from: "text"; url: string };
+
 /** An agent is never on by the catalog's own default: a recipe ticks one only from this computer's use of it. */
 export interface AgentEntry extends EntryBase {
   kind: "agent";
   about: AgentAbout;
+  /** Absent where the vendor's versions are not in the form the agent's own version flag prints, so the two are
+   * never compared, and the catalog's pin is not set beside what stands either. */
+  latest?: LatestSource;
   /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
