@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACE_CONNECTS, PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
+import { PLACE_CONNECTS, PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, backUrl, linkedOver, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
 
 describe("the one state of a computer that is not answering", () => {
   const now = Date.parse("2026-09-12T13:30:00.000Z");
@@ -105,6 +105,30 @@ describe("what this host knows about reaching a computer that is not answering",
     expect(road.address).toBe("192.168.1.34 · dials in");
     expect(road.refused).toBeNull();
     expect(road.sentence).toBe("wsp waits for old-laptop to dial in, last from 192.168.1.34; it last answered 36 min ago.");
+  });
+
+  it("says a box on the ssh dial-back dials back over ssh, and never that it dials in from this computer's loopback", () => {
+    const road = absentRoad({ name: "spoo", road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } }, awayMs });
+    expect(road.address).toBe("root@spoo · ssh");
+    expect(road.dialsBack).toBe("dials back over ssh (127.0.0.1:4640 on spoo)");
+    expect(road.sentence).toBe("wsp logs in to spoo at root@spoo over ssh, and spoo dials back over ssh (127.0.0.1:4640 on spoo); it last answered 32 min ago.");
+    const bare = absentRoad({ name: "spoo", road: { from: "127.0.0.1", back: { boxPort: 4640 } }, awayMs });
+    expect(bare.address).toBeNull();
+    expect(bare.sentence).toBe("spoo dials back over ssh (127.0.0.1:4640 on spoo); it last answered 32 min ago.");
+    for (const said of [road.sentence, bare.sentence, road.address, bare.address]) expect(said ?? "").not.toContain("127.0.0.1 · dials in");
+    expect(bare.sentence).not.toContain("last from 127.0.0.1");
+    expect(absentRoad({ name: "vps", road: { ssh: "root@65.21.4.12", from: "65.21.4.12" }, awayMs }).dialsBack).toBeNull();
+  });
+
+  it("names the road a link came in on off the address it dialled: over ssh for the forward on its own loopback", () => {
+    const handed = ["http://192.168.1.20:4640", "https://h645d7f8a8d48cbd6.example"];
+    expect(backUrl(4640)).toBe("http://127.0.0.1:4640");
+    expect(linkedOver("http://127.0.0.1:4640", { boxPort: 4640 }, handed)).toBe("over ssh");
+    expect(linkedOver("http://192.168.1.20:4640", undefined, handed)).toBe("at http://192.168.1.20:4640");
+    expect(linkedOver("https://h645d7f8a8d48cbd6.example", { boxPort: 4640 }, handed)).toBe("at https://h645d7f8a8d48cbd6.example");
+    // The box writes the address it dialled, so one this host never handed out is not said in this host's voice.
+    expect(linkedOver("http://127.0.0.1:4720", { boxPort: 4640 }, handed)).toBeUndefined();
+    expect(linkedOver("https://whatever-it-likes.example/" + "a".repeat(8000), undefined, handed)).toBeUndefined();
   });
 
   it("says so plainly on a computer this host has no address for and has never heard from", () => {

@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -83,7 +83,7 @@ import {
   addTakenLine,
   placeRootHomeRefusal,
 } from "../src/places.js";
-import { BackCutError, backBindLine, backUrl, heldPlaceScript } from "../src/place-back.js";
+import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
@@ -1595,7 +1595,8 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(box.ran[deploy]).not.toContain("192.168.1.20");
     expect(box.stages).toContain(`reach done (${dialsBackOverSshNote(urls, undefined)})`);
     expect(dialsBackOverSshNote(urls, undefined)).toBe("cannot reach this computer at http://100.129.166.28:4720, http://192.168.1.20:4720, so it dials back over ssh");
-    expect(box.stages).toContain("service running (it dials this computer at http://127.0.0.1:4720)");
+    expect(box.stages).toContain("service running (it dials back over ssh (127.0.0.1:4720 on spoo))");
+    expect(box.stages.join("\n")).not.toContain("dials this computer at http://127.0.0.1");
     expect(installed.back).toEqual({ boxPort: 4720 });
     expect(back.released).toEqual([]);
   });
@@ -1609,6 +1610,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const deploy = box.ran.find(script => script.includes(`case "$(uname -m)" in`))!;
     expect(deploy).toContain(`join '${relay}' '${backUrl(4720)}' --code-file`);
     expect(box.stages).toContain(`reach done (${relay}, and back over ssh)`);
+    expect(box.stages).toContain(`service running (it dials this computer at ${relay}, then dials back over ssh (127.0.0.1:4720 on spoo))`);
   });
 
   it("holds no forward where the box reaches an address of the door, or on a host that names no door port of its own", async () => {
