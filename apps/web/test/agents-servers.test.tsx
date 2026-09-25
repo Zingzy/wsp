@@ -15,6 +15,7 @@ import { resetServerIcons } from "../src/components/agents/useServerIcon.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
+import { pickOption } from "./select.js";
 
 const NOW = Date.parse("2026-09-24T12:03:00.000Z");
 const SERVER = { airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", notion: "server-global-notion-http-mcp.notion.com", sentry: "server-global-sentry-http-mcp.sentry.dev" };
@@ -162,12 +163,7 @@ describe("Add an MCP server", () => {
     const h = host();
     render(<List />);
     openForm();
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=add-server-agent]")!);
-    const codex = await screen.findByRole("option", { name: "Codex" });
-    await act(async () => void (await new Promise(r => setTimeout(r, 0))));
-    // Under jsdom the select takes a click on an item only once a key has highlighted it.
-    fireEvent.keyDown(codex, { key: "Enter" });
-    fireEvent.click(codex);
+    await pickOption(document.querySelector("[data-k=add-server-agent]")!, "Codex");
     expect(document.querySelector("[data-k=add-server-file]")?.textContent).toBe("~/.codex/config.toml");
     type("add-server-name", "acme");
     fireEvent.click(screen.getByRole("radio", { name: W.byAddress }));
@@ -184,11 +180,11 @@ describe("Add an MCP server", () => {
     expect(h.adds).toEqual([[AGENTS_REPORT.target, { agent: "codex", name: "acme", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-x" } }]]);
   });
 
-  it("from a task's panel puts it in the project's own file when the person says so", () => {
+  it("from a task's panel puts it in the project's own file when the person says so", async () => {
     const h = host();
-    render(<List ctx={{ project: { name: "wsp", path: "~/wsp" } }} />);
+    render(<List />);
     openForm();
-    fireEvent.click(screen.getByRole("radio", { name: "wsp" }));
+    await pickOption(document.querySelector("[data-k=where-pick]")!, /^wsp/);
     expect(document.querySelector("[data-k=add-server-file]")?.textContent).toBe("~/wsp/.mcp.json");
     type("add-server-name", "acme");
     type("add-server-command", "uvx acme");

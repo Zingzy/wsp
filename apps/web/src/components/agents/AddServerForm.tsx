@@ -7,7 +7,7 @@
 import { PlusIcon, XIcon } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { MCP_AGENTS, agentName } from "@wsp/catalog";
-import { commandWords, unclosedQuoteRefusal, type AgentsReport, type ServerAdd } from "@wsp/protocol";
+import { commandWords, unclosedQuoteRefusal, type AgentsProject, type AgentsReport, type ServerAdd } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { RefusalSlot } from "../../settings/sheetParts.js";
@@ -17,7 +17,8 @@ import { InputGroup, InputGroupInput } from "../ui/input-group.js";
 import { SegmentedControl } from "../ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select.js";
 import { Spinner } from "../ui/spinner.js";
-import { AGENTS_LIST_WORDS as W, type RowsContext } from "./agentsRows.js";
+import { OneOf } from "./agentsParts.js";
+import { AGENTS_LIST_WORDS as W, inProject, pickOf, whereNow, type ProjectPick } from "./agentsRows.js";
 import type { AddFormProps } from "./kinds/kind.js";
 
 type Road = "command" | "address";
@@ -34,14 +35,14 @@ const MONO = "font-mono text-[13px] sm:text-[13px]";
 const serverAgents = (report: AgentsReport | null): string[] => MCP_AGENTS.filter(a => report?.agents.some(r => r.id === a.id && r.installed) === true).map(a => a.id);
 
 /** The file an add for this agent lands in: the one the report already read servers from, else the first the agent
- * reads; a project's own file under the project's folder. */
-function fileOf(agent: string, project: boolean, report: AgentsReport | null, ctx: RowsContext): string | undefined {
+ * reads; a project's own file under that project's folder. */
+function fileOf(agent: string, project: AgentsProject | undefined, report: AgentsReport | null): string | undefined {
   const entry = MCP_AGENTS.find(a => a.id === agent);
   if (entry === undefined) return undefined;
-  if (project) {
-    const own = report?.servers.find(r => r.agent === agent && r.scope === "project")?.file;
+  if (project !== undefined) {
+    const own = report?.servers.find(r => r.agent === agent && inProject(r, project))?.file;
     const first = entry.mcp.projectFiles?.[0];
-    return own ?? (first === undefined ? undefined : ctx.project?.path === undefined ? first : `${ctx.project.path}/${first}`);
+    return own ?? (first === undefined ? undefined : `${project.path}/${first}`);
   }
   return report?.servers.find(r => r.agent === agent && r.scope === "user")?.file ?? entry.mcp.files[0];
 }
@@ -89,7 +90,7 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
   const [url, setUrl] = useState("");
   const [pairs, setPairs] = useState<readonly Pair[]>([]);
   const [next, setNext] = useState(0);
-  const [project, setProject] = useState(false);
+  const [picked, setPicked] = useState<ProjectPick | undefined>(undefined);
   const [adding, setAdding] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
   const servers = ctx.servers;
@@ -104,8 +105,10 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
   }
 
   const named = pairs.filter(p => p.name.trim() !== "" || p.value !== "");
-  const ready = agent !== "" && name.trim() !== "" && (road === "command" ? command.trim() !== "" : url.trim() !== "") && named.every(p => p.name.trim() !== "") && !adding;
-  const file = fileOf(agent, project, report, ctx);
+  const where = whereNow(report, picked, on);
+  const project = where.project;
+  const ready = where.lost === undefined && agent !== "" && name.trim() !== "" && (road === "command" ? command.trim() !== "" : url.trim() !== "") && named.every(p => p.name.trim() !== "") && !adding;
+  const file = where.lost === undefined ? fileOf(agent, project, report) : undefined;
 
   const submit = (): void => {
     if (!ready) return;
@@ -117,12 +120,12 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
     const ask: ServerAdd = {
       agent,
       name: name.trim(),
-      ...(project ? { project: true } : {}),
+      ...(project === undefined ? {} : { project: true }),
       ...(road === "command" ? { command: program, args, ...(named.length > 0 ? { env: values } : {}) } : { url: url.trim(), ...(named.length > 0 ? { headers: values } : {}) }),
     };
     setAdding(true);
     setRefused(undefined);
-    servers.add(ask).then(done, (e: unknown) => {
+    servers.add(ask, project).then(done, (e: unknown) => {
       setAdding(false);
       setRefused(errorText(e));
     });
@@ -205,18 +208,9 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
           {road === "command" ? W.addVariable : W.addHeader}
         </Button>
       </Line>
-      {ctx.project === undefined ? null : (
-        <Line label={W.where}>
-          <SegmentedControl
-            value={project ? "project" : "user"}
-            onChange={v => setProject(v === "project")}
-            className="h-7 self-start"
-            segmentClassName="px-2.5 text-xs"
-            segments={[
-              { value: "user", label: W.global },
-              { value: "project", label: ctx.project.name },
-            ]}
-          />
+      {where.options.length === 0 ? null : (
+        <Line label={W.where} top>
+          <OneOf k="where-pick" label={W.where} options={where.options} value={where.value} set={v => setPicked(pickOf(report, v))} {...(where.lost === undefined ? {} : { lost: where.lost })} />
         </Line>
       )}
       <div data-add-server-footer className="mt-1 flex items-center gap-3 border-t border-border pt-4">

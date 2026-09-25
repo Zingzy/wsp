@@ -6,7 +6,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, RefObject } from "react";
 import type { AgentsProject, AgentsReport } from "@wsp/protocol";
-import type { DocState, FlowView, RowAct, RowsContext } from "../agentsRows.js";
+import type { DocState, FlowView, PickOption, RowAct, RowsContext } from "../agentsRows.js";
 
 export type GroupBy = "none" | "agent" | "source" | "scope";
 
@@ -104,8 +104,10 @@ export interface Choice {
   readonly id: string;
   readonly label: string;
   readonly many: boolean;
-  readonly options: readonly { readonly value: string; readonly label: string; readonly agent?: string; readonly held?: string }[];
+  readonly options: readonly (PickOption & { readonly agent?: string; readonly held?: string })[];
   readonly value: readonly string[];
+  /** Why the one value picked no longer stands, said under the pick. */
+  readonly lost?: string;
   readonly set: (value: readonly string[]) => void;
 }
 
