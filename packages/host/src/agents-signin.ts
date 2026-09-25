@@ -66,7 +66,7 @@ async function wrapFor(on: AgentsOn): Promise<(line: string) => string> {
 
 /** The opener a harness is handed for a sign-in: it writes the page onto the sign-in's own terminal, then hands it to
  * the browser the terminal had. A tool may open its page with no terminal of its own, so the write goes to the device. */
-const PAGE_OPENER = ["#!/bin/sh", '[ -n "$WSP_SIGNIN_TTY" ] && printf "%s\\n" "$1" > "$WSP_SIGNIN_TTY"', 'exec "$WSP_SIGNIN_OPENER" "$@"'];
+const PAGE_OPENER = ["#!/bin/sh", '[ -n "$WSP_SIGNIN_TTY" ] && printf "%s" "$1" | tr -d "\\000-\\037\\177" > "$WSP_SIGNIN_TTY" && printf "\\n" > "$WSP_SIGNIN_TTY"', 'exec "$WSP_SIGNIN_OPENER" "$@"'];
 
 /** The line run with the sign-in's own opener as BROWSER, so the pty is the one place its page is read from and a
  * browser.open from anything else on the workspace never becomes the row's page. */

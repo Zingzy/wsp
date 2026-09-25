@@ -5,7 +5,7 @@
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
 import type { McpServerSpec } from "@wsp/protocol";
-import { CATALOG_AGENTS, CODEX_TOML, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpEditLib, type McpFormat, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpEditLib, type McpFormat, type McpServer } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };
@@ -13,7 +13,7 @@ const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp
 describe("the catalog's MCP configs", () => {
   it("are registered from the agent entries that have one, each naming its format module and files among the entry's own config paths", () => {
     expect(MCP_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode"]);
-    expect(MCP_AGENTS.map(a => a.mcp.format)).toEqual([MCP_SERVERS_JSON, CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON]);
+    expect(MCP_AGENTS.map(a => a.mcp.format)).toEqual([MCP_SERVERS_JSON, CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON]);
     for (const a of MCP_AGENTS) for (const f of a.mcp.files) expect(a.configPaths, a.id).toContain(f);
     expect(CATALOG_AGENTS.filter(a => a.mcp !== undefined)).toEqual(MCP_AGENTS);
     expect(catalogEntry("pi")).toMatchObject({ kind: "agent" });
@@ -60,6 +60,15 @@ describe("read", () => {
     expect(claude.map(s => [s.name, s.envRefs])).toEqual([["a", ["A_TOKEN", "ORG"]], ["b", []]]);
     const opencode = OPENCODE_JSON.read(JSON.stringify({ mcp: { c: { type: "remote", url: "https://c.example/mcp", headers: { Authorization: "Bearer {env:C_TOKEN}" } } } }), HOME);
     expect(opencode.map(s => [s.name, s.envRefs])).toEqual([["c", ["C_TOKEN"]]]);
+  });
+
+  it("a url that takes part of itself from the environment names the variable, and Gemini CLI's bare $X counts where Claude Code's does not", () => {
+    const servers = { u: { url: "https://${MCP_HOST}/mcp" }, h: { httpUrl: "https://h.example/mcp", headers: { Authorization: "Bearer $TOK", "X-Org": "${ORG}" } } };
+    const claude = MCP_SERVERS_JSON.read(JSON.stringify({ mcpServers: servers }), HOME);
+    expect(claude.map(s => [s.name, s.envRefs])).toEqual([["u", ["MCP_HOST"]], ["h", ["ORG"]]]);
+    const gemini = GEMINI_SETTINGS_JSON.read(JSON.stringify({ mcpServers: servers }), HOME);
+    expect(gemini.map(s => [s.name, s.envRefs])).toEqual([["u", ["MCP_HOST"]], ["h", ["TOK", "ORG"]]]);
+    expect(GEMINI_SETTINGS_JSON.read(JSON.stringify({ mcpServers: { p: { url: "https://p.example/mcp", headers: { X: "costs $5" } } } }), HOME)[0]!.envRefs).toEqual([]);
   });
 
   it("Codex's TOML: mcp_servers tables with their env, header and bearer sub-keys, quoted names, multi-line arrays and inline tables, in file order", () => {

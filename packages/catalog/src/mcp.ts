@@ -145,7 +145,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 /** Each variable the header values name under the format's reference syntax, first seen first. */
-const refsIn = (headers: Record<string, string>, ref: RegExp): string[] => [...new Set(Object.values(headers).flatMap(v => [...v.matchAll(ref)].map(m => m[1]!)))];
+const refsIn = (values: readonly string[], ref: RegExp): string[] => [...new Set(values.flatMap(v => [...v.matchAll(ref)].map(m => (m[1] ?? m[2])!)))];
 
 function dict(v: unknown): Record<string, string> {
   if (!isObject(v)) return {};
@@ -365,27 +365,34 @@ function jsonFormat(shape: JsonShape): McpFormat {
   };
 }
 
-/** `mcpServers.<name> = { command, args, env, cwd }` or `{ url | httpUrl, headers }`: Claude Code's user file, whose
- * `projects` hold the same shape per folder, and Gemini CLI's settings. */
-export const MCP_SERVERS_JSON: McpFormat = jsonFormat({
-  key: "mcpServers",
-  projects: true,
-  server: (name, raw, scope) => {
-    if (!isObject(raw)) return undefined;
-    const command = str(raw.command);
-    const url = str(raw.httpUrl) ?? str(raw.url);
-    if (command !== undefined) {
-      const cwd = str(raw.cwd);
-      return { name, scope, transport: { kind: "stdio", command, args: strs(raw.args), env: dict(raw.env), ...(cwd !== undefined ? { cwd } : {}) }, envRefs: [] };
-    }
-    if (url !== undefined) {
-      const headers = dict(raw.headers);
-      return { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(headers, /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g) };
-    }
-    return undefined;
-  },
-  entry: s => ({ command: s.command, args: [...s.args] }),
-});
+/** `mcpServers.<name> = { command, args, env, cwd }` or `{ url | httpUrl, headers }`, whose url and headers take
+ * `ref`'s variables from the environment. */
+const mcpServersJson = (ref: RegExp): McpFormat =>
+  jsonFormat({
+    key: "mcpServers",
+    projects: true,
+    server: (name, raw, scope) => {
+      if (!isObject(raw)) return undefined;
+      const command = str(raw.command);
+      const url = str(raw.httpUrl) ?? str(raw.url);
+      if (command !== undefined) {
+        const cwd = str(raw.cwd);
+        return { name, scope, transport: { kind: "stdio", command, args: strs(raw.args), env: dict(raw.env), ...(cwd !== undefined ? { cwd } : {}) }, envRefs: [] };
+      }
+      if (url !== undefined) {
+        const headers = dict(raw.headers);
+        return { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn([url, ...Object.values(headers)], ref) };
+      }
+      return undefined;
+    },
+    entry: s => ({ command: s.command, args: [...s.args] }),
+  });
+
+/** Claude Code's user file, whose `projects` hold the same shape per folder: `${X}` and `${X:-default}`. */
+export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g);
+
+/** Gemini CLI's settings, which also expand a bare `$X`. */
+export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g);
 
 /** `mcp.<name> = { type: "local", command: [command, ...args], environment }` or `{ type: "remote", url, headers }`:
  * OpenCode's config. */
@@ -398,7 +405,7 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
     if (raw.type === "remote") {
       const url = str(raw.url);
       const headers = dict(raw.headers);
-      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(headers, /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g), ...off };
+      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(Object.values(headers), /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g), ...off };
     }
     const [command, ...args] = strs(raw.command);
     if (command === undefined) return undefined;

@@ -244,6 +244,19 @@ describe("a watched sign-in", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("takes the escape bytes out of a page before it reaches the sign-in's terminal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pages-"));
+    const shim = join(dir, "shim");
+    writeFileSync(shim, "#!/bin/sh\nexit 0\n");
+    chmodSync(shim, 0o755);
+    const line = pagesOnPty(`"$BROWSER" "$(printf 'https://mcp.test/a\\033]0;x\\007b\\033[2Jc')" < /dev/null > /dev/null 2>&1; echo done`);
+    const args = process.platform === "darwin" ? ["-q", "/dev/null", "bash", "-c", line] : ["-qec", `bash -c ${shellQuote(line)}`, "/dev/null"];
+    const out = execFileSync("script", args, { env: { PATH: "/usr/bin:/bin", BROWSER: shim }, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+    expect(out).toContain("https://mcp.test/a]0;xb[2Jc\r\n");
+    expect(out).not.toMatch(/[\x07\x1b]/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("waits on the browser here, with the page offered and nothing to paste, and runs with this computer's own opener", async () => {
     const plan = await planSignIn({ kind: "here" }, { agent: "claude", server: "notion" });
     const t = await run((l, pty, line) => {

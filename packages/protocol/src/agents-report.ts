@@ -198,10 +198,10 @@ export const addToolsHereRefusal = "The wsp tools go into an agent's config on t
 
 /** A C0 control character or DEL: what an interactive terminal acts on rather than shows, so a name holding one is
  * never a name wsp runs anything by. */
-export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f]/.test(s);
+export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f-\x9f]/.test(s);
 
 /** The text with every control character taken out, for a name that reaches a log line. */
-export const withoutControlChars = (s: string): string => s.replace(/[\x00-\x1f\x7f]/g, "");
+export const withoutControlChars = (s: string): string => s.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
 
 /** Why a server a config names was left out of the report. */
 export const controlNameRefusal = (file: string): string => `${file} names a server with a control character in its name, which was left out.`;

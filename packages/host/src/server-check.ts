@@ -22,7 +22,7 @@ const CHECK_KEPT_MS = 3 * 60_000;
 const HARNESS_KEPT_MS = 10 * 60_000;
 const HARNESS_AT_ONCE = 2;
 /** How long a harness is given to say whether it holds a server's sign-in. */
-const HARNESS_MS = 10_000;
+const HARNESS_MS = 5_000;
 
 /** What one request answered: its status, and whether it asked for a sign-in in its headers. */
 export interface Knock {
@@ -61,7 +61,7 @@ export const knock: Knocker = (url, headers, timeoutMs, pin) =>
 
 const INTERNAL = new BlockList();
 for (const [net, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const) INTERNAL.addSubnet(net, bits, "ipv4");
-for (const [net, bits] of [["::", 127], ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8], ["2002::", 16]] as const) INTERNAL.addSubnet(net, bits, "ipv6");
+for (const [net, bits] of [["::", 96], ["64:ff9b:1::", 48], ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8], ["2002::", 16]] as const) INTERNAL.addSubnet(net, bits, "ipv6");
 
 /** The IPv4 address an IPv6 one carries, mapped (::ffff:a.b.c.d) or through NAT64 (64:ff9b::/96). */
 function carriedV4(address: string): string | undefined {

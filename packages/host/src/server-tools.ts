@@ -192,7 +192,7 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
 export async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string, deadlineMs: number): Promise<Asked> {
   const check = agent.mcp.check;
   if (check === undefined) return { auth: "unknown", holder: agent.id };
-  const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs + RUN_MARGIN_MS });
+  const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs });
   return { auth: (out === undefined ? undefined : check.auth(out)) ?? "unknown", holder: agent.id };
 }
 
