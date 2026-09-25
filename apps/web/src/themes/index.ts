@@ -2,13 +2,19 @@
 // The one list of themes. A theme is its module and its sheet, keyed on its id; adding one is its two files and
 // its line here.
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
+import { denim } from "./denim.js";
+import { frost } from "./frost.js";
 import { graphite } from "./graphite.js";
+import { linen } from "./linen.js";
+import { moss } from "./moss.js";
 import { paper } from "./paper.js";
+import { pitch } from "./pitch.js";
+import { tungsten } from "./tungsten.js";
 import type { Theme, ThemeSide } from "./theme.js";
 
 export type { Theme, ThemeSide } from "./theme.js";
 
-export const THEMES: readonly Theme[] = [paper, graphite];
+export const THEMES: readonly Theme[] = [paper, linen, frost, graphite, denim, tungsten, moss, pitch];
 
 export const themeById = (id: string): Theme | undefined => THEMES.find(t => t.id === id);
 
