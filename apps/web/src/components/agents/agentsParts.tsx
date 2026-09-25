@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small pieces every level of the agents manager draws: an act as an xs
 // outline button with its glyph, a row's or a head's lead, the agents' marks
-// after a name, and the one status badge an MCP server wears.
-import { CircleCheckIcon, CircleDashedIcon, CircleOffIcon, CircleXIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
+// after a name, and an MCP server's status as a dot and a word.
+import type { LucideIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
-import { Badge } from "../ui/badge.js";
 import { Button, DANGER_BUTTON } from "../ui/button.js";
 import { Spinner } from "../ui/spinner.js";
 import { agentNames, type RowAct } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
-import type { Lead, ServerState, StatusBadge } from "./kinds/kind.js";
+import type { Lead, ServerState, ServerStatus } from "./kinds/kind.js";
 
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
  * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it. */
@@ -75,21 +74,24 @@ export function AgentMarks({ agents }: { agents: readonly string[] }) {
   );
 }
 
-/** Each state's mark and the one class its hue takes: /mcp's hues through the theme's own tokens, the words muted. */
-const BADGE_MARKS: Record<ServerState, { icon: LucideIcon; tone: string }> = {
-  connected: { icon: CircleCheckIcon, tone: "text-success-foreground" },
-  "needs-sign-in": { icon: TriangleAlertIcon, tone: "text-warning-foreground" },
-  failed: { icon: CircleXIcon, tone: "text-destructive-foreground" },
-  off: { icon: CircleOffIcon, tone: "text-muted-foreground" },
-  unknown: { icon: CircleDashedIcon, tone: "text-muted-foreground" },
+/** The dot carries /mcp's hue through the theme's own tokens; the word stays muted. */
+const DOTS: Record<ServerState, string> = {
+  connected: "bg-success",
+  "signed-in": "bg-success",
+  "needs-sign-in": "bg-warning",
+  failed: "bg-destructive",
+  open: "bg-foreground/30",
+  off: "bg-foreground/30",
+  unknown: "bg-foreground/30",
 };
 
-export function ServerBadge({ badge, className }: { badge: StatusBadge; className?: string }) {
-  const { icon: Icon, tone } = BADGE_MARKS[badge.state];
+export function ServerStatusView({ status, className }: { status: ServerStatus; className?: string }) {
   return (
-    <Badge data-k="server-badge" data-state={badge.state} variant="outline" className={cn("gap-1.5 px-1.5 font-mono text-[11px] font-normal text-muted-foreground sm:text-[11px]", className)} {...(badge.hover === undefined ? {} : { title: badge.hover })}>
-      <Icon aria-hidden className={cn("size-3 opacity-100", tone)} />
-      {badge.words}
-    </Badge>
+    <span data-k="server-status" data-state={status.state} className={cn("inline-flex min-w-0 items-center gap-1.5", className)} {...(status.hover === undefined ? {} : { title: status.hover })}>
+      <span data-status-dot aria-hidden className={cn("size-2 shrink-0 rounded-full", DOTS[status.state])} />
+      <span data-status-word className="truncate font-mono text-[11px] text-muted-foreground">
+        {status.words}
+      </span>
+    </span>
   );
 }

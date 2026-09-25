@@ -31,13 +31,14 @@ const titles = (): string[] => rows().map(r => r.querySelector("[data-row-title]
 const subtext = (key: string): string | undefined => rowEl(key).querySelector("[data-row-subtext]")?.textContent ?? undefined;
 const stateLine = (key: string): string | undefined => rowEl(key).querySelector("[data-row-state]")?.textContent ?? undefined;
 const quick = (key: string): HTMLButtonElement | null => rowEl(key).querySelector<HTMLButtonElement>("[data-row-slot] button");
-const badge = (el: ParentNode): HTMLElement => el.querySelector<HTMLElement>("[data-k=server-badge]")!;
+const badge = (el: ParentNode): HTMLElement => el.querySelector<HTMLElement>("[data-k=server-status]")!;
+const dotOf = (el: HTMLElement): string | undefined => el.querySelector("[data-status-dot]")?.getAttribute("class")?.match(/bg-[a-z]+(\/\d+)?/)?.[0];
 const tab = (name: string): void => void fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${name}`) }));
 const openRow = (key: string): HTMLElement => {
   fireEvent.click(rowEl(key).querySelector<HTMLButtonElement>("[data-row-trigger]")!);
   return document.querySelector<HTMLElement>("[data-agents-detail]")!;
 };
-const facts = (el: ParentNode): [string, string][] => [...el.querySelectorAll<HTMLElement>("[data-fact]")].map(f => [f.querySelector("[data-fact-label]")!.textContent ?? "", f.querySelector("[data-fact-value]")?.textContent ?? f.querySelector("[data-copy-row] [data-k]")?.textContent ?? f.querySelector("[data-k=server-badge]")?.textContent ?? ""]);
+const facts = (el: ParentNode): [string, string][] => [...el.querySelectorAll<HTMLElement>("[data-fact]")].map(f => [f.querySelector("[data-fact-label]")!.textContent ?? "", f.querySelector("[data-fact-value]")?.textContent ?? f.querySelector("[data-copy-row] [data-k]")?.textContent ?? f.querySelector("[data-k=server-status]")?.textContent ?? ""]);
 const acts = (el: ParentNode): string[] => [...el.querySelectorAll<HTMLElement>("[data-detail-acts] button")].map(b => b.textContent ?? "");
 const groupLabels = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-group-label]")].map(l => l.textContent ?? "");
 const SERVER = { notion: "server-global-notion-http-mcp.notion.com", airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-global-linear-http-mcp.linear.app", sentry: "server-global-sentry-http-mcp.sentry.dev", wsp: "server-global-wsp-stdio-wsp mcp" };
@@ -164,17 +165,29 @@ describe("the list grammar", () => {
     expect(quick(SERVER.notion)?.textContent).toBe("Sign in");
   });
 
-  it("says each server's state in muted words with the hue in the mark alone, and a step only where one is needed", () => {
-    draw();
+  it("says each server's state as a dot carrying the hue and a muted word, with no box, border or glyph, and a step only where one is needed", () => {
+    const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "wsp" ? { ...s, transport: { kind: "http", host: "wsp.example" }, auth: "connected" } : s)) };
+    const tools = fakeTools();
+    tools.answer("github", { auth: "connected", tools: Array.from({ length: 33 }, (_, i) => ({ name: `t${i}` })), readAt: AGENTS_REPORT.readAt });
+    draw({ report, ctx: { where: "box", tools } });
     tab("MCP servers");
     const read = (key: string) => {
       const b = badge(rowEl(key));
-      return [b.dataset["state"], b.textContent, b.querySelector("svg")!.getAttribute("class")!.match(/text-[a-z-]+-foreground/)?.[0]];
+      return [b.dataset["state"], b.textContent, dotOf(b)];
     };
-    expect(read(SERVER.airtable)).toEqual(["connected", "open", "text-success-foreground"]);
-    expect(read(SERVER.linear)).toEqual(["needs-sign-in", "needs sign-in", "text-warning-foreground"]);
-    expect(read(SERVER.sentry)).toEqual(["off", "off", "text-muted-foreground"]);
-    for (const b of document.querySelectorAll<HTMLElement>("[data-k=server-badge]")) expect(b.className).toContain("text-muted-foreground");
+    // A server that needs no sign-in and was never checked says so, never "open".
+    expect(read(SERVER.airtable)).toEqual(["open", "no sign-in needed", "bg-foreground/30"]);
+    expect(read(SERVER.linear)).toEqual(["needs-sign-in", "needs sign-in", "bg-warning"]);
+    expect(read(SERVER.sentry)).toEqual(["off", "off", "bg-foreground/30"]);
+    expect(read("server-global-wsp-http-wsp.example")).toEqual(["connected", "connected", "bg-success"]);
+    // Once its tools are known, the count alone beside the green dot.
+    expect(read(SERVER.github)).toEqual(["connected", "33 tools", "bg-success"]);
+    for (const b of document.querySelectorAll<HTMLElement>("[data-k=server-status]")) {
+      expect(b.className).not.toMatch(/\bborder\b|rounded-md|\bpx-/);
+      expect(b.querySelector("svg")).toBeNull();
+      expect(b.querySelector("[data-status-word]")?.className).toMatch(/font-mono.*text-\[11px\].*text-muted-foreground/);
+      expect(b.querySelector("[data-status-dot]")?.className).toMatch(/size-2.*rounded-full/);
+    }
     expect(quick(SERVER.airtable)).toBeNull();
     expect(quick(SERVER.sentry)?.textContent).toBe("Turn on");
     // The command as the file writes it, its placeholder kept as text.
@@ -189,23 +202,20 @@ describe("the list grammar", () => {
     expect(groupLabels()).toEqual(["Global", "wsp~/wsp"]);
     const github = badge(rowEl(SERVER.github));
     expect([github.dataset["state"], github.textContent, github.getAttribute("title")]).toEqual(["failed", "failed", "Did not answer in 20 s."]);
-    expect(github.querySelector("svg")?.getAttribute("class")).toContain("text-destructive-foreground");
+    expect(dotOf(github)).toBe("bg-destructive");
     fireEvent.click(quick(SERVER.github)!);
     expect(tools.asks).toEqual([["opencode", "github", true]]);
     // Pressing the step opens the detail under it.
     expect(document.querySelector("[data-agents-detail] [data-k=detail-title]")?.textContent).toBe("github");
   });
 
-  it("regroups a tab from Group and sort, which offers the tab's own groupings and sorts by name alone", async () => {
+  it("regroups a tab from Group and sort by where servers are set up or by agent, never by a state", async () => {
     draw();
     tab("MCP servers");
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-view]")!);
     const items = await screen.findAllByRole("menuitemradio");
-    expect(items.map(i => i.textContent)).toEqual(["Scope", "State", "Agent", "None", "Name"]);
+    expect(items.map(i => i.textContent)).toEqual(["Scope", "Agent", "None", "Name"]);
     fireEvent.click(items[1]!);
-    expect(groupLabels()).toEqual(["Needs sign-in", "Off", "Connected"]);
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-view]")!);
-    fireEvent.click((await screen.findAllByRole("menuitemradio"))[2]!);
     expect(groupLabels()).toEqual(["Claude Code", "OpenCode", "Codex"]);
     // A folded entry stands under each of its agents.
     expect(document.querySelectorAll(`[data-agents-row="${SERVER.notion}"]`)).toHaveLength(2);
@@ -472,16 +482,26 @@ describe("the detail", () => {
     clear.mockRestore();
   });
 
-  it("says a harness holds a server's sign-in, never zero tools", () => {
+  it("says in a sentence why a harness that keeps a server's sign-in leaves its tools unlisted, never zero tools", () => {
     const tools = fakeTools();
     tools.answer("linear", { auth: "signed-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     draw({ ctx: { where: "box", tools } });
     tab("MCP servers");
     expect(badge(rowEl(SERVER.linear)).textContent).toBe("signed in");
+    expect(dotOf(badge(rowEl(SERVER.linear)))).toBe("bg-success");
     const detail = openRow(SERVER.linear);
-    const line = detail.querySelector<HTMLElement>("[data-fact=tools] [data-fact-value]")!;
-    expect(line.textContent).toBe("held by Claude Code");
-    expect(line.getAttribute("title")).toBe(W.heldByHover("Claude Code"));
+    expect(detail.querySelector("[data-fact=tools] [data-fact-value]")?.textContent).toBe("Claude Code keeps this server's sign-in, so wsp cannot list its tools yet.");
+  });
+
+  it("reads the newer of the report and a server's last connect, and a report that checked nothing never hides a listed count", () => {
+    const tools = fakeTools();
+    tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: "2026-09-24T11:00:00.000Z" });
+    tools.answer("airtable", { ...SERVER_TOOLS["airtable"]!, readAt: "2026-09-24T11:00:00.000Z" });
+    const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "linear" ? { ...s, auth: "signed-in" } : s)) };
+    draw({ report, ctx: { where: "box", tools } });
+    tab("MCP servers");
+    expect(badge(rowEl(SERVER.linear)).textContent).toBe("signed in");
+    expect(badge(rowEl(SERVER.airtable)).textContent).toBe("3 tools");
   });
 
   it("says what a skill wsp writes, a plugin's and a project's can and cannot do", () => {
@@ -698,7 +718,9 @@ describe("the pure rules", () => {
     expect(project).toHaveLength(2);
     const linear = AGENTS_REPORT.servers.find(s => s.name === "linear")!;
     expect(rowState(linear, undefined)).toBe("needs-sign-in");
-    expect(rowState(linear, { auth: "signed-in", readAt: "" })).toBe("connected");
+    expect(rowState(linear, { auth: "signed-in", readAt: "" })).toBe("signed-in");
+    expect(rowState(linear, { auth: "signed-in", readAt: "2026-09-24T11:00:00.000Z" }, "2026-09-24T12:00:00.000Z")).toBe("needs-sign-in");
+    expect(rowState({ ...linear, auth: "open" }, undefined)).toBe("open");
     expect(rowState({ ...linear, enabled: false }, { auth: "signed-in", readAt: "" })).toBe("off");
   });
 

@@ -3,16 +3,20 @@
 // computer or workspace it stands on. The line is the catalog row's own: its
 // no-browser flow, run as the owner of the home where the daemon runs as
 // root, with a shared login's store pointed at the computer's logins folder,
-// and never with a DISPLAY, so a tool with a paste road takes it. The watched
-// pty reports each page the tool prints and the code beside it, types what a
-// page hands back, and asks the tool's own status until it says signed in.
-// The vault and the wsp tools are the two writes that sit beside it.
+// and never with a DISPLAY, so a tool with a paste road takes it. A server's
+// sign-in runs its harness's browser flow wherever the page's return reaches
+// it: this computer's browser here, the relay's forward for a workspace. The
+// watched pty reports each page the tool prints or asks the browser shim to
+// open and the code beside it, types what a page hands back, and asks the
+// tool's own status until it says signed in. The vault and the wsp tools are
+// the two writes that sit beside it.
 import { CATALOG_AGENTS, MCP_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
 import { asLogin, targetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
   controlSignInRefusal,
   hasControlChar,
+  isHttpUrl,
   lastLine,
   noVaultKeyRefusal,
   notTokenRefusal,
@@ -26,9 +30,10 @@ import {
 } from "@wsp/protocol";
 import type { AgentsActs, AgentsOn, SignInAsk, SignInRun } from "@wsp/runtime";
 import { writeEnvFile } from "./env-keys.js";
-import { STOPPED_NOTE, cadence, codeIn } from "./init-handoff.js";
+import { STOPPED_NOTE, cadence, codeIn, signInEnv } from "./init-handoff.js";
 import { installMcp } from "./mcp-install.js";
 import { BOX_SIGN_IN_MS } from "./place-signin.js";
+import { openerCommand } from "./relay.js";
 import { runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
 
 /** One sign-in as the watched pty runs it: the line, the questions the row answers, the shape of the code it prints,
@@ -66,11 +71,15 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   if (hasControlChar(ask.agent) || (ask.server !== undefined && hasControlChar(ask.server))) throw new Error(controlSignInRefusal);
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
-    const road = serverSignInRoad(entry.id, ask.server, on.kind === "here");
+    const reach = on.kind === "here" ? "here" : on.kind === "machine" && on.relayed === true ? "relay" : "none";
+    const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
     if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
     const wrap = await wrapFor(on);
-    return { line: { command: wrap(road.command) }, questions: [], paste: () => road.finish === "code" };
+    // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it, and
+    // its browser.open is what the relay carries here.
+    const env = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? signInEnv("callback") : undefined;
+    return { line: { command: wrap(road.command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
   }
   const row = entry.signIn;
   if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
@@ -121,6 +130,10 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   let settle: () => void = () => {};
   const stop = new Promise<void>(r => (settle = r));
   void run.stop.then(() => settle());
+  // A harness that opened its page through the daemon's browser shim printed nothing to scan; only http(s) is offered.
+  const unshim = link.onEvent(e => {
+    if (e["type"] === "browser.open" && isHttpUrl(e["url"])) page(e["url"]);
+  });
   let outcome: WatchOutcome | undefined;
   let failure: string | undefined;
   const watching = watchPty({
@@ -171,6 +184,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (landed) await Promise.race([watching, new Promise(r => setTimeout(r, o.graceMs ?? GRACE_MS))]);
   settle();
   await watching;
+  unshim();
   if (landed) return void run.emit({ state: "signed-in" });
   if (outcome === undefined) return void run.emit({ state: "failed", said: failure ?? "the sign-in command never ran" });
   if (outcome.stopped) return void run.emit({ state: "failed", said: STOPPED_NOTE });

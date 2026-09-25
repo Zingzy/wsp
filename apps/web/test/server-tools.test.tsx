@@ -47,7 +47,7 @@ const open = (key: string): HTMLElement => {
   return document.querySelector<HTMLElement>("[data-agents-detail]")!;
 };
 const button = (id: string): HTMLButtonElement => document.querySelector<HTMLButtonElement>(`[data-agents-detail] [data-k=act-${id}]`)!;
-const badge = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail] [data-fact=status] [data-k=server-badge]")!;
+const badge = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail] [data-fact=status] [data-k=server-status]")!;
 
 afterEach(() => {
   cleanup();
@@ -66,7 +66,7 @@ describe("a server's tools", () => {
     expect(button("list-tools").textContent).toBe(W.listing);
     expect(button("list-tools").disabled).toBe(true);
     expect(button("list-tools").querySelector("[role=status], svg")).not.toBeNull();
-    asks[0]!.answer({ auth: "open", tools: [{ name: "list_records", description: "List records in a base" }, { name: "create_record" }], readAt: READ_AT });
+    asks[0]!.answer({ auth: "connected", tools: [{ name: "list_records", description: "List records in a base" }, { name: "create_record" }], readAt: READ_AT });
     await settle();
     expect(badge().textContent).toBe("2 tools");
     expect(document.querySelector("[data-fact=tools] [data-fact-value]")?.textContent).toBe("2 tools");

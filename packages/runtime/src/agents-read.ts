@@ -18,7 +18,8 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale">;
 export type AgentsOn =
   | { kind: "here"; project?: string }
   | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string }
-  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string };
+  /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
+  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -32,7 +33,10 @@ export interface ServerToolsAsk {
 /** How the host reads the agents off a target, and asks one server there for its tools. Absent on a runtime wired
  * without it, where every read is refused. */
 export interface AgentsReader {
-  read(on: AgentsOn): Promise<AgentsRead>;
+  /** `key` names the target, which what a read checks is kept under. */
+  read(on: AgentsOn, key?: string): Promise<AgentsRead>;
+  /** Drops what was kept for the target, which a sign-in there has just changed. */
+  forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
 }
 
@@ -94,6 +98,11 @@ export interface AgentsReadOptions<Caller> {
   /** Something written changed what a report reads there; no target is every report. */
   changed: (target?: AgentsTarget) => void;
   now: () => number;
+  /** Whether this host forwards a workspace's sign-in callback port from this computer, which is the relay's own
+   * answer for every workspace. */
+  relayed?: () => boolean;
+  /** The host's log: each sign-in's start and end, never its page, code or token. */
+  log?: (line: string) => void;
 }
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
@@ -167,7 +176,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
-    return ws.local ? { kind: "here", project: ws.project } : { kind: "machine", machine: ws.machine, project: ws.project };
+    return ws.local ? { kind: "here", project: ws.project } : { kind: "machine", machine: ws.machine, project: ws.project, ...(o.relayed?.() === true ? { relayed: true } : {}) };
   };
   return {
     async read(target, origin) {
@@ -178,7 +187,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const report = stamped(target, await reader.read(on));
+      const report = stamped(target, await reader.read(on, JSON.stringify(target)));
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;
     },
@@ -197,12 +206,19 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         const { signInId, run } = await held;
         return follow(signInId, run, emit);
       }
+      const log = o.log ?? (line => console.warn(line));
+      const what = `${ask.agent}${ask.server !== undefined ? `, server ${ask.server}` : ""}, on ${"workspaceId" in target ? `workspace ${target.workspaceId}` : `computer ${target.placeId}`}`;
       const begun = (async () => {
         const acts = actsOf();
         const on = await onOf(target, origin);
         if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
-        const plan = await acts.signIn(on, ask);
+        const plan = await acts.signIn(on, ask).catch((e: unknown) => {
+          log(`sign-in refused: ${what}: ${e instanceof Error ? e.message : String(e)}`);
+          throw e;
+        });
         const signInId = `si_${randomBytes(6).toString("hex")}`;
+        log(`sign-in ${signInId} started: ${what}`);
+        let stoppedBy = false;
         const readers = new Set<(e: Record<string, unknown>) => void>();
         const channel = await o.channel(target, e => readers.forEach(read => read(e)), origin);
         let settle: () => void = () => {};
@@ -211,6 +227,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           followers: new Set([emit]),
           stop: () => {
             if (starting.get(key) === begun) starting.delete(key);
+            stoppedBy = true;
             settle();
           },
         };
@@ -234,6 +251,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
             running.delete(signInId);
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();
+            log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
+            o.reader?.forget?.(JSON.stringify(target));
             o.changed(target);
           });
         return { signInId, run };

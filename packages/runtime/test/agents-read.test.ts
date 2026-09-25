@@ -88,7 +88,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     };
   }
 
-  function acting(phase: { now: WorkspacePhase }) {
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
     const changed: (AgentsTarget | undefined)[] = [];
@@ -113,8 +113,12 @@ describe("the sign-ins on a computer or a workspace", () => {
       addTools: async () => ({ file: "~/.codex/config.toml" }),
     };
     const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const forgot: string[] = [];
+    const logged: string[] = [];
     const api = agentsReads<undefined>({
-      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
+      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
+      log: line => void logged.push(line),
+      ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
       places: () => undefined,
       workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
@@ -122,8 +126,38 @@ describe("the sign-ins on a computer or a workspace", () => {
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
     });
-    return { api, ch, planned, changed, codes, finish: () => finish() };
+    return { api, ch, planned, changed, codes, forgot, logged, finish: () => finish() };
   }
+
+  it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
+    for (const relayed of [true, false]) {
+      const t = acting({ now: "running" }, relayed);
+      const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+      expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), project: "/root/landing", ...(relayed ? { relayed: true } : {}) });
+      leave();
+    }
+  });
+
+  it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {
+    const t = acting({ now: "running" });
+    const { signInId } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+    await tick();
+    t.ch.push({ url: "https://mcp.notion.com/authorize?code=SECRETCODE&state=x" });
+    await t.api.signInCode(signInId, "SECRETCODE");
+    t.finish();
+    await tick();
+    expect(t.forgot).toEqual([JSON.stringify({ workspaceId: "ws_1" })]);
+    expect(t.changed).toEqual([{ workspaceId: "ws_1" }]);
+    expect(t.logged).toEqual([`sign-in ${signInId} started: claude, server notion, on workspace ws_1`, `sign-in ${signInId} ended: claude, server notion, on workspace ws_1: signed-in`]);
+    const stopped = await t.api.signIn({ placeId: "here" }, { agent: "codex" }, () => {});
+    t.api.signInStop(stopped.signInId);
+    await tick();
+    expect(t.logged.at(-1)).toBe(`sign-in ${stopped.signInId} ended: codex, on computer here: stopped`);
+    const refused = acting({ now: "running" });
+    await expect(refused.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode" }, () => {})).rejects.toThrow(/asks you to pick/);
+    expect(refused.logged).toEqual(["sign-in refused: opencode, on workspace ws_1: opencode asks you to pick"]);
+    expect(JSON.stringify([t.logged, refused.logged])).not.toContain("SECRETCODE");
+  });
 
   it("run what the host planned over the target's own channel, push each step under the sign-in's id, take a code by that id and say the agents changed at the end", async () => {
     const t = acting({ now: "running" });

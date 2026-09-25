@@ -184,6 +184,9 @@ describe("signing an agent in from its row", () => {
     expect(h.started.map(s => [s.agent, s.server])).toEqual([["claude", "linear"]]);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://claude.ai/oauth/authorize?code=true", paste: true }));
     const field = detail().querySelector<HTMLInputElement>("[data-k=code-field]")!;
+    // An MCP sign-in has no code: what goes back is the address the browser landed on.
+    expect(field.placeholder).toBe("The address your browser landed on");
+    expect(field.getAttribute("aria-label")).toBe("linear: The address your browser landed on");
     fireEvent.change(field, { target: { value: " http://localhost:4711/callback?code=x " } });
     fireEvent.keyDown(field, { key: "Enter" });
     await settle();
@@ -246,6 +249,30 @@ describe("signing an agent in from its row", () => {
     expect(h.started).toEqual([]);
   });
 
+  it("waits on the browser on this computer, where the harness opens the page and takes the redirect, with the page as a fallback and Cancel", async () => {
+    const h = host();
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<List where="here" report={{ ...AGENTS_REPORT, target: { placeId: "here" } }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    fireEvent.click(rowEl(LINEAR).querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    await settle();
+    expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[{ placeId: "here" }, "claude", "linear"]]);
+    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
+    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(flow.querySelector("[data-k=sign-in-open]")).toBeNull();
+    expect(detail().querySelector("[data-detail-acts] button")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
+    act(() => h.started[0]!.step({ state: "waiting", url: "https://mcp.linear.app/authorize?client_id=x", paste: false }));
+    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(flow.querySelector("[data-k=code-field]")).toBeNull();
+    const page = flow.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
+    expect(page.textContent).toBe("Open the page");
+    fireEvent.click(page);
+    expect(opened).toHaveBeenCalledWith("https://mcp.linear.app/authorize?client_id=x", "_blank", "noopener,noreferrer");
+    act(() => h.started[0]!.step({ state: "failed", said: "Authentication failed: access denied" }));
+    expect(flow.querySelector("[data-k=sign-in-browser]")).toBeNull();
+    expect(detail().querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: access denied");
+  });
+
   it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own line in a folded entry", async () => {
     host();
     render(<List />);
@@ -253,6 +280,7 @@ describe("signing an agent in from its row", () => {
     openRow(NOTION);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
     expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
+    expect(detail().querySelector("[data-k=sign-in-why]")?.textContent).toBe("Its page returns to localhost, which wsp does not carry back to spoo yet. Run this in a terminal on spoo:");
   });
 });
 

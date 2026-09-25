@@ -60,7 +60,7 @@ export interface AgentsManagerProps {
 
 type Level = { readonly kind: "list" } | { readonly kind: "detail"; readonly key: string } | { readonly kind: "under"; readonly key: string } | { readonly kind: "under-row"; readonly key: string; readonly row: string };
 
-const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope", state: "State" };
+const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope" };
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 
 /** The nearest box that scrolls, whose place the list keeps while a detail stands over it. */

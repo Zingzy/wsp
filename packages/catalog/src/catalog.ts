@@ -11,7 +11,7 @@ import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
-import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type ServerSignInRoad } from "./mcp-login.js";
+import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type PageReach, type ServerSignInRoad } from "./mcp-login.js";
 import { RELEASE_PINS } from "./release-pins.js";
 import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
@@ -453,10 +453,10 @@ export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is M
 export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
 
 /** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an
- * agent with none. `here`: the computer the person's browser is on. */
-export function serverSignInRoad(agentId: string, name: string, here: boolean): ServerSignInRoad | undefined {
+ * agent with none. */
+export function serverSignInRoad(agentId: string, name: string, reach: PageReach): ServerSignInRoad | undefined {
   const login = MCP_AGENTS.find(a => a.id === agentId)?.mcp.login;
-  return login === undefined ? undefined : loginRoad(login, name, here);
+  return login === undefined ? undefined : loginRoad(login, name, reach);
 }
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));

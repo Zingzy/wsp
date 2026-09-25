@@ -6,19 +6,24 @@
 import { shellQuote } from "@wsp/protocol";
 
 export type McpLogin =
-  /** A command run in a pty on the computer the server is set up on. `code`: the page's redirect is pasted back into
-   * it; `callback`: the page returns to localhost on the computer the browser is on. */
-  | { measured: string; command(name: string): string; finish: "code" | "callback" }
+  /** A command run in a pty on the computer the server is set up on, whose page returns to localhost on the computer the
+   * browser is on. `pasted`: the same sign-in printing its page and taking back the address the browser landed on,
+   * which finishes from any computer. */
+  | { measured: string; command(name: string): string; pasted?(name: string): string }
   /** The harness signs a server in only inside its own session: the line typed there. */
   | { measured: string; inside(name: string): string };
 
-/** `--no-browser` prints the page and asks for the redirect URL back, which a person pastes from any computer. */
-export const CLAUDE_MCP_LOGIN: McpLogin = { measured: "claude 2.1.282", command: name => `claude mcp login ${shellQuote(name)} --no-browser`, finish: "code" };
+/** Without `--no-browser` it opens the page through $BROWSER, or `open`, and its own listener takes the redirect. */
+export const CLAUDE_MCP_LOGIN: McpLogin = {
+  measured: "claude 2.1.282",
+  command: name => `claude mcp login ${shellQuote(name)}`,
+  pasted: name => `claude mcp login ${shellQuote(name)} --no-browser`,
+};
 
 /** No flag for a headless run: the page returns to a port the command listens on. */
-export const CODEX_MCP_LOGIN: McpLogin = { measured: "codex-cli 0.155.1", command: name => `codex mcp login ${shellQuote(name)}`, finish: "callback" };
+export const CODEX_MCP_LOGIN: McpLogin = { measured: "codex-cli 0.155.1", command: name => `codex mcp login ${shellQuote(name)}` };
 
-export const OPENCODE_MCP_LOGIN: McpLogin = { measured: "opencode 1.18.18", command: name => `opencode mcp auth ${shellQuote(name)}`, finish: "callback" };
+export const OPENCODE_MCP_LOGIN: McpLogin = { measured: "opencode 1.18.18", command: name => `opencode mcp auth ${shellQuote(name)}` };
 
 /** Gemini CLI has no command for it: `/mcp auth` inside a session. */
 export const GEMINI_MCP_LOGIN: McpLogin = { measured: "gemini docs", inside: name => `/mcp auth ${name}` };
@@ -27,10 +32,13 @@ export const GEMINI_MCP_LOGIN: McpLogin = { measured: "gemini docs", inside: nam
  * themselves, with why. */
 export type ServerSignInRoad = { kind: "pty"; command: string; finish: "code" | "callback" } | { kind: "copy"; line: string; why: "inside" | "callback" };
 
-/** The road for one server under this harness's module. `here`: the computer the browser is on, which is the only
- * one a page returning to localhost reaches. */
-export function loginRoad(login: McpLogin, name: string, here: boolean): ServerSignInRoad {
+/** Where a page that returns to localhost reaches the harness: `here`, the computer the browser is on; `relay`, a
+ * computer whose callback port this host forwards from here; `none`, a computer it does not. */
+export type PageReach = "here" | "relay" | "none";
+
+/** The road for one server under this harness's module. */
+export function loginRoad(login: McpLogin, name: string, reach: PageReach): ServerSignInRoad {
   if ("inside" in login) return { kind: "copy", line: login.inside(name), why: "inside" };
-  const command = login.command(name);
-  return login.finish === "callback" && !here ? { kind: "copy", line: command, why: "callback" } : { kind: "pty", command, finish: login.finish };
+  if (reach !== "none") return { kind: "pty", command: login.command(name), finish: "callback" };
+  return login.pasted !== undefined ? { kind: "pty", command: login.pasted(name), finish: "code" } : { kind: "copy", line: login.command(name), why: "callback" };
 }

@@ -69,10 +69,19 @@ export type McpTool = z.infer<typeof McpTool>;
 export const McpRowTransport = z.discriminatedUnion("kind", [z.object({ kind: z.literal("stdio"), line: z.string() }), z.object({ kind: z.literal("http"), host: z.string() })]);
 export type McpRowTransport = z.infer<typeof McpRowTransport>;
 
-/** A server's sign-in as its config alone says it: nothing to sign in (`open`), a saved sign-in (`signed-in`), one
- * it needs, one that failed, or no way to tell without connecting (`unknown`). */
-export const McpAuth = z.enum(["open", "signed-in", "needs-sign-in", "failed", "unknown"]);
+/** A server's state: nothing to sign in as its config says, unchecked (`open`); its address answered with no sign-in
+ * asked (`connected`); a sign-in its harness holds (`signed-in`); one it needs; one that failed; or no way to tell
+ * without connecting (`unknown`). */
+export const McpAuth = z.enum(["open", "connected", "signed-in", "needs-sign-in", "failed", "unknown"]);
 export type McpAuth = z.infer<typeof McpAuth>;
+
+/** A host no lookup or check from another computer may name: loopback, an IP literal, a single label, or a name only a
+ * local network, a tailnet or an internal zone resolves. */
+export function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (h.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || !h.includes(".")) return true;
+  return /(^|\.)(localhost|local|internal|lan|ts\.net)$/.test(h);
+}
 
 /** `home`: Claude Code's servers kept for the home folder itself; `project`: a workspace's project files. */
 export const McpScope = z.enum(["user", "home", "project"]);
