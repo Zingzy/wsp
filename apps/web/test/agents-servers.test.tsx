@@ -7,10 +7,11 @@
 // stands in the detail or under the form.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { unclosedQuoteRefusal, type AgentsReport, type AgentsTarget, type ServerAdd, type ServerAsk } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, unclosedQuoteRefusal, type AgentsReport, type AgentsTarget, type ServerAdd, type ServerAsk } from "@wsp/protocol";
 import { AgentsManager } from "../src/components/agents/AgentsManager.js";
 import { AGENTS_LIST_WORDS as W, type RowsContext } from "../src/components/agents/agentsRows.js";
 import { useServerActs } from "../src/components/agents/useServerActs.js";
+import { resetServerIcons } from "../src/components/agents/useServerIcon.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
@@ -60,7 +61,64 @@ const openForm = (): void => {
 
 afterEach(() => {
   cleanup();
-  useStore.setState({ api: null });
+  resetServerIcons();
+  useStore.setState({ api: null, preferences: DEFAULT_PREFERENCES });
+});
+
+describe("Server icons", () => {
+  const NOTION = "data:image/png;base64,iVBORw0KGgo=";
+  function icons(answers: Record<string, string | null>) {
+    const asked: [string, boolean][] = [];
+    useStore.setState({ api: { serversIcon: async (host: string, refresh?: boolean) => (asked.push([host, refresh === true]), answers[host] ?? null) } as unknown as Api });
+    return asked;
+  }
+  const iconIn = (el: HTMLElement): HTMLImageElement | null => el.querySelector<HTMLImageElement>("[data-k=lead-box] img[data-k=server-icon]");
+  const settle = (): Promise<void> => act(async () => void (await new Promise(r => setTimeout(r, 0))));
+
+  it("draws a remote server's own icon off the host in its row and its detail, asks once per host, and keeps the glyph for a command server", async () => {
+    const asked = icons({ "mcp.notion.com": NOTION });
+    render(<List />);
+    tab("MCP servers");
+    await settle();
+    expect(iconIn(rowEl(SERVER.notion))?.getAttribute("src")).toBe(NOTION);
+    expect(iconIn(rowEl(SERVER.sentry))).toBeNull();
+    expect(rowEl(SERVER.sentry).querySelector("[data-k=lead-box] svg")).not.toBeNull();
+    expect(iconIn(rowEl(SERVER.airtable))).toBeNull();
+    expect(asked.map(([h]) => h).sort()).toEqual(["mcp.linear.app", "mcp.notion.com", "mcp.sentry.dev"]);
+    const d = openRow(SERVER.notion);
+    await settle();
+    expect(iconIn(d)?.getAttribute("src")).toBe(NOTION);
+    expect(asked).toHaveLength(3);
+  });
+
+  it("asks the host again with refresh after Read again", async () => {
+    const asked = icons({ "mcp.notion.com": NOTION });
+    render(<List />);
+    tab("MCP servers");
+    await settle();
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-read-again]")!);
+    await settle();
+    expect(asked.filter(([h]) => h === "mcp.notion.com")).toEqual([
+      ["mcp.notion.com", false],
+      ["mcp.notion.com", true],
+    ]);
+    expect(iconIn(rowEl(SERVER.notion))?.getAttribute("src")).toBe(NOTION);
+  });
+
+  it("asks nothing and draws every glyph while the person has server icons off, and drops a drawn icon the moment they turn it off", async () => {
+    const asked = icons({ "mcp.notion.com": NOTION });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, serverIcons: false } });
+    render(<List />);
+    tab("MCP servers");
+    await settle();
+    expect(asked).toEqual([]);
+    expect(document.querySelectorAll("img[data-k=server-icon]")).toHaveLength(0);
+    act(() => useStore.setState({ preferences: DEFAULT_PREFERENCES }));
+    await settle();
+    expect(iconIn(rowEl(SERVER.notion))?.getAttribute("src")).toBe(NOTION);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, serverIcons: false } }));
+    expect(document.querySelectorAll("img[data-k=server-icon]")).toHaveLength(0);
+  });
 });
 
 describe("Add an MCP server", () => {

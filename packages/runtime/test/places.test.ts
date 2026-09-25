@@ -85,7 +85,7 @@ import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprin
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServersActs, type SkillsActs } from "../src/agents-read.js";
+import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServerIcons, type ServersActs, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -130,7 +130,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -142,6 +142,7 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
     ...(opts.skillsActs === undefined ? {} : { skillsActs: opts.skillsActs }),
     ...(opts.serversActs === undefined ? {} : { serversActs: opts.serversActs }),
+    ...(opts.serverIcons === undefined ? {} : { serverIcons: opts.serverIcons }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
@@ -4512,6 +4513,36 @@ describe("the agents on a computer you own", () => {
       expect(await device.request(op, extra), op).toMatchObject({ ok: false, error: deviceHeldRefusal(op) });
     }
     expect(asked).toHaveLength(6);
+  });
+
+  it("asks for a server's icon from the host's own socket alone, and asks nothing and forgets every icon once the person turns server icons off", async () => {
+    const asked: string[] = [];
+    let forgot = 0;
+    let on: (() => Promise<boolean>) | undefined;
+    const icons: ServerIcons = { folder: "/nowhere/icons", icon: async (host, refresh, stillOn) => (asked.push(`${host} ${refresh === true}`), (on = stillOn), "data:image/png;base64,AA=="), forget: () => void (forgot += 1) };
+    await serving({ serverIcons: icons });
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect(await c.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: true, icon: "data:image/png;base64,AA==" });
+    expect(await c.request("servers.icon", { host: "mcp.notion.com", refresh: true })).toMatchObject({ ok: true, icon: "data:image/png;base64,AA==" });
+    expect(asked).toEqual(["mcp.notion.com false", "mcp.notion.com true"]);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    expect(await ticketed.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    const redeemer = await WsClient.connect(srv!.port);
+    sockets.push(redeemer.ws);
+    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    sockets.push(device.ws);
+    expect(await device.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: false, error: deviceHeldRefusal("servers.icon") });
+    expect(await c.request("preferences.set", { patch: { theme: "dark" } })).toMatchObject({ ok: true });
+    expect(forgot).toBe(0);
+    expect(await c.request("preferences.set", { patch: { serverIcons: false } })).toMatchObject({ ok: true, preferences: { serverIcons: false } });
+    expect(forgot).toBe(1);
+    // An ask started before the switch went off reads it again before it keeps anything.
+    expect(await on?.()).toBe(false);
+    expect(await c.request("servers.icon", { host: "mcp.sentry.dev", refresh: true })).toMatchObject({ ok: true, icon: null });
+    expect(asked).toHaveLength(2);
   });
 
   it("add, turn off and remove a server from the host's own socket alone, each on the computer named, and never log the values an add carried", async () => {
