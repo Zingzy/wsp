@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -688,8 +688,7 @@ export function daemonUnit(place: DaemonPlace, target: DaemonTarget, previewHost
   ].join("\n");
 }
 
-/** Where the workspace AppArmor profile lands, and the name it loads under. */
-export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
+/** The name the workspace AppArmor profile loads under. */
 export const WSP_WORKSPACE_APPARMOR = "wsp-workspace";
 
 /** The AppArmor profile a box needs on Ubuntu 23.10 and later, where the kernel refuses a plain binary the user
@@ -715,11 +714,11 @@ export function apparmorProfile(place: DaemonPlace, target: DaemonTarget): strin
  * it landed. */
 /** Takes the workspace profile back off, where this computer has one loaded. Guarded the way the step that wrote
  * it is: a computer with no apparmor_parser and no file of ours never had one, and says nothing about it. */
-function apparmorOffStep(): string[] {
+export function apparmorOffStep(profile = WSP_WORKSPACE_APPARMOR_PATH): string[] {
   return [
-    `if [ -f ${WSP_WORKSPACE_APPARMOR_PATH} ]; then`,
-    `  command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${WSP_WORKSPACE_APPARMOR_PATH} 2>/dev/null || true`,
-    `  rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    `if [ -f ${shellQuote(profile)} ]; then`,
+    `  command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${shellQuote(profile)} 2>/dev/null || true`,
+    `  rm -f ${shellQuote(profile)}`,
     "fi",
   ];
 }
@@ -787,7 +786,8 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     ...place.exportEnv,
     ...stepMark(place, "files"),
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
-    `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
+    // A root tar keeps the owner the Mac packed the bundle under, which names nobody on that computer.
+    `tar --no-same-owner -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
@@ -851,8 +851,111 @@ export function daemonOwnedPaths(place: DaemonPlace): string[] {
   ];
 }
 
+/** What a failed add's undo answers with when a place file stands that neither the read nor this add's join put
+ * there: another add took the box meanwhile. */
+export const ADD_TAKEN_LINE = "WSP_ADD_TAKEN";
+
 /** What the removal answers with once the machine carries nothing of wsp's any more. */
 export const DAEMON_GONE_LINE = "DAEMON_REMOVED";
+
+/** One thing a joined add writes on a computer, and how taking it back goes: a file or folder of wsp's own goes
+ * whole, a folder the add only made on the way to one goes when it is empty, the unit is stopped before its file
+ * goes, a unit the computer already held is stopped or disabled only where it was not running or enabled before,
+ * the workspace profile is unloaded, wsp's line comes out of the person's login file, and that file goes only when
+ * the line was all it held. */
+export interface AddWrite {
+  path: string;
+  as: "own" | "folder" | "unit" | "running" | "enabled" | "apparmor" | "line" | "login";
+}
+
+/** A path and each folder above it up to the home, the home and / never among them. */
+const underHome = (home: string, path: string): string[] => (path !== "/" && path.startsWith(`${home}/`) ? [path, ...underHome(home, posix.dirname(path))] : []);
+
+/** Everything a joined add can leave on a computer, off the place that names each path: what the deploy lands,
+ * what the join on that computer writes, and what its agent writes if it started. The work folder is a folder the
+ * join made and is never taken with anything in it; wsp's own folder is never taken whole, since a host on the
+ * same login keeps its state there. */
+export function joinedAddWrites(place: DaemonPlace, unitPath: string): AddWrite[] {
+  const home = place.root.replace(/\/+$/, "");
+  const at = placeDaemonPaths(home);
+  const own = [...placeOwnedPaths(home).filter(path => path !== at.wsp), `${posix.dirname(place.profileFile)}/wsp-preview.sh`, at.manifestPath, at.putDir, joinOf(place).codeFile];
+  const folders = [...new Set([...place.make, workFolderIn(home)].flatMap(path => underHome(home, path)))].filter(path => !own.includes(path)).sort((a, b) => b.split("/").length - a.split("/").length);
+  return [
+    { path: unitPath, as: "unit" },
+    { path: unitPath, as: "running" },
+    { path: unitPath, as: "enabled" },
+    ...own.map((path): AddWrite => ({ path, as: "own" })),
+    { path: WSP_WORKSPACE_APPARMOR_PATH, as: "apparmor" },
+    ...(place.profileSource === undefined ? [] : [{ path: place.profileSource, as: "line" } as const, { path: place.profileSource, as: "login" } as const]),
+    ...folders.map((path): AddWrite => ({ path, as: "folder" })),
+  ];
+}
+
+/** What the read of a computer's own holdings ends with, so a read cut short is never taken for one that found nothing. */
+export const ADD_FOUND_END = "WSP_HAD_END";
+const ADD_FOUND_LINE = "WSP_HAD";
+
+/** Asked before a byte of the add lands: which of those writes the computer already holds, each by its place in
+ * the list, so a path's own characters never have to survive the trip back. */
+export function addFoundScript(place: DaemonPlace, writes: readonly AddWrite[], systemctl: string): string {
+  return [...place.exportEnv, ...writes.map((w, i) => `${stillThere(place, w, systemctl)} && echo '${ADD_FOUND_LINE} ${i}'`), `echo ${ADD_FOUND_END}`].join("\n");
+}
+
+/** The test that holds where the computer has this write, read before the add and again once the undo ran. */
+function stillThere(place: DaemonPlace, w: AddWrite, systemctl: string): string {
+  const unit = shellQuote(posix.basename(w.path));
+  if (w.as === "running") return `${systemctl} is-active --quiet ${unit} 2>/dev/null`;
+  if (w.as === "enabled") return `${systemctl} is-enabled --quiet ${unit} 2>/dev/null`;
+  if (w.as === "line") return `grep -qF ${shellQuote(place.profileFile)} ${sh(place, w.path)} 2>/dev/null`;
+  return `{ [ -e ${sh(place, w.path)} ] || [ -L ${sh(place, w.path)} ]; }`;
+}
+
+/** Which writes the computer held, or nothing where it never finished saying, which leaves every write its own. */
+export function addFound(stdout: string, count: number): ReadonlySet<number> | undefined {
+  const lines = stdout.split("\n").map(line => line.trim());
+  if (!lines.includes(ADD_FOUND_END)) return undefined;
+  const held = lines.flatMap(line => {
+    const m = new RegExp(`^${ADD_FOUND_LINE} (\\d+)$`).exec(line);
+    return m === null || Number(m[1]) >= count ? [] : [Number(m[1])];
+  });
+  return new Set(held);
+}
+
+/** Takes back what a failed add wrote and the computer did not hold before it, and nothing else: the unit first,
+ * so its agent lets go of the files, then the files, the profile, wsp's line in the login file and the folders it
+ * made, deepest first. A path under a folder that has become a link since the read is left, as both leave roads
+ * leave one. The last line is said only when every write taken back is gone; a folder left holding what is not
+ * the add's is not one of them. A place file this add's join did not write and the read did not find is another
+ * add's, so the undo stops before its first removal. A unit this add wrote fresh counts as left while it runs. */
+export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], found: ReadonlySet<number>, systemctl: string, joined: boolean): string {
+  const home = place.root.replace(/\/+$/, "");
+  const unitHeld = writes.some((w, i) => w.as === "unit" && found.has(i));
+  const taken = writes.filter((w, i) => !found.has(i) && (unitHeld || (w.as !== "running" && w.as !== "enabled")));
+  const checked = [...taken.filter(w => w.as !== "folder"), ...(unitHeld ? [] : writes.filter((w, i) => w.as === "running" && !found.has(i)))];
+  const placeFile = joinOf(place).file;
+  const raced = joined ? [] : writes.filter((w, i) => w.path === placeFile && w.as === "own" && !found.has(i));
+  const at = (as: AddWrite["as"]): string[] => taken.flatMap(w => (w.as === as ? [w.path] : []));
+  const unit = (path: string): string => shellQuote(posix.basename(path));
+  const unlinked = (path: string, line: string): string => {
+    const links = underHome(home, posix.dirname(path)).map(folder => `[ ! -L ${sh(place, folder)} ]`);
+    return links.length === 0 ? line : `if ${links.reverse().join(" && ")}; then ${line}; fi`;
+  };
+  return [
+    ...place.exportEnv,
+    ...raced.map(w => `if ${stillThere(place, w, systemctl)}; then echo ${ADD_TAKEN_LINE}; exit 0; fi`),
+    ...at("unit").flatMap(path => [`${systemctl} disable --now ${unit(path)} 2>/dev/null || true`, `rm -f ${sh(place, path)}`, `${systemctl} daemon-reload 2>/dev/null || true`]),
+    ...at("running").map(path => `${systemctl} stop ${unit(path)} 2>/dev/null || true`),
+    ...at("enabled").map(path => `${systemctl} disable ${unit(path)} 2>/dev/null || true`),
+    ...at("own").map(path => unlinked(path, `rm -rf ${sh(place, path)}`)),
+    ...(at("apparmor").length === 0 ? [] : apparmorOffStep()),
+    ...at("line").map(path => unsourceStep(place, path)),
+    ...at("login").map(path => `[ -s ${sh(place, path)} ] || rm -f ${sh(place, path)}`),
+    ...at("folder").map(path => unlinked(path, `rmdir ${sh(place, path)} 2>/dev/null || true`)),
+    "left=0",
+    ...checked.map(w => (w.as === "login" ? `[ -e ${sh(place, w.path)} ] && [ ! -s ${sh(place, w.path)} ] && left=1` : `${stillThere(place, w, systemctl)} && left=1`)),
+    `[ "$left" = 0 ] && echo ${DAEMON_GONE_LINE}`,
+  ].join("\n");
+}
 
 /** Runs that removal and says what the machine answered, for the one caller that has to report a machine which
  * would not let go of it. */
@@ -947,25 +1050,31 @@ export const joinedLine = (name: string, url: string): string => `${name} joined
 /** The engine's readers of a box's words bound them at this length. */
 const SAID_MAX = 300;
 
-export const cappedLine = (line: string): string => (line.length <= SAID_MAX ? line : `${line.slice(0, SAID_MAX - 1)}…`);
+export const cappedLine = (line: string, max = SAID_MAX): string => (line.length <= max ? line : `${line.slice(0, max - 1)}…`);
 
 export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said: string): string => cappedLine(`${name} ${PLACE_DEPLOY_STEPS[step]}: ${said}`);
 
 /** A tool's closing line after the one that said why, which is not the box's reason. */
 const TOOL_TRAILER = /^tar: (Exiting with failure status due to previous errors|Error is not recoverable: exiting now)$/;
 
-/** Under set -e the line that ended the script is the last the box wrote on stderr. */
-function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
+/** The step a joined deploy reached, off the marks it printed; "service" is past the join writing its place file. */
+function joinedStep(join: DaemonJoin, stdout: string): PlaceDeployStep {
   let step: PlaceDeployStep = "files";
   // Whichever address answered: the join may spell it as it normalised it.
   const [joinedHead, joinedTail] = joinedLine(join.name, "\0").split("\0") as [string, string];
-  for (const raw of res.stdout.split("\n")) {
+  for (const raw of stdout.split("\n")) {
     const line = raw.trim();
     const word = line.startsWith(`${WSP_STEP_LINE} `) ? line.slice(WSP_STEP_LINE.length + 1) : undefined;
     if (word !== undefined && isDeployStep(word)) step = word;
     else if (line === WSP_READY_LINE) step = "join";
     else if (line.startsWith(joinedHead) && line.endsWith(joinedTail)) step = "service";
   }
+  return step;
+}
+
+/** Under set -e the line that ended the script is the last the box wrote on stderr. */
+function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
+  const step = joinedStep(join, res.stdout);
   const said = clientWords(res.stderr.replace(/\r/g, ""))
     .split("\n")
     .map(line => line.trim())
@@ -987,6 +1096,15 @@ function deployFailureDetail(place: DaemonPlace, res: { stdout: string; stderr: 
 export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string; exitCode: number }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
   return place.join === undefined ? deployFailureDetail(place, res, previewHostSuffix, targets) : joinedFailureLine(place.join, res);
 }
+
+/** A joined deploy whose own join refused the computer as already in a wsp, read off the join's line on stderr
+ * before any sentence is capped: what stands there is another add's, and nothing of it is this add's to take back. */
+export class PlaceAlreadyJoinedError extends Error {}
+
+/** A joined deploy that failed after its own join wrote the place file, so the place file on the box is this add's. */
+export class PlaceJoinedThenFailedError extends Error {}
+
+const joinSaidAlreadyJoined = (stderr: string): boolean => stderr.split("\n").some(line => line.replace(/\r/g, "").trim() === ALREADY_JOINED_LINE);
 
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
  * with (the runtime replaces it the first time a client reaches the daemon) and, where the machine picked the port,
@@ -1030,7 +1148,10 @@ export async function deployDaemon(
     const res = await machine.run(deployScript(place, token, suffix, targets), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       if (place.join !== undefined) console.warn(deployFailureDetail(place, res, suffix, targets));
-      throw new Error(deployFailureLine(place, res, suffix, targets));
+      const line = deployFailureLine(place, res, suffix, targets);
+      if (place.join === undefined) throw new Error(line);
+      if (joinSaidAlreadyJoined(res.stderr)) throw new PlaceAlreadyJoinedError(line);
+      throw joinedStep(place.join, res.stdout) === "service" ? new PlaceJoinedThenFailedError(line) : new Error(line);
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
     return { token, ...(port > 0 ? { port } : {}) };

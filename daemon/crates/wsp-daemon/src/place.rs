@@ -415,6 +415,18 @@ pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Ve
     removed
 }
 
+/// Takes the workspace AppArmor profile a root install loaded off this computer: unloaded while its file is still
+/// there, since the kernel holds a profile by name and a bare removal would leave it loaded for a binary that is
+/// gone, then the file. Answers the path when it went; nothing when there was none to take.
+pub(crate) fn sweep_workspace_profile(profile: &Path, read: &dyn Fn(&str) -> String) -> Option<String> {
+    if !profile.is_file() {
+        return None;
+    }
+    let quoted = format!("'{}'", profile.to_string_lossy().replace('\'', r"'\''"));
+    read(&format!("command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R {quoted} 2>/dev/null; true"));
+    std::fs::remove_file(profile).ok().map(|()| profile.to_string_lossy().into_owned())
+}
+
 /// What one removal under the home did, which is what the leave's lines say.
 enum Removed {
     Gone,
@@ -1267,5 +1279,26 @@ mod tests {
         assert!(std::fs::symlink_metadata(at.bin_dir.join("xdg-open")).is_err());
         assert!(work.exists());
         assert!(sweep_place_home(home.path(), &|_| String::new()).is_empty());
+    }
+
+    #[test]
+    fn the_workspace_profile_is_unloaded_before_its_file_goes_and_named_in_what_the_leave_took() {
+        let etc = tempfile::tempdir().unwrap();
+        let profile = etc.path().join("wsp-workspace");
+        std::fs::write(&profile, "profile wsp-workspace {}\n").unwrap();
+        let asked = std::cell::RefCell::new(Vec::<(String, bool)>::new());
+        let read = |script: &str| {
+            asked.borrow_mut().push((script.to_owned(), profile.exists()));
+            String::new()
+        };
+        assert_eq!(sweep_workspace_profile(&profile, &read), Some(profile.to_string_lossy().into_owned()));
+        assert!(!profile.exists());
+        let asked = asked.into_inner();
+        assert_eq!(asked.len(), 1);
+        assert!(asked[0].0.contains(&format!("apparmor_parser -R '{}'", profile.display())), "{}", asked[0].0);
+        assert!(asked[0].1, "the profile was unloaded while its file was still there");
+        // A computer that never loaded one is asked nothing and says nothing.
+        let never = |_: &str| -> String { panic!("nothing to unload") };
+        assert_eq!(sweep_workspace_profile(&profile, &never), None);
     }
 }

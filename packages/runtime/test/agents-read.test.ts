@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
+import { nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
@@ -350,3 +350,63 @@ describe("the sign-ins on a computer or a workspace", () => {
 });
 
 const tick = (): Promise<void> => new Promise(r => setTimeout(r, 5));
+
+describe("the skills on a computer or a workspace", () => {
+  function skills(phase: { now: WorkspacePhase }): { asked: [string, unknown, unknown][]; changed: (AgentsTarget | undefined)[]; api: ReturnType<typeof agentsReads<undefined>> } {
+    const asked: [string, unknown, unknown][] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const acts: SkillsActs = {
+      search: async (q, limit) => (asked.push(["search", q, limit]), [{ id: "a/b/pdf", source: "a/b", skillId: "pdf", name: "pdf", installs: 3 }]),
+      get: async skill => (asked.push(["get", skill, undefined]), { text: "# pdf", size: 5 }),
+      preview: async (on, ask) => (asked.push(["preview", on, ask]), { text: "# pdf", size: 5 }),
+      add: async (on, ask) => (asked.push(["add", on, ask]), { path: "~/.agents/skills/pdf", agents: [] }),
+      remove: async (on, ask) => {
+        asked.push(["remove", on, ask]);
+        throw new Error("rm failed");
+      },
+      toggle: async (on, ask) => (asked.push(["toggle", on, ask]), { paths: ["~/.agents/skills/pdf"] }),
+    };
+    const api = agentsReads<undefined>({
+      reader: undefined,
+      places: () => undefined,
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      skills: acts,
+      channel: async () => {
+        throw new Error("no channel on this road");
+      },
+      changed: target => void changed.push(target),
+      now: () => Date.parse("2026-09-24T12:00:00Z"),
+    });
+    return { asked, changed, api };
+  }
+
+  it("searches with twenty hits unless told otherwise, and reads a skills.sh skill with no target", async () => {
+    const { asked, api } = skills({ now: "running" });
+    expect(await api.skillsSearch("pdf")).toHaveLength(1);
+    await api.skillsSearch("pdf", 5);
+    expect(await api.skillsGet("a/b/pdf")).toEqual({ text: "# pdf", size: 5 });
+    expect(asked).toEqual([["search", "pdf", 20], ["search", "pdf", 5], ["get", "a/b/pdf", undefined]]);
+  });
+
+  it("changes a skill on the workspace's own machine and says the report there changed, whether the write held or not", async () => {
+    const { asked, changed, api } = skills({ now: "running" });
+    const target = { workspaceId: "ws_1" };
+    await api.skillsAdd(target, { skill: "a/b/pdf", project: true });
+    await api.skillsToggle(target, { name: "pdf", on: false });
+    await expect(api.skillsRemove(target, { name: "pdf" })).rejects.toThrow("rm failed");
+    expect(await api.skillsPreview(target, { name: "pdf" })).toEqual({ text: "# pdf", size: 5 });
+    expect(asked.map(([what, on]) => [what, (on as AgentsOn).kind])).toEqual([["add", "machine"], ["toggle", "machine"], ["remove", "machine"], ["preview", "machine"]]);
+    expect(changed).toEqual([target, target, target]);
+  });
+
+  it("never touches a napping workspace's skills", async () => {
+    const { asked, changed, api } = skills({ now: "napping" });
+    const target = { workspaceId: "ws_1" };
+    for (const act of [() => api.skillsAdd(target, { skill: "a/b/pdf" }), () => api.skillsToggle(target, { name: "pdf", on: false }), () => api.skillsRemove(target, { name: "pdf" }), () => api.skillsPreview(target, { name: "pdf" })]) {
+      await expect(act()).rejects.toThrow(nappingSkillsRefusal("landing"));
+    }
+    expect(asked).toEqual([]);
+    expect(changed).toEqual([]);
+  });
+});

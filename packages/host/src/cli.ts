@@ -97,6 +97,7 @@ import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
+import { skillsActs } from "./skills-acts.js";
 import { knock } from "./server-check.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
@@ -783,6 +784,8 @@ export function makeRuntime(
     // A key pasted in the app lands in the same vault, and the wsp tools an agent's config gets are the entry an
     // install writes: this same wsp against this state file.
     agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),
+    // skills.sh is asked from this host and never from the page; a skill lands as the login of the computer it is for.
+    skillsActs: skillsActs(),
     // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),

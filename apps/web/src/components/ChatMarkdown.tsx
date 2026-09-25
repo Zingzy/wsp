@@ -101,6 +101,9 @@ interface ChatMarkdownProps {
   wordWrap?: boolean;
   /** A file link was clicked. Absent means file links render as plain text chips. */
   onOpenFile?: ((path: string, line?: number) => void) | undefined;
+  /** A file nobody here wrote, a skill's SKILL.md: no raw HTML, no image fetched, no link but to a web page, a mail
+   * address or a heading, and nothing resolved against a folder. */
+  restricted?: boolean;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<ProviderSkill> = [];
@@ -223,6 +226,55 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+/** The sanitizer's schema for a restricted file: no image, links only to web pages and mail addresses, no source
+ * for anything, and the span the restricted plugin writes for an image or a link it took apart. */
+const SKILL_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  tagNames: (defaultSchema.tagNames ?? []).filter((tag) => tag !== "img"),
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta"],
+    blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
+    span: [...(defaultSchema.attributes?.span ?? []), "dataK", "className"],
+  },
+  protocols: { ...defaultSchema.protocols, href: ["http", "https", "mailto"], src: [] },
+} satisfies Parameters<typeof rehypeSanitize>[0];
+
+const RESTRICTED_FACT_CLASS = ["font-mono", "text-[11px]", "text-muted-foreground"];
+
+/** Whether a restricted file's link may stay one: a web page, a mail address, or a place in the same document. */
+const restrictedHref = (href: unknown): href is string => typeof href === "string" && (/^(https?:|mailto:)/i.test(href) || href.startsWith("#"));
+
+type RestrictedNode = { type: string; value?: string; tagName?: string; properties?: Record<string, unknown>; children?: RestrictedNode[] };
+
+/** Takes apart what a restricted file may not do before the sanitizer sees it: raw HTML becomes its own source text,
+ * an image becomes its alt text and its address, and a link to anything but a web page, a mail address or a heading
+ * becomes its text and its address with no anchor. */
+function rehypeRestrict() {
+  const text = (value: string): RestrictedNode => ({ type: "text", value });
+  const fact = (value: string, k: string): RestrictedNode => ({ type: "element", tagName: "span", properties: { dataK: k, className: RESTRICTED_FACT_CLASS }, children: [text(value)] });
+  const visit = (node: RestrictedNode): RestrictedNode => {
+    if (node.type === "raw") return text(node.value ?? "");
+    if (node.type === "element" && node.tagName === "img") {
+      const alt = typeof node.properties?.alt === "string" ? node.properties.alt : "";
+      const src = typeof node.properties?.src === "string" ? node.properties.src : "";
+      return fact([alt, src].filter((w) => w !== "").join(" "), "skill-image");
+    }
+    const children = node.children?.map(visit);
+    if (node.type === "element" && node.tagName === "a" && !restrictedHref(node.properties?.href)) {
+      const href = typeof node.properties?.href === "string" ? node.properties.href : "";
+      return { type: "element", tagName: "span", properties: { dataK: "skill-link" }, children: [...(children ?? []), ...(href === "" ? [] : [text(" "), fact(href, "skill-link-href")])] };
+    }
+    return children === undefined ? node : { ...node, children };
+  };
+  return (tree: RestrictedNode) => visit(tree);
+}
+
+const SKILL_MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts, remarkNormalizeListItemIndentation, remarkPreserveCodeMeta] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+
+const SKILL_MARKDOWN_REHYPE_PLUGINS = [rehypeRestrict, [rehypeSanitize, SKILL_SANITIZE_SCHEMA]] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
 const GITHUB_ALERT_PRESENTATIONS: Record<
@@ -1294,26 +1346,34 @@ function areMarkdownFileLinkPropsEqual(
 
 function ChatMarkdown({
   text,
-  cwd,
-  onTaskListChange,
+  cwd: givenCwd,
+  onTaskListChange: givenTaskListChange,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
   parseRawHtml = true,
-  imageBaseDir,
-  onImageExpand,
+  imageBaseDir: givenImageBaseDir,
+  onImageExpand: givenImageExpand,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
   resolvedTheme,
   wordWrap = true,
-  onOpenFile,
+  onOpenFile: givenOpenFile,
+  restricted = false,
 }: ChatMarkdownProps) {
+  // A restricted file is resolved against no folder and opens nothing of this computer's.
+  const cwd = restricted ? undefined : givenCwd;
+  const imageBaseDir = restricted ? undefined : givenImageBaseDir;
+  const onTaskListChange = restricted ? undefined : givenTaskListChange;
+  const onImageExpand = restricted ? undefined : givenImageExpand;
+  const onOpenFile = restricted ? undefined : givenOpenFile;
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
     >();
+    if (restricted) return metaByHref;
     for (const href of extractMarkdownLinkHrefs(text)) {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;
@@ -1323,9 +1383,10 @@ function ChatMarkdown({
       }
     }
     return metaByHref;
-  }, [cwd, imageBaseDir, text]);
+  }, [cwd, imageBaseDir, restricted, text]);
   const inlineCodeFileLinkMetaByText = useMemo(() => {
     const metaByText = new Map<string, MarkdownFileLinkMeta>();
+    if (restricted) return metaByText;
     for (const span of extractInlineCodeSpans(text)) {
       if (metaByText.has(span)) continue;
       const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd);
@@ -1334,7 +1395,7 @@ function ChatMarkdown({
       }
     }
     return metaByText;
-  }, [cwd, imageBaseDir, text]);
+  }, [cwd, imageBaseDir, restricted, text]);
   const fileLinkParentSuffixByPath = useMemo(() => {
     const filePaths = [
       ...[...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath),
@@ -1342,10 +1403,14 @@ function ChatMarkdown({
     ];
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
-  const markdownUrlTransform = useCallback((href: string) => {
-    if (isWindowsDrivePathHref(href)) return href;
-    return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
-  }, []);
+  const markdownUrlTransform = useCallback(
+    (href: string) => {
+      if (restricted) return defaultUrlTransform(href);
+      if (isWindowsDrivePathHref(href)) return href;
+      return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
+    },
+    [restricted],
+  );
   // Re-emit highlighted content as markdown so copying out of the rendered
   // view keeps links, emphasis, lists, and code fences intact.
   const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -1473,12 +1538,15 @@ function ChatMarkdown({
       },
       a({ node, href, children, title: _title, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
-        const fileLinkMeta = normalizedHref
-          ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
-            resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))
-          : null;
+        const fileLinkMeta =
+          normalizedHref && !restricted
+            ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
+              resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))
+            : null;
         if (!fileLinkMeta) {
-          const faviconHost = resolveExternalWebLinkHost(href);
+          const webHost = resolveExternalWebLinkHost(href);
+          // A restricted file's page draws no favicon: that is an image fetched from Google naming the host.
+          const faviconHost = restricted ? null : webHost;
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
           const linkChildren = <MarkdownLinkContext value>{children}</MarkdownLinkContext>;
@@ -1504,7 +1572,7 @@ function ChatMarkdown({
               )}
             </a>
           );
-          if (!faviconHost || !href) {
+          if (!webHost || !href) {
             return link;
           }
           return (
@@ -1527,7 +1595,7 @@ function ChatMarkdown({
         );
       },
       code({ node, children, className, ...props }) {
-        if (node?.properties?.dataInlineCode != null) {
+        if (!restricted && node?.properties?.dataInlineCode != null) {
           const codeText = nodeToPlainText(children);
           const fileLinkMeta =
             inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
@@ -1543,6 +1611,13 @@ function ChatMarkdown({
         );
       },
       img: function MarkdownImage({ node, title, src, alt, ...props }) {
+        if (restricted) {
+          return (
+            <span data-k="skill-image" className={RESTRICTED_FACT_CLASS.join(" ")}>
+              {[alt, typeof src === "string" ? src : ""].filter(Boolean).join(" ")}
+            </span>
+          );
+        }
         const imageExpand = use(MarkdownLinkContext) ? undefined : onImageExpand;
         const localSrc = node?.properties?.dataLocalSrc;
         const markdownTitle = node?.properties?.dataMarkdownTitle;
@@ -1637,6 +1712,7 @@ function ChatMarkdown({
     onTaskListChange,
     onImageExpand,
     onOpenFile,
+    restricted,
     skills,
     text,
     wordWrap,
@@ -1644,11 +1720,14 @@ function ChatMarkdown({
   /* eslint-enable react/no-unstable-nested-components */
 
   const remarkPlugins = useMemo(
-    () => [
-      ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
-      ...extraRemarkPlugins,
-    ],
-    [extraRemarkPlugins, lineBreaks],
+    () =>
+      restricted
+        ? SKILL_MARKDOWN_REMARK_PLUGINS
+        : [
+            ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
+            ...extraRemarkPlugins,
+          ],
+    [extraRemarkPlugins, lineBreaks, restricted],
   );
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
@@ -1664,7 +1743,7 @@ function ChatMarkdown({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+        rehypePlugins={restricted ? SKILL_MARKDOWN_REHYPE_PLUGINS : parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
         skipHtml={false}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}

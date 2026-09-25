@@ -3886,6 +3886,7 @@ const DAEMON_CONTENTS = [
   "4faf16035d8608562f0cfa8d463a7dc8b38830944b43002b9544697bb9c1dcd9",
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
   "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
+  "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4092,7 +4093,8 @@ const DAEMON_CONTENTS = [
  * Version 73 answers fs.folders, one level of a box's folders or every repo on it, for a project added from a box.
  * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
  * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
- * removed beside that project, and refuses to remove a path that is not a copy of the project it names. */
+ * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
+ * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5351,6 +5353,25 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { file }: the wsp server written into that agent's own config on this computer, the entry an
    * install writes, with the wsp skill beside it. Refused on any other computer. */
   z.object({ id: reqId, op: z.literal("agents.addTools"), target: AgentsTarget, agent: z.string() }),
+  /** Replies with { skills: SkillHit[] }: skills.sh searched by this host, the one caller of it; an empty query is
+   * refused, since skills.sh refuses it. */
+  z.object({ id: reqId, op: z.literal("skills.search"), q: z.string(), limit: z.number().int().min(1).max(50).optional() }),
+  /** Replies with { preview: SkillPreview }: a skill's SKILL.md off skills.sh by its `<owner>/<repo>/<skill>`, read
+   * by this host and nothing installed. */
+  z.object({ id: reqId, op: z.literal("skills.get"), skill: z.string() }),
+  /** Replies with { preview: SkillPreview }: the SKILL.md of one skill there, by its name, the project's skill of that
+   * name with `project`. */
+  z.object({ id: reqId, op: z.literal("skills.preview"), target: AgentsTarget, name: z.string(), project: z.boolean().optional() }),
+  /** Replies with { added: SkillAdded }: a skill off skills.sh put into the shared skills folder there, the project's
+   * with `project`, with a link or a copy in the folder of each agent named that does not read that folder. Every
+   * path in the download is checked first, the files land 0644 as that computer's login, and nothing in them runs. */
+  z.object({ id: reqId, op: z.literal("skills.add"), target: AgentsTarget, skill: z.string(), agents: z.array(z.string()).optional(), project: z.boolean().optional() }),
+  /** Replies with { removed: string[] }: every folder of that skill there and every link to it, gone. The skill wsp
+   * writes and a plugin's are refused. */
+  z.object({ id: reqId, op: z.literal("skills.remove"), target: AgentsTarget, name: z.string(), project: z.boolean().optional() }),
+  /** Replies with { paths: string[] }: that skill turned off or on there, its SKILL.md renamed SKILL.md.off or back
+   * in each of its folders. The skill wsp writes, a plugin's and a project's are refused. */
+  z.object({ id: reqId, op: z.literal("skills.toggle"), target: AgentsTarget, name: z.string(), project: z.boolean().optional(), on: z.boolean() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
    * image stands, every build is priced at the image's own place whatever `on` says. */

@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -101,6 +101,23 @@ export interface AgentsActs {
   addTools(on: AgentsOn, agent: string): Promise<{ file: string }>;
 }
 
+/** One skill there by its name: the project's of that name with `project`, else the one that is not a project's. */
+export interface SkillAsk {
+  name: string;
+  project?: boolean;
+}
+
+/** What the host does with skills: skills.sh searched and read by the host alone, and a skill there previewed,
+ * installed off skills.sh, turned off or on, and removed, every write as that computer's login. */
+export interface SkillsActs {
+  search(q: string, limit: number): Promise<SkillHit[]>;
+  get(skill: string): Promise<SkillPreview>;
+  preview(on: AgentsOn, ask: SkillAsk): Promise<SkillPreview>;
+  add(on: AgentsOn, ask: { skill: string; agents?: readonly string[]; project?: boolean }): Promise<SkillAdded>;
+  remove(on: AgentsOn, ask: SkillAsk): Promise<{ removed: string[] }>;
+  toggle(on: AgentsOn, ask: SkillAsk & { on: boolean }): Promise<{ paths: string[] }>;
+}
+
 /** The refusal for a runtime served without the readers. */
 export const NO_AGENTS_READER = "this runtime carries no agents reader; the host that serves the app wires one";
 
@@ -118,6 +135,7 @@ export interface AgentsReadOptions<Caller> {
   places: () => PlaceDoor | undefined;
   workspace: (id: string, origin?: Caller) => Promise<AgentsWorkspace>;
   acts?: AgentsActs;
+  skills?: SkillsActs;
   /** One channel to the target's daemon: this computer's, a joined computer's over its link, or a workspace's. */
   channel: (target: AgentsTarget, onEvent: (event: Record<string, unknown>) => void, origin?: Caller) => Promise<DaemonChannel>;
   /** Something written changed what a report reads there; no target is every report. */
@@ -129,6 +147,9 @@ export interface AgentsReadOptions<Caller> {
   /** The host's log: each sign-in's start and end, never its page, code or token. */
   log?: (line: string) => void;
 }
+
+/** How many hits a search asks skills.sh for where the asker names no number. */
+export const SKILLS_SEARCH_LIMIT = 20;
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
@@ -148,6 +169,12 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   key(agent: string, key: string): Promise<void>;
   addTools(target: AgentsTarget, agent: string, origin?: Caller): Promise<{ file: string }>;
   forwards(relay: CallbackForwards): () => void;
+  skillsSearch(q: string, limit?: number): Promise<SkillHit[]>;
+  skillsGet(skill: string): Promise<SkillPreview>;
+  skillsPreview(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<SkillPreview>;
+  skillsAdd(target: AgentsTarget, ask: { skill: string; agents?: readonly string[]; project?: boolean }, origin?: Caller): Promise<SkillAdded>;
+  skillsRemove(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<{ removed: string[] }>;
+  skillsToggle(target: AgentsTarget, ask: SkillAsk & { on: boolean }, origin?: Caller): Promise<{ paths: string[] }>;
 } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
@@ -169,6 +196,10 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   const actsOf = (): AgentsActs => {
     if (o.acts === undefined) throw new Error(NO_AGENTS_READER);
     return o.acts;
+  };
+  const skillsOf = (): SkillsActs => {
+    if (o.skills === undefined) throw new Error(NO_AGENTS_READER);
+    return o.skills;
   };
   /** Each sign-in running, by its id: its code writer, who follows its steps, the last step for one who joins, and
    * its stop. */
@@ -193,6 +224,20 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (run.followers.delete(emit) && run.followers.size === 0) run.stop();
       },
     };
+  };
+  /** Where a skill there is read or written; a napping workspace is never woken for one. */
+  const skillOn = async (target: AgentsTarget, origin?: Caller): Promise<AgentsOn> => {
+    const on = await onOf(target, origin);
+    if ("napping" in on) throw usage(nappingSkillsRefusal(on.napping));
+    return on;
+  };
+  /** A write there, after which the report there reads again, whether the write held or stopped halfway. */
+  const written = async <T,>(target: AgentsTarget, run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } finally {
+      o.changed(target);
+    }
   };
   /** Where a target's lines run, or the napping workspace's name. */
   const onOf = async (target: AgentsTarget, origin?: Caller): Promise<AgentsOn | Napping> => {
@@ -333,6 +378,21 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     async key(agent, key) {
       await actsOf().key(agent, key);
       o.changed();
+    },
+    skillsSearch: (q, limit = SKILLS_SEARCH_LIMIT) => skillsOf().search(q, limit).then(hits => hits.map(h => SkillHit.parse(h))),
+    skillsGet: async skill => SkillPreview.parse(await skillsOf().get(skill)),
+    skillsPreview: async (target, ask, origin) => SkillPreview.parse(await skillsOf().preview(await skillOn(target, origin), ask)),
+    async skillsAdd(target, ask, origin) {
+      const [skills, on] = [skillsOf(), await skillOn(target, origin)];
+      return written(target, async () => SkillAdded.parse(await skills.add(on, ask)));
+    },
+    async skillsRemove(target, ask, origin) {
+      const [skills, on] = [skillsOf(), await skillOn(target, origin)];
+      return written(target, () => skills.remove(on, ask));
+    },
+    async skillsToggle(target, ask, origin) {
+      const [skills, on] = [skillsOf(), await skillOn(target, origin)];
+      return written(target, () => skills.toggle(on, ask));
     },
     async addTools(target, agent, origin) {
       const acts = actsOf();

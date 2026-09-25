@@ -351,6 +351,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("guestManifestPath", Value::from(numbers::DEFAULT_MANIFEST_PATH));
     m.insert("openShimPath", Value::from(numbers::OPEN_SHIM_PATH));
     m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
+    m.insert("workspaceApparmorPath", Value::from(numbers::WORKSPACE_APPARMOR_PATH));
     m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
     m.insert("guestDaemonSocketPath", Value::from(numbers::GUEST_DAEMON_SOCKET_PATH));
     m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));

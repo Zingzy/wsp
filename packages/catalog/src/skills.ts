@@ -56,6 +56,14 @@ export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
   },
 };
 
+/** Where an install puts a skill for one agent, a project's with `project`: nothing where the agent reads the shared
+ * folder already, else its own folder with how that folder takes a skill. */
+export function ownSkillFolder(a: { skillRoots: SkillRoots }, project: boolean): SkillRoot | undefined {
+  const roots = project ? a.skillRoots.project : a.skillRoots.user;
+  if (roots.some(r => r.dir === (project ? PROJECT_SHARED_SKILLS : SHARED_SKILLS))) return undefined;
+  return roots[0];
+}
+
 /** The folder the agent's own skills go in, where the wsp skill is written. */
 export const skillsDirOf = (a: { skillRoots: SkillRoots }): string => a.skillRoots.user[0].dir;
 
