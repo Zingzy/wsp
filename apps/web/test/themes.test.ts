@@ -81,12 +81,13 @@ function colours(id: string): (token: string) => Rgba {
 /** The Mac's dark window: its own declarations and the sidebar's inside it. */
 const macWindow = new Map(declarations(blockBody(indexCss, /\.desktop-mac\.dark \{/)!));
 const macSidebar = new Map(declarations(blockBody(blockBody(indexCss, /\.desktop-mac \[data-app-sidebar\] \{/)!, /@variant dark \{/)!));
-/** The sidebar's own tiers, which the Mac's light sidebar lays straight on the glass. */
+/** The sidebar's own tiers, which the Mac's light sidebar lays over its veil on the glass. */
 const sidebarTiers = new Map(declarations(blockBody(indexCss, /:root,\n\[data-app-sidebar\] \{/)!));
-/** The glass as it reads over a white desktop, the lightest it shows. */
+/** The glass read as mid grey: the dark glass over a white desktop, the lightest it shows, and the light glass over a
+ * dark desktop, the darkest. */
 const GLASS: Rgba = [128 / 255, 128 / 255, 128 / 255, 1];
-/** The light glass over a white desktop, as near white as the system draws it. */
-const LIGHT_GLASS: Rgba = [240 / 255, 240 / 255, 240 / 255, 1];
+/** The Mac's light window, where the sidebar alone stands on the glass under a veil of its own ground. */
+const macLightWindow = new Map(declarations(blockBody(indexCss, /\.desktop-mac:not\(\.dark\) \{/) ?? ""));
 
 describe("the theme registry", () => {
   it("ids are unique, each side's default is the record's default pick, and an id that is missing or on the other side reads as that side's default", () => {
@@ -173,9 +174,10 @@ describe.each(THEMES.map(t => [t.id, t] as const))("the %s theme", (id, theme) =
     expect(ratio("--sidebar-foreground", "--glass-ink")).toBeGreaterThanOrEqual(1.1);
   });
 
-  it.skipIf(theme.side !== "light")("in the Mac's light window every sidebar ink reads at AA straight on the glass over a white desktop", () => {
-    for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--muted-foreground", sidebarTiers.get("--sidebar-row-rest")!, sidebarTiers.get("--sidebar-prose")!]) {
-      expect(contrast(c(ink), LIGHT_GLASS), ink).toBeGreaterThanOrEqual(4.5);
+  it.skipIf(theme.side !== "light")("in the Mac's light window every sidebar ink reads at AA over the veil on the glass over a dark desktop, where the glass reads as mid grey", () => {
+    const ground = over(c(`color-mix(in srgb, var(--sidebar) ${macLightWindow.get("--sidebar-veil") ?? "0%"}, transparent)`), GLASS);
+    for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--sidebar-quiet", sidebarTiers.get("--sidebar-row-rest")!, sidebarTiers.get("--sidebar-prose")!]) {
+      expect(contrast(c(ink), ground), ink).toBeGreaterThanOrEqual(4.5);
     }
   });
 
