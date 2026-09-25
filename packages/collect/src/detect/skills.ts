@@ -27,14 +27,16 @@ export const SKILL_HEAD_BYTES = 4096;
 const END = "\x1eEND";
 
 /** Prints, per SKILL.md found under each root (two or three folders down: a category folder is allowed, links are
- * followed), the root, the skill's folder, where that folder links, and the frontmatter lines alone. */
+ * followed), the root, the skill's folder, where that folder links, whether it is turned off (a SKILL.md.off with no
+ * SKILL.md beside it), and the frontmatter lines alone. */
 const SCRIPT = [
   'for r in "$@"; do',
   '  [ -d "$r" ] || continue',
-  '  find -L "$r" -mindepth 2 -maxdepth 3 -name SKILL.md -type f 2>/dev/null | while IFS= read -r f; do',
-  '    d=${f%/SKILL.md}',
+  '  find -L "$r" -mindepth 2 -maxdepth 3 \\( -name SKILL.md -o -name SKILL.md.off \\) -type f 2>/dev/null | while IFS= read -r f; do',
+  '    d=${f%/*}',
+  '    o=; case $f in *.off) [ -f "$d/SKILL.md" ] && continue; o=1;; esac',
   '    l=; [ -L "$d" ] && l=$(readlink "$d")',
-  "    printf '\\036%s\\037%s\\037%s\\037' \"$r\" \"$d\" \"$l\"",
+  "    printf '\\036%s\\037%s\\037%s\\037%s\\037' \"$r\" \"$d\" \"$l\" \"$o\"",
   `    head -c ${SKILL_HEAD_BYTES} "$f" | awk 'NR==1 && $0 != "---" {exit} NR>1 && $0 == "---" {exit} NR>1 {print}'`,
   "  done",
   "done",
@@ -98,14 +100,14 @@ export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): P
   if (said === undefined) return { skills: [], refused: ["skills: the folders could not be read"] };
   const refused = said.trimEnd().endsWith(END) ? [] : ["skills: the answer was cut short, so the list is not whole"];
   const rootOf = new Map(roots.map(r => [r.dir, r]));
-  const found: { root: SkillRootAt; dir: string; link: string; head: string }[] = [];
+  const found: { root: SkillRootAt; dir: string; link: string; off: boolean; head: string }[] = [];
   for (const record of said.split("\x1e").slice(1)) {
-    const [rootDir, dir, link, head] = record.split("\x1f");
+    const [rootDir, dir, link, off, head] = record.split("\x1f");
     const root = rootDir === undefined ? undefined : rootOf.get(rootDir);
     if (root === undefined || dir === undefined || head === undefined) continue;
     const rel = dir.slice(root.dir.length + 1);
     if (!dir.startsWith(`${root.dir}/`) || rel.split("/").some(seg => seg.startsWith("."))) continue;
-    found.push({ root, dir, link: link ?? "", head });
+    found.push({ root, dir, link: link ?? "", off: off === "1", head });
   }
   const dirs = new Set(found.map(f => `${f.root.dir}\0${f.dir}`));
   const rows = new Map<string, SkillRow>();
@@ -120,6 +122,7 @@ export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): P
       path: tilde(host.home, f.dir),
       ...(f.root.agent !== undefined ? { agent: f.root.agent } : {}),
       ...(f.link !== "" ? { linkTo: tilde(host.home, posix.resolve(posix.dirname(f.dir), f.link)) } : {}),
+      ...(f.off ? { off: true as const } : {}),
     };
     const row = rows.get(key);
     if (row === undefined) rows.set(key, { name, ...(meta.description !== undefined ? { description: meta.description } : {}), paths: [path], scope: f.root.scope });

@@ -49,8 +49,9 @@ export const AgentRow = z.object({
 export type AgentRow = z.infer<typeof AgentRow>;
 
 /** One folder a skill lives in: `~`-relative, the agent whose own folder it is (none for a folder several agents
- * read), and where a link points when the folder is one. */
-export const SkillPath = z.object({ path: z.string(), agent: z.string().optional(), linkTo: z.string().optional() });
+ * read), where a link points when the folder is one, and whether it is turned off: its SKILL.md renamed
+ * SKILL.md.off, which no agent loads. */
+export const SkillPath = z.object({ path: z.string(), agent: z.string().optional(), linkTo: z.string().optional(), off: z.literal(true).optional() });
 export type SkillPath = z.infer<typeof SkillPath>;
 
 export const SkillScope = z.enum(["user", "project", "plugin"]);
@@ -59,6 +60,39 @@ export type SkillScope = z.infer<typeof SkillScope>;
 /** One skill by its name, with every folder it lives in. `description` is off its SKILL.md's frontmatter. */
 export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope });
 export type SkillRow = z.infer<typeof SkillRow>;
+
+/** One skill skills.sh lists for a search: `id` is `<owner>/<repo>/<skill>`, what an install names. */
+export const SkillHit = z.object({ id: z.string(), source: z.string(), skillId: z.string(), name: z.string(), installs: z.number().int().nonnegative() });
+export type SkillHit = z.infer<typeof SkillHit>;
+
+/** How much of a SKILL.md a preview carries. */
+export const SKILL_PREVIEW_BYTES = 64 * 1024;
+
+/** A skill's SKILL.md as a preview draws it: its first part, up to SKILL_PREVIEW_BYTES, and the whole file's size. */
+export const SkillPreview = z.object({ text: z.string(), size: z.number().int().nonnegative() });
+export type SkillPreview = z.infer<typeof SkillPreview>;
+
+/** Where an install put a skill: its one folder, and each agent's folder that got a link to it or a copy of it. */
+export const SkillAdded = z.object({ path: z.string(), agents: z.array(z.object({ agent: z.string(), path: z.string() })) });
+export type SkillAdded = z.infer<typeof SkillAdded>;
+
+/** Why a search was not sent: skills.sh refuses an empty one. */
+export const skillsSearchEmptyRefusal = "Type something to search skills.sh for.";
+
+/** Why the skill wsp writes is never turned off or removed: the next start writes it again. */
+export const systemSkillRefusal = (name: string): string => `${name} is written by wsp and kept current on every start, so it is always on.`;
+
+/** Why a plugin's skill is not turned off or removed on its own. */
+export const pluginSkillRefusal = (name: string): string => `${name} comes with a plugin; turn the plugin off instead.`;
+
+/** Why a project's skill is not turned off: it lives in the repo, and the rename would be a change to it. */
+export const projectSkillOffRefusal = (name: string, path: string): string => `${name} lives in the repo at ${path}, so it is not turned off here.`;
+
+/** Why an act named a skill the computer does not have. */
+export const noSuchSkillRefusal = (name: string): string => `There is no skill named ${name} there.`;
+
+/** Why a napping workspace's skills were not read or changed: nothing here wakes a machine. */
+export const nappingSkillsRefusal = (name: string): string => `${name} is napping, and its skills are read and changed only while it runs; wake it first`;
 
 /** One tool a server lists, as its tools/list answers it. */
 export const McpTool = z.object({ name: z.string(), description: z.string().optional() });

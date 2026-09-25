@@ -69,6 +69,8 @@
 //                    panel at the widths its shape changes over (520, 480,
 //                    380 and its 360 floor)
 //   panel-agents     the task on the box selected, its panel open on Agents
+//   skill-preview    agents-widths with every SKILL.md a hostile one, for the
+//                    restricted renderer's render test
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
@@ -77,8 +79,9 @@ import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
 import { useServerTools } from "../../src/components/agents/useServerTools";
+import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
+import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -403,6 +406,13 @@ const api = {
     throw new Error("That is not a Claude Code token.");
   },
   agentsAddTools: async () => ({ file: "~/.config/opencode/opencode.json" }),
+  // The skill-preview screen answers every SKILL.md with a hostile one, the installed road and the skills.sh road alike.
+  skillsPreview: async (_target: unknown, name: string) => (screen === "skill-preview" ? { text: HOSTILE_SKILL_MD, size: HOSTILE_SKILL_MD.length } : (SKILL_PREVIEWS[name] ?? { text: `# ${name}\n`, size: name.length + 3 })),
+  skillsGet: async (skill: string) => (screen === "skill-preview" ? { text: HOSTILE_SKILL_MD, size: HOSTILE_SKILL_MD.length } : { text: `---\nname: ${skill.split("/").at(-1)}\n---\n# ${skill.split("/").at(-1)}\n\nFill, merge and split PDF files.\n\n- Read a form's fields.\n- Fill them from a table.\n`, size: 120 }),
+  skillsSearch: async () => SKILL_HITS,
+  skillsToggle: async () => {},
+  skillsRemove: async () => {},
+  skillsAdd: async () => ({ path: "~/.agents/skills/pdf", agents: [] }),
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},
@@ -495,6 +505,7 @@ const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
 ];
 function AgentsWidths() {
   const tools = useServerTools(AGENTS_REPORT.target);
+  const skills = useSkillActs(AGENTS_REPORT.target);
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
@@ -505,7 +516,7 @@ function AgentsWidths() {
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"
-            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }) }}
+            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />
@@ -558,7 +569,7 @@ function Centre() {
 
 createRoot(document.getElementById("root")!).render(
   <>
-    {screen === "agents-widths" ? (
+    {screen === "agents-widths" || screen === "skill-preview" ? (
       <AgentsWidths />
     ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">

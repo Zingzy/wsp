@@ -10,10 +10,11 @@
 // page's own edges; labels and rows keep one rhythm; the head, tabs and
 // toolbar stay pinned while the list scrolls; a tab's tooltip opens only
 // while its word is hidden; Tab reaches every row with its ring drawn.
-// Photographs of every tab, a detail of each kind and an agent not installed
-// at 360, 480 and 696 in both themes, and the real right panel and computer
-// page. Vite serves test/wireframe, so like the other render tests it runs
-// only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
+// Photographs of every tab, a detail of each kind and an agent not installed,
+// Add a skill with its results and a skill's SKILL.md at 360, 480 and 696 in
+// both themes, and the real right panel and computer page. Vite serves
+// test/wireframe, so like the other render tests it runs only when asked for
+// (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -331,6 +332,34 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tools-${theme}.png`), animations: "disabled" });
       await at(360).locator("[data-under-row=list_records] button").click();
       await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tool-${theme}.png`), animations: "disabled" });
+    }
+  }, 180_000);
+
+  it("photographs Add a skill with its results and a result's detail with its SKILL.md, at 360, 480 and 696 in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=agents-widths&theme=${theme}`);
+      await page!.waitForSelector("[data-agents-row]");
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      for (const width of [360, 480, 696]) {
+        await pickTab(width, "Skills");
+        await at(width).locator("[data-k=agents-add]").click();
+        await at(width).locator("[data-k=add-search]").fill("pdf");
+        await at(width).locator("[data-k=add-search]").press("Enter");
+        await at(width).locator("[data-add-row]").first().waitFor();
+        // Rows of one height, none wider than the level, the figure at the right edge.
+        const rows = await at(width).locator("[data-add-row]").evaluateAll(els => els.map(el => ({ h: Math.round(el.getBoundingClientRect().height), over: el.scrollWidth > el.clientWidth })));
+        for (const r of rows) expect(r).toEqual({ h: 48, over: false });
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-add-skill-${theme}.png`), animations: "disabled" });
+        await at(width).locator('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]').click();
+        await at(width).locator("[data-k=skill-preview-body] h1").waitFor();
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-add-skill-detail-${theme}.png`), animations: "disabled" });
+        await at(width).locator("[data-k=agents-back]").click();
+        await at(width).locator("[data-k=agents-back]").click();
+        await at(width).locator('[data-agents-row="skill-user-frontend-design"] [data-row-trigger]').click();
+        await at(width).locator("[data-k=skill-preview-body] h1").waitFor();
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-skill-preview-${theme}.png`), animations: "disabled" });
+        await at(width).locator("[data-k=agents-back]").click();
+      }
     }
   }, 180_000);
 

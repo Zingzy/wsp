@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,6 +55,25 @@ describe("the skills on a computer", () => {
     const { host } = fixture();
     const names = (await detectSkills(host, await skillRoots(host))).skills.map(s => s.name);
     for (const never of ["hidden", "cached", "notes", "inner", "project-only"]) expect(names).not.toContain(never);
+  });
+
+  it("reads a folder whose SKILL.md was renamed SKILL.md.off as that skill turned off there, through a link too", async () => {
+    const { host, home } = fixture();
+    const shared = join(home, ".agents/skills/memo");
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, "SKILL.md"), "---\nname: memo\ndescription: Keep notes\n---\nbody\n");
+    symlinkSync(shared, join(home, ".claude/skills/memo"));
+    renameSync(join(shared, "SKILL.md"), join(shared, "SKILL.md.off"));
+    const memo = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(memo.description).toBe("Keep notes");
+    expect(memo.paths).toEqual([
+      { path: "~/.claude/skills/memo", agent: "claude", linkTo: "~/.agents/skills/memo", off: true },
+      { path: "~/.agents/skills/memo", off: true },
+    ]);
+    // A folder holding both is on: an agent loads the SKILL.md it finds.
+    writeFileSync(join(shared, "SKILL.md"), "---\nname: memo\n---\n");
+    const again = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(again.paths.every(p => p.off === undefined)).toBe(true);
   });
 
   it("a workspace adds its project's own folders as project skills", async () => {

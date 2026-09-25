@@ -2,12 +2,14 @@
 // One row of any kind at its kind's one height, split from the next by 2 px
 // and no rule: the lead, the name with the agents' marks after it, one fact
 // under it, an agent's state or a server's badge under that, and at the right
-// end the one step it needs. The row is one button whose ::before carries the
+// end the one step it needs, or the word off where it is turned off. The row is one button whose ::before carries the
 // hover over the whole block; the step is a sibling that lets the pointer
 // through except on its own button, so no button stands inside a button and
 // Tab reaches the row, then its step.
 import { cn } from "../../lib/utils.js";
+import { FACT } from "../../settings/format.js";
 import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
+import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import type { RowView } from "./kinds/kind.js";
 
 export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; height: string; dim: boolean; first: boolean; onOpen: () => void }) {
@@ -25,7 +27,7 @@ export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; h
         <LeadMark lead={row.lead} label={row.title} />
         <span className="flex min-w-0 flex-1 flex-col justify-center">
           <span className="flex min-w-0 items-center gap-2">
-            <span data-row-title className={cn("truncate text-sm leading-5 font-medium", row.available === true ? "text-foreground/70" : "text-foreground")} title={row.title}>
+            <span data-row-title className={cn("truncate text-sm leading-5 font-medium", row.available === true || row.off === true ? "text-foreground/70" : "text-foreground")} title={row.title}>
               {row.title}
             </span>
             {row.marks === undefined ? null : <AgentMarks agents={row.marks} />}
@@ -47,6 +49,11 @@ export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; h
           )}
         </span>
       </button>
+      {step !== undefined || row.off !== true ? null : (
+        <span data-row-word className={cn(FACT, "shrink-0")}>
+          {W.off}
+        </span>
+      )}
       {step === undefined ? null : (
         <div data-row-slot className="pointer-events-none flex shrink-0 items-center">
           <ActButton act={step} className="pointer-events-auto relative z-10" />

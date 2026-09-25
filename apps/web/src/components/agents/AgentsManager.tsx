@@ -4,11 +4,13 @@
 // head says whose they are, the tabs pick a kind, one toolbar searches,
 // groups and adds, and the list stands in groups with no rules between rows.
 // A row opens its detail in place of the list, with Back; a kind may add a
-// level of rows under the detail and one row's own level under that. Every
-// kind is a registered module, so this file never names one. Its root is the
-// container every width rule reads.
+// level of rows under the detail and one row's own level under that, and an
+// add level in place of the list, whose search asks as the person pauses and
+// whose rows open the detail of one before it is added. Every kind is a
+// registered module, so this file never names one. Its root is the container
+// every width rule reads.
 import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { offlineFor, type AgentsReport } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
@@ -23,7 +25,7 @@ import { ActButton } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, notYet, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
 import { HEAD, NARROW, TABS } from "./agentsWidths.js";
 import { AgentsRow } from "./AgentsRow.js";
-import { DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
+import { AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
 import { AGENTS_KINDS } from "./kinds/index.js";
 import type { AgentsShell, AnyKind, GroupBy } from "./kinds/kind.js";
 import { focusRow, rovingKeys } from "./roving.js";
@@ -58,7 +60,16 @@ export interface AgentsManagerProps {
   readonly kinds?: readonly AnyKind[];
 }
 
-type Level = { readonly kind: "list" } | { readonly kind: "detail"; readonly key: string } | { readonly kind: "under"; readonly key: string } | { readonly kind: "under-row"; readonly key: string; readonly row: string };
+type Level =
+  | { readonly kind: "list" }
+  | { readonly kind: "detail"; readonly key: string }
+  | { readonly kind: "under"; readonly key: string }
+  | { readonly kind: "under-row"; readonly key: string; readonly row: string }
+  | { readonly kind: "add" }
+  | { readonly kind: "add-detail"; readonly key: string };
+
+/** How long the add level's search waits after the last key before it asks. */
+const ASK_AFTER_MS = 250;
 
 const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope", state: "State" };
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
@@ -79,6 +90,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const [level, setLevel] = useState<Level>({ kind: "list" });
   const [query, setQuery] = useState("");
   const [grouping, setGrouping] = useState<Record<string, GroupBy>>({});
+  const [typed, setTyped] = useState("");
+  const [asked, setAsked] = useState("");
   const root = useRef<HTMLElement | null>(null);
   const search = useRef<HTMLInputElement | null>(null);
   const kept = useRef<{ key: string; top: number } | null>(null);
@@ -86,7 +99,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const tab = kinds.find(k => k.id === tabId) ?? kinds[0]!;
   const paused = pausedReport(report);
   const held = given.heldWhy ?? (paused ? W.paused : null);
-  const ctx: RowsContext = held === null ? given : { ...given, heldWhy: held };
+  const ctx: RowsContext = { ...given, on, ...(held === null ? {} : { heldWhy: held }) };
   const staleWord = paused ? W.paused : given.heldWhy !== null && given.heldWhy !== undefined ? W.away : undefined;
   const dim = reading || held !== null;
   const page = shell === "page";
@@ -99,9 +112,25 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const count = report === null ? null : tab.count(items);
   const lines: RefusedLine[] = [...(report === null ? [] : refusedLines(report.refused)), ...misses, ...(report === null && error !== null ? [{ id: "read-refused", label: error }] : [])];
   const readAgo = report === null ? undefined : W.readAgo(offlineFor(now - Date.parse(report.readAt)));
-  const current = level.kind === "list" ? undefined : items.find(item => tab.key(item) === level.key);
-  const at: Level = level.kind !== "list" && current === undefined ? { kind: "list" } : level;
+  const adder = heldReason(ctx) === undefined ? tab.adder?.(ctx) : undefined;
+  const adding = level.kind === "add" || level.kind === "add-detail";
+  const current = level.kind === "list" || adding ? undefined : items.find(item => tab.key(item) === level.key);
+  const addView = level.kind === "add-detail" ? adder?.detail(level.key, asked, report, ctx) : undefined;
+  // A level whose item left goes back one: to the list, or to the add level where the search no longer holds it.
+  const at: Level =
+    adding && adder === undefined ? { kind: "list" } : level.kind === "add-detail" && addView === undefined ? { kind: "add" } : !adding && level.kind !== "list" && current === undefined ? { kind: "list" } : level;
   if (at !== level) setLevel(at);
+  const askRef = useRef(adder);
+  askRef.current = adder;
+  // The search asks once the person pauses, and at once on Enter.
+  useEffect(() => {
+    if (typed.trim() === asked.trim()) return;
+    const timer = setTimeout(() => setAsked(typed), ASK_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [typed, asked]);
+  useEffect(() => {
+    if (asked.trim() !== "") askRef.current?.ask(asked, ctx);
+  }, [asked, tab.id]);
 
   const open = (key: string): void => {
     const scroller = scrollerOf(root.current);
@@ -124,6 +153,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const pick = (next: string): void => {
     setTabId(next);
     setQuery("");
+    setTyped("");
+    setAsked("");
     setLevel({ kind: "list" });
   };
 
@@ -134,7 +165,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     }
   };
 
-  const add: RowAct = onImage(ctx) ? editImageAct(ctx) : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+  const add: RowAct = onImage(ctx) ? editImageAct(ctx) : adder !== undefined ? { id: "add", label: W.add, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
 
   const staleMark =
     staleWord === undefined ? null : (
@@ -350,17 +381,36 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     );
 
   const backLabel = W.back(tab.word);
+  const addLevel =
+    adder === undefined || !(at.kind === "add" || at.kind === "add-detail") ? null : at.kind === "add-detail" && addView !== undefined ? (
+      <DetailLevel key={`add-${at.key}`} view={addView} back={() => setLevel({ kind: "add" })} backLabel={W.back(adder.title)} />
+    ) : (
+      <AddLevelView
+        adder={adder}
+        level={adder.level(asked, report, ctx)}
+        query={typed}
+        typing={typed.trim() !== asked.trim()}
+        onQuery={setTyped}
+        onAsk={() => setAsked(typed)}
+        onRow={row => setLevel({ kind: "add-detail", key: row.key })}
+        back={backToList}
+        backLabel={backLabel}
+      />
+    );
   const levelView =
-    at.kind === "list" || current === undefined
+    addLevel !== null
+      ? addLevel
+      : at.kind === "list" || current === undefined
       ? null
       : (() => {
-          const detail = tab.detail(current, ctx, { openUnder: () => setLevel({ kind: "under", key: at.key }) });
+          const key = "key" in at ? at.key : "";
+          const detail = tab.detail(current, ctx, { openUnder: () => setLevel({ kind: "under", key }) });
           const under = detail.under;
           const row = at.kind === "under-row" ? under?.rows?.find(r => r.key === at.row) : undefined;
-          if (at.kind === "detail" || under === undefined) return <DetailLevel key={at.key} view={detail} back={backToList} backLabel={backLabel} />;
-          const toUnder = (): void => setLevel({ kind: "under", key: at.key });
+          if (at.kind === "detail" || under === undefined) return <DetailLevel key={key} view={detail} back={backToList} backLabel={backLabel} />;
+          const toUnder = (): void => setLevel({ kind: "under", key });
           if (row !== undefined) return <UnderRowLevel key={`row-${row.key}`} row={row} back={toUnder} backLabel={W.back(under.title)} />;
-          return <UnderLevelView key="under" level={under} back={() => setLevel({ kind: "detail", key: at.key })} backLabel={W.back(detail.title)} now={now} onRow={r => setLevel({ kind: "under-row", key: at.key, row: r.key })} />;
+          return <UnderLevelView key="under" level={under} back={() => setLevel({ kind: "detail", key })} backLabel={W.back(detail.title)} now={now} onRow={r => setLevel({ kind: "under-row", key, row: r.key })} />;
         })();
 
   return (

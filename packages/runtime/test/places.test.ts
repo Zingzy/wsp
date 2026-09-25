@@ -78,7 +78,7 @@ import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprin
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader } from "../src/agents-read.js";
+import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -123,7 +123,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -133,6 +133,7 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
     ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
     ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
+    ...(opts.skillsActs === undefined ? {} : { skillsActs: opts.skillsActs }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
@@ -4081,6 +4082,52 @@ describe("the agents on a computer you own", () => {
     sockets.push(bare.ws);
     expect(await bare.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: NO_AGENTS_READER });
   });
+  it("search, read, preview, add, turn off and remove skills from the host's own socket alone, each on the computer named", async () => {
+    const asked: string[] = [];
+    const acts: SkillsActs = {
+      search: async (q, limit) => (asked.push(`search ${q} ${limit}`), [{ id: "a/b/pdf", source: "a/b", skillId: "pdf", name: "pdf", installs: 3 }]),
+      get: async skill => (asked.push(`get ${skill}`), { text: "# pdf", size: 5 }),
+      preview: async (on, ask) => (asked.push(`preview ${on.kind} ${ask.name}`), { text: "# pdf", size: 5 }),
+      add: async (on, ask) => (asked.push(`add ${on.kind} ${ask.skill} ${(ask.agents ?? []).join(",")} ${ask.project === true}`), { path: "~/.agents/skills/pdf", agents: [{ agent: "claude", path: "~/.claude/skills/pdf" }] }),
+      remove: async (on, ask) => (asked.push(`remove ${on.kind} ${ask.name}`), { removed: ["~/.agents/skills/pdf"] }),
+      toggle: async (on, ask) => (asked.push(`toggle ${on.kind} ${ask.name} ${ask.on}`), { paths: ["~/.agents/skills/pdf"] }),
+    };
+    const { hostKey } = await serving({ agentsReader: reading([], []), skillsActs: acts });
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws);
+    await c.request("events.subscribe");
+    const box = { placeId };
+    expect(await c.request("skills.search", { q: "pdf" })).toMatchObject({ ok: true, skills: [{ id: "a/b/pdf" }] });
+    expect(await c.request("skills.get", { skill: "a/b/pdf" })).toMatchObject({ ok: true, preview: { text: "# pdf", size: 5 } });
+    expect(await c.request("skills.preview", { target: box, name: "pdf" })).toMatchObject({ ok: true, preview: { size: 5 } });
+    expect(await c.request("skills.add", { target: { placeId: HERE_PLACE_ID }, skill: "a/b/pdf", agents: ["claude"] })).toMatchObject({ ok: true, added: { path: "~/.agents/skills/pdf" } });
+    expect(await c.request("skills.toggle", { target: box, name: "pdf", on: false })).toMatchObject({ ok: true, paths: ["~/.agents/skills/pdf"] });
+    expect(await c.request("skills.remove", { target: box, name: "pdf" })).toMatchObject({ ok: true, removed: ["~/.agents/skills/pdf"] });
+    expect(asked).toEqual(["search pdf 20", "get a/b/pdf", "preview box pdf", "add here a/b/pdf claude false", "toggle box pdf false", "remove box pdf"]);
+    await until(() => c.events.filter(e => e.type === "agents.changed").length === 3);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    const redeemer = await WsClient.connect(srv!.port);
+    sockets.push(redeemer.ws);
+    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    sockets.push(device.ws);
+    for (const [op, extra] of [
+      ["skills.search", { q: "pdf" }],
+      ["skills.get", { skill: "a/b/pdf" }],
+      ["skills.preview", { target: box, name: "pdf" }],
+      ["skills.add", { target: box, skill: "a/b/pdf" }],
+      ["skills.toggle", { target: box, name: "pdf", on: true }],
+      ["skills.remove", { target: box, name: "pdf" }],
+    ] as const) {
+      expect(await ticketed.request(op, extra), op).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+      expect(await device.request(op, extra), op).toMatchObject({ ok: false, error: deviceHeldRefusal(op) });
+    }
+    expect(asked).toHaveLength(6);
+  });
+
   it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {
     const typed: string[] = [];
     const keys: string[] = [];

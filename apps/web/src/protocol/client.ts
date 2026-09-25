@@ -10,6 +10,9 @@ import {
   AgentsReport,
   AgentsSignInEvent,
   ServerToolsAnswer,
+  SkillAdded,
+  SkillHit,
+  SkillPreview,
   type AgentsTarget,
   BringBackResult,
   CLOUD_SETUP_WORDS,
@@ -430,6 +433,18 @@ export interface Api {
   agentsKey?(agent: string, key: string): Promise<void>;
   /** Writes the wsp server into an agent's config on this computer. */
   agentsAddTools?(target: AgentsTarget, agent: string): Promise<{ file: string }>;
+  /** skills.sh searched by the host; the page never asks skills.sh itself. A client without it holds Add a skill. */
+  skillsSearch?(q: string): Promise<SkillHit[]>;
+  /** A skill's SKILL.md off skills.sh by its `<owner>/<repo>/<skill>`, read by the host with nothing installed. */
+  skillsGet?(skill: string): Promise<SkillPreview>;
+  /** One skill's SKILL.md there, by its name; the project's of that name with `project`. */
+  skillsPreview?(target: AgentsTarget, name: string, project: boolean): Promise<SkillPreview>;
+  /** A skill off skills.sh put there, with a link or a copy for each agent named. */
+  skillsAdd?(target: AgentsTarget, skill: string, agents: readonly string[], project: boolean): Promise<SkillAdded>;
+  /** Every folder of one skill there and every link to it, gone. */
+  skillsRemove?(target: AgentsTarget, name: string, project: boolean): Promise<void>;
+  /** One skill there turned off or on. */
+  skillsToggle?(target: AgentsTarget, name: string, project: boolean, on: boolean): Promise<void>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -777,6 +792,15 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
+    skillsSearch: async q => {
+      const skills = (await c.request<{ skills?: unknown }>("skills.search", { q })).skills;
+      return (Array.isArray(skills) ? skills : []).map(hit => SkillHit.parse(hit));
+    },
+    skillsGet: async skill => SkillPreview.parse((await c.request<{ preview?: unknown }>("skills.get", { skill })).preview),
+    skillsPreview: async (target, name, project) => SkillPreview.parse((await c.request<{ preview?: unknown }>("skills.preview", { target, name, ...(project ? { project } : {}) })).preview),
+    skillsAdd: async (target, skill, agents, project) => SkillAdded.parse((await c.request<{ added?: unknown }>("skills.add", { target, skill, agents: [...agents], ...(project ? { project } : {}) })).added),
+    skillsRemove: async (target, name, project) => void (await c.request("skills.remove", { target, name, ...(project ? { project } : {}) })),
+    skillsToggle: async (target, name, project, on) => void (await c.request("skills.toggle", { target, name, on, ...(project ? { project } : {}) })),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
     agentsSignIn: async (target, agent, server, onStep) => {

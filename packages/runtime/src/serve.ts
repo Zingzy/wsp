@@ -1471,6 +1471,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               send({ id: msg.id, ok: true, ...(await rt.agents.addTools(msg.target, msg.agent, origin)) });
               return;
+            case "skills.search":
+            case "skills.get":
+            case "skills.preview":
+            case "skills.add":
+            case "skills.remove":
+            case "skills.toggle": {
+              // skills.sh is asked by this host alone, and a skill on one of the person's computers is theirs to change.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const skill = (ask: { name: string; project?: boolean }) => ({ name: ask.name, ...(ask.project !== undefined ? { project: ask.project } : {}) });
+              if (msg.op === "skills.search") send({ id: msg.id, ok: true, skills: await rt.agents.skillsSearch(msg.q, msg.limit) });
+              else if (msg.op === "skills.get") send({ id: msg.id, ok: true, preview: await rt.agents.skillsGet(msg.skill) });
+              else if (msg.op === "skills.preview") send({ id: msg.id, ok: true, preview: await rt.agents.skillsPreview(msg.target, skill(msg), origin) });
+              else if (msg.op === "skills.add") {
+                const ask = { skill: msg.skill, ...(msg.agents !== undefined ? { agents: msg.agents } : {}), ...(msg.project !== undefined ? { project: msg.project } : {}) };
+                send({ id: msg.id, ok: true, added: await rt.agents.skillsAdd(msg.target, ask, origin) });
+              } else if (msg.op === "skills.remove") send({ id: msg.id, ok: true, ...(await rt.agents.skillsRemove(msg.target, skill(msg), origin)) });
+              else send({ id: msg.id, ok: true, ...(await rt.agents.skillsToggle(msg.target, { ...skill(msg), on: msg.on }, origin)) });
+              return;
+            }
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
