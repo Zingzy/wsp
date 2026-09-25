@@ -81,8 +81,12 @@ function colours(id: string): (token: string) => Rgba {
 /** The Mac's dark window: its own declarations and the sidebar's inside it. */
 const macWindow = new Map(declarations(blockBody(indexCss, /\.desktop-mac\.dark \{/)!));
 const macSidebar = new Map(declarations(blockBody(blockBody(indexCss, /\.desktop-mac \[data-app-sidebar\] \{/)!, /@variant dark \{/)!));
+/** The sidebar's own tiers, which the Mac's light sidebar lays straight on the glass. */
+const sidebarTiers = new Map(declarations(blockBody(indexCss, /:root,\n\[data-app-sidebar\] \{/)!));
 /** The glass as it reads over a white desktop, the lightest it shows. */
 const GLASS: Rgba = [128 / 255, 128 / 255, 128 / 255, 1];
+/** The light glass over a white desktop, as near white as the system draws it. */
+const LIGHT_GLASS: Rgba = [240 / 255, 240 / 255, 240 / 255, 1];
 
 describe("the theme registry", () => {
   it("ids are unique, each side's default is the record's default pick, and an id that is missing or on the other side reads as that side's default", () => {
@@ -95,6 +99,10 @@ describe("the theme registry", () => {
     expect(themeFor("light", SIDE_DEFAULT.dark.id)).toBe(SIDE_DEFAULT.light);
     for (const t of THEMES) expect(themeFor(t.side, t.id)).toBe(t);
     for (const t of THEMES) expect(t.word.length * t.line.length).toBeGreaterThan(0);
+  });
+
+  it("the set is three light themes and five dark, each side led by its default", () => {
+    expect(THEMES.map(t => `${t.side}:${t.id}`)).toEqual(["light:paper", "light:linen", "light:frost", "dark:graphite", "dark:denim", "dark:tungsten", "dark:moss", "dark:pitch"]);
   });
 
   it("each theme is one module importing its own sheet, and the sheets on disk are the registered ones", () => {
@@ -142,22 +150,32 @@ describe.each(THEMES.map(t => [t.id, t] as const))("the %s theme", (id, theme) =
     expect(ratio("--foreground", "--card", "--background")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--muted-foreground", "--background")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--muted-foreground", "--card", "--background")).toBeGreaterThanOrEqual(4.5);
-    for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--sidebar-whisper", "--sidebar-quiet"]) expect(ratio(ink, "--sidebar"), ink).toBeGreaterThanOrEqual(4.5);
+    for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--sidebar-whisper", "--sidebar-quiet", sidebarTiers.get("--sidebar-prose")!]) expect(ratio(ink, "--sidebar"), ink).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--accent-foreground", "--accent", "--background")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--sidebar-hover-ink", "--sidebar-hover", "--sidebar")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--muted-foreground", "--accent", "--background")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--sidebar-quiet", "--sidebar-hover", "--sidebar")).toBeGreaterThanOrEqual(4.5);
   });
 
-  it.skipIf(theme.side !== "dark")("in the Mac's window, muted text in the chat column, the right panel and the sidebar reads at AA over its share of the glass under a hover fill", () => {
+  it.skipIf(theme.side !== "dark")("in the Mac's window, muted text and the chat's links in the chat column, the right panel and the sidebar reads at AA over its share of the glass under a hover fill", () => {
     const share = (region: string): Rgba => over(c(`color-mix(in srgb, var(--material-ground) ${macWindow.get(region)!}, transparent)`), GLASS);
     const regions = [
-      { region: "--material-centre", inks: [macWindow.get("--muted-foreground")!], fills: ["--accent"] },
+      { region: "--material-centre", inks: [macWindow.get("--muted-foreground")!, "--info-foreground"], fills: ["--accent"] },
       { region: "--material-panel", inks: [macWindow.get("--muted-foreground")!], fills: ["--accent"] },
-      { region: "--material-sidebar", inks: ["--sidebar-muted-foreground", "--muted-foreground", "--sidebar-row-rest", "--sidebar-prose"].map(t => macSidebar.get(t)!), fills: ["--sidebar-row-hover", "--sidebar-row-selected"] },
+      { region: "--material-sidebar", inks: ["--sidebar-foreground", ...["--sidebar-muted-foreground", "--muted-foreground", "--sidebar-row-rest", "--sidebar-prose"].map(t => macSidebar.get(t)!)], fills: ["--sidebar-row-hover", "--sidebar-row-selected"] },
     ];
     for (const { region, inks, fills } of regions) {
       for (const ink of inks) for (const fill of fills) expect(contrast(c(ink), over(c(fill), share(region))), `${ink} on ${fill} in ${region}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.skipIf(theme.side !== "dark")("in the Mac's window a row's name stands a step brighter than the sidebar's quiet ink, which the glass lifts", () => {
+    expect(ratio("--sidebar-foreground", "--glass-ink")).toBeGreaterThanOrEqual(1.1);
+  });
+
+  it.skipIf(theme.side !== "light")("in the Mac's light window every sidebar ink reads at AA straight on the glass over a white desktop", () => {
+    for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--muted-foreground", sidebarTiers.get("--sidebar-row-rest")!, sidebarTiers.get("--sidebar-prose")!]) {
+      expect(contrast(c(ink), LIGHT_GLASS), ink).toBeGreaterThanOrEqual(4.5);
     }
   });
 
