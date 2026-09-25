@@ -3,7 +3,8 @@
 // as it stands, fed by the host's steps for a watched run, the paste for a
 // token or key, and the line for the person's terminal; the wsp tools being
 // written into an agent's config. A signed-in run leaves its row, since the
-// report read again after it says so. A new target starts from nothing.
+// report read again after it says so; a cancelled one stops on the host and
+// leaves its row at once. A new target starts from nothing.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
@@ -23,6 +24,8 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
   const [flows, setFlows] = useState<{ targetKey: string | null; of: Record<string, SignInFlow> }>({ targetKey, of: {} });
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
   const running = useRef(new Map<string, Running>());
+  // The run each row's steps belong to: a step or a start answered for a run that was cancelled or replaced is dropped.
+  const runs = useRef(new Map<string, object>());
   const current = useRef(targetKey);
   useEffect(() => {
     current.current = targetKey;
@@ -55,8 +58,11 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       if (begin.kind === "vault") return put(rowId, () => ({ kind: "vault", agent: begin.agent, word: begin.word, ...(begin.mint !== undefined ? { mint: begin.mint } : {}) }));
       if (api?.agentsSignIn === undefined) return;
       running.current.get(rowId)?.stop?.();
+      const run = {};
+      runs.current.set(rowId, run);
       put(rowId, () => ({ kind: "run", state: "running" }));
       const step = (e: AgentsSignInEvent): void => {
+        if (runs.current.get(rowId) !== run) return;
         if (e.state === "signed-in") {
           running.current.get(rowId)?.off?.();
           running.current.delete(rowId);
@@ -77,14 +83,26 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
         }));
       };
       api.agentsSignIn(JSON.parse(targetKey) as AgentsTarget, begin.agent, begin.server, step).then(
-        run => {
-          if (current.current !== targetKey) return run.stop();
-          running.current.set(rowId, run);
+        handle => {
+          if (current.current !== targetKey || runs.current.get(rowId) !== run) return handle.stop();
+          running.current.set(rowId, handle);
         },
-        (e: unknown) => put(rowId, () => ({ kind: "run", state: "failed", said: said(e) })),
+        (e: unknown) => {
+          if (runs.current.get(rowId) === run) put(rowId, () => ({ kind: "run", state: "failed", said: said(e) }));
+        },
       );
     },
     [api, targetKey, put],
+  );
+
+  const cancel = useCallback(
+    (rowId: string): void => {
+      runs.current.delete(rowId);
+      running.current.get(rowId)?.stop?.();
+      running.current.delete(rowId);
+      put(rowId, undefined);
+    },
+    [put],
   );
 
   const code = useCallback(
@@ -126,5 +144,5 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
   );
 
   if (targetKey === null || api === null) return undefined;
-  return { flowOf: rowId => shown[rowId], start, code, save, addTools, adding: agent => adding.has(agent) };
+  return { flowOf: rowId => shown[rowId], start, cancel, code, save, addTools, adding: agent => adding.has(agent) };
 }

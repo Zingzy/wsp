@@ -64,9 +64,10 @@
 //   bring-back-absent    the same on a workspace whose computer is not
 //                        answering, which says what that computer says
 //   bring-back-roadless  the same on a wsp whose host carries no such request
-//   agents-widths    the Agents, Skills and Servers list off one report at the
-//                    page's card width, the switch's edge and a phone's page
-//                    (696, 675, 358) and in the panel at 380 and its 360 floor
+//   agents-widths    the agents manager off one report as the page at its
+//                    card's width and a phone's (760, 696, 358) and as the
+//                    panel at the widths its shape changes over (520, 480,
+//                    380 and its 360 floor)
 //   panel-agents     the task on the box selected, its panel open on Agents
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
@@ -74,7 +75,7 @@ import { manyAgents } from "./agents";
 import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
-import { AgentsList, type AgentsShell } from "../../src/components/agents/AgentsList";
+import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
 import { useServerTools } from "../../src/components/agents/useServerTools";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
@@ -481,11 +482,14 @@ useRightPanelStore.setState({
   byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : screen === "panel-agents" && id === "ws_box" ? agentsPanel : shutPanel])),
 });
 
-/** The widths the Agents list is measured at: the page's card, the switch's edge, a phone's page, the panel and its floor. */
+/** The widths the agents manager is measured at: the page's column, its card and a phone's page, and the panel over
+ * the widths its tabs change shape at down to its floor. */
 const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
+  { shell: "page", width: 760 },
   { shell: "page", width: 696 },
-  { shell: "page", width: 675 },
   { shell: "page", width: 358 },
+  { shell: "panel", width: 520 },
+  { shell: "panel", width: 480 },
   { shell: "panel", width: 380 },
   { shell: "panel", width: 360 },
 ];
@@ -494,8 +498,17 @@ function AgentsWidths() {
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
-        <div key={w.width} data-agents-width={w.width} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
-          <AgentsList shell={w.shell} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box", ...(tools === undefined ? {} : { tools }) }} onRefresh={() => {}} now={Date.parse(AGENTS_REPORT.readAt)} />
+        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
+          <AgentsManager
+            shell={w.shell}
+            head={w.shell === "panel" ? { title: "On spoo, for wsp", line: "Agents, MCP servers and skills this thread can use: global on spoo, plus wsp's own at ~/wsp.", manage: { computer: "spoo", open: () => {} } } : { line: "Agents, MCP servers and skills on spoo." }}
+            report={AGENTS_REPORT}
+            reading={false}
+            on="spoo"
+            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }) }}
+            onRefresh={() => {}}
+            now={Date.parse(AGENTS_REPORT.readAt)}
+          />
         </div>
       ))}
     </div>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, skillsDirOf } from "../src/index.js";
+import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, isSystemSkill, skillsDirOf } from "../src/index.js";
 
 describe("the folders each agent loads skills from", () => {
   it("every agent names its own folder under the home first, and project folders relative to the project", () => {
@@ -32,5 +32,14 @@ describe("a server its file switches off", () => {
     expect(opencode.map(s => [s.name, s.disabled])).toEqual([["a", true], ["b", undefined]]);
     const codex = CODEX_TOML.read('[mcp_servers.a]\ncommand = "x"\nenabled = false\n\n[mcp_servers.b]\ncommand = "y"\nenabled = true\n', "/h");
     expect(codex.map(s => [s.name, s.disabled])).toEqual([["a", true], ["b", undefined]]);
+  });
+});
+
+describe("the skills wsp writes itself", () => {
+  it("are the one on the person's computer and the one on a machine wsp made, and no other", () => {
+    expect(isSystemSkill(WSP_SKILL_NAME)).toBe(true);
+    expect(isSystemSkill(SKILL_NAME)).toBe(true);
+    expect(isSystemSkill("wsp-review")).toBe(false);
+    expect(isSystemSkill("pdf")).toBe(false);
   });
 });
