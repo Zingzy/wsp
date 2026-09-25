@@ -2113,10 +2113,10 @@ code {
   }
 }
 
-/* Dark mode on the Mac: the whole window stands on the glass, each region #060606 at its own share over it, tuned
-   live with the owner on 2026-09-25 (the dev build's Material panel, Cmd+Shift+M, moves the same variables). Inside
-   the panel every edge is a hairline and cards a faint tint; the line tokens are the contrast ones, which every
-   border utility reads. Light mode keeps its solid ground. */
+/* Dark mode on the Mac: the whole window stands on the glass, each region #060606 at its own share over it. The dev
+   build's Material panel moves these same variables, so a share changes here and there together. Inside the panel
+   every edge is a hairline and cards a faint tint; the line tokens are the contrast ones, which every border utility
+   reads. Light mode keeps its solid ground. */
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inset"] {
   background: transparent;
 }

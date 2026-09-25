@@ -47,8 +47,8 @@ export const HOVER_GLYPH_CLASS = "opacity-0 max-md:hidden";
  * collapse chevron. Worn over the hover glyph's class, which it overrides under the breakpoint. */
 export const SELECTED_ROW_GLYPH_CLASS = "max-md:peer-data-[active=true]/menu-button:flex max-md:peer-data-[active=true]/menu-button:opacity-100";
 
-/** A child list of the tree: 12 px in, the rail just inside the parent's lead, which the owner asked to sit tighter
- * than its centre; no gap between rows, so the rail segments read as one line. */
+/** A child list of the tree: 12 px in, the rail just inside the parent's lead rather than under its centre; no gap
+ * between rows, so the rail segments read as one line. */
 export const CHILD_LIST_CLASS = "ml-3 flex min-w-0 flex-col";
 /** One item of a child list: the rail down its left edge for its whole height, a tick into its row's first line,
  * and the rail stopping at that tick on the last item, which is the elbow. Its row starts past the elbow, so a
