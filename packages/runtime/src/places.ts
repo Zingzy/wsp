@@ -54,6 +54,12 @@ import {
   type PlaceAddStep,
   PLACE_LOGIN_REFUSED_KIND,
   type PlaceStageEvent,
+  type PlaceAddJob,
+  withPlaceStage,
+  keptSaid,
+  markedCut,
+  refusalParts,
+  usageRefusal,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
   type PlaceAuthRequest,
@@ -455,6 +461,8 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
+  /** Every add over ssh still running and the last ADDS_KEPT that finished, oldest first. */
+  adds(): PlaceAddJob[];
   /** Puts the daemon this host deploys on one place where it is behind, then runs the recipe job on it. Refuses in
    * one sentence a place this host does not hold, and a computer that is behind on a runtime wired with no
    * updater; a computer already on this daemon takes the job alone. */
@@ -692,6 +700,13 @@ const DIAL_MS = 20_000;
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
 
+/** Finished adds kept beside the running ones, for a sheet opened after one ended to read what it came to. */
+const ADDS_KEPT = 20;
+/** An add names its own stream so its steps can arrive before its answer; a second add under a running one's name
+ * would land its steps on the first's job. */
+const ADD_RUNNING_LINE = "an add under that id is still running";
+const ADD_RUNNING_FIX = "Leave the id out, or name the add afresh.";
+
 /** What the box itself said while that wait ran out, where this host holds a login to it and the road to read it:
  * the agent's log names the address it could not dial and why. A read that will not take adds nothing, since the
  * sentence above it is the one the person came for. */
@@ -796,6 +811,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * the code became and the attach that follows wakes the install. The login the install logged in over is here
    * too, from the moment its ssh answered, since the record is written by whichever of the two lands second. */
   const awaiting = new Map<string, { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void }>();
+
+  /** The adds over ssh, oldest first, for the host's life: a finished one past the last ADDS_KEPT goes. */
+  const adds = new Map<string, PlaceAddJob>();
+  const putAdd = (addId: string, next: (job: PlaceAddJob) => PlaceAddJob): void => {
+    const job = adds.get(addId);
+    if (job === undefined) return;
+    adds.set(addId, next(job));
+    const finished = [...adds.values()].filter(j => j.state !== "running");
+    for (const gone of finished.slice(0, Math.max(0, finished.length - ADDS_KEPT))) adds.delete(gone.addId);
+  };
 
   /** The road the install came in over, written onto a record: the join frame the record is made from says nothing
    * about how the computer was reached, and every later dial, update and read of its log rides this login. */
@@ -1686,12 +1711,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const install = wiring.install;
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
+      if (adds.get(addId)?.state === "running") throw usageRefusal(ADD_RUNNING_LINE, ADD_RUNNING_FIX);
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note, placeId) => {
         if (state === "running") step = which;
-        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) });
+        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) };
+        putAdd(addId, job => withPlaceStage(job, said));
+        opts.onStage?.(said);
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
+      // Kept from here, where the catch below ends every add it starts: a job that never ends would read as running.
+      adds.delete(addId);
+      adds.set(addId, { addId, address: req.address, ...(req.sshPort !== undefined ? { sshPort: req.sshPort } : {}), startedAt: new Date(at).toISOString(), state: "running", steps: [] });
       const waiting: { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void } = {};
       awaiting.set(code, waiting);
       let installing = true;
@@ -1748,7 +1779,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // against the line it belongs to rather than under the list. One line of it: a note is printed after the
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
-        stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
+        const message = e instanceof Error ? e.message : String(e);
+        const { said, fix, kind } = refusalParts(e);
+        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
+        stage(step, "failed", markedCut(message.split("\n")[0]!));
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
         // The install took its join back off the box, so the record that join made names a computer that no longer
@@ -1832,6 +1866,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       });
       return { exitCode: Number(answer["exitCode"] ?? -1), stdout: String(answer["stdout"] ?? ""), stderr: String(answer["stderr"] ?? "") };
     },
+
+    adds: () => [...adds.values()],
 
     reportOf: async placeId => (await recordOf(placeId))?.report,
     homeOf: async placeId => (await recordOf(placeId))?.report.login["HOME"],

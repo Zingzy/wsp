@@ -12,6 +12,7 @@ vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({
 import { DEFAULT_PREFERENCES, type InitJob, type WorkspaceView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { FIRST_PAGE, useSettingsStore } from "../src/settings/settingsStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { Shell } from "../src/App.js";
 import { CLOSE_NOTICE_LABEL } from "../src/notices/Notice.js";
@@ -62,6 +63,7 @@ beforeEach(() => {
   window.localStorage.clear();
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, sessions: {}, ready: false, gaps: 0, settingsOpen: false, places: [], projects: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, preferences: DEFAULT_PREFERENCES });
   act(() => useNotices.getState().clear());
+  useSettingsStore.setState({ at: FIRST_PAGE });
 });
 
 afterEach(() => {
@@ -231,6 +233,18 @@ describe("the store's refusals", () => {
     expect([s.places, s.projects]).toEqual([[], []]);
     expect([s.placesRead, s.placesRefused?.said, s.projectsRead, s.projectsRefused?.said]).toEqual([true, "places file unreadable", true, "projects file unreadable"]);
     expect(said()).toEqual(expect.arrayContaining(["Computers not read: places file unreadable", "Projects not read: projects file unreadable"]));
+  });
+
+  it("says no notice for a refused place list while Computers, the page that draws it, is on screen", async () => {
+    useSettingsStore.setState({ at: { kind: "group", group: "computers" } });
+    useStore.setState({ settingsOpen: true });
+    await bindWith({
+      placesList: async () => { throw new RequestError("places file unreadable"); },
+      projectsList: async () => { throw new RequestError("projects file unreadable"); },
+    });
+    expect(useStore.getState().placesRefused?.said).toBe("places file unreadable");
+    expect(said()).not.toContain("Computers not read: places file unreadable");
+    expect(said()).toContain("Projects not read: projects file unreadable");
   });
 
   it("a ticket socket's refusal reads as not yours to see and says nothing", async () => {
