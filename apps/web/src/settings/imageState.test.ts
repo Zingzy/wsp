@@ -44,10 +44,17 @@ const read = (place: PlaceView, o: { view?: SealedImageView | null; job?: InitJo
   imageState(place, { view: o.view === undefined ? viewWith() : o.view, job: o.job ?? null, frames: o.frames ?? {} });
 
 describe("one reading of a computer's image", () => {
-  it("has nothing to say about a place that cannot hold the image, or on a host that does not say whether it can", () => {
+  it("has nothing to say about a place that cannot hold the image, whatever else it carries", () => {
     expect(read(here)).toBeUndefined();
-    const { buildsImages: _said, ...unsaid } = here;
-    expect(read(unsaid)).toBeUndefined();
+    expect(read({ ...here, build: copyStoppedLine("no such op"), buildStopped: true }, { frames: { here: [frame("failed", "here", "no such op")] } })).toBeUndefined();
+  });
+
+  it("reads what the row and the frames say where the host has not said whether the place can hold the image, and nothing with neither", () => {
+    const { buildsImages: _said, ...linked } = srv;
+    expect(read(linked, { view: viewWith(copyAt("p_1")) })).toBeUndefined();
+    expect(read({ ...linked, build: copyStoppedLine("no such op"), buildStopped: true }, { frames: { p_1: [frame("failed", "p_1", "no such op")] } })).toEqual({ kind: "stopped", said: copyStoppedLine("no such op") });
+    expect(read({ ...linked, build: copyStoppedLine("no such op"), buildStopped: true })).toEqual({ kind: "stopped", said: copyStoppedLine("no such op") });
+    expect(read(linked, { frames: { p_1: [frame("creating", "p_1")] } })).toEqual({ kind: "copying", line: copyBuildingLine("creating") });
   });
 
   it("reads none where no copy stands and nothing builds, whether or not the image exists elsewhere", () => {

@@ -34,10 +34,11 @@ function copyBuild(place: PlaceView, frames: ImageReads["frames"]): ImageState |
 
 /** What stands on this place, read in order: the image's own build running here, a copy building or stopped here,
  * the copy standing here, then a first build that stopped here. A rebuild that stopped leaves the standing image
- * readable; the job's own rows say why it stopped. Nothing for a place that cannot hold the image at all, or whose
- * host has not said whether it can. */
+ * readable; the job's own rows say why it stopped. Nothing for a place that cannot hold the image at all; where the
+ * host has not said whether it can, only what the row and the frames say. */
 export function imageState(place: PlaceView, reads: ImageReads): ImageState | undefined {
-  if (place.buildsImages !== true) return undefined;
+  if (place.buildsImages === false) return undefined;
+  if (place.buildsImages === undefined) return copyBuild(place, reads.frames);
   const { view, job } = reads;
   const jobHere = job !== null && job.place?.id === place.id;
   if (jobHere && initJobBuilding(job.phase)) return { kind: "building", job };

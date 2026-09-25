@@ -4876,6 +4876,9 @@ export const placeNoLinkLine = (name: string): string => `${name} took the agent
  * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
 export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
 
+/** Why a build on a joined computer stopped when that computer's link went and it never dialled back in time. */
+export const placeWentAwayLine = (name: string): string => `${name} went away before the build finished`;
+
 /** The refusal wsp add over ssh gets on a host that wired no installer: the road that puts the agent on a computer
  * is the host command's, so a runtime served without one holds no way onto a machine it has never met. */
 export const NO_PLACE_INSTALLER = "this host cannot install the agent on a computer over ssh; run wsp add with no argument for the line to type on that computer";

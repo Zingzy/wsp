@@ -192,17 +192,18 @@ describe("a copy of the image is built on a press", () => {
     await rt.close();
   });
 
-  it("a pressed build and a build kept current read one list of failures that are no stop of the row's", async () => {
+  it("any failure after a building frame ends the frames with a stop, once, on a press and on a build kept current alike", async () => {
     const { solari, rt, row, seal, sent } = providers();
     await seal();
     solari.create = async () => {
       throw new PlaceProvisioningError("the recipe on solari is still running");
     };
     await rt.image.build({ place: "solari" }).catch(() => undefined);
-    expect((await row("solari")).buildStopped).toBeUndefined();
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect(sent.filter(e => e.place === "solari").at(-1)).toMatchObject({ stage: "failed", detail: "the recipe on solari is still running" });
     await rt.image.keepCurrent("solari");
-    expect((await row("solari")).buildStopped).toBeUndefined();
-    expect(sent.filter(e => e.place === "solari" && e.stage === "failed")).toEqual([]);
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect(sent.filter(e => e.place === "solari" && e.stage === "failed")).toHaveLength(2);
     await rt.close();
   });
 

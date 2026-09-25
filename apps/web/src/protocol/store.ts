@@ -939,8 +939,7 @@ export const useStore = create<State>((set, get) => {
             const last = kept.at(-1);
             const ended = last !== undefined && copyBuildOf(last)?.stopped !== false;
             const goldenFrames = { ...s.goldenFrames, [word]: [...(ended ? [] : kept), e].slice(-GOLDEN_FRAMES_KEPT) };
-            // Both words name the same row: the create was asked with the row's id and the build's frames carry
-            // the word the backend table keys it by, so the row itself is what matches the two.
+            // The create may have been asked by the row's name while the frames carry its id, so the row matches the two.
             const at = s.places.find(p => placeNamed(p, word));
             const own = s.creations.find(c => c.failed === null && c.where !== undefined && (c.where === word || (at !== undefined && placeNamed(at, c.where))));
             const line = own === undefined ? undefined : imageBuildFrame(e, at === undefined ? word : placeName(at));
