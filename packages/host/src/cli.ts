@@ -43,7 +43,7 @@ import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedE
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
-import { adoptLoginPath } from "./login-path.js";
+import { adoptLoginPath, loginEnv } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { packSeed } from "./project-seed.js";
 import { readBrewTable } from "./init-brew.js";
@@ -101,7 +101,6 @@ import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
 import { agentLatest } from "./agent-latest.js";
 import { serversActs } from "./servers-acts.js";
-import { knock } from "./server-check.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
@@ -784,7 +783,7 @@ export function makeRuntime(
     vault: () => vaultNow(statePath),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.
-    agentsReader: agentsReader({ vault: () => vaultNow(statePath), knock, latest: agentLatest({ statePath, running: VERSION }).read }),
+    agentsReader: agentsReader({ vault: () => vaultNow(statePath), loginEnv, latest: agentLatest({ statePath, running: VERSION }).read }),
     // A key pasted in the app lands in the same vault, and the wsp tools an agent's config gets are the entry an
     // install writes: this same wsp against this state file.
     agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),

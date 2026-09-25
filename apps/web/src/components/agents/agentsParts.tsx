@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small pieces every level of the agents manager draws: an act as an xs
 // outline button with its glyph, a row's or a head's lead, the agents' marks
-// after a name, an MCP server's status as a dot and a word, and one pick of a
+// after a name, a status as a dot and a word on every tab, and one pick of a
 // few in a select.
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
@@ -16,20 +16,32 @@ import { Spinner } from "../ui/spinner.js";
 import { AGENTS_LIST_WORDS as W, agentNames, type RowAct, type PickOption } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import { useServerIcon } from "./useServerIcon.js";
-import type { Lead, ServerState, ServerStatus } from "./kinds/kind.js";
+import type { Lead, Status, Tone } from "./kinds/kind.js";
+
+/** An act standing in a row of 32 px controls, a search field beside it. */
+const TALL = "h-8 sm:h-8 px-2.5";
 
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
  * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it.
- * An act that asks first opens its confirmation, whose own button is the one red at rest. */
-export function ActButton({ act, className }: { act: RowAct; className?: string }) {
+ * An act that asks first opens its confirmation, whose own button is the one red at rest. `tall` stands it at the
+ * height of the controls beside it, and `wordClassName` may hide its word, which then stays its name. */
+export function ActButton({ act, className, k, tall = false, wordClassName }: { act: RowAct; className?: string; k?: string; tall?: boolean; wordClassName?: string }) {
   const [asking, setAsking] = useState(false);
   const boxed = act.run === undefined || act.hover !== undefined;
   const Icon = act.icon;
   const run = act.run === undefined ? undefined : act.confirm === undefined ? act.run : () => setAsking(true);
   const button = (
-    <Button data-k={`act-${act.id}`} size="xs" variant="outline" held={run === undefined} className={cn(act.destructive === true && DANGER_BUTTON, !boxed && className)} {...(run === undefined ? {} : { onClick: run })}>
+    <Button
+      data-k={k ?? `act-${act.id}`}
+      size="xs"
+      variant="outline"
+      held={run === undefined}
+      className={cn(act.destructive === true && DANGER_BUTTON, tall && TALL, !boxed && className)}
+      {...(wordClassName === undefined ? {} : { "aria-label": act.label })}
+      {...(run === undefined ? {} : { onClick: run })}
+    >
       {act.busy === true ? <Spinner className="size-3.5" /> : Icon === undefined ? null : <Icon aria-hidden className="size-3.5" />}
-      {act.label}
+      {wordClassName === undefined ? act.label : <span className={wordClassName}>{act.label}</span>}
     </Button>
   );
   const confirm =
@@ -120,25 +132,29 @@ export function AgentMarks({ agents }: { agents: readonly string[] }) {
   );
 }
 
-// The colour law's written exception: on this dot only, green is connected, amber needs sign-in, red failed.
-const DOTS: Record<ServerState, string> = {
-  connected: "bg-success",
-  "signed-in": "bg-success",
-  "needs-sign-in": "bg-warning",
-  failed: "bg-destructive",
-  open: "bg-foreground/30",
-  "env-key": "bg-foreground/30",
-  off: "bg-foreground/30",
-  unknown: "bg-foreground/30",
+// The colour law's written exception: on this dot only, green is working (connected, signed in, on), amber waits on
+// the person (needs sign-in), red is broken (failed).
+const DOTS: Record<Tone, string> = {
+  good: "bg-success",
+  waiting: "bg-warning",
+  bad: "bg-destructive",
+  quiet: "bg-foreground/30",
 };
 
-export function ServerStatusView({ status, className }: { status: ServerStatus; className?: string }) {
+/** A status as its dot, then its word in the muted mono, the word at one width from `checking` to its answer so what
+ * follows it never moves; a figure it answered with after the word. `fit` drops the width where nothing follows it. */
+export function StatusView({ status, className, fit = false }: { status: Status; className?: string; fit?: boolean }) {
   return (
-    <span data-k="server-status" data-state={status.state} className={cn("inline-flex min-w-0 items-center gap-1.5", className)} {...(status.hover === undefined ? {} : { title: status.hover })}>
-      <span data-status-dot aria-hidden className={cn("size-2 shrink-0 rounded-full", DOTS[status.state])} />
-      <span data-status-word className="truncate font-mono text-[11px] text-muted-foreground">
+    <span data-k="status" data-state={status.state} className={cn("inline-flex min-w-0 items-center gap-1.5", className)} {...(status.hover === undefined ? {} : { title: status.hover })}>
+      <span data-status-dot aria-hidden className={cn("size-2 shrink-0 rounded-full", DOTS[status.tone])} />
+      <span data-status-word className={cn("truncate font-mono text-[11px] text-muted-foreground", !fit && "min-w-[13ch]")}>
         {status.words}
       </span>
+      {status.count === undefined ? null : (
+        <span data-status-count className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+          {status.count}
+        </span>
+      )}
     </span>
   );
 }

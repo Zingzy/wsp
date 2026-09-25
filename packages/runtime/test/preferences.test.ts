@@ -127,7 +127,7 @@ describe("preferences over the wire", () => {
   it("agent version checks follow the person's switch: on by default, and once off the next agents read asks the reader not to ask the vendors", async () => {
     const asked: (boolean | undefined)[] = [];
     const agentsReader: AgentsReader = {
-      read: async (_on, _key, o) => (asked.push(o?.latest), { home: "/Users/ada", user: "ada", agents: [], skills: [], servers: [], refused: [] }),
+      read: async (_on, o) => (asked.push(o?.latest), { home: "/Users/ada", user: "ada", agents: [], skills: [], servers: [], refused: [] }),
       tools: async () => ({ auth: "open", readAt: "2026-09-26T12:00:00.000Z" }),
     };
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS, agentsReader });

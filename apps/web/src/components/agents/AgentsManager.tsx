@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The agents, MCP servers and skills on one computer or for one task, drawn
-// by two hosts: a task's right panel and a computer's page in Settings. A
-// head says whose they are, the tabs pick a kind, one toolbar searches,
-// groups and adds, and the list stands in groups with no rules between rows.
+// by two hosts: a task's right panel and a computer's page in Settings. The
+// tabs pick a kind; in the panel a line under them says what the tab holds on
+// which computer, whose name opens its page, and on the page a head says
+// whose they are. One toolbar searches, groups and adds while the list
+// stands, in groups with no rules between rows; any other level has its own
+// head in the toolbar's place.
 // A row opens its detail in place of the list, with Back; a kind may add a
 // level of rows under the detail and one row's own level under that, and an
 // add level in place of the list: a search that asks as the person pauses,
 // whose rows open the detail of one before it is added, or a form for what a
 // person types. Every kind is a registered module, so this file never names
 // one. Its root is the container every width rule reads.
-import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { offlineFor, type AgentsReport } from "@wsp/protocol";
 import { MICRO_LABEL } from "../../lib/microLabel.js";
@@ -24,7 +27,7 @@ import { Spinner } from "../ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import { ActButton } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, notYet, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
-import { HEAD, NARROW, TABS } from "./agentsWidths.js";
+import { NARROW, TABS } from "./agentsWidths.js";
 import { AgentsRow } from "./AgentsRow.js";
 import { AddFormLevel, AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
 import { AGENTS_KINDS } from "./kinds/index.js";
@@ -34,13 +37,13 @@ import { forgetServerIcons } from "./useServerIcon.js";
 
 export type { AgentsShell } from "./kinds/kind.js";
 
-/** What the head says: the panel's one line (whose these are, the project's folder on its name's hover), or the
- * page's one sentence. */
+/** What the head says: on the page its one sentence; in the panel the computer the rows are on, the road to its page,
+ * and the project the task works, its folder on its name's hover. */
 export interface AgentsHead {
-  readonly title?: ReactNode;
   readonly line?: string;
-  /** The link to the computer's own page, from a task's panel. */
-  readonly manage?: { readonly computer: string; readonly open: () => void };
+  readonly computer?: string;
+  readonly open?: () => void;
+  readonly project?: { readonly name: string; readonly path?: string };
 }
 
 export interface AgentsManagerProps {
@@ -168,7 +171,15 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     }
   };
 
-  const add: RowAct = onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: W.add, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+  const addWord = tab.add;
+  const add: RowAct | undefined =
+    addWord === undefined ? undefined : onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: addWord, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", addWord, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+  // Each time a tab shows a report, its kind asks what it checks there.
+  const shownRef = useRef<() => void>(() => {});
+  shownRef.current = () => tab.shown?.(items, ctx);
+  useEffect(() => {
+    if (report !== null) shownRef.current();
+  }, [tab.id, report]);
 
   const staleMark =
     staleWord === undefined ? null : (
@@ -176,25 +187,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         {staleWord}
       </span>
     );
-  const manage =
-    head.manage === undefined ? null : (
-      <>
-        <Button data-k="agents-manage" size="xs" variant="ghost-muted" className={cn("shrink-0", HEAD.linkHidden)} onClick={head.manage.open}>
-          <SlidersHorizontalIcon aria-hidden className="size-3.5" />
-          {W.manageAll(head.manage.computer)}
-        </Button>
-        <span className={cn("hidden", HEAD.glyphShown)}>
-          <Tooltip>
-            <TooltipTrigger render={<Button data-k="agents-manage-glyph" size="icon-xs" variant="ghost" aria-label={W.manageAll(head.manage.computer)} onClick={head.manage.open} />}>
-              <SlidersHorizontalIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">{W.manageAll(head.manage.computer)}</TooltipPopup>
-          </Tooltip>
-        </span>
-      </>
-    );
   const headRow =
-    head.title === undefined ? (
+    head.line === undefined ? null : (
       <div data-agents-head className="flex min-h-6 items-center gap-3 px-4 pb-3">
         <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground" title={head.line}>
           {head.line}
@@ -202,16 +196,28 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         {staleMark}
         {readAgain()}
       </div>
-    ) : (
-      <div data-agents-head className="flex items-center gap-2 px-4 pt-4 pb-3">
-        <h2 data-k="agents-title" className="min-w-0 truncate text-[13px] leading-6 font-medium text-foreground" {...(typeof head.title === "string" ? { title: head.title } : {})}>
-          {head.title}
-        </h2>
+    );
+  const [before, after] = tab.line(head.project?.name);
+  const tabLine =
+    head.computer === undefined ? null : (
+      <div data-agents-line className="flex min-h-6 items-center gap-3 px-4">
+        <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground">
+          {before}
+          {head.open === undefined ? (
+            <span data-k="agents-computer">{head.computer}</span>
+          ) : (
+            <button type="button" data-k="agents-computer" aria-label={W.openComputer(head.computer)} title={W.openComputer(head.computer)} onClick={head.open} className="cursor-pointer text-foreground/80 underline decoration-foreground/30 underline-offset-2 transition-colors duration-150 hover:text-foreground hover:decoration-foreground/60">
+              {head.computer}
+            </button>
+          )}
+          {after === "" ? null : (
+            <span data-k="agents-project" {...(head.project?.path === undefined ? {} : { title: head.project.path })}>
+              {after}
+            </span>
+          )}
+        </p>
         {staleMark}
-        <span className="-mr-1 ml-auto flex shrink-0 items-center gap-1">
-          {manage}
-          {readAgain()}
-        </span>
+        {readAgain()}
       </div>
     );
 
@@ -274,10 +280,11 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     </div>
   );
 
+  // The toolbar is the list's own: any other level draws its head in its place, and Back finds the query kept.
   const toolbar =
-    tab.search === undefined ? null : (
+    tab.search === undefined || at.kind !== "list" ? null : (
       <div data-agents-toolbar className="flex h-8 items-center gap-1.5 px-4">
-        <InputGroup variant="ghost" className="-ms-3 h-8 min-w-0 flex-1">
+        <InputGroup className="h-8 min-w-0 flex-1">
           <InputGroupAddon>
             <SearchIcon aria-hidden />
           </InputGroupAddon>
@@ -310,7 +317,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         {tab.groupings.length === 0 ? null : (
           <Menu>
             <Tooltip>
-              <TooltipTrigger render={<MenuTrigger render={<Button data-k="agents-view" size="icon" variant="ghost" aria-label={W.groupAndSort} />} />}>
+              <TooltipTrigger render={<MenuTrigger render={<Button data-k="agents-view" size="icon" variant="ghost" className="size-8" aria-label={W.groupAndSort} />} />}>
                 <ListFilterIcon className="size-4" />
               </TooltipTrigger>
               <TooltipPopup side="bottom">{W.groupAndSort}</TooltipPopup>
@@ -336,12 +343,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
             </MenuPopup>
           </Menu>
         )}
-        <span className="inline-flex shrink-0" title={add.hover ?? tab.add}>
-          <Button data-k="agents-add" size="default" variant="outline" aria-label={add.id === "edit-image" ? W.editImage : tab.add} held={add.run === undefined} {...(add.run === undefined ? {} : { onClick: add.run })}>
-            {add.icon === undefined ? null : <add.icon aria-hidden className="size-4" />}
-            <span className={TABS.addWordHidden}>{add.label}</span>
-          </Button>
-        </span>
+        {add === undefined ? null : <ActButton act={{ ...add, hover: add.hover ?? add.label }} k="agents-add" tall wordClassName={TABS.addWordHidden} className="shrink-0" />}
       </div>
     );
 
@@ -364,7 +366,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
       ) : page ? (
         <div data-k="agents-empty" className="mx-4 flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-lg bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-size-[12px_12px]">
           <span className="rounded-md border border-dashed border-border bg-background px-2 py-1 font-mono text-xs text-muted-foreground">{tab.none}</span>
-          <ActButton act={{ ...add, label: add.id === "edit-image" ? W.editImage : tab.add }} />
+          {add === undefined ? null : <ActButton act={add} />}
         </div>
       ) : (
         <p data-k="agents-empty" className={emptyBox}>
@@ -435,14 +437,16 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page ? "px-[5px]" : "min-h-0 flex-1")}>
       {/* The page scrolls as a whole, so its head pins over the list on the page's grained ground; the panel's head
           stands still and only the list under it scrolls, since the panel's ground is the glass and clear. */}
-      <div data-agents-top className={cn("flex flex-col pb-1", page ? "sticky top-0 z-10 bg-background surface-grain" : "flex-none")}>
+      <div data-agents-top className={cn("flex flex-col pb-1", page ? "sticky top-0 z-10 bg-background surface-grain" : "flex-none pt-4")}>
         {headRow}
         <div className="flex flex-col gap-3">
           {tabs}
+          {tabLine}
           {toolbar}
         </div>
       </div>
-      <div data-agents-body className={cn("flex flex-col pt-2", !page && "min-h-0 flex-1 overflow-y-auto", dim && at.kind !== "list" && "opacity-50")}>
+      {/* The list's end keeps the rows' own side gutter under the last one. */}
+      <div data-agents-body className={cn("flex flex-col pt-2 pb-2", !page && "min-h-0 flex-1 overflow-y-auto", dim && at.kind !== "list" && "opacity-50")}>
         {at.kind === "list" ? list : levelView}
         {at.kind !== "list" || lines.length === 0 ? null : (
           <div data-agents-refused className="mt-2 flex flex-col px-4">

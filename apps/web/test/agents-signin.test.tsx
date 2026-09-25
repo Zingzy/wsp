@@ -114,7 +114,7 @@ describe("signing an agent in from its row", () => {
     fireEvent.click(openButton);
     expect(opened).toHaveBeenCalledWith("https://auth.openai.com/codex/device", "_blank", "noopener,noreferrer");
     back();
-    expect(rowEl("agent-codex").querySelector("[data-row-state]")?.textContent).toBe(AGENTS_LIST_WORDS.waitingOnYou);
+    expect(rowEl("agent-codex").querySelector("[data-row-status] [data-status-word]")?.textContent).toBe(AGENTS_LIST_WORDS.waitingOnYou);
     openRow("agent-codex");
     act(() => h.started[0]!.step({ state: "signed-in" }));
     expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();

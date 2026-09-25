@@ -44,8 +44,8 @@ export interface ServerToolsAsk {
 /** How the host reads the agents off a target, and asks one server there for its tools. Absent on a runtime wired
  * without it, where every read is refused. */
 export interface AgentsReader {
-  /** `key` names the target, which what a read checks is kept under; `latest` false asks no vendor for a newest version. */
-  read(on: AgentsOn, key?: string, ask?: { latest?: boolean }): Promise<AgentsRead>;
+  /** `latest` false asks no vendor for a newest version. */
+  read(on: AgentsOn, ask?: { latest?: boolean }): Promise<AgentsRead>;
   /** Drops what was kept for the target, which a sign-in there has just changed. */
   forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
@@ -335,7 +335,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const { runAs, ...read } = await reader.read(on, JSON.stringify(target), { latest: (await o.latestOn?.()) ?? true });
+      const { runAs, ...read } = await reader.read(on, { latest: (await o.latestOn?.()) ?? true });
       const report = stamped(target, { ...read, reach: pageReachOf(on, runAs) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;

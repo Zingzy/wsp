@@ -68,6 +68,30 @@ export async function takeLoginPath(deps: LoginShellDeps): Promise<void> {
   deps.env["PATH"] = path;
 }
 
+/** Every variable `env -0` printed, NUL between them; the first carries whatever an rc file printed before it, which
+ * ends at its last newline. */
+export function loginEnvOf(out: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  out.split("\0").forEach((entry, at) => {
+    const line = at === 0 ? entry.slice(entry.lastIndexOf("\n") + 1) : entry;
+    const eq = line.indexOf("=");
+    if (eq > 0 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(line.slice(0, eq))) env[line.slice(0, eq)] = line.slice(eq + 1);
+  });
+  return env;
+}
+
+let loginEnvRead: Promise<Readonly<Record<string, string>>> | undefined;
+
+/** The person's login shell environment, read once per process the way its PATH is, for a process that should see what
+ * their own agent sees; nothing where the shell fails. */
+export function loginEnv(): Promise<Readonly<Record<string, string>>> {
+  const shell = process.env["SHELL"];
+  return (loginEnvRead ??=
+    shell === undefined || shell === ""
+      ? Promise.resolve({})
+      : new Promise(resolve => execFile(shell, ["-ilc", "env -0"], { timeout: SHELL_LIMIT_MS, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (e, stdout) => resolve(e === null ? loginEnvOf(stdout) : {}))));
+}
+
 let taken: Promise<void> | undefined;
 
 /** The login shell is asked once per process, at the host's start and before it looks any command up. */

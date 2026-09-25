@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One row of any kind at its kind's one height, split from the next by 2 px
 // and no rule: the lead, the name with the agents' marks after it, one fact
-// under it, an agent's state or a server's status under that, and at the right
-// end the one step it needs, or the word off where it is turned off. The row is one button whose ::before carries the
+// under it, its status as a dot and a word under that, and at the right end
+// the one step it needs, or off with its dot where it is turned off. The row is one button whose ::before carries the
 // hover over the whole block; the step is a sibling that lets the pointer
 // through except on its own button, so no button stands inside a button and
 // Tab reaches the row, then its step.
 import { cn } from "../../lib/utils.js";
-import { FACT } from "../../settings/format.js";
-import { ActButton, AgentMarks, LeadMark, ServerStatusView } from "./agentsParts.js";
+import { ActButton, AgentMarks, LeadMark, StatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import type { RowView } from "./kinds/kind.js";
 
@@ -37,21 +36,16 @@ export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; h
               {row.subtext}
             </span>
           )}
-          {row.state === undefined ? null : (
-            <span data-row-state className="truncate font-mono text-xs leading-4 tabular-nums text-muted-foreground">
-              {row.state}
-            </span>
-          )}
           {row.status === undefined ? null : (
-            <span className="mt-1.5 flex">
-              <ServerStatusView status={row.status} />
+            <span data-row-status className="mt-1.5 flex">
+              <StatusView status={row.status} />
             </span>
           )}
         </span>
       </button>
       {step !== undefined || row.off !== true ? null : (
-        <span data-row-word className={cn(FACT, "shrink-0")}>
-          {W.off}
+        <span data-row-word className="flex shrink-0">
+          <StatusView status={{ state: "off", tone: "quiet", words: W.off }} fit />
         </span>
       )}
       {step === undefined ? null : (

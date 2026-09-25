@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's host of the agents manager: what a task can use, read on
 // its own machine, the computer's own rows and its project's, drawn at the
-// panel's width. The head says which computer and which project, the
-// project's folder on its name's hover, and links to that computer's page,
-// where everything on it is managed. A task on a box offers no act of its
+// panel's width. Each tab's line names the computer, whose name opens that
+// computer's page where everything on it is managed, and the project, its
+// folder on its name's hover. A task on a box offers no act of its
 // own, since what is installed is that box's; a fork at a cloud is a copy of
 // the image, so its one act is Edit image.
 import { HERE_PLACE_ID, isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
@@ -29,7 +29,6 @@ const projectPath = (workspace: WorkspaceView): string | undefined => {
 };
 
 export const PANEL_WORDS = {
-  on: (computer: string): string => `On ${computer}, for `,
   fork: (workspace: string, cloud: string): string => `${workspace} (${cloud})`,
 } as const;
 
@@ -51,23 +50,14 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const path = workspace === null ? undefined : projectPath(workspace);
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
   const head: AgentsHead = {
-    title: (
-      <>
-        {PANEL_WORDS.on(computer)}
-        <span data-k="agents-project" {...(path === undefined ? {} : { title: path })}>
-          {project}
-        </span>
-      </>
-    ),
+    computer,
+    ...(project === "" ? {} : { project: { name: project, ...(path === undefined ? {} : { path }) } }),
     ...(placeId === undefined
       ? {}
       : {
-          manage: {
-            computer: where === "here" ? THIS_COMPUTER_WORD : (cloud ?? ""),
-            open: () => {
-              useSettingsStore.getState().go({ kind: "computer", id: placeId });
-              useStore.getState().openSettings();
-            },
+          open: () => {
+            useSettingsStore.getState().go({ kind: "computer", id: placeId });
+            useStore.getState().openSettings();
           },
         }),
   };
