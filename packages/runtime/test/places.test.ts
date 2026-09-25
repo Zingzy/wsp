@@ -47,7 +47,6 @@ import {
   MINT_JOIN_REFUSAL,
   PLACES_WORDS,
   SSH_HOSTS_REFUSAL,
-  deviceHeldRefusal,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeNoHomeLine,
