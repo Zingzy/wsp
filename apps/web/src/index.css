@@ -2142,6 +2142,16 @@ code {
   --chat-composer-glass-surface: rgb(24 24 26);
 }
 
+/* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
+   the whole column onto the thread and the header, and the drawer's own ground stays clear. */
+html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) [data-shell-center] {
+  background: transparent;
+}
+
+html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside]) {
+  background: rgb(6 6 6 / var(--material-centre));
+}
+
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
   background: rgb(6 6 6 / var(--material-panel));
   border-color: var(--contrast-border);
