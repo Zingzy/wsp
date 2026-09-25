@@ -12,7 +12,7 @@ import { Button } from "../ui/button.js";
 import { Input } from "../ui/input.js";
 import { Spinner } from "../ui/spinner.js";
 import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
-import { SignInCode } from "../../sidebar/cloud-setup/SignInCode.js";
+import { SignInCode } from "../../settings/recipe/SignInCode.js";
 import { AGENTS_LIST_WORDS, type FlowView } from "./agentsRows.js";
 
 const LABEL = "text-xs text-muted-foreground";

@@ -26,6 +26,8 @@ export interface ScreenAction {
   focus?: boolean;
   /** The one quiet destructive link a step may carry. */
   destructive?: boolean;
+  /** The confirmation of that act, the one place red stands at rest: the solid destructive button. */
+  confirm?: boolean;
   /** Why the action is disabled, as its tooltip. */
   title?: string;
   /** The keycap while the host is answering it: the arrow gives way to the spinner and the press does not repeat. */
@@ -92,21 +94,26 @@ export function SetupScreen({
       </Tooltip>
     );
   const secondaryHeld = secondary !== undefined && secondary.disabled === true;
-  const quietLink = (k: string, action: ScreenAction, held: boolean): ReactNode => (
-    <Button
-      data-k={k}
-      variant="link"
-      onClick={action.onPress}
-      disabled={held}
-      className={cn(
-        "h-auto p-0 text-[15px] disabled:opacity-50 sm:text-[15px]",
-        // A destructive link is quiet at rest and shows its tone only when the pointer or focus is on it.
-        action.destructive === true ? "text-muted-foreground transition-colors duration-150 hover:text-destructive-foreground focus-visible:text-destructive-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {action.word}
-    </Button>
-  );
+  const quietLink = (k: string, action: ScreenAction, held: boolean): ReactNode =>
+    action.confirm === true ? (
+      <Button data-k={k} variant="destructive" size="sm" onClick={action.onPress} disabled={held}>
+        {action.word}
+      </Button>
+    ) : (
+      <Button
+        data-k={k}
+        variant="link"
+        onClick={action.onPress}
+        disabled={held}
+        className={cn(
+          "h-auto p-0 text-[15px] disabled:opacity-50 sm:text-[15px]",
+          // A destructive link is quiet at rest and shows its tone only when the pointer or focus is on it.
+          action.destructive === true ? "text-muted-foreground transition-colors duration-150 hover:text-destructive-foreground focus-visible:text-destructive-foreground" : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {action.word}
+      </Button>
+    );
   const secondaryLink = secondary !== undefined ? quietLink("secondary", secondary, secondaryHeld) : null;
   const asideLink = aside !== undefined ? quietLink("aside", aside, aside.disabled === true) : null;
   return (

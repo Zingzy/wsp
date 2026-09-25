@@ -324,7 +324,7 @@ describe("the cloud setup sheet", () => {
   });
 
   it("a key the provider refused stays on the step: the field takes the danger tone with the provider's own word under it, and no job starts", async () => {
-    const line = keyRefusedLine("401 Unauthorized");
+    const line = keyRefusedLine("401 Unauthorized", "solari");
     const t = await open({ key: { refusal: { message: line, kind: KEY_REFUSED } } });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
     fireEvent.click(k(t.dialog, "primary"));
@@ -349,7 +349,7 @@ describe("the cloud setup sheet", () => {
   });
 
   it("a check nothing answered says so in the same place, and the keycap turns to Try again", async () => {
-    const line = keyUncheckedLine("fetch failed");
+    const line = keyUncheckedLine("fetch failed", "solari");
     const t = await open({ key: { refusal: { message: line, kind: KEY_UNCHECKED } } });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
     fireEvent.click(k(t.dialog, "primary"));
@@ -1029,6 +1029,9 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(k(dialog, "secondary"));
     expect(api.initCancel).not.toHaveBeenCalled();
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelSure);
+    // The confirmation is the one solid destructive button; the trigger before it was a quiet link.
+    expect(k(dialog, "secondary").className).toContain("bg-destructive");
+    expect(k(dialog, "aside").className).not.toContain("bg-destructive");
     expect(k(dialog, "note").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelWhy);
     // The question is one block in the footer: the two answers side by side under the sentence, nothing under the card.
     const links = k(dialog, "links");
@@ -1270,7 +1273,7 @@ describe("the cloud setup sheet", () => {
   });
 
   it("a build that could not ask the provider about the key offers Start over: the saved key may be fine", async () => {
-    const line = keyUncheckedLine("fetch failed");
+    const line = keyUncheckedLine("fetch failed", "solari");
     const rows = keyStoppedRows(line);
     const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows, progress: { done: 0, total: rows.length }, error: line };
     const t = await open({ setup: { ...HELD, job: stopped } });

@@ -117,11 +117,12 @@ export function useRecipeJob() {
     const harness = job?.thread?.harness;
     if (harness !== undefined) startRoad({ road: "agent", harness });
   };
-  /** Starts the build. The first launch's answer for the MCP rows rides with it: the agents here it configured. */
-  const build = async (agents: readonly InitAgent[], o: { firstWorkspace?: string; importFolder?: string; on?: string }): Promise<void> => {
+  /** Starts the build. The first launch's answer for the MCP rows rides with it: the agents here it configured. A
+   * stop pressed on the way sends no build after it. */
+  const build = async (agents: readonly InitAgent[], o: { firstWorkspace?: string; importFolder?: string; on?: string }, stopped: () => boolean = () => false): Promise<void> => {
     const firstLaunch = job?.screens.find(s => s.id === FIRST_LAUNCH_SCREEN);
-    if (firstLaunch !== undefined) await api!.initAnswer!({ screen: firstLaunch.id, ticks: agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });
-    await api!.initBuild!(o);
+    if (firstLaunch !== undefined && !stopped()) await api!.initAnswer!({ screen: firstLaunch.id, ticks: agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });
+    if (!stopped()) await api!.initBuild!(o);
   };
   return { api, job, draft, setDraft, refusal, setRefusal, busy, keep, attempt, draftAt, imageAt, edit, answer, stepTo, startOver, startRoad, retryAgent, build };
 }

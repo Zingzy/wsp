@@ -14,7 +14,7 @@ import { basename, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
+import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, savedKeyStoppedLine, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -41,9 +41,11 @@ const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "
 /** The rows the host leaves when the saved key is refused, in the order a client draws them. The app's fixture and
  * its dialog test stand in for this job (apps/web/test/cloud-setup/keyRefusedJob.ts), so a change here is a change
  * there; the words themselves are the protocol's, which both sides read. */
+/** The place the fake runtime builds at when nothing names one. */
+const FAKE_PLACE = "default";
 const waitingStage = (id: keyof typeof GOLDEN_STAGE_WORDS): unknown[] => [`stage/${id}`, INIT_ROW_STATES.waiting, undefined];
 const KEY_REFUSED_ROWS = [
-  ["stage/creating", INIT_ROW_STATES.failed, savedKeyRefusedLine("401 Unauthorized")],
+  ["stage/creating", INIT_ROW_STATES.failed, savedKeyRefusedLine("401 Unauthorized", FAKE_PLACE)],
   ...(["deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp", "ready"] as const).map(waitingStage),
   ["sign-in/claude", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
   ["sign-in/gh", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
@@ -1287,10 +1289,19 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.build({})).rejects.toThrow(NO_BUILD_PLACE_LINE);
   });
 
+  it("a Box key typed on the keys door that Box refuses, or that nothing answered about, says Box and not Solari", async () => {
+    const f = fake({ env: {} });
+    f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    await expect(f.jobs.keys({ provider: "box", key: "box_live_wrong" })).rejects.toMatchObject({ message: "Box by ASCII refused this key: 401 Unauthorized", kind: KEY_REFUSED });
+    f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    await expect(f.jobs.keys({ provider: "box", key: "box_live_maybe" })).rejects.toMatchObject({ message: "Box by ASCII could not be reached to check the key: fetch failed", kind: KEY_UNCHECKED });
+    expect(f.saved).toEqual([]);
+  });
+
   it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
     const f = fake({ env: {} });
     f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
-    await expect(f.jobs.keys({ key: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    await expect(f.jobs.keys({ key: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized", "solari"));
     expect(f.backend.keyChecks).toBe(1);
     // Nothing was written and no provider module was swapped in, so the setup cannot move on with a refused key.
     expect(f.saved).toEqual([]);
@@ -1327,7 +1338,7 @@ describe("the init job, manual road", () => {
   it("a check nothing answered says so instead of blaming the key, and its kind marks it worth pressing again", async () => {
     const f = fake({ env: {} });
     f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
-    await expect(f.jobs.keys({ key: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed"), kind: KEY_UNCHECKED });
+    await expect(f.jobs.keys({ key: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed", "solari"), kind: KEY_UNCHECKED });
     expect(f.saved).toEqual([]);
     expect((await f.jobs.get()).keys).toEqual({ box: false, solari: false });
   });
@@ -1343,20 +1354,20 @@ describe("the init job, manual road", () => {
     await f.settled();
     const stopped = f.jobs.view()!;
     expect(stopped.phase).toBe("failed");
-    expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized"));
+    expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized", FAKE_PLACE));
     expect(stopped.keyRefused).toBe(true);
     // The run says the refusal and then the one way on; never the generic sentence, and never a machine, since the
     // refusal was read before anything could boot.
     const said = stopped.log.join("\n");
-    expect(said).toContain(savedKeyRefusedLine("401 Unauthorized"));
-    expect(said).toContain(SAVED_KEY_STOPPED_LINE);
+    expect(said).toContain(savedKeyRefusedLine("401 Unauthorized", FAKE_PLACE));
+    expect(said).toContain(savedKeyStoppedLine(FAKE_PLACE));
     expect(said).not.toContain("Nothing was booted");
     expect(f.backend.machines).toEqual([]);
     expect(f.backend.keyChecks).toBe(1);
     // The rows the host leaves, which are what every client draws and what the app's fixture stands in for: the first
     // stage failed with the refusal as its line, and every row after it reads as one the build never reached.
     expect(stopped.rows.map(r => [r.id, r.state, r.detail])).toEqual(KEY_REFUSED_ROWS);
-    expect(stopped.rows.find(r => r.id === "stage/creating")!.lines).toEqual([savedKeyRefusedLine("401 Unauthorized")]);
+    expect(stopped.rows.find(r => r.id === "stage/creating")!.lines).toEqual([savedKeyRefusedLine("401 Unauthorized", FAKE_PLACE)]);
     // Nothing on it reads as work done: the count is none of them, so the bar cannot read as progress.
     const { rows } = initBuildRows(stopped.rows);
     expect(initStageCount(rows).done).toBe(0);
@@ -1375,7 +1386,7 @@ describe("the init job, manual road", () => {
     await f.settled();
     const stopped = f.jobs.view()!;
     expect(stopped.phase).toBe("failed");
-    expect(stopped.error).toBe(keyUncheckedLine("fetch failed"));
+    expect(stopped.error).toBe(keyUncheckedLine("fetch failed", FAKE_PLACE));
     expect(stopped.keyRefused).toBeUndefined();
     expect(f.backend.machines).toEqual([]);
   });
@@ -1389,7 +1400,44 @@ describe("the init job, manual road", () => {
     await f.settled();
     expect(f.jobs.view()!.phase).toBe("done");
     expect(f.backend.keyChecks).toBe(1);
-    expect(CLOUD_SETUP_WORDS.keys.refusedSaved).toBe("Solari refused the saved key");
+    expect(CLOUD_SETUP_WORDS.keys.refusedSaved("solari")).toBe("Solari refused the saved key");
+  });
+
+  it("a build at Box asks Box about its saved key and never the wired provider, and says Box refused it", async () => {
+    const REFUSED = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    const twoPlaces = () => {
+      const box = stubBackend();
+      const f = fake({ places: wired => { box.execImpl = wired.execImpl; return { wired: "solari", backend: p => (p === "solari" ? wired : p === "box" ? box : undefined), list: () => ["solari", "box"] }; } });
+      saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+      return { f, box };
+    };
+    // Box refuses its key and Solari would take its own: the build at Box stops on Box's refusal.
+    const refused = twoPlaces();
+    refused.box.keyRefusal = REFUSED;
+    await refused.f.jobs.start({ road: "terminal" });
+    await refused.f.settled();
+    await refused.f.jobs.build({ on: "box" });
+    await refused.f.settled();
+    expect([refused.box.keyChecks, refused.f.backend.keyChecks]).toEqual([1, 0]);
+    const stopped = refused.f.jobs.view()!;
+    expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized", "box"));
+    expect(stopped.error).toBe("Box by ASCII refused the saved key: 401 Unauthorized");
+    expect(stopped.keyRefused).toBe(true);
+    expect(refused.box.machines).toEqual([]);
+    // The way on names the same provider: the key to save is a Box key.
+    const said = stopped.log.join("\n");
+    expect(said).toContain("Save a key Box by ASCII takes and run wsp init again; nothing booted, and the recipe is kept.");
+    expect(said).not.toContain("Solari");
+    // Solari refuses its key and Box takes its own: the build at Box goes on, and Solari is never asked.
+    const taken = twoPlaces();
+    taken.f.backend.keyRefusal = REFUSED;
+    await taken.f.jobs.start({ road: "terminal" });
+    await taken.f.settled();
+    await taken.f.jobs.build({ on: "box" });
+    await taken.f.settled();
+    expect([taken.box.keyChecks, taken.f.backend.keyChecks]).toEqual([1, 0]);
+    expect(taken.f.jobs.view()).toMatchObject({ phase: "done" });
+    expect(taken.f.jobs.view()!.keyRefused).toBeUndefined();
   });
 });
 
