@@ -68,7 +68,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
         }),
   };
   return (
-    <div data-k="agents-surface" className="min-h-0 flex-1 overflow-y-auto">
+    <div data-k="agents-surface" className="flex min-h-0 flex-1 flex-col">
       <AgentsManager
         shell="panel"
         head={head}

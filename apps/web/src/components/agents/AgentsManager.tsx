@@ -365,16 +365,17 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
 
   return (
     // On the page the content stands on the cards' text edge, their hairline and px-5, 5 px past the panel's.
-    <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page && "px-[5px]")}>
-      {/* Pinned over the list on the surface it stands on: the page's grained main surface, the panel's flat one. */}
-      <div data-agents-top className={cn("sticky top-0 z-10 flex flex-col bg-background pb-1", page && "surface-grain")}>
+    <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page ? "px-[5px]" : "min-h-0 flex-1")}>
+      {/* The page scrolls as a whole, so its head pins over the list on the page's grained ground; the panel's head
+          stands still and only the list under it scrolls, since the panel's ground is the glass and clear. */}
+      <div data-agents-top className={cn("flex flex-col pb-1", page ? "sticky top-0 z-10 bg-background surface-grain" : "flex-none")}>
         {headRow}
         <div className="flex flex-col gap-3">
           {tabs}
           {toolbar}
         </div>
       </div>
-      <div data-agents-body className={cn("flex flex-col pt-2", dim && at.kind !== "list" && "opacity-50")}>
+      <div data-agents-body className={cn("flex flex-col pt-2", !page && "min-h-0 flex-1 overflow-y-auto", dim && at.kind !== "list" && "opacity-50")}>
         {at.kind === "list" ? list : levelView}
         {at.kind !== "list" || lines.length === 0 ? null : (
           <div data-agents-refused className="mt-2 flex flex-col px-4">
