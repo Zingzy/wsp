@@ -7,7 +7,7 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -597,9 +597,9 @@ describe("the cloud's page", () => {
   };
   const copy = { place: "hetzner", version: 1, hash: HASH, snapshotId: "snap_h", builtAt: "2026-09-12T10:00:00.000Z", sizeBytes: 4.2 * 1024 ** 3 };
 
-  it("carries the spend as a line, the Image card with Edit image in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
+  it("carries the spend as a line, the Image card with what the image holds and Edit in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
     const api = computersApi(
-      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }] } as Partial<Api>,
+      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
@@ -609,15 +609,14 @@ describe("the cloud's page", () => {
     expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr");
     expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["cloud", "image", "agents", "copies", "acts"]);
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
-    expect(document.querySelector("[data-k='edit-image']")?.textContent).toBe(IMAGE_WORDS.edit);
+    expect(document.querySelector("[data-k='edit-recipe']")?.textContent).toBe(IMAGE_WORDS.holdsEdit);
     expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 · ${COPY_CURRENT} · 4.2 GB · `))]]);
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
-    fireEvent.click(document.querySelector("[data-k='edit-image']")!);
-    expect(useStore.getState().setupOpen).toBe(true);
+    fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
     await settle();
-    expect(document.querySelector("[data-cloud-setup-dialog]")).not.toBeNull();
-    act(() => useStore.getState().closeSetup());
-    await settle();
+    // The recipe opens in the card, never the setup sheet.
+    expect(useStore.getState().setupOpen).toBe(false);
+    expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
   });
 
   it("says nothing about the image on a cloud whose key this host does not hold, and draws no card with nothing in it", async () => {

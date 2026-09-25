@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobBuilding, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { vaultOf } from "./env-keys.js";
@@ -105,6 +105,8 @@ const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 
 /** The build rows' state words are the protocol's; the stage rows read the terminal's own start, end and fail words. */
 const STATE = INIT_ROW_STATES;
+/** The one-job refusal: a start or a build while a job is running or building. */
+const JOB_RUNNING = "an init job is already running; cancel it or let it finish first";
 
 /** Whether a road's answers arrive on the recipe beside the state rather than from screens a client answers. Read
  * once, here: on such a road that file is the whole answer, so the build keeps its sign-ins as they were written
@@ -341,7 +343,7 @@ export class InitJobs implements InitDoor {
   }
 
   async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
-    if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error("an init job is already running; cancel it or let it finish first");
+    if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error(JOB_RUNNING);
     this.count += 1;
     // A sweep that ended stays on the job it belonged to and no further; one still trying rides on.
     for (const [id, row] of this.sweeps) if (row.state !== STATE.retrying) this.sweeps.delete(id);
@@ -456,12 +458,23 @@ export class InitJobs implements InitDoor {
   }
 
   async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string; rebuild?: boolean }): Promise<InitJob> {
+    if (this.state !== undefined && initJobBuilding(this.state.phase)) throw new Error(JOB_RUNNING);
     const s = this.answering();
     const saved = this.deps.saved();
     // The place the image is built on is what builds, not the key a road once named: a joined computer whose daemon
     // runs workspaces builds with no key at all, and a host with no such place is refused before anything reads
-    // this computer.
-    const built = await this.buildPlace(o.on);
+    // this computer. The job is building from here, so a second build sent during that answer boots no second
+    // builder; a refused place puts it back on its screens.
+    s.phase = "building";
+    let built: Awaited<ReturnType<InitJobs["buildPlace"]>>;
+    try {
+      built = await this.buildPlace(o.on);
+    } catch (e) {
+      if (!s.cancelled) s.phase = "answering";
+      throw e;
+    }
+    // A cancel sent during that answer, or a new job started over it, stops here, before any builder boots.
+    if (s.cancelled || this.state !== s) return this.view()!;
     const reading = s.reading!;
     const answers = s.answers!;
     const path = smallRecipePath(this.deps.statePath);
@@ -480,10 +493,10 @@ export class InitJobs implements InitDoor {
     // fill in the page and the outcome when they reach it, and a row the run never reaches ends as skipped, said so.
     for (const row of this.chosenSignIns(s)) s.rows.push(row);
     const first = firstWorkspaceName(o.firstWorkspace);
-    // The import rides the fork, so with no name the folder goes with it and the row below says why for both.
+    // The import rides the fork, so with no name there is no folder to land either, and no row for either: a step
+    // nobody was asked is not counted.
     const folder = first === undefined ? undefined : folderOf(o.importFolder);
-    // The workspace row is drawn either way, so the list never ends on a step whose answer nobody can read.
-    s.rows.push(first === undefined ? { id: "workspace", kind: "workspace", label: CLOUD_SETUP_WORDS.ask.headline, state: STATE.skipped, detail: NO_FIRST_WORKSPACE } : { id: `workspace/${first}`, kind: "workspace", label: first, state: STATE.waiting });
+    if (first !== undefined) s.rows.push({ id: `workspace/${first}`, kind: "workspace", label: first, state: STATE.waiting });
     if (folder !== undefined) s.rows.push({ id: `project/${folder}`, kind: "project", label: basename(folder), state: STATE.waiting });
     this.emit();
     const offs: (() => void)[] = [];

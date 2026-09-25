@@ -11,7 +11,7 @@
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { DaemonErrorCode } from "@wsp/protocol";
 import { RefusalSlot } from "../settings/sheetParts.js";
-import { FIELD, FIELD_LABEL } from "../sidebar/cloud-setup/rows.js";
+import { FIELD, FIELD_LABEL } from "../settings/recipe/rows.js";
 import { Input } from "../components/ui/input.js";
 import { cn } from "../lib/utils.js";
 

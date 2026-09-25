@@ -19,8 +19,9 @@ import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
 import { cn } from "../../lib/utils.js";
-import { MICRO_LABEL } from "./SetupScreen.js";
 
+/** The caps mono label a step's count and a group divider wear. */
+export const MICRO_LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
 export const STATE_WORD = "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 export const CARD = "w-full overflow-hidden rounded-[10px] border border-border bg-card text-left";
 /** How many 48 px rows a card shows before it scrolls. */

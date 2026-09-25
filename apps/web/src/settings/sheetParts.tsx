@@ -10,7 +10,7 @@ import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { cn } from "../lib/utils.js";
-import { STATE_WORD } from "../sidebar/cloud-setup/rows.js";
+import { STATE_WORD } from "./recipe/rows.js";
 
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
 const COPIED_MS = 1_400;

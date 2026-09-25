@@ -12,8 +12,8 @@ import { Button } from "../../components/ui/button.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
+import { MICRO_LABEL } from "../../settings/recipe/rows.js";
 
-export const MICRO_LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
 /** The least room over the label and under the footer, once the step is taller than the window's middle. */
 export const TOP_MARGIN_MIN = 48;
 export const BOTTOM_MARGIN_MIN = 40;
