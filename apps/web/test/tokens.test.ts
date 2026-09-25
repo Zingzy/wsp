@@ -81,7 +81,7 @@ describe("index.css", () => {
         border-color: var(--sidebar-border);
 
         & > [data-slot="sidebar-inner"] {
-          background: transparent;
+          background-color: transparent;
         }
       }
 
@@ -146,6 +146,17 @@ describe("index.css", () => {
         --muted: rgb(255 255 255 / calc(var(--material-card) + 1%));
         --border: rgb(255 255 255 / var(--material-line));
         --input: rgb(255 255 255 / calc(var(--material-line) + 6%));
+      }
+
+      /* Light mode on the Mac: the sidebar alone stands on the glass, under a veil of its own ground. Over a dark desktop
+         the glass reads as mid grey, and Linen's prose, the thinnest of the light sidebar inks, holds AA there only at 99
+         percent. */
+      .desktop-mac:not(.dark) {
+        --sidebar-veil: 100%;
+      }
+
+      .desktop-mac:not(.dark) [data-slot="sidebar-inner"] {
+        background-color: color-mix(in srgb, var(--sidebar) var(--sidebar-veil), transparent);
       }
 
       /* The window paints the glass behind the page, so the page's own canvas is
