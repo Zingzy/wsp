@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, RuntimeResponse, VerbFailure, authRefusal, exitClassOf, notFoundRefusal, refusal, refusalLine, usageRefusal, verbFailure } from "../src/index.js";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, RuntimeResponse, VerbFailure, authRefusal, exitClassOf, keptSaid, notFoundRefusal, refusal, refusalLine, refusalParts, usageRefusal, verbFailure } from "../src/index.js";
 
 describe("the exit code every wsp verb answers with", () => {
   it("is one table: ok 0, provider 1, auth 2, usage 3, each class with its words", () => {
@@ -48,5 +48,23 @@ describe("the exit code every wsp verb answers with", () => {
   it("the refused frame declares the fix, so a client that parses the wire keeps it", () => {
     const frame = { id: 1, ok: false, error: "spoo names no user. Type user@spoo.", kind: "invalid", fix: "Type user@spoo." };
     expect(RuntimeResponse.parse(frame)).toEqual(frame);
+  });
+});
+
+describe("a refusal a host keeps for every client", () => {
+  it("reads the halves a refusal was stamped with, and nothing that is not a string", () => {
+    expect(refusalParts(refusal("spoo has no curl", "Install it.", "missing"))).toEqual({ said: "spoo has no curl.", fix: "Install it.", kind: "missing" });
+    expect(refusalParts(Object.assign(new Error("no"), { fix: 7, kind: null }))).toEqual({ said: "no", fix: undefined, kind: undefined });
+    expect(refusalParts("plain")).toEqual({ said: "plain", fix: undefined, kind: undefined });
+  });
+
+  it("cuts each line at 400 characters and the lines past the eleventh, saying each cut", () => {
+    const lines = ["box did not dial back", "y".repeat(401), ...Array.from({ length: 12 }, (_, n) => `line ${n}`)];
+    const kept = keptSaid(lines.join("\n")).split("\n");
+    expect(kept).toHaveLength(12);
+    expect(kept[1]).toBe(`${"y".repeat(400)} (cut 1 characters)`);
+    expect(kept.at(-2)).toBe("line 8");
+    expect(kept.at(-1)).toBe("(cut 3 lines)");
+    expect(keptSaid("short\nsaid")).toBe("short\nsaid");
   });
 });

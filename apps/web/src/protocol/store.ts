@@ -14,10 +14,10 @@ import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
-import { applyAddStage, readAdds } from "../settings/adds.js";
+import { applyAddStage, takeAdds } from "../settings/adds.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
-import { useSettingsStore } from "../settings/settingsStore.js";
+import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsStore.js";
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
@@ -268,6 +268,8 @@ interface State {
   loadHarnesses(workspaceId: string): Promise<void>;
 }
 
+/** Where a refused places list is drawn: while that page is on screen, the refusal says itself there. */
+const COMPUTERS_PAGE: SettingsAt = { kind: "group", group: "computers" };
 const NO_SESSIONS: SessionView[] = [];
 
 function groupSessions(rows: SessionView[]): Record<string, SessionView[]> {
@@ -388,11 +390,12 @@ export const useStore = create<State>((set, get) => {
   /** What a refused list reads as: undefined for a lost socket, which the banner says and the next pull asks again;
    * null for a socket that may not see it, an empty list that says nothing; else the fault, said once as a notice.
    * Either answer clears the rows, as a refused forwards read does: rows read before it are not today's list. */
-  const listRefusal = (e: unknown, what: string): Failure | null | undefined => {
+  /** A refused list, said as a notice unless the page it is drawn on is the one on screen. */
+  const listRefusal = (e: unknown, what: string, home?: SettingsAt): Failure | null | undefined => {
     const failure = failureOf(e);
     if (failure.disconnected) return undefined;
     if (failure.kind === "ticket") return null;
-    noticeFailure(e, said => `${what} not read: ${said}`);
+    if (home === undefined || !get().settingsOpen || !sameAt(useSettingsStore.getState().at, home)) noticeFailure(e, said => `${what} not read: ${said}`);
     return failure;
   };
 
@@ -416,14 +419,16 @@ export const useStore = create<State>((set, get) => {
     // waits on a reply that is never coming.
     const placesAsked = api.placesList?.();
     if (placesAsked === undefined) set({ placesRead: true });
-    else
+    else {
+      takeAdds(api, placesAsked.then(read => read.adds));
       void placesAsked.then(
-        places => set({ places, placesRead: true, placesRefused: null }),
+        ({ places }) => set({ places, placesRead: true, placesRefused: null }),
         (e: unknown) => {
-          const refused = listRefusal(e, "Computers");
+          const refused = listRefusal(e, "Computers", COMPUTERS_PAGE);
           if (refused !== undefined) set({ places: [], placesRead: true, placesRefused: refused });
         },
       );
+    }
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
     set({ landings: {} });
   };
@@ -453,7 +458,6 @@ export const useStore = create<State>((set, get) => {
         if (failureOf(e).kind !== "ticket") noticeFailure(e, said => `Setup not read: ${said}`);
       });
     readPlaces(api);
-    readAdds(api);
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
     if (projectsAsked === undefined) set({ projectsRead: true });

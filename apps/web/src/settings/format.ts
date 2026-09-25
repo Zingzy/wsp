@@ -153,6 +153,8 @@ export const ADD_COMPUTER_WORDS = {
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
   running: "closing keeps it going",
+  /** An add the host no longer lists while nothing here waits on it: the host restarted, or never got the ask. */
+  hostLost: "The host lost track of this add, so how it ended is not known; add it again if the computer is not listed.",
 } as const;
 
 /** Each size source as its segment names it: whole at every width, since a cut segment is a defect. */

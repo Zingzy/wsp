@@ -16,7 +16,7 @@ import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { NO_REASON, type Api } from "../protocol/client.js";
 import { failureOf, type Failure } from "../protocol/failure.js";
-import { addFix, addOverSsh, useAdds, useShownAdd } from "./adds.js";
+import { addFix, addOverSsh, useAdds, useShownAdd, type SshDraft } from "./adds.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
 import { ComputerRow } from "./computers.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -209,7 +209,7 @@ function Steps({ lines }: { lines: readonly StepLine[] }) {
 }
 
 /** The fields as an add typed them: user@host splits at its first @, and a port of 22 is left unsaid. */
-function loginOf(job: PlaceAddJob | undefined): { user: string; host: string; port: string } {
+function loginOf(job: PlaceAddJob | undefined): SshDraft {
   if (job === undefined) return { user: "", host: "", port: "" };
   const at = job.address.indexOf("@");
   return { user: at === -1 ? "" : job.address.slice(0, at), host: at === -1 ? job.address : job.address.slice(at + 1), port: job.sshPort === undefined ? "" : String(job.sshPort) };
@@ -226,15 +226,18 @@ function SshRoad({ now }: { now: () => number }) {
       </RoadBody>
     );
   }
-  // Keyed by the add, so an add started in another window, or this one's own, sets the fields to what it asked.
-  const drawn = job?.state === "done" ? undefined : job;
-  return <SshForm key={drawn?.addId ?? "none"} job={drawn} />;
+  return <SshForm job={job?.state === "done" ? undefined : job} />;
 }
 
+/** The fields hold a running add's login, else what this window typed and has not sent, else the login of the add
+ * shown. Typing writes the draft, which is what clears a refusal: it was about what was asked, not what is typed. */
 function SshForm({ job }: { job: PlaceAddJob | undefined }) {
   const api = useStore(s => s.api);
   const places = useStore(s => s.places);
-  const [login, setLogin] = useState(() => loginOf(job));
+  const draft = useAdds(s => s.draft);
+  const running = job?.state === "running";
+  const login = running ? loginOf(job) : (draft ?? loginOf(job));
+  const setLogin = (next: SshDraft): void => useAdds.setState({ draft: next });
   const { user, host, port } = login;
   const [hosts, setHosts] = useState<SshHost[] | null>(null);
   const [hostsRefused, setHostsRefused] = useState<Failure | null>(null);
@@ -259,9 +262,9 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
     const n = Number.parseInt(asked.port, 10);
     addOverSsh(api, { address, ...(Number.isFinite(n) && n !== 22 ? { port: n } : {}) });
   };
-  const running = job?.state === "running";
-  const fix = job?.state === "failed" ? addFix(job) : undefined;
-  const refusal = job?.state === "failed" ? { said: job.said ?? NO_REASON, ...(fix === undefined ? {} : { fix }) } : null;
+  const failed = job?.state === "failed" && draft === null ? job : undefined;
+  const fix = failed === undefined ? undefined : addFix(failed);
+  const refusal = failed === undefined ? null : { said: failed.said ?? NO_REASON, ...(fix === undefined ? {} : { fix }) };
   const held = api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
   const suggested = hosts ?? [];
   const enter = (e: React.KeyboardEvent): void => {

@@ -1970,6 +1970,61 @@ describe("the adds this host keeps", () => {
     expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_box", state: "done", placeId: added.place.id })]);
   });
 
+  it("keeps no add whose join code was never issued, since nothing would ever end it", async () => {
+    const store = memoryStore();
+    const put = store.put.bind(store);
+    store.put = async (collection, id, value) => (collection === "pairings" ? Promise.reject(new Error("the state file is read-only")) : put(collection, id, value));
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => ({ name: "box" }) } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect(await c.request("places.add", { addId: "a_ro", address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: "the state file is read-only" });
+    expect(await addsOf(c)).toEqual([]);
+  });
+
+  it("keeps the box's own lines under a failed add cut to the length a log line keeps, and says each cut", async () => {
+    const long = `agent: ${"x".repeat(5_000)}`;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => ({ name: "box", ssh: "root@10.0.0.9" }), log: async () => [long, "agent: dial refused"] },
+      placeJoinWaitMs: 50,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    await runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const [job] = (await addsOf(c)) as { said: string }[];
+    expect(job!.said.split("\n")).toEqual([placeNoLinkLine("box"), `${long.slice(0, 400)} (cut ${long.length - 400} characters)`, "agent: dial refused"]);
+  });
+
+  it("refuses an add under the id of one still running, and leaves that one's job as it was", async () => {
+    let go: () => void = () => {};
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          await new Promise<void>(ok => (go = ok));
+          throw new Error("root@10.0.0.9 did not answer on port 22");
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    const first = c.request("places.add", { addId: "a_one", address: "root@10.0.0.9" });
+    await until(async () => (await addsOf(c)).length === 1);
+    expect(await c.request("places.add", { addId: "a_one", address: "maya@elsewhere" })).toMatchObject({ ok: false, kind: "usage" });
+    expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_one", address: "root@10.0.0.9", state: "running", steps: [{ step: "connect", state: "running" }] })]);
+    go();
+    await first;
+  });
+
   it("keeps every add still running and the last twenty that finished", async () => {
     runtime = createRuntime({
       backend: stubBackend(),

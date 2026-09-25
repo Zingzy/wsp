@@ -182,7 +182,7 @@ describe("the Computers list", () => {
     const saved: unknown[] = [];
     const api = computersApi({
       initGet: async () => setupOf({ keys }),
-      placesList: async () => places,
+      placesList: async () => ({ places, adds: [] }),
       initKeys: async (asked: unknown) => {
         saved.push(asked);
         keys = { ...keys, box: true };
@@ -464,6 +464,23 @@ describe("a computer's own page", () => {
     expect(rowOf("answered")?.querySelector("[data-settings-description]")?.className).toContain("truncate");
   });
 
+  it("draws a refused Try now in the refusal slot with the host's fix, and leaves the Answered row's description as it was", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    useStore.setState({ places: [here, vps] });
+    const refused = { dialPlace: async () => Promise.reject(new RequestError("wsp holds no login for vps. Add it again over ssh.", undefined, "Add it again over ssh.")) } as unknown as Partial<Api>;
+    await mountComputers(computersApi(refused).api, { kind: "computer", id: "p_3" });
+    fireEvent.click(document.querySelector("[data-k='dial']")!);
+    const slot = await waitFor(() => {
+      const found = document.querySelector("[data-settings-page] [data-k='dial-refusal']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(slot.textContent).toBe("wsp holds no login for vps. Add it again over ssh.");
+    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Add it again over ssh.");
+    expect(descriptionOf("answered")).toBe(said);
+  });
+
   it("offers no dial where there is no road to dial over, says why in the description, and words the button for the road there is", async () => {
     const said = placeNoDialLine("old-macbook");
     const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
@@ -500,6 +517,26 @@ describe("a computer's own page", () => {
     await waitFor(() => expect(removed).toEqual(["p_1"]));
     // The page that was about the removed computer goes back to the list.
     await waitFor(() => expect(pageAt()).toBe("computers"));
+  });
+
+  it("draws a refused remove in the refusal slot, the host's fix in the fix ink, and a remove the host did not make in that same slot", async () => {
+    useStore.setState({ places: [here, { ...laptop, present: true }] });
+    let answer: () => Promise<unknown> = async () => Promise.reject(new RequestError("old-macbook still holds a running workspace. Stop it first, then remove again.", undefined, "Stop it first, then remove again."));
+    await mountComputers(computersApi({ removePlace: async () => answer() } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
+    fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    const slot = await waitFor(() => {
+      const found = document.querySelector("[data-k='remove-refusal']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(slot.textContent).toBe("old-macbook still holds a running workspace. Stop it first, then remove again.");
+    expect(slot.className).toContain("text-destructive-foreground");
+    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Stop it first, then remove again.");
+    answer = async () => ({ removed: false, swept: [], note: "old-macbook was not removed: its record is locked" });
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook was not removed: its record is locked"));
+    expect(document.querySelector("[data-k='remove-refusal'] span.text-foreground")).toBeNull();
   });
 
   it("gives a computer that is answering no line to run by hand: the host sweeps it over the link", async () => {
@@ -772,6 +809,40 @@ describe("Add a computer on the page", () => {
     expect(slot()).toBe("root@spoo runs zsh as root's shell");
   });
 
+  it("clears a refusal the moment the person changes what they typed", async () => {
+    useAdds.setState({ jobs: { a_host: job({ state: "failed", steps: [{ step: "connect", state: "failed" }], said: "root@spoo did not answer on port 22" }) } });
+    await open("ssh", { addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    expect(slot()).toBe("root@spoo did not answer on port 22");
+    expect(host().getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(document.querySelector("[data-k='ssh-port']")!, { target: { value: "2222" } });
+    expect(slot()).toBe("");
+    expect(host().hasAttribute("aria-invalid")).toBe(false);
+    expect(host().value).toBe("spoo");
+  });
+
+  it("keeps what was typed and not sent in this window when the person leaves the page, and through another window's add, and never sends it", async () => {
+    const asked: SshLogin[] = [];
+    await open("ssh", { addComputerOverSsh: async (login: SshLogin) => (asked.push(login), box) } as unknown as Partial<Api>);
+    fireEvent.change(user(), { target: { value: "maya" } });
+    fireEvent.change(host(), { target: { value: "hetzner" } });
+    fireEvent.change(document.querySelector("[data-k='ssh-port']")!, { target: { value: "2200" } });
+    cleanup();
+    render(<AddComputer setup={null} now={() => NOW} />);
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    expect([user().value, host().value, document.querySelector<HTMLInputElement>("[data-k='ssh-port']")!.value]).toEqual(["maya", "hetzner", "2200"]);
+    // Another window's add takes the form while it runs, and hands it back as it ends.
+    act(() => useAdds.setState(s => ({ jobs: { ...s.jobs, a_other: job({ addId: "a_other", address: "root@elsewhere" }) } })));
+    stage("a_other", "connect", "running");
+    expect([host().value, host().disabled]).toEqual(["elsewhere", true]);
+    stage("a_other", "connect", "failed", "root@elsewhere did not answer on port 22");
+    expect([user().value, host().value, document.querySelector<HTMLInputElement>("[data-k='ssh-port']")!.value]).toEqual(["maya", "hetzner", "2200"]);
+    expect(asked).toEqual([]);
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await settle();
+    expect(asked).toEqual([{ address: "maya@hetzner", port: 2200 }]);
+    expect(useAdds.getState().draft).toBeNull();
+  });
+
   it("keeps the run when the person switches roads or leaves the page and comes back, since the host keeps installing", async () => {
     const { at, api } = pending();
     await open("ssh", api);
@@ -905,7 +976,7 @@ describe("Add a computer on the page", () => {
           places = [here, ascii];
           return setupOf({ keys: { solari: false, box: k.provider === "box" } });
         },
-        placesList: async () => places,
+        placesList: async () => ({ places, adds: [] }),
       } as unknown as Partial<Api>,
       setupOf({ keys: { solari: false, box: false } }),
     );
@@ -926,7 +997,7 @@ describe("Add a computer on the page", () => {
   it("says a key the host kept with no cloud row as kept and no computer yet, never as saved", async () => {
     await open(
       "cloud",
-      { initKeys: async () => setupOf({ keys: { solari: false, box: true } }), placesList: async () => [here] } as unknown as Partial<Api>,
+      { initKeys: async () => setupOf({ keys: { solari: false, box: true } }), placesList: async () => ({ places: [here], adds: [] }) } as unknown as Partial<Api>,
       setupOf({ keys: { solari: false, box: false } }),
     );
     const boxKey = document.querySelector("[data-k='road-cloud'] [data-provider='box']")!;
@@ -941,7 +1012,7 @@ describe("Add a computer on the page", () => {
     let refuse: Error | undefined;
     await open(
       "cloud",
-      { initKeys: async () => (refuse !== undefined ? Promise.reject(refuse) : setupOf({ keys: { solari: false, box: false } })), placesList: async () => [here] } as unknown as Partial<Api>,
+      { initKeys: async () => (refuse !== undefined ? Promise.reject(refuse) : setupOf({ keys: { solari: false, box: false } })), placesList: async () => ({ places: [here], adds: [] }) } as unknown as Partial<Api>,
       setupOf({ keys: { solari: false, box: false } }),
     );
     const boxKey = document.querySelector("[data-k='road-cloud'] [data-provider='box']")!;

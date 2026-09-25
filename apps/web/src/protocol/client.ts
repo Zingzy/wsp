@@ -498,11 +498,10 @@ export interface Api {
   /** The person's Ghostty config on the computer running the host, as the terminal pane applies it, read now for the
    * scheme the app shows. Optional so fixtures without a terminal need not fake it; without it the pane keeps its defaults. */
   hostTerminalConfig?(scheme: TerminalScheme): Promise<TerminalConfig>;
-  /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on. Optional so a
-   * fixture with no Settings page need not fake it. */
-  placesList?(): Promise<PlaceView[]>;
-  /** Every add over ssh the host is running and the last it finished, off the same places.list. */
-  addsList?(): Promise<PlaceAddJob[]>;
+  /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on; and beside
+   * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
+   * page need not fake it. */
+  placesList?(): Promise<{ places: PlaceView[]; adds: PlaceAddJob[] }>;
   /** Every project this wsp holds, which is what the new-workspace dialog picks one of. Optional so a fixture that
    * makes no workspace need not fake it; without it the dialog says there is no project yet. */
   projectsList?(): Promise<ProjectView[]>;
@@ -730,9 +729,11 @@ export function makeApi(c: ProtocolClient): Api {
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
     addComputerOverSsh: async (login, addId) =>
       PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }) })).place),
-    placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.
-    addsList: async () => PlaceAddJob.array().parse((await c.request<{ adds?: unknown }>("places.list")).adds ?? []),
+    placesList: async () => {
+      const read = await c.request<{ places?: unknown; adds?: unknown }>("places.list");
+      return { places: PlaceView.array().parse(read.places), adds: PlaceAddJob.array().parse(read.adds ?? []) };
+    },
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }) })).project),
     projectsRemove: async projectId => {

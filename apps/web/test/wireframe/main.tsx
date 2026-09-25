@@ -58,7 +58,7 @@
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer Computers scrolled to Add a computer, the ssh road open
-//   settings-add-computer-failed  the same after a reload, the add the host kept
+//   settings-add-computer-failed  the same after an add this window watched fail, one the host kept
 //                         refused while the wsp step ran, with the host's fix
 //   settings-computers-refused  Computers with the host refusing the places read
 //                         and the ssh config read
@@ -97,6 +97,7 @@ import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
+import { useAdds } from "../../src/settings/adds";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import "../../src/index.css";
 
@@ -388,9 +389,8 @@ const api = {
   watchStatuses: async () => [],
   capabilities: async () => caps({}),
   getGolden: async () => ({ head: null, versions: [] }),
-  placesList: async () => (screen === "settings-computers-refused" ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again.")) : computers),
+  placesList: async () => (screen === "settings-computers-refused" ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again.")) : { places: computers, adds: screen === "settings-add-computer-failed" ? [FAILED_ADD] : [] }),
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
-  ...(screen === "settings-add-computer-failed" ? { addsList: async () => [FAILED_ADD] } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
   listHarnesses: async () => [],
@@ -510,6 +510,8 @@ useStore.setState({
   selectedId: screen === "settings-over-panel" ? "ws_copy" : screen === "panel-agents" ? "ws_box" : null,
   selectedThreadId: null,
 } as never);
+// This window watched the add fail: one read off the host at a reload alone leaves the form clean.
+if (screen === "settings-add-computer-failed") useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
 useStore.getState().bind(api);
 // A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
 // sidebar and the creation view are what these shots are of, so the panel on every workspace a screen can select

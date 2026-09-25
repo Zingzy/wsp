@@ -314,15 +314,15 @@ describe("makeApi wrappers", () => {
     await expect(api.addComputerOverSsh!({ address: "root@65.21.4.12" }, "a_mine")).rejects.toThrow();
   });
 
-  it("addsList reads the adds off places.list, none from a host that sends none, and refuses a step the wire type does not vouch for", async () => {
+  it("placesList reads the computers and the adds off one places.list, no adds from a host that sends none, and refuses a step the wire type does not vouch for", async () => {
     const { api } = await connect();
     const job = { addId: "a_1", address: "root@spoo", startedAt: "2026-09-25T09:00:00.000Z", state: "failed", steps: [{ step: "wsp", state: "failed", note: "no curl" }], said: "spoo has no curl.", fix: "Install it." };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [job] });
-    expect(await api.addsList!()).toEqual([job]);
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [job] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box] });
-    expect(await api.addsList!()).toEqual([]);
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [{ ...job, steps: [{ step: "node", state: "running" }] }] });
-    await expect(api.addsList!()).rejects.toThrow();
+    await expect(api.placesList!()).rejects.toThrow();
   });
 });
 

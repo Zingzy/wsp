@@ -72,6 +72,7 @@ import {
   SSH_HOSTS_REFUSAL,
   issuesLine,
   redacted,
+  markedCut,
   requestSecrets,
   RUNTIME_OPS,
   type AccountDevice,
@@ -316,9 +317,6 @@ function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
 }
 
 const DECLARED_OPS = new Set(RUNTIME_OPS);
-/** How much of a refusal's sentence a log line keeps: refusals repeat what they were sent, an id or an op, and a
- * socket through the door may send frames of many megabytes. */
-const LOGGED_CHARS = 400;
 /** More secret values than any real frame carries (a record of logins, an environment); past it the sentence is not
  * scanned at all, since each value is one pass over the line on the host's own thread. */
 const SCANNED_SECRETS = 256;
@@ -335,8 +333,7 @@ function refusedLine(frame: unknown, payload: Record<string, unknown>, said?: st
   const text = said ?? String(payload["error"]);
   const end = text.indexOf("\n");
   const first = redacted(end === -1 ? text : text.slice(0, end), secrets);
-  const cut = first.length > LOGGED_CHARS ? `${first.slice(0, LOGGED_CHARS)} (cut ${first.length - LOGGED_CHARS} characters)` : first;
-  return `refused ${op} kind=${kind}: ${cut}`;
+  return `refused ${op} kind=${kind}: ${markedCut(first)}`;
 }
 
 /** Every workspace a verb answers with goes through here on its way out. The record's view holds the display stream

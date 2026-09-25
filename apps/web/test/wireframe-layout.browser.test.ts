@@ -849,7 +849,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     await shot("add-computer-390-dark", "[data-k=add-computer]");
   }, 90_000);
 
-  it("Computers draws each refusal where its control is, in the host's two halves: the add the host kept after a reload under its fields, the places read above Add a computer, the ssh config where its hosts would be", async () => {
+  it("Computers draws each refusal where its control is, in the host's two halves: the add this window watched fail under its fields, the places read above Add a computer, the ssh config where its hosts would be", async () => {
     const slotRead = (k: string) =>
       page!.evaluate(key => {
         const slot = document.querySelector<HTMLElement>(`[data-k=${key}]`)!;
@@ -878,6 +878,8 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       expect(places.inside).toBe(true);
       expect(hosts.text).toBe("Hosts from your ssh config not read: ~/.ssh/config: permission denied");
       expect(hosts.inside).toBe(true);
+      // The page that draws the refusal is on screen, so no notice says it again.
+      expect(await page!.locator("[data-notice]").count()).toBe(0);
       // The road opens with a 200 ms rise; the shots wait it out.
       await page!.waitForTimeout(400);
       await shot(`computers-refused-${theme}`);

@@ -56,7 +56,9 @@ import {
   type PlaceStageEvent,
   type PlaceAddJob,
   withPlaceStage,
-  refusalSaid,
+  keptSaid,
+  refusalParts,
+  usageRefusal,
   type PlaceAuthRefusal,
   type PlaceAuthReply,
   type PlaceAuthRequest,
@@ -699,6 +701,10 @@ const JOIN_WAIT_MS = 90_000;
 
 /** Finished adds kept beside the running ones, for a sheet opened after one ended to read what it came to. */
 const ADDS_KEPT = 20;
+/** An add names its own stream so its steps can arrive before its answer; a second add under a running one's name
+ * would land its steps on the first's job. */
+const ADD_RUNNING_LINE = "an add under that id is still running";
+const ADD_RUNNING_FIX = "Leave the id out, or name the add afresh.";
 
 /** What the box itself said while that wait ran out, where this host holds a login to it and the road to read it:
  * the agent's log names the address it could not dial and why. A read that will not take adds nothing, since the
@@ -1703,6 +1709,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const install = wiring.install;
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
+      if (adds.get(addId)?.state === "running") throw usageRefusal(ADD_RUNNING_LINE, ADD_RUNNING_FIX);
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note, placeId) => {
         if (state === "running") step = which;
@@ -1771,8 +1778,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
         // first line rides the throw, which both roads print whole.
         const message = e instanceof Error ? e.message : String(e);
-        const { fix, kind } = e as { fix?: unknown; kind?: unknown };
-        putAdd(addId, job => ({ ...job, said: refusalSaid(message, typeof fix === "string" ? fix : undefined), ...(typeof fix === "string" ? { fix } : {}), ...(typeof kind === "string" ? { kind } : {}) }));
+        const { said, fix, kind } = refusalParts(e);
+        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
         stage(step, "failed", message.split("\n")[0]!);
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
