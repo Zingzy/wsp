@@ -90,6 +90,9 @@ function CopyGlyph({ value, label }: { value: string; label: string }) {
 /** One fact: the label in its column, the value in the mono clamped at two lines with the whole on its hover, the
  * reason or state after it in the muted mono. */
 function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
+  const copy = fact.copy === true && fact.value !== undefined ? <CopyGlyph value={fact.value} label={fact.label === "" ? labelFor : fact.label} /> : null;
+  // With nothing after the value the glyph stays beside it, so a long value never wraps an empty line under it.
+  const trailing = fact.fact !== undefined || fact.act !== undefined;
   return (
     <div data-fact={fact.id} className="group/fact flex min-h-7 items-start gap-3">
       <span data-fact-label className="flex min-h-7 w-24 shrink-0 items-center text-xs text-muted-foreground @min-[480px]:w-40">
@@ -104,18 +107,19 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
               {fact.value}
             </span>
           )}
+          {trailing ? null : copy}
         </span>
-        {fact.fact === undefined && fact.act === undefined && fact.copy !== true ? null : (
+        {trailing ? (
           <span className="flex flex-1 items-center gap-2">
             {fact.fact === undefined ? null : (
               <span data-fact-note className={cn(FACT, "whitespace-nowrap")} title={fact.fact}>
                 {fact.fact}
               </span>
             )}
-            {fact.copy === true && fact.value !== undefined ? <CopyGlyph value={fact.value} label={fact.label === "" ? labelFor : fact.label} /> : null}
+            {copy}
             {fact.act === undefined ? null : <ActButton act={fact.act} className="ml-auto" />}
           </span>
-        )}
+        ) : null}
       </span>
     </div>
   );
