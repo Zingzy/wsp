@@ -2,9 +2,10 @@
 // The agents report off one target, read through the collector's Host: this
 // computer's own, or machineHost over a computer's link, a workspace or a fork,
 // every line as the login the computer was added with. Everything is read off
-// config and presence: no MCP server is started, no harness list command runs
-// and no login file is opened, so a page open costs a handful of round trips
-// and nothing the person has set up is started by looking at it.
+// config and presence, and a remote server's address is asked once for its
+// state: no MCP server is started and no login file is opened, so a page open
+// costs a handful of round trips and nothing the person has set up is started
+// by looking at it.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, signInRoadOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
@@ -13,6 +14,7 @@ import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLog
 import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, type AgentRow, type AgentSignInState, type McpRow } from "@wsp/protocol";
 import { vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { machineHost, type MachineHost } from "./machine-host.js";
+import { serverChecks, type Knocker, type Resolver, type ServerChecks } from "./server-check.js";
 import { serverTools, type KeptTools } from "./server-tools.js";
 
 const READ_MS = 20_000;
@@ -81,12 +83,16 @@ function transportOf(server: McpServer, home: string): McpRow["transport"] {
   }
 }
 
-/** A server's sign-in off its config alone: a command or a static header needs none, anything else is unknown
- * until something connects to it, which a list never does. */
-const authOf = (server: McpServer): McpRow["auth"] => (server.transport.kind === "stdio" || Object.keys(server.transport.headers).length > 0 ? "open" : "unknown");
+/** A server's sign-in off its config alone: a command or a static header needs none, a token read from the
+ * environment is the environment's, anything else is unknown until its address is asked. */
+const authOf = (server: McpServer): McpRow["auth"] =>
+  server.transport.kind === "stdio" ? "open" : server.envRefs.length > 0 ? "env-key" : Object.keys(server.transport.headers).length > 0 ? "open" : "unknown";
 
 /** Names the definition sets or reads, never a value. */
 const envNamesOf = (server: McpServer): string[] => [...new Set([...(server.transport.kind === "stdio" ? Object.keys(server.transport.env) : []), ...server.envRefs])].sort();
+
+/** A server's state off something beyond its config, where one is checked. */
+type Check = (agent: McpAgent, server: McpServer) => Promise<McpRow["auth"] | undefined>;
 
 interface Servers {
   rows: McpRow[];
@@ -95,9 +101,13 @@ interface Servers {
 }
 
 /** Every server each agent's own file defines, and its project's where a workspace is read; the first of an agent's
- * files that is there is its config, as the agent itself reads it. */
-async function serversOf(host: Host, project: string | undefined): Promise<Servers> {
+ * files that is there is its config, as the agent itself reads it. Only the person's own servers are checked when
+ * the page opens: a project's are what a repo names, asked on the click. A harness asked about a name it keeps in
+ * two scopes picks one itself and may start a command server, so such a name is not checked. */
+async function serversOf(host: Host, project: string | undefined, check?: Check): Promise<Servers> {
   const rows: McpRow[] = [];
+  const checkable: { agent: McpAgent; server: McpServer; row: McpRow }[] = [];
+  const twice = new Map<string, Set<string>>();
   const wsp = new Set<string>();
   const refused: string[] = [];
   const firstOf = async (files: readonly string[]): Promise<{ file: string; text: string } | undefined> => {
@@ -113,7 +123,7 @@ async function serversOf(host: Host, project: string | undefined): Promise<Serve
         continue;
       }
       if (!project && s.name === MCP_SERVER_NAME) wsp.add(agent.id);
-      rows.push({
+      const row: McpRow = {
         agent: agent.id,
         name: s.name,
         scope: project ? "project" : s.scope,
@@ -122,19 +132,33 @@ async function serversOf(host: Host, project: string | undefined): Promise<Serve
         envNames: envNamesOf(s),
         auth: authOf(s),
         enabled: s.disabled !== true,
-      });
+      };
+      rows.push(row);
+      if (!project && row.enabled && s.envRefs.length === 0) checkable.push({ agent, server: s, row });
     }
   };
   await Promise.all(
     MCP_AGENTS.map(async agent => {
-      const [own, theirs] = await Promise.all([
-        firstOf(agent.mcp.files.map(f => expand(host, f))),
-        project === undefined ? undefined : firstOf((agent.mcp.projectFiles ?? []).map(f => posix.join(project, f))),
-      ]);
-      if (own !== undefined) push(agent, own.file, agent.mcp.format.read(own.text, host.home), false);
-      if (theirs !== undefined) push(agent, theirs.file, agent.mcp.format.read(theirs.text, host.home).filter(s => s.scope === "user"), true);
+      const own = agent.mcp.files.map(f => expand(host, f));
+      // The project files the harness reads when asked from the home folder, which is where every check is asked.
+      const atHome = agent.mcp.check === undefined || check === undefined ? [] : (agent.mcp.projectFiles ?? []).map(f => posix.join(host.home, f)).filter(f => !own.includes(f));
+      const [mine, theirs, home] = await Promise.all([firstOf(own), project === undefined ? undefined : firstOf((agent.mcp.projectFiles ?? []).map(f => posix.join(project, f))), firstOf(atHome)]);
+      const read = (f: { text: string } | undefined, userOnly: boolean): McpServer[] => (f === undefined ? [] : agent.mcp.format.read(f.text, host.home).filter(s => !userOnly || s.scope === "user"));
+      const servers = read(mine, false);
+      if (mine !== undefined) push(agent, mine.file, servers, false);
+      if (theirs !== undefined) push(agent, theirs.file, read(theirs, true), true);
+      const scopes = new Map<string, Set<string>>();
+      for (const [name, scope] of [...servers.map(s => [s.name, s.scope]), ...read(home, true).map(s => [s.name, "project"])]) scopes.set(name!, (scopes.get(name!) ?? new Set()).add(scope!));
+      twice.set(agent.id, new Set([...scopes].filter(([, where]) => where.size > 1).map(([name]) => name)));
     }),
   );
+  if (check !== undefined)
+    await Promise.all(
+      checkable
+        .filter(({ agent, server }) => twice.get(agent.id)?.has(server.name) !== true)
+        // A check that could not be made leaves the config's word; it never costs the whole report.
+        .map(({ agent, server, row }) => check(agent, server).then(auth => void (auth !== undefined && (row.auth = auth)), () => undefined)),
+    );
   const order = new Map(MCP_AGENTS.map((a, i) => [a.id, i]));
   return { rows: rows.sort((a, b) => order.get(a.agent)! - order.get(b.agent)! || a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name)), wsp, refused };
 }
@@ -154,12 +178,12 @@ interface BoxSaid {
 
 /** The report off one Host. `box` carries what a computer you joined reported, which stands in for the version
  * and sign-in reads; everywhere else each agent's own version flag and status command answer, run side by side. */
-export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; project?: string; box?: BoxSaid }): Promise<AgentsRead> {
+export async function readAgents(host: Host, o: { user: string; vault: Readonly<Record<string, string>>; project?: string; box?: BoxSaid; check?: Check }): Promise<AgentsRead> {
   const refused: string[] = [];
   const agents: readonly AgentEntry[] = CATALOG_AGENTS;
   const [where, servers, skills, recipe] = await Promise.all([
     host.exec.run("sh", ["-c", WHERE, "sh", ...agents.map(a => a.bin)], { timeoutMs: READ_MS }),
-    serversOf(host, o.project),
+    serversOf(host, o.project, o.check),
     skillRoots(host, o.project !== undefined ? { project: o.project } : {}).then(roots => detectSkills(host, roots)),
     o.box !== undefined ? recipeServers(host) : Promise.resolve(undefined),
   ]);
@@ -207,24 +231,43 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
 /** The reader the runtime is wired with: this computer's own Host for this computer and a workspace on it, and
  * machineHost for everything else, after one read of who its lines run as. A computer you joined hands a command
  * its stdin, so the variables a started server is given ride there. Each server's tools answer is kept here. */
-export function agentsReader(o: { vault: () => Readonly<Record<string, string>>; here?: () => Host; now?: () => number; toolsMs?: number; log?: (line: string) => void }): AgentsReader {
+export function agentsReader(o: {
+  vault: () => Readonly<Record<string, string>>;
+  here?: () => Host;
+  now?: () => number;
+  toolsMs?: number;
+  log?: (line: string) => void;
+  /** How a remote server's address is asked for its state; none asks nothing. */
+  knock?: Knocker;
+  /** How its name is resolved before it is asked. */
+  resolve?: Resolver;
+  checkMs?: number;
+}): AgentsReader & { forget(key: string): void } {
   const kept = new Map<string, KeptTools>();
+  const now = o.now ?? Date.now;
+  const checks: ServerChecks | undefined = o.knock === undefined ? undefined : serverChecks({ knock: o.knock, now, ...(o.resolve !== undefined ? { resolve: o.resolve } : {}), ...(o.checkMs !== undefined ? { checkMs: o.checkMs } : {}) });
+  const checkOn = (host: Host, key: string | undefined) =>
+    checks === undefined ? {} : { check: (agent: McpAgent, server: McpServer) => checks.auth(host, { cwd: host.home, ...(key !== undefined ? { key } : {}) }, agent, server) };
   const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string }> => {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
     return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user };
   };
   return {
-    read: async (on: AgentsOn) => {
-      if (on.kind === "here") return readAgents(o.here?.() ?? nodeHost(), { user: userInfo().username, vault: o.vault(), ...(on.project !== undefined ? { project: on.project } : {}) });
+    read: async (on: AgentsOn, key?: string) => {
+      if (on.kind === "here") {
+        const host = o.here?.() ?? nodeHost();
+        return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.project !== undefined ? { project: on.project } : {}), ...checkOn(host, key) });
+      }
       const { host, user } = await hostOf(on);
       const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
-      const read = await readAgents(host, { user, vault: o.vault(), ...(on.kind === "machine" && on.project !== undefined ? { project: on.project } : {}), ...(box !== undefined ? { box } : {}) });
+      const read = await readAgents(host, { user, vault: o.vault(), ...(on.kind === "machine" && on.project !== undefined ? { project: on.project } : {}), ...(box !== undefined ? { box } : {}), ...checkOn(host, key) });
       return { ...read, refused: [...read.refused, ...host.refused] };
     },
     tools: async (on, ask) => {
       const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
       const project = on.kind === "box" ? undefined : on.project;
-      return serverTools(host, ask, { kept, now: o.now ?? Date.now, log: o.log ?? (line => console.warn(line)), ...(project !== undefined ? { project } : {}), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
+      return serverTools(host, ask, { kept, now, log: o.log ?? (line => console.warn(line)), ...(project !== undefined ? { project } : {}), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
     },
+    forget: key => checks?.forget(key),
   };
 }

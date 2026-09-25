@@ -2,7 +2,7 @@
 import type { Machine } from "@wsp/engine";
 import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -40,6 +40,27 @@ describe("the agents in a workspace", () => {
     const here = reads({ now: "running" }, true);
     await here.api.read({ workspaceId: "ws_3" });
     expect(here.asked).toEqual([{ kind: "here", project: "/root/landing" }]);
+  });
+
+  it("say on the report where a page that returns to localhost reaches, off the one rule the sign-in plans by", async () => {
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const on = (local: boolean, relayed: boolean) =>
+      agentsReads<undefined>({
+        reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
+        places: () => undefined,
+        workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: "running", local, machine, project: "/root/landing" }),
+        channel: async () => {
+          throw new Error("no channel on this road");
+        },
+        changed: () => undefined,
+        relayed: () => relayed,
+        now: () => Date.parse("2026-09-24T12:00:00Z"),
+      });
+    expect((await on(true, false).read({ workspaceId: "ws_1" })).reach).toBe("here");
+    expect((await on(false, true).read({ workspaceId: "ws_1" })).reach).toBe("relay");
+    expect((await on(false, false).read({ workspaceId: "ws_1" })).reach).toBe("none");
+    expect((await on(false, false).read({ placeId: "here" })).reach).toBe("here");
+    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} })]).toEqual(["here", "relay", "none", "none"]);
   });
 
   it("forgets a workspace's last report once the workspace is removed, so nothing holds it for the host's life", async () => {
@@ -88,7 +109,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     };
   }
 
-  function acting(phase: { now: WorkspacePhase }) {
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
     const changed: (AgentsTarget | undefined)[] = [];
@@ -113,8 +134,12 @@ describe("the sign-ins on a computer or a workspace", () => {
       addTools: async () => ({ file: "~/.codex/config.toml" }),
     };
     const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const forgot: string[] = [];
+    const logged: string[] = [];
     const api = agentsReads<undefined>({
-      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
+      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
+      log: line => void logged.push(line),
+      ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
       places: () => undefined,
       workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
@@ -122,8 +147,44 @@ describe("the sign-ins on a computer or a workspace", () => {
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
     });
-    return { api, ch, planned, changed, codes, finish: () => finish() };
+    return { api, ch, planned, changed, codes, forgot, logged, finish: () => finish() };
   }
+
+  it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
+    for (const relayed of [true, false]) {
+      const t = acting({ now: "running" }, relayed);
+      const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+      expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), project: "/root/landing", ...(relayed ? { relayed: true } : {}) });
+      leave();
+    }
+  });
+
+  it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {
+    const t = acting({ now: "running" });
+    const { signInId } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+    await tick();
+    t.ch.push({ url: "https://mcp.notion.com/authorize?code=SECRETCODE&state=x" });
+    await t.api.signInCode(signInId, "SECRETCODE");
+    t.finish();
+    await tick();
+    expect(t.forgot).toEqual([JSON.stringify({ workspaceId: "ws_1" })]);
+    expect(t.changed).toEqual([{ workspaceId: "ws_1" }]);
+    expect(t.logged).toEqual([`sign-in ${signInId} started: claude, server notion, on workspace ws_1`, `sign-in ${signInId} ended: claude, server notion, on workspace ws_1: signed-in`]);
+    const stopped = await t.api.signIn({ placeId: "here" }, { agent: "codex" }, () => {});
+    t.api.signInStop(stopped.signInId);
+    await tick();
+    expect(t.logged.at(-1)).toBe(`sign-in ${stopped.signInId} ended: codex, on computer here: stopped`);
+    const refused = acting({ now: "running" });
+    await expect(refused.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode" }, () => {})).rejects.toThrow(/asks you to pick/);
+    expect(refused.logged).toEqual(["sign-in refused: opencode, on workspace ws_1: opencode asks you to pick"]);
+    expect(JSON.stringify([t.logged, refused.logged])).not.toContain("SECRETCODE");
+  });
+
+  it("log a sign-in's names with every control character taken out, so no name forges a line of the host's log", async () => {
+    const t = acting({ now: "running" });
+    await expect(t.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode", server: "x\nsign-in si_forged ended: \x1b[2Kok\r" }, () => {})).rejects.toThrow(/asks you to pick/);
+    expect(t.logged).toEqual(["sign-in refused: opencode, server xsign-in si_forged ended: [2Kok, on workspace ws_1: opencode asks you to pick"]);
+  });
 
   it("run what the host planned over the target's own channel, push each step under the sign-in's id, take a code by that id and say the agents changed at the end", async () => {
     const t = acting({ now: "running" });
