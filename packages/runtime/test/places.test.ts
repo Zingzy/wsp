@@ -3121,6 +3121,29 @@ describe("a fork on a computer you joined", () => {
     await until(async () => second.tunnels.some(t => t.port === 32768));
   });
 
+  it("hands a channel on that computer's link the tunnel frames of a road it opened, and keeps its own forward's to itself", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const { localPort } = await runtime!.places!.forward(placeId, 32768);
+    const pane = netConnect({ host: "127.0.0.1", port: localPort });
+    await until(async () => place.tunnels.length === 1);
+    const own = place.tunnels[0]!.tunnelId;
+    const heard: Record<string, unknown>[] = [];
+    const channel = runtime!.places!.channel(placeId, e => void heard.push(e))!;
+    place.push({ type: "tunnel.data", tunnelId: own, data: "aGk=" });
+    place.push({ type: "tunnel.data", tunnelId: "t9", data: "aGk=" });
+    place.push({ type: "tunnel.end", tunnelId: "t9" });
+    await until(async () => heard.length === 2);
+    expect(heard).toEqual([
+      { type: "tunnel.data", tunnelId: "t9", data: "aGk=" },
+      { type: "tunnel.end", tunnelId: "t9" },
+    ]);
+    channel.close();
+    pane.destroy();
+  });
+
   it("a napping fork is not counted as one that runs, and the room is what a create can take now", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, {

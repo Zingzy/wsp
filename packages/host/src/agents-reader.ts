@@ -248,9 +248,9 @@ export function agentsReader(o: {
   const checks: ServerChecks | undefined = o.knock === undefined ? undefined : serverChecks({ knock: o.knock, now, ...(o.resolve !== undefined ? { resolve: o.resolve } : {}), ...(o.checkMs !== undefined ? { checkMs: o.checkMs } : {}) });
   const checkOn = (host: Host, key: string | undefined) =>
     checks === undefined ? {} : { check: (agent: McpAgent, server: McpServer) => checks.auth(host, { cwd: host.home, ...(key !== undefined ? { key } : {}) }, agent, server) };
-  const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string }> => {
+  const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string; runAs?: string }> => {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
-    return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user };
+    return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user, ...(login.runAs !== undefined ? { runAs: login.runAs } : {}) };
   };
   return {
     read: async (on: AgentsOn, key?: string) => {
@@ -258,10 +258,10 @@ export function agentsReader(o: {
         const host = o.here?.() ?? nodeHost();
         return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.project !== undefined ? { project: on.project } : {}), ...checkOn(host, key) });
       }
-      const { host, user } = await hostOf(on);
+      const { host, user, runAs } = await hostOf(on);
       const box = on.kind === "box" ? { ...(on.signIns !== undefined ? { signIns: on.signIns } : {}), ...(on.versions !== undefined ? { versions: on.versions } : {}) } : undefined;
       const read = await readAgents(host, { user, vault: o.vault(), ...(on.kind === "machine" && on.project !== undefined ? { project: on.project } : {}), ...(box !== undefined ? { box } : {}), ...checkOn(host, key) });
-      return { ...read, refused: [...read.refused, ...host.refused] };
+      return { ...read, refused: [...read.refused, ...host.refused], ...(runAs !== undefined ? { runAs } : {}) };
     },
     tools: async (on, ask) => {
       const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
