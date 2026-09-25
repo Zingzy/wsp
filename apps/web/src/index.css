@@ -2226,14 +2226,16 @@ code {
    painting so the window's own material shows through the canvas alone, and
    the chrome around it paints the app background itself: the right pane's tab
    strip, the terminal tabs beside a split, the header row and the thread above
-   a drawer, and every column and banner that does not hold the canvas. In a
-   browser tab there is no material, and the canvas blends over the pane's token. */
+   a drawer, and every column and banner that does not hold the canvas. In dark
+   mode every region already paints its own share over the glass, so only light
+   mode repaints the chrome. In a browser tab there is no material, and the
+   canvas blends over the pane's token. */
 html.desktop-mac:has([data-terminal-translucent]),
 html.desktop-mac :has([data-terminal-translucent]) {
   background: transparent;
 }
 
-html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+html.desktop-mac:not(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
   background: var(--background);
 }
 
