@@ -81,7 +81,7 @@ import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1808,6 +1808,42 @@ describe("putting the agent on a computer over ssh", () => {
       (e: unknown) => e as Error,
     );
     expect(failed?.message).toBe(placeNoLinkLine("box"));
+  });
+
+  it("drops the record a join made when the install it landed in failed, since that install took the join back off the box", async () => {
+    const hostKey = newPlaceKeyPair();
+    const store = memoryStore();
+    const removed: string[] = [];
+    let joined = "";
+    const said = "spoo connected back but its agent did not start: systemctl exited 1; nothing this add put on it is left there";
+    let taken = true;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async req => {
+          // The join on the box landed and wrote the record; the unit it installed next did not start.
+          const { client, placeId } = await join(hostKey, { code: readJoinToken(req.code).code, name: "spoo", report: report("spoo") });
+          sockets.push(client.ws);
+          joined = placeId;
+          throw taken ? new PlaceAddTakenBackError(said) : new Error(said);
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    runtime.events.on("place.removed", e => removed.push((e as { placeId: string }).placeId));
+    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
+    expect(joined).not.toBe("");
+    expect(await store.get("places", joined)).toBeUndefined();
+    expect((await placesOf()).some(p => p.id === joined)).toBe(false);
+    expect(removed).toEqual([joined]);
+    // An install that could not take its join back keeps the record, which is the road a remove sweeps that box by.
+    taken = false;
+    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
+    expect(await store.get("places", joined)).toBeDefined();
+    expect(removed).toHaveLength(1);
   });
 
   it("keeps the login the install used on the record when the computer never dials back, which is the box that needs it most", async () => {
