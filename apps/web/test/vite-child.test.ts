@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { stopVite } from "./vite-child";
+import { startVite, stopVite } from "./vite-child";
 
 // The child prints once its script has run, so a signal never races its handler.
 const started = (script: string) => {
@@ -28,4 +30,9 @@ it("an already exited child is left alone", async () => {
   await new Promise(done => c.once("exit", done));
   await stopVite(c);
   expect(c.exitCode).toBe(0);
+});
+
+it("a harness page that is not on disk is refused before any server starts", async () => {
+  const web = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  await expect(startVite(web, "/test/no-such-harness/index.html")).rejects.toThrow("/test/no-such-harness/index.html is not a file");
 });

@@ -18,7 +18,7 @@ import { AgentLine, agentStepWords } from "./recipe/AgentLine.js";
 import { ReadingRows } from "./recipe/ReadingRows.js";
 import { RecipeScreen } from "./recipe/RecipeScreen.js";
 import { RoadChoice, roadReady, type RoadPick } from "./recipe/RoadChoice.js";
-import { MICRO_LABEL } from "./recipe/rows.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { recipeAt, useRecipeJob } from "./recipe/useRecipeJob.js";
 import { RefusalSlot } from "./sheetParts.js";
 
@@ -37,7 +37,7 @@ function RecipeStep({ k, counter, headline, top, note, cost, primary, links, ref
     <div data-k="recipe" data-step={k} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         {counter === undefined ? null : (
-          <p data-k="recipe-counter" className={MICRO_LABEL}>
+          <p data-k="recipe-counter" className={cn(MICRO_LABEL, "text-muted-foreground")}>
             {counter}
           </p>
         )}

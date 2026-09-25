@@ -18,10 +18,9 @@ import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
+import { MICRO_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 
-/** The caps mono label a step's count and a group divider wear. */
-export const MICRO_LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
 export const STATE_WORD = "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 export const CARD = "w-full overflow-hidden rounded-[10px] border border-border bg-card text-left";
 /** How many 48 px rows a card shows before it scrolls. */
@@ -130,7 +129,7 @@ export const LONE_FIELD = "h-12 w-full rounded-md border border-input bg-backgro
 /** One caps mono divider over a group of rows. */
 export function GroupLabel({ children }: { children: ReactNode }) {
   return (
-    <li data-k="group" className={cn(ROW_LINE, "flex h-8 items-center pl-4", MICRO_LABEL)}>
+    <li data-k="group" className={cn(ROW_LINE, "flex h-8 items-center pl-4 text-muted-foreground", MICRO_LABEL)}>
       {children}
     </li>
   );

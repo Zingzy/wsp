@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small pieces every level of the agents manager draws: an act as an xs
 // outline button with its glyph, a row's or a head's lead, the agents' marks
-// after a name, and an MCP server's status as a dot and a word.
+// after a name, an MCP server's status as a dot and a word, and one pick of a
+// few in a select.
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
@@ -10,8 +11,9 @@ import { FACT } from "../../settings/format.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../ui/button.js";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select.js";
 import { Spinner } from "../ui/spinner.js";
-import { AGENTS_LIST_WORDS as W, agentNames, type RowAct } from "./agentsRows.js";
+import { AGENTS_LIST_WORDS as W, agentNames, type RowAct, type PickOption } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import { useServerIcon } from "./useServerIcon.js";
 import type { Lead, ServerState, ServerStatus } from "./kinds/kind.js";
@@ -137,6 +139,47 @@ export function ServerStatusView({ status, className }: { status: ServerStatus; 
       <span data-status-word className="truncate font-mono text-[11px] text-muted-foreground">
         {status.words}
       </span>
+    </span>
+  );
+}
+
+function OptionView({ option }: { option: PickOption }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="truncate">{option.label}</span>
+      {option.fact === undefined ? null : <span className={cn(FACT, "truncate")}>{option.fact}</span>}
+    </span>
+  );
+}
+
+/** One pick of a few, each option by its name with a fact beside it where it has one, the trigger as its option
+ * reads. A value no option carries draws an empty trigger, never the value, and `lost` says under it why. */
+export function OneOf({ k, label, options, value, set, lost, className }: { k: string; label: string; options: readonly PickOption[]; value: string; set: (value: string) => void; lost?: string; className?: string }) {
+  const optionOf = (v: string): PickOption | undefined => options.find(o => o.value === v);
+  return (
+    <span className="flex min-w-0 flex-col gap-1">
+      <Select value={value} onValueChange={v => typeof v === "string" && set(v)}>
+        <SelectTrigger size="default" aria-label={label} data-k={k} className={cn("h-8 min-h-8 w-full", className)}>
+          <SelectValue>
+            {(v: string) => {
+              const option = optionOf(v);
+              return option === undefined ? null : <OptionView option={option} />;
+            }}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup>
+          {options.map(o => (
+            <SelectItem key={o.value} value={o.value}>
+              <OptionView option={o} />
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+      {lost === undefined ? null : (
+        <span data-k={`${k}-lost`} className="text-xs text-muted-foreground">
+          {lost}
+        </span>
+      )}
     </span>
   );
 }

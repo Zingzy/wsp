@@ -22,7 +22,7 @@ const HEAD = { title: "On spoo, for wsp" };
 afterEach(cleanup);
 
 function draw(over: Partial<AgentsManagerProps> = {}) {
-  return render(<AgentsManager shell="panel" head={HEAD} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box", project: { name: "wsp", path: "~/wsp" } }} onRefresh={() => {}} now={NOW} {...over} />);
+  return render(<AgentsManager shell="panel" head={HEAD} report={AGENTS_REPORT} reading={false} on="spoo" ctx={{ where: "box" }} onRefresh={() => {}} now={NOW} {...over} />);
 }
 
 const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-row]")];
@@ -214,7 +214,7 @@ describe("the list grammar", () => {
   it("groups servers by where they are set up, the project by its name and folder, and turns a failed connect's badge with its reason as the hover and Reconnect", () => {
     const tools = fakeTools();
     tools.answer("github", SERVER_TOOLS["github"]!);
-    draw({ ctx: { where: "box", tools, project: { name: "wsp", path: "~/wsp" } } });
+    draw({ ctx: { where: "box", tools } });
     tab("MCP servers");
     expect(groupLabels()).toEqual(["Global", "wsp~/wsp"]);
     const github = badge(rowEl(SERVER.github));

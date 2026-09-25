@@ -154,12 +154,13 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       const list = await at(width).evaluate(el => {
         const left = el.getBoundingClientRect().left;
         const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - left);
-        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group]"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
+        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group] svg circle"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
       });
       await at(width).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-trigger]').click();
       const detail = await at(width).evaluate(el => Math.round(el.querySelector("[data-fact-label]")!.getBoundingClientRect().left - el.getBoundingClientRect().left));
       console.info(`agents left edge at ${width}: ${JSON.stringify({ ...list, detail })}`);
-      // The panel's 16 px; the page's 21, the cards' hairline and px-5.
+      // The panel's 16 px; the page's 21, the cards' hairline and px-5. The ghost search box starts in the gutter, so
+      // its glyph's ink is what stands on the edge.
       const edge = width === 360 ? 16 : 21;
       expect([list.line, list.tabs, list.search, list.label, list.mark, detail]).toEqual([edge, edge, edge, edge, edge, edge]);
       await at(width).locator("[data-k=agents-back]").click();
@@ -206,16 +207,16 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       }
       return { color: "", image: "" };
     };
-    const panel = await surface.evaluate((el, underSrc) => {
-      const underOf = new Function(`return ${underSrc}`)() as typeof under;
-      el.scrollTop = 300;
+    // In the panel the list scrolls under a head that stands outside it, so nothing passes under the head.
+    const panel = await surface.evaluate(el => {
+      const body = el.querySelector<HTMLElement>("[data-agents-body]")!;
+      body.scrollTop = 300;
       const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
-      const style = getComputedStyle(top);
-      return { scrolled: el.scrollTop, offset: Math.round(top.getBoundingClientRect().top - el.getBoundingClientRect().top), bg: { color: style.backgroundColor, image: style.backgroundImage }, under: underOf(top) };
-    }, under.toString());
+      return { scrolled: body.scrollTop, offset: Math.round(top.getBoundingClientRect().top - el.getBoundingClientRect().top), inside: body.contains(top) };
+    });
     expect(panel.scrolled).toBeGreaterThan(0);
     expect(panel.offset).toBe(0);
-    expect(panel.bg).toEqual(panel.under);
+    expect(panel.inside).toBe(false);
     expect(await page!.locator("[data-k=agents-surface] [data-k=agents-line]").count()).toBe(0);
     await open("screen=settings-computer&theme=dark", { width: 1280, height: 600 });
     await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");

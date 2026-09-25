@@ -155,8 +155,8 @@ export function ProjectSwitcher({
               render={
                 <SidebarMenuAction
                   showOnHover
-                  // The room's own place: the row's 8 px inset, the 14 px chevron and the 8 px gap before it.
-                  className={cn(HOVER_GLYPH_CLASS, "right-7.5")}
+                  // The room's own place: the row's 8 px inset, the 16 px chevron and the 10 px gap before it.
+                  className={cn(HOVER_GLYPH_CLASS, "right-8.5")}
                   data-k="new-workspace"
                   data-project={pick.id}
                   aria-label={NEW_WORKSPACE}

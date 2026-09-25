@@ -12,7 +12,7 @@ import { Button } from "../../components/ui/button.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
-import { MICRO_LABEL } from "../../settings/recipe/rows.js";
+import { MICRO_LABEL } from "../../lib/microLabel.js";
 
 /** The least room over the label and under the footer, once the step is taller than the window's middle. */
 export const TOP_MARGIN_MIN = 48;
@@ -115,7 +115,7 @@ export function SetupScreen({
       <div data-k="top" aria-hidden className="w-full" style={{ flex: "1 1 0", minHeight: TOP_MARGIN_MIN }} />
       <div data-k="head" className="mb-16 flex w-full shrink-0 flex-col items-center">
         {counter !== undefined ? (
-          <p data-k="counter" className={cn(MICRO_LABEL, "mb-[14px]")}>
+          <p data-k="counter" className={cn(MICRO_LABEL, "mb-[14px] text-muted-foreground")}>
             {counter}
           </p>
         ) : null}

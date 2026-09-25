@@ -15,6 +15,7 @@ import { useSkillActs } from "../src/components/agents/useSkillActs.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
+import { pickOption } from "./select.js";
 
 const NOW = Date.parse("2026-09-24T12:03:00.000Z");
 const SKILL_MD = "---\nname: frontend-design\ndescription: Design frontends\n---\n# Frontend design\n\nPick a bold direction.\n";
@@ -254,7 +255,7 @@ describe("Add a skill", () => {
     const option = (id: string): HTMLElement => detail().querySelector<HTMLElement>(`[data-choice=agents] [data-choice-option=${id}]`)!;
     expect([...detail().querySelectorAll<HTMLElement>("[data-choice=agents] [data-choice-option]")].map(o => o.dataset["choiceOption"])).toEqual(["claude", "codex", "opencode"]);
     expect(option("codex").getAttribute("title")).toBe(W.readsShared);
-    expect(detail().querySelector("[data-choice=where]")).toBeNull();
+    expect(detail().querySelector("[data-k=where-pick]")?.textContent).toBe(W.global);
     fireEvent.click(option("claude").querySelector("button,[role=checkbox]")!);
     fireEvent.click(actIn("install"));
     expect(h.adds).toEqual([["anthropics/skills/pdf", [], false]]);
@@ -264,14 +265,14 @@ describe("Add a skill", () => {
 
   it("from a task's panel, asks whether it goes in the project, and a skill already there is held", async () => {
     const h = host();
-    render(<List ctx={{ where: "here", project: { name: "wsp", path: "~/wsp" } }} />);
+    render(<List ctx={{ where: "here" }} />);
     tab("Skills");
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
     typeSearch("pdf");
     fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
-    fireEvent.click(screen.getByRole("radio", { name: "wsp" }));
+    await pickOption(detail().querySelector("[data-k=where-pick]")!, /^wsp/);
     fireEvent.click(actIn("install"));
     expect(h.adds).toEqual([["anthropics/skills/pdf", ["claude"], true]]);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
