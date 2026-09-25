@@ -78,6 +78,7 @@ import {
   placeNoLoginsLine,
   boxSignInLaterLine,
   boxSignedInLine,
+  joinUnansweredLine,
 } from "../src/places.js";
 import { BackCutError, backBindLine, backUrl, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
@@ -273,6 +274,15 @@ const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joi
   now: () => 0,
   manager: unitsUnder(home),
   uid: 0,
+});
+
+describe("a join the host never answered", () => {
+  it("names the address and the wait, then what to do, and reads whole behind the app's install sentence", () => {
+    const line = joinUnansweredLine("http://100.129.166.28:4640");
+    expect(line).toBe("the host at http://100.129.166.28:4640 did not answer in 20 s; put both computers on one network, or link that host to your relay, and try again");
+    // The app reads it as the box's last stderr line behind "<name> took wsp but could not connect back: ", cut at 300.
+    expect(`spoo took wsp but could not connect back: ${line}`.length).toBeLessThanOrEqual(300);
+  });
 });
 
 describe("what wsp add prints with no argument", () => {
@@ -1802,7 +1812,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       run: async (script: string) =>
         script.includes("PREFLIGHT_OK")
           ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" }
-          : (reachAnswer(script) ?? { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: "the host at http://192.168.1.20:4400 did not answer in 20s\n" }),
+          : (reachAnswer(script) ?? { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: `${joinUnansweredLine("http://192.168.1.20:4400")}\n` }),
     };
     const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, hostNameFor: async (reach: SshReach) => reach.host };
     const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
@@ -1810,7 +1820,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const warn = vi.spyOn(console, "warn").mockImplementation((...said: unknown[]) => void warned.push(said.map(String).join(" ")));
     try {
       const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
-      expect(said).toBe("box took wsp but could not connect back: the host at http://192.168.1.20:4400 did not answer in 20s");
+      expect(said).toBe(`box took wsp but could not connect back: ${joinUnansweredLine("http://192.168.1.20:4400")}`);
       // The join it was running, spelled as it ran there, is for whoever reads the host's log.
       expect(warned.join("\n")).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
     } finally {

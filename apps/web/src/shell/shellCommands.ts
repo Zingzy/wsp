@@ -20,6 +20,7 @@ import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, 
 import { threadFolderOf } from "../files/root.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { addNotice } from "../notices/store.js";
+import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useHeldPanelStore, useRightPanelStore } from "../rightPanelStore.js";
 import { absenceOf } from "../settings/places.js";
@@ -41,14 +42,14 @@ export interface ShellCommandTarget {
 
 export type SplitDirection = "horizontal" | "vertical";
 
-/** A workspace the link refused a pty for, in the app's own sentence as a notice. Only for a refusal with no pane to stand in for it: a computer that is not answering
- * is the pane's own sentence, said where the click was, so nothing is said here about one. What used to land here
- * was the link's words behind a workspace name and a colon, and it stayed until another toast replaced it. */
-export function reportTerminalRefused(workspaceId: string): void {
+/** A workspace the link refused a pty for, as a notice with the link's reason. Only for a refusal with no pane to
+ * stand in for it: a computer that is not answering is the pane's own sentence, said where the click was, so
+ * nothing is said here about one. */
+export function reportTerminalRefused(workspaceId: string, e: unknown): void {
   const { workspaces, statuses, places } = useStore.getState();
   const workspace = workspaces.find(w => w.id === workspaceId) ?? null;
   if (absenceOf(places, workspace, statuses[workspaceId] ?? null, null) !== null) return;
-  addNotice({ kind: "error", text: terminalRefusedLine(workspace?.name) });
+  addNotice({ kind: "error", text: terminalRefusedLine(workspace?.name, failureOf(e).said) });
 }
 
 /** Runs fn against the workspace's link. Nothing is asked of a workspace whose computer is not answering: its pane
@@ -60,7 +61,7 @@ function withTerminals(workspaceId: string, fn: (terminals: WorkspaceTerminals) 
   if (absenceOf(places, workspace, statuses[workspaceId] ?? null, null) !== null) return Promise.resolve();
   const terminals = getTerminals(workspaceId);
   if (!terminals) return Promise.resolve();
-  return fn(terminals).then(() => undefined, () => reportTerminalRefused(workspaceId));
+  return fn(terminals).then(() => undefined, (e: unknown) => reportTerminalRefused(workspaceId, e));
 }
 
 /** Where a fresh pty starts: the folder a thread of this workspace would start in, which is the project's own
