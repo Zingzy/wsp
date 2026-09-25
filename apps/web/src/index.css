@@ -2109,13 +2109,31 @@ code {
   border-color: var(--sidebar-border);
 
   & > [data-slot="sidebar-inner"] {
-    background: var(--sidebar-veil, transparent);
+    background: transparent;
   }
 }
 
-/* The owner's pick over the window's sidebar material, compared live against window and hud on 2026-09-24. */
-:root:not([data-theme="light"]):is(.dark) {
-  --sidebar-veil: rgb(16 16 18 / 55%);
+/* Dark mode on the Mac: the whole window stands on the glass. The left sidebar is the bare glass; the right panel
+   lays #060606 at 60 percent over it and the centre #060606 at 72 percent, so the column read in is the darkest and
+   steadiest (tuned live with the owner on 2026-09-25). Inside the panel every edge is an 8 percent hairline and cards
+   a 2 percent tint; the line tokens are the contrast ones, which every border utility reads. Light mode keeps its
+   solid ground. */
+.desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inset"] {
+  background: transparent;
+}
+
+.desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] {
+  background: rgb(6 6 6 / 72%);
+}
+
+.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
+  background: rgb(6 6 6 / 60%);
+  border-color: var(--contrast-border);
+  --background: transparent;
+  --card: rgb(255 255 255 / 2%);
+  --muted: rgb(255 255 255 / 3%);
+  --contrast-border: rgb(255 255 255 / 8%);
+  --contrast-input: rgb(255 255 255 / 14%);
 }
 
 /* The window paints the glass behind the page, so the page's own canvas is
