@@ -32,6 +32,6 @@ export function pickedDest(picked: string, source: string): string {
 /** Where the folder landed on this Mac; the caches and each agent's outcome are in their rows, so only the fact no row
  * can carry, that the workspace had no sessions for it, joins the line. */
 export function exportLandedLine(result: ProjectExportResult, source: string): string {
-  const sessions = result.agents.length === 0 ? "; no agent sessions for it on the workspace" : "";
+  const sessions = result.agents.length === 0 ? "; no agent sessions for it on the task" : "";
   return `${folderName(source)} is at ${result.dest} on this Mac${sessions}.`;
 }

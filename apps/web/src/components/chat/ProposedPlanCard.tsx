@@ -73,7 +73,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
-      addNotice({ kind: "error", text: "This thread has no workspace folder to save the plan into." });
+      addNotice({ kind: "error", text: "This thread has no folder to save the plan into." });
       return;
     }
     setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
@@ -88,7 +88,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       return;
     }
     if (!relativePath) {
-      setPathRefusal({ said: "Type a path in the workspace to save the plan to." });
+      setPathRefusal({ said: "Type a path to save the plan to." });
       return;
     }
 
@@ -126,7 +126,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             {onSavePlan ? (
               <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
-                Save to workspace
+                Save to task
               </MenuItem>
             ) : null}
           </MenuPopup>
@@ -178,14 +178,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         >
           <DialogPopup className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Save plan to workspace</DialogTitle>
+              <DialogTitle>Save plan to a folder</DialogTitle>
               <DialogDescription>
-                Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+                Enter a path relative to <code>{workspaceRoot ?? "the task"}</code>.
               </DialogDescription>
             </DialogHeader>
             <DialogPanel className="space-y-3">
               <label htmlFor={savePathInputId} className="grid gap-1.5">
-                <span className="text-xs font-medium text-foreground">Workspace path</span>
+                <span className="text-xs font-medium text-foreground">Folder</span>
                 <Input
                   id={savePathInputId}
                   value={savePath}

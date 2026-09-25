@@ -11,7 +11,7 @@
 // each beside the agent that reads it.
 import { ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
-import { CLOUD_SETUP_WORDS, SOLARI_CONSOLE, initCostLine, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, SOLARI_CONSOLE, fmtSize, type InitSetup, type WorkspaceSize } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { cn } from "../../lib/utils.js";
@@ -23,6 +23,9 @@ const DOTS = "••••••••••••";
 
 const CONSOLE_URL = `https://${SOLARI_CONSOLE}`;
 const FIELD_ID = "setup-key-solari";
+
+const costLine = (size: WorkspaceSize, rateUsdPerHour: number): string =>
+  `A ${fmtSize(size)} task costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
 const CHECK_ID = `${FIELD_ID}-check`;
 
 /** What the provider said about the key last pressed: the line under the field, and whether pressing again is worth
@@ -52,7 +55,7 @@ export function SetupKeys({ setup, onSave, onBack, refusal, check = null, busy =
     onSave({ solari: typed });
   };
   const said = check !== null && sent === typed ? check : null;
-  const top = setup.pricing !== null ? `${words.top}. ${initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour)}` : words.top;
+  const top = setup.pricing !== null ? `${words.top}. ${costLine(setup.pricing.size, setup.pricing.rateUsdPerHour)}` : words.top;
   const primary = kept ? { word: CLOUD_SETUP_WORDS.screen.keycap, onPress: () => onSave({}), focus: false, busy } : { word: said?.retry === true ? words.retry : words.keycap, onPress: save, disabled: !ready, focus: false, busy, title: words.pasteFirst };
   return (
     <SetupScreen k="keys" headline={words.headline} top={top} refusal={refusal} primary={primary} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>

@@ -87,7 +87,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     {
       kind: "action",
       value: "action:new-workspace",
-      searchTerms: ["new workspace", "create workspace"],
+      searchTerms: ["new task", "create task"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: NEW_WORKSPACE,
       description: input.canCreate ? "One piece of work on one project" : "Not connected to the runtime",
@@ -117,26 +117,26 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   // the runtime stamped no thread id on, which pin the workspace alone and so are no step.
   const walkingIn = walkedWorkspace(input);
   const threadWalkDescription =
-    walk.length > 0 ? "Only one thread" : walkingIn === null ? "No threads to walk" : `Nothing to step to on ${walkingIn}; a walk stays inside one workspace`;
+    walk.length > 0 ? "Only one thread" : walkingIn === null ? "No threads to walk" : `Nothing to step to on ${walkingIn}; a walk stays inside one task`;
   items.push(
     {
       kind: "action",
       value: "action:next-workspace",
-      searchTerms: ["next workspace", "switch workspace", "cycle workspaces"],
+      searchTerms: ["next task", "switch task", "cycle tasks"],
       icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
-      title: "Next workspace",
+      title: "Next task",
       shortcutCommand: "workspace.next",
-      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      ...(oneWorkspace ? { disabled: true, description: "Only one task" } : {}),
       run: sync(handlers.nextWorkspace),
     },
     {
       kind: "action",
       value: "action:previous-workspace",
-      searchTerms: ["previous workspace", "switch workspace", "cycle workspaces"],
+      searchTerms: ["previous task", "switch task", "cycle tasks"],
       icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
-      title: "Previous workspace",
+      title: "Previous task",
       shortcutCommand: "workspace.previous",
-      ...(oneWorkspace ? { disabled: true, description: "Only one workspace" } : {}),
+      ...(oneWorkspace ? { disabled: true, description: "Only one task" } : {}),
       run: sync(handlers.previousWorkspace),
     },
     {
@@ -194,7 +194,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "rightPanel.toggle",
       title: "Toggle right panel",
-      description: selected ? selected.displayName : "Select a workspace first",
+      description: selected ? selected.displayName : "Select a task first",
       disabled: selected === null,
       run: async () => {
         if (selected) handlers.toggleRightPanel(selected.id);
@@ -219,7 +219,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     // computer that is not answering is that computer's word and not the wire's.
     const absent = absenceOf(input.places, project.workspace, project.status, null);
     const parts = [absent?.word ?? project.indicator.label, whereWord(project)];
-    if (project.id === input.selectedId) parts.push("Current workspace");
+    if (project.id === input.selectedId) parts.push("Current task");
     // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
     const slot = WORKSPACE_SELECT_SLOTS[index];
     return {

@@ -305,13 +305,13 @@ describe("new workspace helpers", () => {
   it("a concurrency refusal keeps the runtime's words, which name the machines holding the slots, under the cap title", () => {
     const line = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
     const explained = explainCreateRefusal(new RequestError(line, "concurrency"));
-    expect(explained.title).toMatch(/no more workspaces/i);
+    expect(explained.title).toMatch(/no more tasks/i);
     expect(explained.detail).toBe(line);
   });
 
   it("other failures keep their message under a plain title", () => {
     expect(explainCreateRefusal(new Error("no golden image yet"))).toEqual({
-      title: "Could not create the workspace",
+      title: "Could not create the task",
       detail: "no golden image yet",
     });
     expect(explainCreateRefusal("boom").detail).toBe("boom");

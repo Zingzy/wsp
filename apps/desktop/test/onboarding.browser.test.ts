@@ -288,7 +288,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     expect(await visible("#welcome")).toBe(false);
     expect(await visible("#agents")).toBe(true);
     expect(await page!.textContent("#agents h1")).toBe("Your agents drive wsp");
-    expect(await page!.textContent("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and workspaces on this Mac.");
+    expect(await page!.textContent("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on this Mac.");
     expect(await rows()).toEqual([
       { name: "Claude Code", state: "on this Mac", checked: true, disabled: false, mark: "claude" },
       { name: "Codex", state: "on this Mac", checked: true, disabled: false, mark: "codex" },

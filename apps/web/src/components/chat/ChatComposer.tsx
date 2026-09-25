@@ -692,7 +692,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                       data-chat-composer-compact={compact || undefined}
                       className={cn(
                         "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center",
-                        compact ? "gap-x-1 ps-4 pe-2 sm:ps-5" : "gap-x-2 gap-y-2 px-3 pt-3.5 pb-3 sm:px-4 sm:pt-4 sm:pb-4",
+                        compact ? "gap-x-1 ps-4 pe-2 sm:ps-5 [&_[data-composer-picker]]:h-7 [&_[data-composer-picker]]:gap-1.5 [&_[data-composer-picker]]:text-[13px]" : "gap-x-2 gap-y-2 px-3 pt-3.5 pb-3 sm:px-4 sm:pt-4 sm:pb-4",
                         compact && (tall ? "gap-y-1 pt-3.5 pb-2" : "py-2"),
                       )}
                     >

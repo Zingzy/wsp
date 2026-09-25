@@ -5,16 +5,17 @@
  * This is intentionally a shallow model: it owns an ordered set of surface
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, and the diff and the
- * agents are singleton surfaces.
+ * terminal surfaces point at terminal session ids, and the diff, the
+ * workspace's own readings, its processes and the agents are singleton surfaces.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here belongs to the machine, not to one conversation on it.
  */
+import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "agents"] as const;
+export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "machine", "processes", "agents"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -29,6 +30,8 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
+  | { id: "machine"; kind: "machine" }
+  | { id: "processes"; kind: "processes" }
   | { id: "agents"; kind: "agents" };
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
@@ -80,9 +83,14 @@ const EMPTY_WORKSPACE_STATE: WorkspaceRightPanelState = {
   activeSurfaceId: null,
   surfaces: [],
 };
+// This computer's panel stands behind the default thread and the first run, where nothing asked for it yet.
+const EMPTY_HERE_STATE: WorkspaceRightPanelState = { ...EMPTY_WORKSPACE_STATE, isOpen: false };
+const emptyFor = (key: string): WorkspaceRightPanelState => (key === HERE_KEY ? EMPTY_HERE_STATE : EMPTY_WORKSPACE_STATE);
 
 const SINGLETONS: { [K in SingletonKind]: Extract<RightPanelSurface, { kind: K }> } = {
   diff: { id: "diff", kind: "diff" },
+  machine: { id: "machine", kind: "machine" },
+  processes: { id: "processes", kind: "processes" },
   agents: { id: "agents", kind: "agents" },
 };
 const singletonSurface = (kind: SingletonKind): RightPanelSurface => SINGLETONS[kind];
@@ -112,8 +120,8 @@ const upsertSurface = (
   activeSurfaceId: activate ? surface.id : current.activeSurfaceId,
 });
 
-const isEmptyState = (state: WorkspaceRightPanelState): boolean =>
-  state.isOpen === EMPTY_WORKSPACE_STATE.isOpen &&
+const isEmptyState = (key: string, state: WorkspaceRightPanelState): boolean =>
+  state.isOpen === emptyFor(key).isOpen &&
   state.activeSurfaceId === null &&
   state.surfaces.length === 0;
 
@@ -122,9 +130,9 @@ const updateWorkspace = (
   workspaceId: string,
   updater: (current: WorkspaceRightPanelState) => WorkspaceRightPanelState,
 ): Record<string, WorkspaceRightPanelState> => {
-  const current = byWorkspaceId[workspaceId] ?? EMPTY_WORKSPACE_STATE;
+  const current = byWorkspaceId[workspaceId] ?? emptyFor(workspaceId);
   const next = updater(current);
-  if (isEmptyState(next)) {
+  if (isEmptyState(workspaceId, next)) {
     if (!(workspaceId in byWorkspaceId)) return byWorkspaceId;
     const { [workspaceId]: _removed, ...rest } = byWorkspaceId;
     return rest;
@@ -151,6 +159,8 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   if (!isKnownKind(kind)) return null;
   switch (kind) {
     case "diff":
+    case "machine":
+    case "processes":
     case "agents":
       return singletonSurface(kind);
     case "preview": {
@@ -195,7 +205,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
         const activeSurfaceId = surfaces.some((surface) => surface.id === state?.activeSurfaceId)
           ? (state?.activeSurfaceId ?? null)
           : (surfaces[0]?.id ?? null);
-        const isOpen = typeof state?.isOpen === "boolean" ? state.isOpen : EMPTY_WORKSPACE_STATE.isOpen;
+        const isOpen = typeof state?.isOpen === "boolean" ? state.isOpen : emptyFor(workspaceId).isOpen;
         return [workspaceId, { isOpen, surfaces, activeSurfaceId }];
       },
     ),
@@ -491,7 +501,7 @@ export function selectWorkspaceRightPanelState(
   workspaceId: string | null | undefined,
 ): WorkspaceRightPanelState {
   if (!workspaceId) return EMPTY_WORKSPACE_STATE;
-  return byWorkspaceId[workspaceId] ?? EMPTY_WORKSPACE_STATE;
+  return byWorkspaceId[workspaceId] ?? emptyFor(workspaceId);
 }
 
 export function selectActiveRightPanel(
@@ -529,10 +539,3 @@ export function selectPanelTerminalIds(
   const state = selectWorkspaceRightPanelState(byWorkspaceId, workspaceId);
   return state.surfaces.flatMap((surface) => (surface.kind === "terminal" ? surface.terminalIds : []));
 }
-
-/** Whether the panel stands while no workspace is selected, where every pane in it is held: closed until the panel
- * chord or the header's toggle asks, and for this page only, since nothing in it is a workspace's to keep. */
-export const useHeldPanelStore = create<{ open: boolean; toggle: () => void }>()(set => ({
-  open: false,
-  toggle: () => set(s => ({ open: !s.open })),
-}));

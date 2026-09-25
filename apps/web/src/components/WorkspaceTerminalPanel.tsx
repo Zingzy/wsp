@@ -46,8 +46,8 @@ export function WorkspaceTerminalPanel({
     return (
       <Empty className="flex-1">
         <EmptyHeader>
-          <EmptyTitle>No terminal link for this workspace.</EmptyTitle>
-          <EmptyDescription>Terminals connect while the workspace is running.</EmptyDescription>
+          <EmptyTitle>No terminal link for this task.</EmptyTitle>
+          <EmptyDescription>Terminals connect while the task is running.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );

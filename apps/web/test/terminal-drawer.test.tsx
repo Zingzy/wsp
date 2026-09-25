@@ -158,7 +158,7 @@ describe("WorkspaceTerminalDrawer", () => {
     expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalOpen ?? false).toBe(false);
 
     act(() => useTerminalDrawerStore.getState().setOpen(WS, true));
-    await screen.findByText(/No terminals for this workspace yet/);
+    await screen.findByText(/No terminals open/);
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(1);
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
@@ -445,7 +445,7 @@ describe("drawer resilience", () => {
     clearNotices();
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText(/No terminals for this workspace yet/);
+    await screen.findByText(/No terminals open/);
     await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
     expect(count("pty.create")).toBe(1);
 
@@ -488,16 +488,16 @@ describe("panes on a workspace that is not running", () => {
 
     act(() => setPane("pausing", { machineState: "running", reach: { state: "napping" } }, wakes));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("paused"));
-    expect(overlay()!.textContent).toContain("Pausing. The shell is kept; wake the workspace to continue");
+    expect(overlay()!.textContent).toContain("Pausing. The shell is kept; wake the task to continue");
     act(() => {
       setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
       wt.feedStatus("connecting");
     });
-    await waitFor(() => expect(overlay()!.textContent).toContain("Paused. The shell is kept; wake the workspace to continue"));
+    await waitFor(() => expect(overlay()!.textContent).toContain("Paused. The shell is kept; wake the task to continue"));
     // The frame stays: the surface is still mounted under the overlay, and a key pressed into it is refused, not sent.
     expect(inputs("drawer")).toHaveLength(1);
     fireEvent.keyDown(inputs("drawer")[0]!, { key: "a", code: "KeyA" });
-    await waitFor(() => expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the workspace is paused"));
+    await waitFor(() => expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the task is paused"));
     expect(writes()).toEqual([]);
 
     fireEvent.click(within(overlay()!).getByRole("button", { name: "Wake" }));
@@ -577,7 +577,7 @@ describe("panes on a workspace that is not running", () => {
     expect(fireEvent.keyDown(wake, { key: "Enter", code: "Enter" })).toBe(true);
     expect(document.querySelector("[data-terminal-refused]")).toBeNull();
     expect(fireEvent.keyDown(overlay()!, { key: "a", code: "KeyA" })).toBe(false);
-    expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the workspace is paused");
+    expect(document.querySelector("[data-terminal-refused]")?.textContent).toBe("Typing is refused: the task is paused");
     // With the pane holding focus, the next state takes it so keys keep landing on the refusal.
     (inputs("drawer")[0] as HTMLElement).focus();
     act(() => setPane("waking", { machineState: "starting", reach: { state: "napping" } }, wakes));
@@ -609,14 +609,14 @@ describe("panes on a workspace that is not running", () => {
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
     act(() => wt.feedStatus("connecting"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
-    expect(overlay()!.textContent).toMatch(/Reconnecting to the workspace\s*for \d+s/);
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the task\s*for \d+s/);
     expect(within(overlay()!).queryByRole("button", { name: "Wake" })).toBeNull();
     act(() => setPane("running", { reach: { state: "unreachable" } }));
     expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting");
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
-    expect(overlay()!.textContent).toContain("The workspace is not answering");
-    expect(hints()).toEqual(["Rebuild it from the workspace's row"]);
+    expect(overlay()!.textContent).toContain("The task is not answering");
+    expect(hints()).toEqual(["Rebuild it from the task's row"]);
     act(() => {
       setPane("running", {});
       wt.feedStatus("live");
@@ -644,18 +644,18 @@ describe("panes on a workspace that is not running", () => {
       getLive(WS).feedStatus("connecting");
     });
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
-    expect(overlay()!.textContent).toMatch(/Reconnecting to the workspace\s*for \d+s/);
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the task\s*for \d+s/);
     expect(hints()).toEqual([
-      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on",
-      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the task last answered; the work on it took the memory, not a fault of the computer it runs on",
+      "A task on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
     ]);
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
-    expect(overlay()!.textContent).not.toContain("The workspace is not answering");
+    expect(overlay()!.textContent).not.toContain("The task is not answering");
     expect(overlay()!.textContent).toContain("Out of memory (3.6 GB of 3.9 GB used, load 6.4)");
     expect(hints()).toEqual([
-      "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
-      "Rebuild it from the workspace's row",
+      "A task on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
+      "Rebuild it from the task's row",
     ]);
     act(() => {
       setPane("running", {});
@@ -679,7 +679,7 @@ describe("panes on a workspace that is not running", () => {
         <Panel />
       </>,
     );
-    await waitFor(() => expect(screen.getAllByText("Workspace is paused; wake it to open a terminal")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByText("Task is paused; wake it to open a terminal")).toHaveLength(2));
     expect(document.querySelectorAll("[data-terminal-empty='paused']")).toHaveLength(2);
     fireEvent.click(screen.getAllByRole("button", { name: "Wake" })[0]!);
     await waitFor(() => expect(wakes).toEqual([WS]));

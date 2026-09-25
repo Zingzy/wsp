@@ -72,7 +72,7 @@ describe("workspaceState", () => {
       connecting: "Connecting to wsp",
       reconnecting: "wsp is not running, reconnecting",
       closed: "wsp is not running",
-      "not-found": "Workspace not found",
+      "not-found": "Task not found",
       loading: "Loading transcript",
       "no-agents": "the agents here have not answered yet",
     };

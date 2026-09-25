@@ -200,7 +200,7 @@ const harnesses = ["claude", "codex", "opencode"].map((value) => ({
 const commands = [
   {
     value: "Actions",
-    items: ["New workspace", "New terminal", "Toggle sidebar", "Open browser"],
+    items: ["New task", "New terminal", "Toggle sidebar", "Open browser"],
   },
 ];
 const regions = ["singapore", "frankfurt", "oregon", "tokyo"];
@@ -211,7 +211,7 @@ function DraftInputSample() {
   const [name, setName] = useState("api");
   return (
     <div className="flex flex-col gap-2">
-      <DraftInput aria-label="Workspace name" value={name} onCommit={setName} />
+      <DraftInput aria-label="Task name" value={name} onCommit={setName} />
       <span className="text-muted-foreground text-xs">committed: {name}</span>
     </div>
   );
@@ -305,7 +305,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     render: () => (
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="g-name">Workspace name</Label>
+          <Label htmlFor="g-name">Task name</Label>
           <Input id="g-name" placeholder="api" />
         </div>
         <Textarea placeholder="What should we build in api?" rows={3} />
@@ -467,7 +467,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </DialogTrigger>
           <DialogPopup>
             <DialogHeader>
-              <DialogTitle>New workspace</DialogTitle>
+              <DialogTitle>New task</DialogTitle>
               <DialogDescription>
                 A copy of your image where you pick.
               </DialogDescription>
@@ -489,7 +489,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </AlertDialogTrigger>
           <AlertDialogPopup>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete workspace?</AlertDialogTitle>
+              <AlertDialogTitle>Delete task?</AlertDialogTitle>
               <AlertDialogDescription>
                 The computer and the images on it are removed.
               </AlertDialogDescription>
@@ -510,7 +510,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </SheetTrigger>
           <SheetPopup side="right">
             <SheetHeader>
-              <SheetTitle>Workspace</SheetTitle>
+              <SheetTitle>Task</SheetTitle>
               <SheetDescription>state, projects, live</SheetDescription>
             </SheetHeader>
             <SheetPanel>
@@ -543,7 +543,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </MenuTrigger>
           <MenuPopup>
             <MenuGroup>
-              <MenuGroupLabel>Workspace</MenuGroupLabel>
+              <MenuGroupLabel>Task</MenuGroupLabel>
               <MenuItem>
                 Fork <MenuShortcut>⌘F</MenuShortcut>
               </MenuItem>
@@ -568,7 +568,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           <TooltipTrigger render={<Button variant="outline" size="sm" />}>
             Tooltip
           </TooltipTrigger>
-          <TooltipPopup>Opens the workspace panel</TooltipPopup>
+          <TooltipPopup>Opens the task panel</TooltipPopup>
         </Tooltip>
       </div>
     ),
@@ -615,7 +615,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     id: "table",
     render: () => (
       <Table>
-        <TableCaption>Workspaces on this host</TableCaption>
+        <TableCaption>Tasks on this host</TableCaption>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
@@ -666,14 +666,14 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           <EmptyMedia variant="icon">
             <FolderIcon />
           </EmptyMedia>
-          <EmptyTitle>No workspaces</EmptyTitle>
+          <EmptyTitle>No tasks</EmptyTitle>
           <EmptyDescription>
             Add a computer or connect a provider, then create one.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button size="sm">
-            <PlusIcon /> New workspace
+            <PlusIcon /> New task
           </Button>
         </EmptyContent>
       </Empty>
@@ -724,8 +724,8 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </SidebarHeader>
           <SidebarContent>
             <SidebarGroup>
-              <SidebarGroupLabel>Workspaces</SidebarGroupLabel>
-              <SidebarGroupAction aria-label="New workspace">
+              <SidebarGroupLabel>Tasks</SidebarGroupLabel>
+              <SidebarGroupAction aria-label="New task">
                 <PlusIcon />
               </SidebarGroupAction>
               <SidebarGroupContent>

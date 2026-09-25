@@ -27,7 +27,7 @@
 // sides, the sub-rows holding their room so picking a group moves no row below
 // it, the Light pick drawing the page light, Restore defaults only off the
 // defaults, the region right of the sidebar whole with the panel back on the
-// chord, and the one-field sheet's geometry over Computers. A computer's page
+// chord, and Add a computer's roads laid out on Computers. A computer's page
 // is photographed to its foot at both widths, in a window tall enough to hold
 // it, since its acts are under its agent rows. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
@@ -502,7 +502,7 @@ const SETTINGS_SCREENS = [
   ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
   ["settings-search", "[data-settings-at=search] [data-settings-row=sidebar-width]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
-  ["settings-add-computer", "[data-k=add-computer] [data-k=login-field]"],
+  ["settings-add-computer", "[data-k=add-computer] [data-k=road-ssh] [data-k=login]"],
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
 const ROW = 52;
@@ -814,54 +814,38 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     await shot("from-foot-390-dark");
   }, 60_000);
 
-  it("the Add a computer sheet stands over Computers 448 wide, inset 16 px, as tall as it holds and never past the window less 32, and stops at the cap in a short window", async () => {
-    const settled = async (selector: string): Promise<void> => {
-      await page!.evaluate(() => delete (window as unknown as { __rect?: string }).__rect);
-      await page!.waitForFunction(
-        sel => {
-          const el = document.querySelector(sel);
-          if (el === null) return false;
-          const held = window as unknown as { __rect?: string };
-          const now = JSON.stringify(el.getBoundingClientRect());
-          const same = held.__rect === now;
-          held.__rect = now;
-          return same;
-        },
-        selector,
-        { polling: 100 },
-      );
-    };
-    const box = async (selector: string) =>
-      page!.locator(selector).first().evaluate(el => {
-        const b = el.getBoundingClientRect();
-        return { y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), right: Math.round(b.right), bottom: Math.round(b.bottom) };
+  it("Add a computer stands inline on Computers: three road pictures of one size on one row that stack on a phone, and the ssh road open under them with its fields at one height and every step listed", async () => {
+    const READY = "[data-k=add-computer] [data-k=road-ssh] [data-k=login]";
+    const layout = () =>
+      page!.evaluate(() => {
+        const box = (el: Element) => {
+          const b = el.getBoundingClientRect();
+          return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), bottom: Math.round(b.bottom) };
+        };
+        const pictures = [...document.querySelectorAll("[data-k=add-roads] [data-add-road] > span:first-child")].map(box);
+        const fields = [...document.querySelectorAll("[data-k=road-ssh] input")].map(box);
+        return { pictures, fields, roads: box(document.querySelector("[data-k=add-roads]")!), panel: box(document.querySelector("[data-k=road-ssh]")!), steps: document.querySelectorAll("[data-k=road-ssh] [data-k=plan] li").length };
       });
-    for (const size of [
-      { width: 1280, height: 800 },
-      { width: 1024, height: 700 },
-    ]) {
-      await open("settings-add-computer", "dark", "[data-k=add-computer] [data-k=login-field]", size);
-      await settled("[data-slot=sheet-popup]");
-      const popup = await box("[data-slot=sheet-popup]");
-      const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-      console.info(`add a computer at ${size.width}: ${popup.w} by ${popup.h}, top ${popup.y}, right inset ${size.width - popup.right}`);
-      expect(popup.w).toBe(448);
-      expect(popup.y).toBe(16);
-      expect(size.width - popup.right).toBe(16);
-      expect(popup.bottom - footer.bottom).toBeLessThanOrEqual(1);
-      expect(popup.h).toBeLessThanOrEqual(size.height - 32);
-      expect(await page!.locator("[data-k=plan] [data-k=line]").count()).toBe(PlaceAddStep.options.length);
+    for (const theme of THEMES) {
+      await open("settings-add-computer", theme, READY);
+      const wide = await layout();
+      console.info(`add a computer at 1280 ${theme}: ${JSON.stringify(wide)}`);
+      expect(wide.pictures).toHaveLength(3);
+      expect(new Set(wide.pictures.map(p => p.y)).size).toBe(1);
+      expect(new Set(wide.pictures.map(p => `${p.w}x${p.h}`)).size).toBe(1);
+      expect(wide.panel.y).toBeGreaterThanOrEqual(wide.roads.bottom);
+      expect(wide.fields).toHaveLength(3);
+      expect(new Set(wide.fields.map(f => f.h)).size).toBe(1);
+      expect(new Set(wide.fields.map(f => f.y)).size).toBe(1);
+      expect(wide.steps).toBe(PlaceAddStep.options.length);
+      await shot(`add-computer-1280-${theme}`, "[data-k=add-computer]");
     }
-    // Shorter than the app allows, on purpose: the one window where the cap is reached, and the body scrolls under
-    // a standing footer.
-    await open("settings-add-computer", "dark", "[data-k=add-computer] [data-k=login-field]", { width: 1024, height: 420 });
-    await settled("[data-slot=sheet-popup]");
-    const popup = await box("[data-slot=sheet-popup]");
-    const footer = await box("[data-slot=sheet-popup] [data-slot=sheet-footer]");
-    expect(popup.h).toBe(420 - 32);
-    expect(footer.bottom).toBeLessThanOrEqual(420);
-    const body = await page!.locator("[data-slot=sheet-popup] [data-slot=scroll-area-viewport]").evaluate(el => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
-    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
-    await shot("add-computer-capped-1024x420");
+    await open("settings-add-computer", "dark", READY, { width: 390, height: 844 });
+    const phone = await layout();
+    console.info(`add a computer at 390: ${JSON.stringify(phone)}`);
+    expect(new Set(phone.pictures.map(p => p.x)).size).toBe(1);
+    expect(phone.pictures[1]!.y).toBeGreaterThan(phone.pictures[0]!.y);
+    expect(new Set(phone.fields.map(f => f.x)).size).toBe(1);
+    await shot("add-computer-390-dark", "[data-k=add-computer]");
   }, 90_000);
 });

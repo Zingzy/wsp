@@ -40,13 +40,13 @@ describe("the remove sentence", () => {
   it("names what comes off a computer that holds workspaces, and what leaves this Mac", () => {
     expect(removeTitle(hetzner)).toBe("Remove hetzner?");
     expect(removeSentence(hetzner, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its workspace come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The workspace's record and 2 threads leave this Mac.",
+      "wsp and its task come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The task's record and 2 threads leave this Mac.",
     );
   });
 
   it("says workspaces and records in the plural above one", () => {
     expect(removeSentence(hetzner, { workspaces: [{ name: "a", state: "Running", threads: 2 }, { name: "b", state: "Running", threads: 1 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its 2 workspaces come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The workspaces' records and 3 threads leave this Mac.",
+      "wsp and its 2 tasks come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The tasks' records and 3 threads leave this Mac.",
     );
   });
 
@@ -66,7 +66,7 @@ describe("the remove sentence", () => {
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
     expect(removeSentence(ascii, { workspaces: [{ name: "api", state: "Running", threads: 3 }, { name: "web", state: "Running", threads: 2 }] })).toBe(
-      "Its 2 workspaces are deleted at ASCII and the key is forgotten on this Mac. Their records and 5 threads leave this Mac.",
+      "Its 2 tasks are deleted at ASCII and the key is forgotten on this Mac. Their records and 5 threads leave this Mac.",
     );
   });
 
@@ -91,7 +91,7 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
   });
 
   it("says there is no project to make a workspace of yet, and the line that records one", () => {
-    expect(PROJECT_PICK_WORDS.noneYet).toBe("No projects yet, and a workspace is a copy of one.");
+    expect(PROJECT_PICK_WORDS.noneYet).toBe("No projects yet, and a task is a copy of one.");
     expect(PROJECT_PICK_WORDS.addOne).toBe("Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.");
   });
 

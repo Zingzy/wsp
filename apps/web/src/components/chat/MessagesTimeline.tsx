@@ -130,6 +130,8 @@ interface TimelineRowSharedState {
   onToggleWorkEntry: (anchorKey: string) => void;
   onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
   workGroupViewState: WorkGroupViewState;
+  lastReplyId: MessageId | null;
+  replyMeta: React.ReactNode;
 }
 
 /** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
@@ -223,6 +225,8 @@ export interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Lines that belong to the transcript's end, scrolled with it above the composer's inset. */
   footer?: React.ReactNode;
+  /** Facts about the settled turn, drawn on the last reply's own row beside its time. */
+  replyMeta?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +265,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   footer = null,
+  replyMeta = null,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -396,6 +401,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  const lastReplyId = useMemo(() => {
+    const last = rows.findLast(row => row.kind === "message");
+    return last?.kind === "message" && last.message.role === "assistant" ? last.message.id : null;
+  }, [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
@@ -513,6 +522,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
       workGroupViewState,
+      lastReplyId,
+      replyMeta,
     }),
     [
       timestampFormat,
@@ -532,6 +543,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       suspendEndScrollMaintenanceForDisclosure,
       workGroupViewState,
+      lastReplyId,
+      replyMeta,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -598,6 +611,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
             ListFooterComponent={
               <>
+                {lastReplyId === null ? replyMeta : null}
                 {footer}
                 {TIMELINE_LIST_FOOTER}
                 <div aria-hidden className="h-(--chat-composer-inset,0px)" />
@@ -1093,6 +1107,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                 </TooltipPopup>
               </Tooltip>
             )}
+            {ctx.lastReplyId === row.message.id ? ctx.replyMeta : null}
           </div>
         ) : null}
       </div>

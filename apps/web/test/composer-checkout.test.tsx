@@ -177,7 +177,7 @@ const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]"
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
 const branch = () => branchSlot()?.dataset["composerBranch"];
-const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
+const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
 const SLOT_HEIGHT = ["h-7", "sm:h-6"];
 /** The folder's own item in either form: it is the one that gives its width up, and it keeps what it cannot hold inside its box. */
@@ -522,19 +522,13 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(root()).toBe("/root"));
   });
 
-  it("explains the locked folder on hover and offers a new thread here with the picker open", async () => {
+  it("explains the locked folder on hover and offers no new-thread button beside it", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     expect(row()?.dataset["pickable"]).toBeUndefined();
     expect(screen.getByText("The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.").getAttribute("role")).toBe("tooltip");
-
-    fireEvent.click(screen.getByRole("button", { name: "New thread here" }));
-    await waitFor(() => expect(row()?.dataset["pickable"]).toBe("true"));
-    expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
-    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
-    expect(menuPick("/root")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
   });
 

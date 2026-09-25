@@ -15,10 +15,10 @@ import { workspaceActions, workspaceTarget } from "../../web/src/actions/workspa
 import { SEPARATOR, workspaceMenuShape } from "./workspace-menu.js";
 
 const ITEMS: ContextMenuItem[] = [
-  { id: "phase", label: "Pause workspace", group: "state", enabled: true },
+  { id: "phase", label: "Pause task", group: "state", enabled: true },
   { id: "rebuild", label: "Rebuild machine", group: "state", enabled: false, refusal: "Rebuild replaces a gone or zombie machine; this one answers" },
   { id: "open-terminal", label: "Open terminal", group: "open", enabled: true, shortcut: "⌘J", accelerator: "CommandOrControl+J" },
-  { id: "forget", label: "Forget workspace", group: "remove", enabled: false, refusal: "Only a workspace whose machine is gone can be forgotten; this one is running", destructive: true },
+  { id: "forget", label: "Forget task", group: "remove", enabled: false, refusal: "Only a workspace whose machine is gone can be forgotten; this one is running", destructive: true },
 ];
 
 const clickOf = (template: MenuItemConstructorOptions[], label: string) => template.find(row => row.label === label)!.click!;
@@ -27,7 +27,7 @@ const fakeClick = (): [MenuItem: import("electron").MenuItem, window: undefined,
 describe("contextMenuTemplate", () => {
   it("gives a row that can run its hint as the hover text, and a dimmed row's reason still wins the slot", () => {
     const rows: ContextMenuItem[] = [
-      { id: "nap", label: "Pause workspace", group: "state", enabled: true, checked: false, hint: "a nap keeps the memory and bills nothing" },
+      { id: "nap", label: "Pause task", group: "state", enabled: true, checked: false, hint: "a nap keeps the memory and bills nothing" },
       { id: "rebuild", label: "Rebuild machine", group: "state", enabled: false, refusal: "this one answers", hint: "never read" },
     ];
     const template = contextMenuTemplate(rows, vi.fn());
@@ -41,12 +41,12 @@ describe("contextMenuTemplate", () => {
     const choose = vi.fn();
     const template = contextMenuTemplate(ITEMS, choose);
     expect(template.map(row => row.type === "separator" ? "---" : `${row.label}${row.enabled === false ? " (off)" : ""}`)).toEqual([
-      "Pause workspace",
+      "Pause task",
       "Rebuild machine (off)",
       "---",
       "Open terminal",
       "---",
-      "Forget workspace (off)",
+      "Forget task (off)",
     ]);
     expect(template[1]).toMatchObject({ enabled: false, toolTip: "Rebuild replaces a gone or zombie machine; this one answers" });
     expect(template[0]).not.toHaveProperty("toolTip");
@@ -60,7 +60,7 @@ describe("contextMenuTemplate", () => {
 describe("chooseFrom", () => {
   it("answers with the row clicked", async () => {
     const chosen = chooseFrom(ITEMS, (template, _onClose) => {
-      clickOf(template, "Pause workspace")(...fakeClick());
+      clickOf(template, "Pause task")(...fakeClick());
     });
     await expect(chosen).resolves.toBe("phase");
   });

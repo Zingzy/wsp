@@ -87,7 +87,7 @@ describe("rightPanelStore hydrate", () => {
         { id: "file:x", kind: "file" },
         { id: "browser:t9", kind: "preview" },
         { id: "browser:new", kind: "preview", resourceId: null },
-        { id: "machine", kind: "machine" },
+        { id: "screen", kind: "screen" },
         { id: "browser:t1", kind: "preview", resourceId: "t1" },
       ],
       "file:x",

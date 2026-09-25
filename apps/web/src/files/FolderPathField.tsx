@@ -29,8 +29,8 @@ export const FOLDER_PATH_WORDS = {
   notAbsolute: { said: "That is not a full path.", fix: "Start it with a slash." },
   notThere: { said: "No folder there.", fix: "Check the path, or walk to it below." },
   notAFolder: { said: "That is a file, not a folder.", fix: "Give the folder that holds it." },
-  outside: { said: "Outside this workspace.", fix: "Import it as a project first." },
-  unread: { said: "The workspace could not read it.", fix: "Walk to it below instead." },
+  outside: { said: "Outside this task.", fix: "Import it as a project first." },
+  unread: { said: "The task could not read it.", fix: "Walk to it below instead." },
 } as const satisfies Record<string, FolderRefusal>;
 
 const BY_CODE: Partial<Record<DaemonErrorCode, FolderRefusal>> = {
