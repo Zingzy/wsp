@@ -222,3 +222,63 @@ describe("the default place at the image's seal", () => {
     await rt.close();
   });
 });
+
+describe("a fork at a place that holds no copy of the image", () => {
+  /** Every line the creates on this runtime said, in order, by the workspace's name. */
+  function said(rt: ReturnType<typeof providers>["rt"]): { name: string; message: string }[] {
+    const lines: { name: string; message: string }[] = [];
+    rt.events.on("workspace.creating", e => {
+      if (e.type === "workspace.creating") lines.push({ name: e.name, message: e.message });
+    });
+    return lines;
+  }
+
+  it("builds the copy there first, saying so with the time and the rate before anything boots, then forks the copy", async () => {
+    const { box, rt, seal, head, composed } = providers();
+    await seal();
+    const lines = said(rt);
+    const made = await createOn(rt, { golden: await head(), name: "x", on: "box" });
+    const copy = (await rt.image.get()).copies.find(c => c.place === "box")!;
+    expect(copy).toBeDefined();
+    expect(made.golden).toBe(copy.snapshotId);
+    expect(box.machines.at(-1)!.spec.fromSnapshot).toBe(copy.snapshotId);
+    expect(composed.count).toBe(1);
+    expect(lines.filter(l => l.name === "x")[0]!.message).toBe("building your image on box first, about ten minutes, billed at $0.11/hr while it builds, then x forks from it");
+    await rt.close();
+  });
+
+  it("at a place that charges nothing the line says no rate", async () => {
+    const { box, rt, seal, head } = providers();
+    Object.assign(box.pricing, { rateUsdPerHour: () => 0 });
+    await seal();
+    const lines = said(rt);
+    await createOn(rt, { golden: await head(), name: "x", on: "box" });
+    expect(lines.filter(l => l.name === "x")[0]!.message).toBe("building your image on box first, about ten minutes, then x forks from it");
+    await rt.close();
+  });
+
+  it("two forks at once build one copy, and a copy a cut left behind is built again before the next fork", async () => {
+    const { box, rt, seal, head, composed } = providers();
+    await seal();
+    const [a, b] = await Promise.all([createOn(rt, { golden: await head(), name: "a", on: "box" }), createOn(rt, { golden: await head(), name: "b", on: "box" })]);
+    expect(a.golden).toBe(b.golden);
+    expect([box.snapshots.length, composed.count]).toEqual([1, 1]);
+    await seal({ recipeHash: "h2" });
+    const lines = said(rt);
+    const c = await createOn(rt, { golden: await head(), name: "c", on: "box" });
+    expect([box.snapshots.length, composed.count]).toEqual([2, 2]);
+    expect(c.golden).toBe((await rt.image.get()).copies.find(x => x.place === "box")!.snapshotId);
+    expect(lines.filter(l => l.name === "c")[0]!.message).toMatch(/^building your image on box first/);
+    await rt.close();
+  });
+
+  it("a place already standing on the image forks at once and says nothing about a build", async () => {
+    const { rt, seal, head } = providers();
+    await seal();
+    await rt.image.build({ place: "box" });
+    const lines = said(rt);
+    await createOn(rt, { golden: await head(), name: "x", on: "box" });
+    expect(lines.filter(l => l.name === "x").some(l => l.message.includes("building your image"))).toBe(false);
+    await rt.close();
+  });
+});

@@ -2504,8 +2504,8 @@ export const SealedImageCopy = z.object({
 export type SealedImageCopy = z.infer<typeof SealedImageCopy>;
 
 /** What a build at a place came to: the copy that place holds now, and whether this call built it. A place already
- * standing on the record is answered with its copy and `built: false` rather than refused, so the road that builds
- * a copy on first use and a person typing the line twice both get the copy they asked for. */
+ * standing on the record is answered with its copy and `built: false` rather than refused, so a fork there and a
+ * person typing the line twice both get the copy they asked for. */
 export const SealedImageBuilt = z.object({ copy: SealedImageCopy, built: z.boolean() });
 export type SealedImageBuilt = z.infer<typeof SealedImageBuilt>;
 
@@ -3619,10 +3619,11 @@ export const NOT_ON_THIS_ROAD = "not on this road";
  * computer's own directories and a copy of a checkout on it, so there is nothing to pull and nothing to build. */
 export const NO_IMAGES_HERE = "this computer keeps no images: a workspace here is a copy of the computer itself";
 
-/** What a place that holds no copy of the image a fork names is refused with. A place builds its copy on first use;
- * until it does, the forks land where the image already is. */
+/** What a fork is refused with when the place it lands on answers that it holds no copy of the snapshot named. A
+ * fork builds the copy it needs only of the image's current version, so this is an older version or a project's
+ * image named at a place it was never built at. */
 export const placeHoldsNoImageLine = (place: string, image: string): string =>
-  `${place} holds no copy of ${image}; a place builds its copy of your image on first use, and until it does forks land on your default place`;
+  `${place} holds no copy of ${image}; a fork there builds a copy first only of your image's current version`;
 
 /** What a remove of a place that still holds forks is refused with: the machines are the person's to delete, and a
  * place taken out from under them would leave containers nothing here can name. */

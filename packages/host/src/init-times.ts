@@ -3,6 +3,7 @@
 // the import result at the seal, read back when the next wsp init offers a
 // rebuild, so the estimate is the measured one and not a constant.
 import { existsSync, readFileSync } from "node:fs";
+import { BUILD_TAKES_UNMEASURED } from "@wsp/protocol";
 import type { StageView } from "./init.js";
 
 export interface BuildTimes {
@@ -11,9 +12,6 @@ export interface BuildTimes {
   /** Milliseconds each clocked stage of the build and the seal ran, in the order they ran. */
   stages: Record<string, number>;
 }
-
-/** How long a build is said to take before this computer has measured one. */
-const ASSUMED = "about ten minutes";
 
 /** The stages the streams clocked, or nothing when a stage before a closing one has no clock: the builder already
  * held it, so the run was not a rebuild and measures none. */
@@ -52,7 +50,7 @@ export function readBuildTimes(path: string): BuildTimes | undefined {
 
 /** How long the last build ran, to the minute, and whether it was measured here at all. */
 function length(last: BuildTimes | undefined): { words: string; measured: boolean } {
-  if (last === undefined) return { words: ASSUMED, measured: false };
+  if (last === undefined) return { words: BUILD_TAKES_UNMEASURED, measured: false };
   const total = Object.values(last.stages).reduce((a, b) => a + b, 0);
   if (total < 60_000) return { words: "under a minute", measured: true };
   const minutes = Math.round(total / 60_000);

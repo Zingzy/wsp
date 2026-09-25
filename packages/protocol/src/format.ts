@@ -1626,6 +1626,16 @@ export function startingLine(name: string, where: string): string {
   return `starting ${name} on ${where}`;
 }
 
+/** How long a build is said to take where none has been measured. */
+export const BUILD_TAKES_UNMEASURED = "about ten minutes";
+
+/** The creation log's first line for a fork at a place that holds no current copy of the image: the copy is built
+ * there before the fork, which takes a build's time and, where the place charges, a builder's hours. */
+export function copyFirstLine(where: string, name: string, rateUsdPerHour: number): string {
+  const billed = chargesNothing(rateUsdPerHour) ? "" : `, billed at ${fmtRate(rateUsdPerHour)} while it builds`;
+  return `building your image on ${where} first, ${BUILD_TAKES_UNMEASURED}${billed}, then ${name} forks from it`;
+}
+
 /** The last line of a create, as the word table ends it. */
 export const CREATE_READY = "ready";
 

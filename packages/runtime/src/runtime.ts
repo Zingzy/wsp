@@ -222,7 +222,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type SignInAsk } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -4983,8 +4983,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fromImage = keepsImages(at);
     // What this workspace forks: the image the add built for this project where it built one, since that image
     // already holds the clone and its dependencies; else, at a place that is not the image's own, that place's
-    // copy of the image once a build of it running there has finished, and everywhere else the snapshot asked for.
-    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId) : "";
+    // current copy of the image, built there first when it holds none, and everywhere else the snapshot asked for.
+    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId, (where, rate) => report("fork-requested", copyFirstLine(where, o.name, rate))) : "";
     const inherited = fromImage ? (await imageOf(golden)).version?.size : undefined;
     const record: WorkspaceRecord = {
       id,
@@ -8321,8 +8321,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const held = goldenHead(await copyOf(place, name));
       // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
-      // the other. A place already standing on the record is answered with what it holds: the road that builds a
-      // copy on first use asks this of every place a fork lands on, and a second ask must cost nothing.
+      // the other. A place already standing on the record is answered with what it holds: a fork there asks this
+      // before it builds, and a second ask must cost nothing.
       if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) {
         const standing = (await copiesOf(name)).find(c => c.place === place);
         if (standing === undefined) throw new Error(`${where} holds ${name} v${held.version} and no copy of it was recorded there`);
@@ -8419,9 +8419,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** The snapshot a fork names at the place it lands on. A place that is not the image's own forks its own copy: the
-   * one a build running there seals, which the create waits for, or the one standing there on the record. Everywhere
-   * else, and where the place holds no current copy, the snapshot asked for goes through as it is. */
-  const copyForFork = async (golden: string, placeId: string | undefined): Promise<string> => {
+   * one a build running there seals, which the create waits for, or the one standing there on the record. A caller
+   * that can say so before anything bills has a place holding no current copy build one first, through the same
+   * build a press starts; everywhere else the snapshot asked for goes through as it is. */
+  const copyForFork = async (golden: string, placeId: string | undefined, announce?: (where: string, rateUsdPerHour: number) => void): Promise<string> => {
     const place = placeId ?? places.wired;
     const name = await imageHeadNamed(golden);
     if (name === undefined || place === (await imagePlace(name))) return golden;
@@ -8432,7 +8433,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     const record = await recordOf(name);
     const held = goldenHead(await copyOf(place, name));
-    return record !== undefined && held !== undefined && copyIsCurrent(record, { hash: held.imageHash }) ? held.snapshotId : golden;
+    if (record === undefined) return golden;
+    if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) return held.snapshotId;
+    if (announce === undefined) return golden;
+    const { at } = await placeAt(place);
+    if (!buildsImages(at.capabilities)) return golden;
+    announce(placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
+    return (await image.build({ place, name })).copy.snapshotId;
   };
 
   /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the
