@@ -7,22 +7,22 @@ import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
-import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
+import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
-import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
+import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
 import {
@@ -79,6 +79,9 @@ import {
   boxSignInLaterLine,
   boxSignedInLine,
   joinUnansweredLine,
+  addUndoneLine,
+  addTakenLine,
+  placeRootHomeRefusal,
 } from "../src/places.js";
 import { BackCutError, backBindLine, backUrl, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
@@ -918,6 +921,26 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(swept.removed[0]).toBe(`systemd system unit ${unit.name} (stopped)`);
   });
 
+  it("unloads the workspace profile and takes its file where the leave runs as root, and leaves it for any other login", async () => {
+    const home = tmp("leave-apparmor");
+    // A space in the folder: the path is one word to the shell or the removal takes two files that are not it.
+    const profile = join(tmp("leave-apparmor-etc"), "apparmor d", "wsp-workspace");
+    mkdirSync(dirname(profile));
+    writeFileSync(profile, "profile wsp-workspace {}\n");
+    const ran: string[] = [];
+    const sh = (script: string): string => {
+      ran.push(script);
+      return execFileSync("/bin/sh", ["-c", script], { encoding: "utf8" });
+    };
+    const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, apparmorProfile: profile });
+    expect(existsSync(profile)).toBe(true);
+    expect(other.removed).not.toContain(profile);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, apparmorProfile: profile });
+    expect(ran.some(script => script.includes(`apparmor_parser -R ${shellQuote(profile)}`))).toBe(true);
+    expect(existsSync(profile)).toBe(false);
+    expect(swept.removed).toContain(profile);
+  });
+
   it("says what the manager answered when the stop refused, and still takes the file", async () => {
     const home = tmp("leave-stop-refused");
     const manager = unitsUnder(home);
@@ -1417,7 +1440,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1441,7 +1464,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     };
     const backend = {
       hostNameFor: async (reach: SshReach) => (box.proxied === true ? undefined : (box.dials ?? reach.host)),
-      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) }),
+      adopt: async () => ({ machine, login: { HOME: box.home ?? "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) }),
       // A computer this computer's ssh client has already met: every case below is about what the install does
       // after that, so none of them stands on the first dial of a stranger.
       keyFor: async () => BOX_KEY,
@@ -1657,6 +1680,180 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(back.released).toEqual(["root@spoo"]);
   });
 
+  /** A box whose deploy fails after its join connected back, answering the read of what it already holds with the
+   * writes `had` names, and the undo with `undo`. Every script it was handed is on `ran`, in order. */
+  function failingBox(had: (write: { path: string; as: string }) => boolean, opts: { found?: "unsaid"; undo?: { exitCode: number; stdout: string; stderr: string }; preflight?: string; deploy?: { stdout: string; stderr: string } } = {}) {
+    const box = fakeBox("x86_64");
+    const writes = joinedAddWrites(joinedPlace({ home: "/home/maya", path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: "/home/maya/.wsp/join-code", name: "box" }), placeUnit("/home/maya").path);
+    const backend = { ...(box.backend as { adopt: () => Promise<{ machine: { run: (script: string, o?: unknown) => Promise<unknown> } }> }) };
+    const adopt = backend.adopt;
+    backend.adopt = async () => {
+      const adopted = await adopt();
+      const run = adopted.machine.run;
+      adopted.machine.run = async (script, o) => {
+        if (script.includes(ADD_FOUND_END)) {
+          box.ran.push(script);
+          if (opts.found === "unsaid") return { exitCode: 255, stdout: "", stderr: "Connection reset by peer\n" };
+          return { exitCode: 0, stdout: `${writes.flatMap((w, i) => (had(w) ? [`WSP_HAD ${i}\n`] : [])).join("")}${ADD_FOUND_END}\n`, stderr: "" };
+        }
+        if (opts.preflight !== undefined && script.includes("PREFLIGHT_OK")) {
+          box.ran.push(script);
+          return { exitCode: 1, stdout: `${opts.preflight}\n`, stderr: "" };
+        }
+        if (script.includes(`case "$(uname -m)" in`)) {
+          box.ran.push(script);
+          return { exitCode: 1, ...(opts.deploy ?? { stdout: `WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\n${joinedLine("box", "http://192.168.1.20:4720")}\n`, stderr: "systemctl enable --now wsp-place-abc exited 1 and said: Failed to enable unit\n" }) };
+        }
+        if (script.endsWith(`echo ${DAEMON_GONE_LINE}`)) {
+          box.ran.push(script);
+          return opts.undo ?? { exitCode: 0, stdout: `${DAEMON_GONE_LINE}\n`, stderr: "" };
+        }
+        return run(script, o);
+      };
+      return adopted;
+    };
+    return { ...box, backend, writes };
+  }
+
+  const SERVICE_SAID = "box connected back but its agent did not start: systemctl enable --now wsp-place-abc exited 1 and said: Failed to enable unit";
+
+  it("takes back what a failed add put on the box once the deploy fails, and nothing the box held before the add", async () => {
+    const at = placeDaemonPaths("/home/maya");
+    const unit = placeUnit("/home/maya");
+    // The person's own ~/.local/bin and login file were there before the add; nothing else of the list was.
+    const box = failingBox(w => w.path === at.binDir || w.as === "login");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const thrown = await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-add"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    warned.mockRestore();
+    // Marked as taken back, which is what lets the runtime drop the record the join made.
+    expect(thrown).toBeInstanceOf(PlaceAddTakenBackError);
+    const said = thrown.message;
+    expect(said).toBe(addUndoneLine(SERVICE_SAID, true));
+    expect(said).toBe(`${SERVICE_SAID}; nothing this add put on it is left there`);
+    const found = box.ran.findIndex(script => script.includes(ADD_FOUND_END));
+    const deploy = box.ran.findIndex(script => script.includes(`case "$(uname -m)" in`));
+    const undo = box.ran.findIndex(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`));
+    expect(box.ran.findIndex(script => script.startsWith("reach() {"))).toBeLessThan(found);
+    expect(found).toBeLessThan(deploy);
+    expect(deploy).toBeLessThan(undo);
+    const lines = box.ran[undo]!.split("\n");
+    // The unit the join wrote, stopped before its file goes; the profile the deploy loaded; wsp's line in their file.
+    expect(lines).toContain(`systemctl disable --now ${shellQuote(unit.name)} 2>/dev/null || true`);
+    expect(lines).toContain(`rm -f ${shellQuote(unit.path)}`);
+    expect(box.ran[undo]).toContain("apparmor_parser -R '/etc/apparmor.d/wsp-workspace'");
+    expect(box.ran[undo]).toContain(`grep -vF ${shellQuote(at.profileFile)} '/home/maya/.profile'`);
+    const removed = [...box.ran[undo]!.matchAll(/rm -rf ('[^']*')/g)].map(m => m[1]);
+    for (const path of [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.tokenPath, at.profileFile, "/home/maya/.wsp/join-code", `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`]) expect(removed).toContain(shellQuote(path));
+    // The folders it only made go when nothing else is in them, and wsp's own folder is never taken whole.
+    expect(lines).toContain(`rmdir ${shellQuote(at.wsp)} 2>/dev/null || true`);
+    expect(lines).toContain(`rmdir ${shellQuote(workFolderIn("/home/maya"))} 2>/dev/null || true`);
+    expect(removed).not.toContain(shellQuote(at.wsp));
+    expect(removed).not.toContain(shellQuote(workFolderIn("/home/maya")));
+    // What the box held before the add stays: their ~/.local/bin, their login file, and a unit this add never writes.
+    expect(box.ran[undo]).not.toContain(`rmdir ${shellQuote(at.binDir)}`);
+    expect(box.ran[undo]).not.toContain("|| rm -f '/home/maya/.profile'");
+    expect(box.ran[undo]).not.toContain("wsp-daemon.service");
+  });
+
+  it("leaves the workspace profile and the files a box held before the add where they were", async () => {
+    const at = placeDaemonPaths("/home/maya");
+    const box = failingBox(w => w.as === "apparmor" || w.path === at.dir);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-kept"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).catch(() => undefined);
+    warned.mockRestore();
+    const undo = box.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))!;
+    expect(undo).not.toContain("apparmor_parser");
+    expect(undo).not.toContain(shellQuote(at.dir));
+    expect(undo).toContain(shellQuote(at.bundle));
+  });
+
+  it("takes nothing back where nothing landed, or where the box never said what it held before", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The box refused at the preflight: the deploy stopped before a byte of wsp's landed, and the refusal is said alone.
+    const refused = failingBox(() => false, { preflight: PLACE_NEEDS_ROOT_LINE });
+    expect(await placeInstaller({ backend: refused.backend as never, ...assets(tmp("undo-preflight"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, refused.stage).catch((e: unknown) => (e as Error).message)).toBe(PLACE_NEEDS_ROOT_LINE);
+    expect(refused.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
+    // The read of what it held did not answer, so nothing on it can be told from what this add wrote.
+    const unsaid = failingBox(() => false, { found: "unsaid" });
+    expect(await placeInstaller({ backend: unsaid.backend as never, ...assets(tmp("undo-unsaid"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, unsaid.stage).catch((e: unknown) => (e as Error).message)).toBe(
+      `${SERVICE_SAID}; what this add put on it may still be there`,
+    );
+    expect(unsaid.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
+    // The undo ran and did not finish.
+    const dropped = failingBox(() => false, { undo: { exitCode: 255, stdout: "", stderr: "Connection closed\n" } });
+    const kept = await placeInstaller({ backend: dropped.backend as never, ...assets(tmp("undo-dropped"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, dropped.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    expect(kept.message).toBe(addUndoneLine(SERVICE_SAID, false));
+    expect(kept).not.toBeInstanceOf(PlaceAddTakenBackError);
+    warned.mockRestore();
+    // A box's line at the cap still leaves room for what the undo did.
+    const long = addUndoneLine(`box took wsp but could not connect back: ${"x".repeat(400)}`, true);
+    expect(long.length).toBeLessThanOrEqual(300);
+    expect(long).toMatch(/…; nothing this add put on it is left there$/);
+  });
+
+  it("sends no undo when the join refused the box as already joined, since what stands there is the add that won", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const box = failingBox(() => false, { deploy: { stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\n", stderr: `${ALREADY_JOINED_LINE}\n` } });
+    const thrown = await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-raced"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    warned.mockRestore();
+    expect(thrown.message).toBe(`box took wsp but could not connect back: ${ALREADY_JOINED_LINE}`);
+    expect(thrown).not.toBeInstanceOf(PlaceAddTakenBackError);
+    expect(box.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
+    // A name long enough that the sentence's cap cuts the join's line off still reads as refused, off the box's own line.
+    const long = failingBox(() => false, { deploy: { stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nWSP_READY\n", stderr: `${ALREADY_JOINED_LINE}\n` } });
+    const cut = await placeInstaller({ backend: long.backend as never, ...assets(tmp("undo-raced-long"), [X86]) })({ address: "maya@box", name: "b".repeat(250), code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, long.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    expect(cut.message).not.toContain(ALREADY_JOINED_LINE);
+    expect(cut).not.toBeInstanceOf(PlaceAddTakenBackError);
+    expect(long.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
+  });
+
+  it("takes nothing back, keeps the record and says so where another add took the box before this one's join ran", async () => {
+    const at = placeDaemonPaths("/home/maya");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The deploy failed at the files step, so this add's join never wrote a place file; one standing now is another add's.
+    const box = failingBox(() => false, { deploy: { stdout: "WSP_STEP files\n", stderr: "tar: place.tgz: unexpected end of file\n" }, undo: { exitCode: 0, stdout: `${ADD_TAKEN_LINE}\n`, stderr: "" } });
+    const thrown = await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-taken"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
+    warned.mockRestore();
+    expect(thrown).not.toBeInstanceOf(PlaceAddTakenBackError);
+    expect(thrown.message).toBe(addTakenLine("box did not take wsp's files: tar: place.tgz: unexpected end of file"));
+    expect(thrown.message).toMatch(/; another add took the box meanwhile, so nothing was taken back off it$/);
+    const undo = box.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))!;
+    expect(undo).toContain(`then echo ${ADD_TAKEN_LINE}; exit 0; fi`);
+    expect(undo.indexOf(ADD_TAKEN_LINE)).toBeLessThan(undo.indexOf(`rm -rf ${shellQuote(at.placeFile)}`));
+    // Past its own join the place file is this add's, and the undo takes it.
+    const own = failingBox(() => false);
+    await placeInstaller({ backend: own.backend as never, ...assets(tmp("undo-own"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, own.stage).catch(() => undefined);
+    expect(own.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).not.toContain(ADD_TAKEN_LINE);
+  });
+
+  it("stops a place unit this add started and leaves one the box was already running as it was", async () => {
+    const unit = placeUnit("/home/maya");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The unit file was there, stopped and disabled: the join rewrote it, enabled it and started it.
+    const idle = failingBox(w => w.as === "unit");
+    await placeInstaller({ backend: idle.backend as never, ...assets(tmp("undo-idle-unit"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, idle.stage).catch(() => undefined);
+    const stopped = idle.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))!.split("\n");
+    expect(stopped).toContain(`systemctl stop ${shellQuote(unit.name)} 2>/dev/null || true`);
+    expect(stopped).toContain(`systemctl disable ${shellQuote(unit.name)} 2>/dev/null || true`);
+    expect(stopped.join("\n")).not.toContain(`rm -f ${shellQuote(unit.path)}`);
+    // Running and enabled before the add: nothing of the undo reaches for it.
+    const running = failingBox(w => w.as === "unit" || w.as === "running" || w.as === "enabled");
+    const said = await placeInstaller({ backend: running.backend as never, ...assets(tmp("undo-running-unit"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, running.stage).then(() => "the add stood", (e: unknown) => (e as Error).message);
+    warned.mockRestore();
+    expect(running.ran.find(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).not.toContain(shellQuote(unit.name));
+    // The join restarted that agent with this add's flags; the sentence says it stands because it was there before.
+    expect(said).toBe(`${SERVICE_SAID}; wsp's agent was running there before this add and is left running, and nothing else this add put on it is left there`);
+    expect(addUndoneLine(SERVICE_SAID, false, true)).toBe(`${SERVICE_SAID}; wsp's agent was running there before this add and is left running, and what else this add put on it may still be there`);
+  });
+
+  it("refuses a box whose login has / for its home before it reads what the box holds", async () => {
+    const box = fakeBox("x86_64", "bash", { home: "/" });
+    const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp("root-home"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).catch((e: unknown) => (e as Error).message);
+    expect(said).toBe(placeRootHomeRefusal("maya@box"));
+    expect(box.ran.some(script => script.includes(ADD_FOUND_END) || script.startsWith("head -c ") || script.startsWith("reach() {"))).toBe(false);
+    expect(box.landed).toEqual([]);
+  });
+
   it("refuses a box that already belongs to a wsp at the connect, naming that wsp, with nothing sent", async () => {
     const studio = placeFileText({ placeId: "p_studio", name: "spoo", hostName: "studio", hostUrls: ["http://192.168.1.5:4640"], hostPublicKey: "c3R1ZGlv", keyPath: "/root/.wsp/place.key", joinedAt: "2026-09-20T10:00:00Z" });
     const elsewhere = fakeBox("x86_64", "bash", { holds: studio });
@@ -1812,7 +2009,11 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       run: async (script: string) =>
         script.includes("PREFLIGHT_OK")
           ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" }
-          : (reachAnswer(script) ?? { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: `${joinUnansweredLine("http://192.168.1.20:4400")}\n` }),
+          : script.includes(ADD_FOUND_END)
+            ? { exitCode: 0, stdout: `${ADD_FOUND_END}\n`, stderr: "" }
+            : script.endsWith(`echo ${DAEMON_GONE_LINE}`)
+              ? { exitCode: 0, stdout: `${DAEMON_GONE_LINE}\n`, stderr: "" }
+              : (reachAnswer(script) ?? { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: `${joinUnansweredLine("http://192.168.1.20:4400")}\n` }),
     };
     const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, hostNameFor: async (reach: SshReach) => reach.host };
     const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
@@ -1820,7 +2021,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const warn = vi.spyOn(console, "warn").mockImplementation((...said: unknown[]) => void warned.push(said.map(String).join(" ")));
     try {
       const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
-      expect(said).toBe(`box took wsp but could not connect back: ${joinUnansweredLine("http://192.168.1.20:4400")}`);
+      expect(said).toBe(`box took wsp but could not connect back: ${joinUnansweredLine("http://192.168.1.20:4400")}; nothing this add put on it is left there`);
       // The join it was running, spelled as it ran there, is for whoever reads the host's log.
       expect(warned.join("\n")).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
     } finally {
@@ -1869,6 +2070,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
         if (script.includes("PREFLIGHT_OK")) return { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" };
         const reached = reachAnswer(script);
         if (reached !== undefined) return reached;
+        if (script.includes(ADD_FOUND_END)) return { exitCode: 0, stdout: `${ADD_FOUND_END}\n`, stderr: "" };
         const lines = script.split("\n").flatMap(line => (/^echo (\S+)$/.exec(line)?.[1] === undefined ? [] : [line.slice("echo ".length)]));
         for (const line of lines) {
           printed.push(line);
@@ -2082,6 +2284,160 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const stranger = fakeBox("x86_64");
     const unmet = { ...(stranger.backend as Record<string, unknown>), keyFor: async () => undefined };
     expect(await kindOf(placeInstaller({ backend: unmet as never, ...assets(tmp("kind-unmet"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls }, stranger.stage))).toBeUndefined();
+  });
+});
+
+describe("what a failed add takes back off a box, run by a real shell", () => {
+  const bash = (script: string): string => execFileSync("/bin/bash", ["-c", script], { encoding: "utf8" });
+
+  /** Everything a joined add lays down under the home, as the deploy and the join on that box write it. */
+  function wroteTheAdd(home: string): void {
+    const at = placeDaemonPaths(home);
+    mkdirSync(join(at.dir, "x86_64"), { recursive: true });
+    writeFileSync(join(at.dir, "x86_64", "wsp-daemon"), "");
+    writeFileSync(at.bundle, "");
+    mkdirSync(at.inbox, { recursive: true });
+    writeFileSync(at.tokenPath, "t");
+    writeFileSync(at.profileFile, "");
+    mkdirSync(at.binDir, { recursive: true });
+    writeFileSync(join(at.binDir, "wsp-open"), "");
+    symlinkSync(join(at.binDir, "wsp-open"), join(at.binDir, "xdg-open"));
+    mkdirSync(at.unitDir, { recursive: true });
+    appendFileSync(join(home, ".profile"), `${profileSourceLine(at.profileFile)}\n`);
+    writeFileSync(at.placeFile, "{}");
+    writeFileSync(at.placeKey, "k");
+    writeFileSync(at.placeLog, "");
+    mkdirSync(workFolderIn(home), { recursive: true });
+  }
+
+  /** The add's writes under this home alone: the unit and the workspace profile are the box's, and no test writes /etc. */
+  function underHome(home: string): { place: ReturnType<typeof joinedPlace>; writes: ReturnType<typeof joinedAddWrites> } {
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    return { place, writes: joinedAddWrites(place, "/nonexistent/wsp-place.service").filter(w => w.path.startsWith(`${home}/`)) };
+  }
+
+  it("takes what the add wrote and leaves every file and folder the home held before it", () => {
+    const home = tmp("undo-held");
+    const at = placeDaemonPaths(home);
+    // Their own bin folder with a tool in it, their login file, and a wsp folder a host on this login keeps its state in.
+    mkdirSync(at.binDir, { recursive: true });
+    writeFileSync(join(at.binDir, "mytool"), "#!/bin/sh\n");
+    writeFileSync(join(home, ".profile"), "export EDITOR=vi\n");
+    mkdirSync(at.wsp, { recursive: true });
+    writeFileSync(join(at.wsp, "state.json"), "{}\n");
+    const { place, writes } = underHome(home);
+    const found = addFound(bash(addFoundScript(place, writes, "systemctl")), writes.length)!;
+    wroteTheAdd(home);
+    expect(bash(addUndoScript(place, writes, found, "true", true))).toContain(DAEMON_GONE_LINE);
+    expect(readdirSync(at.wsp)).toEqual(["state.json"]);
+    expect(readdirSync(at.binDir)).toEqual(["mytool"]);
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe("export EDITOR=vi\n");
+    expect(existsSync(join(home, ".config"))).toBe(false);
+    expect(existsSync(workFolderIn(home))).toBe(false);
+  });
+
+  it("leaves a home that held nothing of the add's as bare as it found it", () => {
+    const home = tmp("undo-bare");
+    const { place, writes } = underHome(home);
+    const found = addFound(bash(addFoundScript(place, writes, "systemctl")), writes.length)!;
+    expect(found.size).toBe(0);
+    wroteTheAdd(home);
+    bash(addUndoScript(place, writes, found, "true", true));
+    expect(readdirSync(home)).toEqual([]);
+  });
+
+  it("says the undo did not finish, and keeps the record's road, where a removal failed", () => {
+    const home = tmp("undo-stuck");
+    const at = placeDaemonPaths(home);
+    const { place, writes } = underHome(home);
+    const found = addFound(bash(addFoundScript(place, writes, "systemctl")), writes.length)!;
+    wroteTheAdd(home);
+    chmodSync(at.wsp, 0o555);
+    try {
+      expect(bash(`${addUndoScript(place, writes, found, "true", true)} || true`)).not.toContain(DAEMON_GONE_LINE);
+      expect(existsSync(at.placeFile)).toBe(true);
+    } finally {
+      chmodSync(at.wsp, 0o755);
+    }
+  });
+
+  it("never follows a folder of the add's that was swapped for a link after the read", () => {
+    const home = tmp("undo-swapped");
+    const at = placeDaemonPaths(home);
+    const { place, writes } = underHome(home);
+    const found = addFound(bash(addFoundScript(place, writes, "systemctl")), writes.length)!;
+    wroteTheAdd(home);
+    const elsewhere = tmp("undo-swapped-elsewhere");
+    mkdirSync(join(elsewhere, posix.basename(at.dir)), { recursive: true });
+    writeFileSync(join(elsewhere, posix.basename(at.dir), "precious"), "");
+    writeFileSync(join(elsewhere, posix.basename(at.placeFile)), "{}");
+    writeFileSync(join(elsewhere, "keep"), "");
+    rmSync(at.wsp, { recursive: true });
+    symlinkSync(elsewhere, at.wsp);
+    expect(bash(`${addUndoScript(place, writes, found, "true", true)} || true`)).not.toContain(DAEMON_GONE_LINE);
+    expect(readdirSync(elsewhere).sort()).toEqual([posix.basename(at.dir), posix.basename(at.placeFile), "keep"].sort());
+    expect(readdirSync(join(elsewhere, posix.basename(at.dir)))).toEqual(["precious"]);
+  });
+
+  it("takes nothing where another add completed on the box after this add read it bare and failed before its join", () => {
+    const home = tmp("undo-raced-b");
+    const { place, writes } = underHome(home);
+    // B reads a bare box, then A's add completes, then B's deploy fails at the files step.
+    const found = addFound(bash(addFoundScript(place, writes, "false")), writes.length)!;
+    expect(found.size).toBe(0);
+    wroteTheAdd(home);
+    const before = execFileSync("/usr/bin/find", [home], { encoding: "utf8" });
+    const said = bash(addUndoScript(place, writes, found, "false", false));
+    expect(said).toContain(ADD_TAKEN_LINE);
+    expect(said).not.toContain(DAEMON_GONE_LINE);
+    expect(execFileSync("/usr/bin/find", [home], { encoding: "utf8" })).toBe(before);
+  });
+
+  it("says the undo did not finish while a unit this add wrote fresh still runs", () => {
+    const home = tmp("undo-fresh-unit");
+    const state = tmp("undo-fresh-unit-state");
+    // A systemctl that keeps active and enabled as files, and refuses disable --now.
+    const systemctl = join(tmp("undo-fresh-unit-bin"), "systemctl");
+    writeFileSync(
+      systemctl,
+      `#!/bin/sh\nS=${shellQuote(state)}\ncase "$1" in\n  is-active) [ -f "$S/active-$3" ];;\n  is-enabled) [ -f "$S/enabled-$3" ];;\n  stop) rm -f "$S/active-$2";;\n  disable) [ "$2" = --now ] && exit 1; rm -f "$S/enabled-$2";;\n  *) exit 0;;\nesac\n`,
+      { mode: 0o755 },
+    );
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    const unitPath = join(home, ".config/systemd/user/wsp-place.service");
+    const writes = joinedAddWrites(place, unitPath).filter(w => w.path.startsWith(`${home}/`));
+    const found = addFound(bash(addFoundScript(place, writes, systemctl)), writes.length)!;
+    expect(found.size).toBe(0);
+    wroteTheAdd(home);
+    mkdirSync(dirname(unitPath), { recursive: true });
+    writeFileSync(unitPath, "[Service]\n");
+    writeFileSync(join(state, "active-wsp-place.service"), "");
+    writeFileSync(join(state, "enabled-wsp-place.service"), "");
+    expect(bash(`${addUndoScript(place, writes, found, systemctl, true)} || true`)).not.toContain(DAEMON_GONE_LINE);
+    expect(existsSync(unitPath)).toBe(false);
+    expect(existsSync(join(state, "active-wsp-place.service"))).toBe(true);
+    // The same box where disable --now works: the unit stops and the undo says it finished.
+    writeFileSync(systemctl, readFileSync(systemctl, "utf8").replace('[ "$2" = --now ] && exit 1;', '[ "$2" = --now ] && rm -f "$S/active-$3";'));
+    wroteTheAdd(home);
+    writeFileSync(unitPath, "[Service]\n");
+    expect(bash(addUndoScript(place, writes, found, systemctl, true))).toContain(DAEMON_GONE_LINE);
+    expect(existsSync(join(state, "active-wsp-place.service"))).toBe(false);
+  });
+
+  it("names every path a leave takes as the add's own, and never a folder above a home of /", () => {
+    const home = "/home/maya";
+    const at = placeDaemonPaths(home);
+    const writes = joinedAddWrites(joinedPlace({ home, path: "/usr/bin" }, { hostUrls: [], codeFile: `${at.wsp}/join-code`, name: "box" }), placeUnit(home).path);
+    const own = writes.filter(w => w.as === "own").map(w => w.path);
+    for (const path of placeOwnedPaths(home).filter(path => path !== at.wsp)) expect(own).toContain(path);
+    expect(own).not.toContain(at.wsp);
+    const root = joinedAddWrites(joinedPlace({ home: "/", path: "/usr/bin" }, { hostUrls: [], codeFile: "/.wsp/join-code", name: "box" }), placeUnit("/").path);
+    expect(root.filter(w => w.as === "folder").map(w => w.path)).not.toContain("/");
+  });
+
+  it("reads nothing as held where the box never finished saying, and only the writes it was asked about", () => {
+    expect(addFound("WSP_HAD 0\n", 3)).toBeUndefined();
+    expect([...addFound(`WSP_HAD 0\nWSP_HAD 2\nWSP_HAD 9\nWSP_HAD x\n${ADD_FOUND_END}\n`, 3)!]).toEqual([0, 2]);
   });
 });
 

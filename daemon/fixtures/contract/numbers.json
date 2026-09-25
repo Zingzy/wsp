@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 74,
+  "daemonVersion": 75,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -50,6 +50,7 @@
   "guestManifestPath": "/root/.wsp/manifest.json",
   "openShimPath": "/usr/local/bin/wsp-open",
   "xdgOpenPath": "/usr/local/bin/xdg-open",
+  "workspaceApparmorPath": "/etc/apparmor.d/wsp-workspace",
   "openSocketPath": "/root/.wsp/open.sock",
   "guestDaemonSocketPath": "/root/.wsp/daemon.sock",
   "guestDaemonDir": "/root/wsp-daemon",

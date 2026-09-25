@@ -27,6 +27,9 @@ export const GUEST_MANIFEST_PATH = `${GUEST_WSP_HOME}/manifest.json`;
  * the harness treats the literal "true" as its never-open sentinel. */
 export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
 export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
+/** Where a root install keeps the AppArmor profile its workspaces run under: written and loaded by the host's
+ * deploy, unloaded by a remove, a leave and the daemon's own sweep. */
+export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
 export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
 /** The socket a process inside a workspace on a computer somebody owns reaches its host over. The daemon of that
