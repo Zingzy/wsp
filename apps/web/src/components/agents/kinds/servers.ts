@@ -46,12 +46,12 @@ export function foldServers(rows: readonly McpRow[], readAt?: string): ServerEnt
  * checked nothing never outweighs an answer. */
 export function rowState(row: McpRow, answer: ServerToolsAnswer | undefined, reportAt?: string): ServerState {
   if (!row.enabled) return "off";
-  const unchecked = row.auth === "open" || row.auth === "unknown";
+  const unchecked = row.auth === "open" || row.auth === "env-key" || row.auth === "unknown";
   return answer !== undefined && (unchecked || reportAt === undefined || answer.readAt >= reportAt) ? answer.auth : row.auth;
 }
 
 /** Worst first: what a folded entry's one status says. */
-const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "unknown", "open", "signed-in", "connected"];
+const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "unknown", "env-key", "open", "signed-in", "connected"];
 
 interface Standing {
   readonly row: McpRow;
@@ -79,6 +79,8 @@ export function statusOf(s: Standing, tools: readonly unknown[] | undefined): Se
       return { state: s.state, words: tools !== undefined ? W.toolsCount(tools.length) : s.state === "connected" ? W.connected : W.signedIn };
     case "open":
       return { state: "open", words: W.noSignInNeeded };
+    case "env-key":
+      return { state: "env-key", words: W.keyFromEnvironment };
     case "needs-sign-in":
       return { state: "needs-sign-in", words: "needs sign-in", hover: W.signInToSee };
     case "failed": {

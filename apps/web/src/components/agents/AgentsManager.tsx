@@ -86,7 +86,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const tab = kinds.find(k => k.id === tabId) ?? kinds[0]!;
   const paused = pausedReport(report);
   const held = given.heldWhy ?? (paused ? W.paused : null);
-  const ctx: RowsContext = held === null ? given : { ...given, heldWhy: held };
+  const ctx: RowsContext = { ...given, ...(held === null ? {} : { heldWhy: held }), ...(report?.reach === undefined ? {} : { reach: report.reach }) };
   const staleWord = paused ? W.paused : given.heldWhy !== null && given.heldWhy !== undefined ? W.away : undefined;
   const dim = reading || held !== null;
   const page = shell === "page";

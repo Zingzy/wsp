@@ -2,7 +2,7 @@
 import type { Machine } from "@wsp/engine";
 import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -40,6 +40,27 @@ describe("the agents in a workspace", () => {
     const here = reads({ now: "running" }, true);
     await here.api.read({ workspaceId: "ws_3" });
     expect(here.asked).toEqual([{ kind: "here", project: "/root/landing" }]);
+  });
+
+  it("say on the report where a page that returns to localhost reaches, off the one rule the sign-in plans by", async () => {
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const on = (local: boolean, relayed: boolean) =>
+      agentsReads<undefined>({
+        reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
+        places: () => undefined,
+        workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: "running", local, machine, project: "/root/landing" }),
+        channel: async () => {
+          throw new Error("no channel on this road");
+        },
+        changed: () => undefined,
+        relayed: () => relayed,
+        now: () => Date.parse("2026-09-24T12:00:00Z"),
+      });
+    expect((await on(true, false).read({ workspaceId: "ws_1" })).reach).toBe("here");
+    expect((await on(false, true).read({ workspaceId: "ws_1" })).reach).toBe("relay");
+    expect((await on(false, false).read({ workspaceId: "ws_1" })).reach).toBe("none");
+    expect((await on(false, false).read({ placeId: "here" })).reach).toBe("here");
+    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} })]).toEqual(["here", "relay", "none", "none"]);
   });
 
   it("forgets a workspace's last report once the workspace is removed, so nothing holds it for the host's life", async () => {
@@ -157,6 +178,12 @@ describe("the sign-ins on a computer or a workspace", () => {
     await expect(refused.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode" }, () => {})).rejects.toThrow(/asks you to pick/);
     expect(refused.logged).toEqual(["sign-in refused: opencode, on workspace ws_1: opencode asks you to pick"]);
     expect(JSON.stringify([t.logged, refused.logged])).not.toContain("SECRETCODE");
+  });
+
+  it("log a sign-in's names with every control character taken out, so no name forges a line of the host's log", async () => {
+    const t = acting({ now: "running" });
+    await expect(t.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode", server: "x\nsign-in si_forged ended: \x1b[2Kok\r" }, () => {})).rejects.toThrow(/asks you to pick/);
+    expect(t.logged).toEqual(["sign-in refused: opencode, server xsign-in si_forged ended: [2Kok, on workspace ws_1: opencode asks you to pick"]);
   });
 
   it("run what the host planned over the target's own channel, push each step under the sign-in's id, take a code by that id and say the agents changed at the end", async () => {

@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box, a fork at a cloud
  * (a copy, so every act is the image's), a cloud's own page (the image's rows), or a task standing on a box, whose
@@ -31,6 +31,7 @@ export const AGENTS_LIST_WORDS = {
   signedIn: "signed in",
   connected: "connected",
   noSignInNeeded: "no sign-in needed",
+  keyFromEnvironment: "key from the environment",
   needsSignIn: "needs sign-in",
   yourKey: "your key",
   notChecked: "not checked",
@@ -193,6 +194,8 @@ export interface RowsContext {
   readonly typeInTerminal?: (line: string) => void;
   /** The project a task's panel reads beside the computer's own rows, which names the project group. */
   readonly project?: { readonly name: string; readonly path?: string };
+  /** Where a sign-in page that returns to localhost reaches, as the host said on the report. */
+  readonly reach?: PageReach;
 }
 
 /** Why no act on the list can be taken: the computer is away, the task is paused, or the acts are another page's. */
@@ -227,7 +230,7 @@ export function agentSignInStart(row: AgentRow, ctx: RowsContext): SignInStart |
 /** How one server's Sign in goes: its harness's own command in a watched pty, or the line the person runs where
  * that command's page cannot come back. */
 export function serverSignInStart(row: McpRow, ctx: RowsContext): SignInStart | undefined {
-  const road = serverSignInRoad(row.agent, row.name, ctx.where === "here" ? "here" : "none");
+  const road = serverSignInRoad(row.agent, row.name, ctx.reach ?? "none");
   if (road === undefined) return undefined;
   if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, finish: road.finish === "callback" ? "callback" : "address" };
   return { kind: "copy", line: road.line, ...(road.why === "callback" ? { why: AGENTS_LIST_WORDS.pageStaysHere(ctx.computer ?? "that computer") } : {}) };

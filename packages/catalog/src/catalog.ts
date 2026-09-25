@@ -4,14 +4,14 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, packageOf, thisComputer, toolRowPrefix } from "@wsp/protocol";
+import { agentOfRow, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
-import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type PageReach, type ServerSignInRoad } from "./mcp-login.js";
+import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { RELEASE_PINS } from "./release-pins.js";
 import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";

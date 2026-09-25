@@ -6,17 +6,16 @@
 // and never with a DISPLAY, so a tool with a paste road takes it. A server's
 // sign-in runs its harness's browser flow wherever the page's return reaches
 // it: this computer's browser here, the relay's forward for a workspace. The
-// watched pty reports each page the tool prints or asks the browser shim to
-// open and the code beside it, types what a page hands back, and asks the
-// tool's own status until it says signed in. The vault and the wsp tools are
-// the two writes that sit beside it.
+// watched pty reports each page the tool prints or hands its own opener and
+// the code beside it, types what a page hands back, and asks the tool's own
+// status until it says signed in. The vault and the wsp tools are the two
+// writes that sit beside it.
 import { CATALOG_AGENTS, MCP_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
 import { asLogin, targetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
   controlSignInRefusal,
   hasControlChar,
-  isHttpUrl,
   lastLine,
   noVaultKeyRefusal,
   notTokenRefusal,
@@ -28,7 +27,7 @@ import {
   type McpServerSpec,
   type SignInLine,
 } from "@wsp/protocol";
-import type { AgentsActs, AgentsOn, SignInAsk, SignInRun } from "@wsp/runtime";
+import { pageReachOf, type AgentsActs, type AgentsOn, type SignInAsk, type SignInRun } from "@wsp/runtime";
 import { writeEnvFile } from "./env-keys.js";
 import { STOPPED_NOTE, cadence, codeIn, signInEnv } from "./init-handoff.js";
 import { installMcp } from "./mcp-install.js";
@@ -65,21 +64,38 @@ async function wrapFor(on: AgentsOn): Promise<(line: string) => string> {
   return line => asLogin(login, line);
 }
 
+/** The opener a harness is handed for a sign-in: it writes the page onto the sign-in's own terminal, then hands it to
+ * the browser the terminal had. A tool may open its page with no terminal of its own, so the write goes to the device. */
+const PAGE_OPENER = ["#!/bin/sh", '[ -n "$WSP_SIGNIN_TTY" ] && printf "%s\\n" "$1" > "$WSP_SIGNIN_TTY"', 'exec "$WSP_SIGNIN_OPENER" "$@"'];
+
+/** The line run with the sign-in's own opener as BROWSER, so the pty is the one place its page is read from and a
+ * browser.open from anything else on the workspace never becomes the row's page. */
+export const pagesOnPty = (command: string): string =>
+  [
+    'WSP_SIGNIN_TTY=$(tty) || WSP_SIGNIN_TTY=; WSP_SIGNIN_OPENER=${BROWSER:-xdg-open}; export WSP_SIGNIN_TTY WSP_SIGNIN_OPENER',
+    'd=$(mktemp -d) || exit 1',
+    "trap 'rm -rf \"$d\"' EXIT",
+    `printf '%s\\n' ${PAGE_OPENER.map(shellQuote).join(" ")} > "$d/open" && chmod 700 "$d/open" || exit 1`,
+    'export BROWSER="$d/open"',
+    command,
+  ].join("; ");
+
 /** The sign-in as it runs where it stands. `terminal`: the person's own terminal runs it, so a row that asks them to
  * pick is theirs to answer; the app refuses it, since nobody there can. */
 export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: boolean } = {}): Promise<SignInPlan> {
   if (hasControlChar(ask.agent) || (ask.server !== undefined && hasControlChar(ask.server))) throw new Error(controlSignInRefusal);
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
-    const reach = on.kind === "here" ? "here" : on.kind === "machine" && on.relayed === true ? "relay" : "none";
+    const reach = pageReachOf(on);
     const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
     if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
     const wrap = await wrapFor(on);
-    // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it, and
-    // its browser.open is what the relay carries here.
+    // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it behind
+    // the sign-in's own opener, and its browser.open is what the relay carries here.
     const env = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? signInEnv("callback") : undefined;
-    return { line: { command: wrap(road.command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
+    const command = reach === "relay" ? pagesOnPty(road.command) : road.command;
+    return { line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
   }
   const row = entry.signIn;
   if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
@@ -130,10 +146,6 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   let settle: () => void = () => {};
   const stop = new Promise<void>(r => (settle = r));
   void run.stop.then(() => settle());
-  // A harness that opened its page through the daemon's browser shim printed nothing to scan; only http(s) is offered.
-  const unshim = link.onEvent(e => {
-    if (e["type"] === "browser.open" && isHttpUrl(e["url"])) page(e["url"]);
-  });
   let outcome: WatchOutcome | undefined;
   let failure: string | undefined;
   const watching = watchPty({
@@ -184,7 +196,6 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (landed) await Promise.race([watching, new Promise(r => setTimeout(r, o.graceMs ?? GRACE_MS))]);
   settle();
   await watching;
-  unshim();
   if (landed) return void run.emit({ state: "signed-in" });
   if (outcome === undefined) return void run.emit({ state: "failed", said: failure ?? "the sign-in command never ran" });
   if (outcome.stopped) return void run.emit({ state: "failed", said: STOPPED_NOTE });

@@ -194,6 +194,20 @@ describe("the list grammar", () => {
     expect(subtext("server-project-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}")).toBe("node scripts/metrics-mcp.js --token ${METRICS_TOKEN}");
   });
 
+  it("reads a server whose token comes from the environment as the environment's key, with a quiet dot and no Sign in", () => {
+    const report: AgentsReport = {
+      ...AGENTS_REPORT,
+      servers: [...AGENTS_REPORT.servers, { agent: "codex", name: "posthog", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.posthog.com" }, envNames: ["POSTHOG_TOKEN"], auth: "env-key", enabled: true }],
+    };
+    draw({ report, ctx: { where: "here" } });
+    tab("MCP servers");
+    const key = "server-global-posthog-http-mcp.posthog.com";
+    const b = badge(rowEl(key));
+    expect([b.dataset["state"], b.textContent, dotOf(b)]).toEqual(["env-key", "key from the environment", "bg-foreground/30"]);
+    expect(quick(key)).toBeNull();
+    expect(acts(openRow(key))).not.toContain("Sign in");
+  });
+
   it("groups servers by where they are set up, the project by its name and folder, and turns a failed connect's badge with its reason as the hover and Reconnect", () => {
     const tools = fakeTools();
     tools.answer("github", SERVER_TOOLS["github"]!);

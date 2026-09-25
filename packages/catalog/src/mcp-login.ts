@@ -3,7 +3,7 @@
 // the harness's sign-in for that server and how it finishes, or the line the
 // person types inside the harness's own session where it has no command.
 // One module per harness, registered on its catalog entry.
-import { shellQuote } from "@wsp/protocol";
+import { shellQuote, type PageReach } from "@wsp/protocol";
 
 export type McpLogin =
   /** A command run in a pty on the computer the server is set up on, whose page returns to localhost on the computer the
@@ -31,10 +31,6 @@ export const GEMINI_MCP_LOGIN: McpLogin = { measured: "gemini docs", inside: nam
 /** Where one server's sign-in runs: in a watched pty on that computer, or as the line the person runs there
  * themselves, with why. */
 export type ServerSignInRoad = { kind: "pty"; command: string; finish: "code" | "callback" } | { kind: "copy"; line: string; why: "inside" | "callback" };
-
-/** Where a page that returns to localhost reaches the harness: `here`, the computer the browser is on; `relay`, a
- * computer whose callback port this host forwards from here; `none`, a computer it does not. */
-export type PageReach = "here" | "relay" | "none";
 
 /** The road for one server under this harness's module. */
 export function loginRoad(login: McpLogin, name: string, reach: PageReach): ServerSignInRoad {

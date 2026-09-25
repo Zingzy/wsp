@@ -16,7 +16,7 @@ export type AgentsShell = "panel" | "page";
 export type Lead = { readonly kind: "agent"; readonly agent: string; readonly faded?: boolean } | { readonly kind: "box"; readonly icon: LucideIcon } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
 /** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked. */
-export type ServerState = "connected" | "signed-in" | "open" | "needs-sign-in" | "failed" | "off" | "unknown";
+export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown";
 
 export interface ServerStatus {
   readonly state: ServerState;

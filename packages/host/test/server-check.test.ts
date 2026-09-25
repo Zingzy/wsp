@@ -2,17 +2,17 @@
 // A remote MCP server's state off one bounded request to the address its
 // config names, against stand-in servers on this computer's loopback. No
 // real server, harness or login file is reached.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
-import { isPrivateHost, type McpRow } from "@wsp/protocol";
+import type { McpRow } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentsReader } from "../src/agents-reader.js";
-import { knock, type Knocker } from "../src/server-check.js";
+import { isInternalAddress, knock, type Knocker, type Pin, type Resolver } from "../src/server-check.js";
 
 const SECRET = "sk-check-SECRET";
 const cleanup: (() => void)[] = [];
@@ -112,14 +112,39 @@ function road(at: Home): Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">
 
 const authOf = (servers: readonly McpRow[], name: string): McpRow["auth"] => servers.find(s => s.name === name)!.auth;
 
+const PUBLIC = "93.184.215.14";
+
+/** How many times the stub harness was asked about a server. */
+const harnessAsks = (at: Home): number =>
+  existsSync(join(at.home, "claude-ran")) ? readFileSync(join(at.home, "claude-ran"), "utf8").split("\n").filter(l => l.startsWith("mcp get")).length : 0;
+
+/** A resolver answering from the table alone, so no name here reaches real DNS. */
+function fakeDns(table: Record<string, readonly string[]>, asked: string[] = []): Resolver {
+  return async name => {
+    asked.push(name);
+    return (table[name] ?? []).map(address => ({ address, family: address.includes(":") ? 6 : 4 }) as Pin);
+  };
+}
+
+/** The real knock, pinned where the resolver said and then carried to the loopback stand-in, so the address it was
+ * pinned to is recorded and the request still reaches a server here. */
+function via(pinned: string[]): Knocker {
+  return (url, headers, ms, pin) => (pinned.push(pin.address), knock(url, headers, ms, { address: "127.0.0.1", family: 4 }));
+}
+
+/** The stand-in's address under a public name the fake resolver answers for. */
+const named = (s: StandIn): string => s.base.replace("127.0.0.1", "mcp.test");
+const DNS = fakeDns({ "mcp.test": [PUBLIC] });
+
 describe("a remote MCP server's state in the report", () => {
   it("reads 2xx as connected, 401, 403 or a challenge as needs sign-in and anything else as failed, off one request each, following no redirect", async () => {
     const s = await standIn();
     const names = ["ok", "auth", "forbidden", "challenge", "gone", "broken", "nostream", "nosession", "moved", "hang"];
-    const at = scratch({ ...Object.fromEntries(names.map(n => [n, { type: "http", url: `${s.base}/${n}` }])), local: { command: "node", args: ["server.js"] } });
+    const at = scratch({ ...Object.fromEntries(names.map(n => [n, { type: "http", url: `${named(s)}/${n}` }])), local: { command: "node", args: ["server.js"] } });
     const lines: string[] = [];
+    const pinned: string[] = [];
     const started = Date.now();
-    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock, checkMs: 400, log: l => void lines.push(l) }).read({ kind: "here" }, "k");
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via(pinned), resolve: DNS, checkMs: 400, log: l => void lines.push(l) }).read({ kind: "here" }, "k");
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(Object.fromEntries(names.map(n => [n, authOf(read.servers, n)]))).toEqual({
       ok: "connected",
@@ -137,31 +162,32 @@ describe("a remote MCP server's state in the report", () => {
     // A command server keeps the config's word: checking it would start it.
     expect(authOf(read.servers, "local")).toBe("open");
     expect(s.hits.map(h => h.path).sort()).toEqual(names.map(n => `/${n}`).sort());
+    expect(new Set(pinned)).toEqual(new Set([PUBLIC]));
   });
 
   it("sends the headers the config sets and never logs a value", async () => {
     const s = await standIn();
-    const at = scratch({ keyed: { type: "http", url: `${s.base}/keyed`, headers: { Authorization: `Bearer ${SECRET}` } } });
+    const at = scratch({ keyed: { type: "http", url: `${named(s)}/keyed`, headers: { Authorization: `Bearer ${SECRET}` } } });
     const lines: string[] = [];
-    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock, log: l => void lines.push(l) }).read({ kind: "here" }, "k");
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS, log: l => void lines.push(l) }).read({ kind: "here" }, "k");
     expect(authOf(read.servers, "keyed")).toBe("connected");
     expect(JSON.stringify([read, lines])).not.toContain(SECRET);
   });
 
   it("asks the harness for a server whose address wants a sign-in, since the harness keeps the token", async () => {
     const s = await standIn();
-    const at = scratch({ signed: { type: "http", url: `${s.base}/auth` }, unsigned: { type: "http", url: `${s.base}/auth` } });
+    const at = scratch({ signed: { type: "http", url: `${named(s)}/auth` }, unsigned: { type: "http", url: `${named(s)}/auth` } });
     writeFileSync(join(at.home, "signed"), "signed\n");
-    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock }).read({ kind: "here" }, "k");
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here" }, "k");
     expect(authOf(read.servers, "signed")).toBe("signed-in");
     expect(authOf(read.servers, "unsigned")).toBe("needs-sign-in");
   });
 
   it("keeps each answer a few minutes per target, and asks again once a sign-in there forgets them", async () => {
     const s = await standIn();
-    const at = scratch({ auth: { type: "http", url: `${s.base}/auth` } });
+    const at = scratch({ auth: { type: "http", url: `${named(s)}/auth` } });
     let now = 1_000_000;
-    const reader = agentsReader({ vault: () => ({}), here: () => here(at), knock, now: () => now });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS, now: () => now });
     expect(authOf((await reader.read({ kind: "here" }, "a")).servers, "auth")).toBe("needs-sign-in");
     await reader.read({ kind: "here" }, "a");
     expect(s.hits).toHaveLength(1);
@@ -177,15 +203,101 @@ describe("a remote MCP server's state in the report", () => {
     expect(s.hits).toHaveLength(4);
   });
 
-  it("never asks a private host for a computer other than this one, where the address would reach this computer instead", async () => {
-    const at = scratch({ lan: { type: "http", url: "http://127.0.0.1:9/mcp" }, box: { type: "http", url: "http://nas.local/mcp" }, public: { type: "http", url: "https://mcp.example.com/mcp" } });
-    const asked: string[] = [];
-    const fake: Knocker = async url => (asked.push(url), { status: 200, challenged: false });
-    const read = await agentsReader({ vault: () => ({}), knock: fake }).read({ kind: "machine", machine: road(at) }, "k");
-    expect(asked).toEqual(["https://mcp.example.com/mcp"]);
-    expect(authOf(read.servers, "lan")).toBe("unknown");
-    expect(authOf(read.servers, "box")).toBe("unknown");
-    expect(authOf(read.servers, "public")).toBe("connected");
+  it("asks the harness once per server per sign-in or per ten minutes, however often the address is asked", async () => {
+    const s = await standIn();
+    const at = scratch({ auth: { type: "http", url: `${named(s)}/auth` } });
+    const asks = (): number => harnessAsks(at);
+    let now = 1_000_000;
+    const reader = agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS, now: () => now });
+    await Promise.all([reader.read({ kind: "here" }, "a"), reader.read({ kind: "here" }, "a")]);
+    expect(asks()).toBe(1);
+    now += 4 * 60_000;
+    await reader.read({ kind: "here" }, "a");
+    expect(s.hits.length).toBeGreaterThanOrEqual(2);
+    expect(asks()).toBe(1);
+    now += 6 * 60_000;
+    await reader.read({ kind: "here" }, "a");
+    expect(asks()).toBe(2);
+    reader.forget("a");
+    await reader.read({ kind: "here" }, "a");
+    expect(asks()).toBe(3);
+  });
+
+  it("runs at most two harness asks at once", async () => {
+    const s = await standIn();
+    const names = ["a1", "a2", "a3", "a4", "a5"];
+    const at = scratch(Object.fromEntries(names.map(n => [n, { type: "http", url: `${named(s)}/auth` }])));
+    writeFileSync(
+      join(at.bin, "claude"),
+      `#!/bin/sh\nif [ "$1 $2" = "mcp get" ]; then touch "$HOME/in.$$"; ls "$HOME" | grep -c '^in\\.' >> "$HOME/peak"; sleep 0.3; rm -f "$HOME/in.$$"; echo "  Status: ! Needs authentication"; exit 0; fi\nexit 2\n`,
+    );
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here" }, "k");
+    expect(names.map(n => authOf(read.servers, n))).toEqual(names.map(() => "needs-sign-in"));
+    const peaks = readFileSync(join(at.home, "peak"), "utf8").trim().split("\n").map(Number);
+    expect(peaks).toHaveLength(5);
+    expect(Math.max(...peaks)).toBeLessThanOrEqual(2);
+  });
+
+  it("checks a project's servers only on the click, never when the page opens", async () => {
+    const s = await standIn();
+    const at = scratch({ mine: { type: "http", url: `${named(s)}/ok` } });
+    const project = join(at.root, "repo");
+    mkdirSync(project);
+    writeFileSync(join(project, ".mcp.json"), JSON.stringify({ mcpServers: { theirs: { type: "http", url: `${named(s)}/ok` } } }));
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here", project }, "k");
+    expect(authOf(read.servers, "mine")).toBe("connected");
+    expect(authOf(read.servers, "theirs")).toBe("unknown");
+    expect(s.hits).toHaveLength(1);
+  });
+
+  it("asks no harness, and checks nothing, for a name set up in two scopes, since the harness picks which one it asks", async () => {
+    const s = await standIn();
+    const at = scratch({ twice: { type: "http", url: `${named(s)}/auth` }, once: { type: "http", url: `${named(s)}/auth` } });
+    writeFileSync(join(at.home, ".claude.json"), JSON.stringify({ mcpServers: { twice: { type: "http", url: `${named(s)}/auth` }, once: { type: "http", url: `${named(s)}/auth` } }, projects: { [at.home]: { mcpServers: { twice: { command: "touch", args: ["started"] } } } } }));
+    writeFileSync(join(at.home, ".mcp.json"), JSON.stringify({ mcpServers: { once: { command: "touch", args: ["started-too"] }, alone: { command: "true" } } }));
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here" }, "k");
+    expect(authOf(read.servers.filter(r => r.scope === "user"), "twice")).toBe("unknown");
+    expect(authOf(read.servers.filter(r => r.scope === "home"), "twice")).toBe("open");
+    expect(authOf(read.servers, "once")).toBe("unknown");
+    expect(harnessAsks(at)).toBe(0);
+    expect(s.hits).toHaveLength(0);
+  });
+
+  it("reads a token taken from the environment as the environment's, asking nothing", async () => {
+    const s = await standIn();
+    const at = scratch({ envd: { type: "http", url: `${named(s)}/keyed`, headers: { Authorization: "Bearer ${MCP_TOKEN}" } } });
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here" }, "k");
+    expect(authOf(read.servers, "envd")).toBe("env-key");
+    expect(read.servers[0]!.envNames).toEqual(["MCP_TOKEN"]);
+    expect(s.hits).toHaveLength(0);
+    expect(harnessAsks(at)).toBe(0);
+  });
+
+  it("refuses an address that resolves anywhere internal, on any computer, and never contacts it", async () => {
+    const at = scratch({
+      lvh: { type: "http", url: "http://lvh.test/mcp" },
+      split: { type: "http", url: "https://split.test/mcp" },
+      literal: { type: "http", url: "http://127.0.0.1:9/mcp" },
+      lan: { type: "http", url: "http://[fd00::5]/mcp" },
+      gone: { type: "http", url: "https://nowhere.test/mcp" },
+      public: { type: "http", url: "https://mcp.example.com/mcp" },
+    });
+    const dns = fakeDns({ "lvh.test": ["127.0.0.1"], "split.test": [PUBLIC, "10.0.0.7"], "mcp.example.com": [PUBLIC, "2606:2800:21f:cb07:6820:80da:af6b:8b2c"] });
+    for (const on of [{ kind: "machine", machine: road(at) } as const, { kind: "here" } as const]) {
+      const asked: { url: string; pin: Pin }[] = [];
+      const fake: Knocker = async (url, _h, _ms, pin) => (asked.push({ url, pin }), { status: 200, challenged: false });
+      const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: fake, resolve: dns }).read(on, "k");
+      expect(asked).toEqual([{ url: "https://mcp.example.com/mcp", pin: { address: PUBLIC, family: 4 } }]);
+      for (const n of ["lvh", "split", "literal", "lan", "gone"]) expect(authOf(read.servers, n), n).toBe("unknown");
+      expect(authOf(read.servers, "public")).toBe("connected");
+    }
+  });
+
+  it("connects to the address it resolved, never asking the name again", async () => {
+    const s = await standIn();
+    const port = new URL(s.base).port;
+    expect(await knock(`http://mcp.test:${port}/ok`, {}, 2_000, { address: "127.0.0.1", family: 4 })).toEqual({ status: 200, challenged: false });
+    expect(s.hits.map(h => [h.path, h.headers.host])).toEqual([["/ok", `mcp.test:${port}`]]);
   });
 
   it("leaves the config's word where a check could not be made, and still answers the report", async () => {
@@ -193,7 +305,7 @@ describe("a remote MCP server's state in the report", () => {
     const broken: Knocker = async () => {
       throw new Error("no network here");
     };
-    const read = await agentsReader({ vault: () => ({}), knock: broken }).read({ kind: "machine", machine: road(at) }, "k");
+    const read = await agentsReader({ vault: () => ({}), knock: broken, resolve: fakeDns({ "mcp.example.com": [PUBLIC] }) }).read({ kind: "machine", machine: road(at) }, "k");
     expect(authOf(read.servers, "public")).toBe("unknown");
   });
 
@@ -206,9 +318,10 @@ describe("a remote MCP server's state in the report", () => {
   });
 });
 
-describe("a private host", () => {
-  it("is loopback, an IP literal, a single label or a local suffix", () => {
-    for (const h of ["localhost", "127.0.0.1", "10.0.0.2", "[::1]", "::1", "nas", "printer.local", "db.internal", "box.lan", "mac.tail1234.ts.net", "api.localhost"]) expect(isPrivateHost(h), h).toBe(true);
-    for (const h of ["mcp.notion.com", "api.example.com", "mcp.linear.app"]) expect(isPrivateHost(h), h).toBe(false);
+describe("an internal address", () => {
+  it("is loopback, private, link-local, shared, multicast or reserved, in either family and mapped", () => {
+    for (const a of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "255.255.255.255", "198.18.0.1", "::1", "::", "fd00::1", "fc00::1", "fe80::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "64:ff9b::a00:1"])
+      expect(isInternalAddress(a), a).toBe(true);
+    for (const a of ["93.184.215.14", "1.1.1.1", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:1.1.1.1"]) expect(isInternalAddress(a), a).toBe(false);
   });
 });

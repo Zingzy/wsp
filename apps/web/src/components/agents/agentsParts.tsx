@@ -74,13 +74,14 @@ export function AgentMarks({ agents }: { agents: readonly string[] }) {
   );
 }
 
-/** The dot carries /mcp's hue through the theme's own tokens; the word stays muted. */
+// The colour law's written exception: on this dot only, green is connected, amber needs sign-in, red failed.
 const DOTS: Record<ServerState, string> = {
   connected: "bg-success",
   "signed-in": "bg-success",
   "needs-sign-in": "bg-warning",
   failed: "bg-destructive",
   open: "bg-foreground/30",
+  "env-key": "bg-foreground/30",
   off: "bg-foreground/30",
   unknown: "bg-foreground/30",
 };

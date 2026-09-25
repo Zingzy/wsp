@@ -19,7 +19,8 @@ export interface McpServer {
   /** `home`: Claude Code's project scope for the home folder itself, which the machine's home stands in for. */
   scope: "user" | "home";
   transport: McpTransport;
-  /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var); names only. */
+  /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var, a header's
+   * reference in the format's own syntax); names only. */
   envRefs: string[];
   /** The file keeps the definition and switches it off: OpenCode's `enabled: false`, Codex's `enabled = false`. */
   disabled?: true;
@@ -143,6 +144,9 @@ export interface McpConfig {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+/** Each variable the header values name under the format's reference syntax, first seen first. */
+const refsIn = (headers: Record<string, string>, ref: RegExp): string[] => [...new Set(Object.values(headers).flatMap(v => [...v.matchAll(ref)].map(m => m[1]!)))];
+
 function dict(v: unknown): Record<string, string> {
   if (!isObject(v)) return {};
   return Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string"));
@@ -374,7 +378,10 @@ export const MCP_SERVERS_JSON: McpFormat = jsonFormat({
       const cwd = str(raw.cwd);
       return { name, scope, transport: { kind: "stdio", command, args: strs(raw.args), env: dict(raw.env), ...(cwd !== undefined ? { cwd } : {}) }, envRefs: [] };
     }
-    if (url !== undefined) return { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [] };
+    if (url !== undefined) {
+      const headers = dict(raw.headers);
+      return { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(headers, /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g) };
+    }
     return undefined;
   },
   entry: s => ({ command: s.command, args: [...s.args] }),
@@ -390,7 +397,8 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
     const off = raw.enabled === false ? { disabled: true as const } : {};
     if (raw.type === "remote") {
       const url = str(raw.url);
-      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers: dict(raw.headers) }, envRefs: [], ...off };
+      const headers = dict(raw.headers);
+      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(headers, /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g), ...off };
     }
     const [command, ...args] = strs(raw.command);
     if (command === undefined) return undefined;

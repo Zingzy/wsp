@@ -55,6 +55,13 @@ describe("read", () => {
     ]);
   });
 
+  it("a header that takes its value from the environment names the variable it reads: ${X} in mcpServers JSON, {env:X} in OpenCode's", () => {
+    const claude = MCP_SERVERS_JSON.read(JSON.stringify({ mcpServers: { a: { type: "http", url: "https://a.example/mcp", headers: { Authorization: "Bearer ${A_TOKEN}", "X-Org": "${ORG:-acme}", Plain: "static" } }, b: { type: "http", url: "https://b.example/mcp", headers: { X: "no $REF here" } } } }), HOME);
+    expect(claude.map(s => [s.name, s.envRefs])).toEqual([["a", ["A_TOKEN", "ORG"]], ["b", []]]);
+    const opencode = OPENCODE_JSON.read(JSON.stringify({ mcp: { c: { type: "remote", url: "https://c.example/mcp", headers: { Authorization: "Bearer {env:C_TOKEN}" } } } }), HOME);
+    expect(opencode.map(s => [s.name, s.envRefs])).toEqual([["c", ["C_TOKEN"]]]);
+  });
+
   it("Codex's TOML: mcp_servers tables with their env, header and bearer sub-keys, quoted names, multi-line arrays and inline tables, in file order", () => {
     const toml = [
       'model = "gpt-5"',

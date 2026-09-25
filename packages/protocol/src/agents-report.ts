@@ -69,21 +69,18 @@ export type McpTool = z.infer<typeof McpTool>;
 export const McpRowTransport = z.discriminatedUnion("kind", [z.object({ kind: z.literal("stdio"), line: z.string() }), z.object({ kind: z.literal("http"), host: z.string() })]);
 export type McpRowTransport = z.infer<typeof McpRowTransport>;
 
-/** A server's state: nothing to sign in as its config says, unchecked (`open`); its address answered with no sign-in
- * asked (`connected`); a sign-in its harness holds (`signed-in`); one it needs; one that failed; or no way to tell
- * without connecting (`unknown`). */
-export const McpAuth = z.enum(["open", "connected", "signed-in", "needs-sign-in", "failed", "unknown"]);
+/** A server's state: nothing to sign in as its config says, unchecked (`open`); a token its config takes from the
+ * environment (`env-key`); its address answered with no sign-in asked (`connected`); a sign-in its harness holds
+ * (`signed-in`); one it needs; one that failed; or no way to tell without connecting (`unknown`). */
+export const McpAuth = z.enum(["open", "env-key", "connected", "signed-in", "needs-sign-in", "failed", "unknown"]);
 export type McpAuth = z.infer<typeof McpAuth>;
 
-/** A host no lookup or check from another computer may name: loopback, an IP literal, a single label, or a name only a
- * local network, a tailnet or an internal zone resolves. */
-export function isPrivateHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  if (h.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || !h.includes(".")) return true;
-  return /(^|\.)(localhost|local|internal|lan|ts\.net)$/.test(h);
-}
-
 /** `home`: Claude Code's servers kept for the home folder itself; `project`: a workspace's project files. */
+/** Where a page that returns to localhost reaches the harness: `here`, the computer the browser is on; `relay`, a
+ * computer whose callback port this host forwards from here; `none`, a computer it does not. */
+export const PageReach = z.enum(["here", "relay", "none"]);
+export type PageReach = z.infer<typeof PageReach>;
+
 export const McpScope = z.enum(["user", "home", "project"]);
 export type McpScope = z.infer<typeof McpScope>;
 
@@ -132,6 +129,8 @@ export const AgentsReport = z.object({
   servers: z.array(McpRow),
   /** One line per reader that could not answer, naming it. */
   refused: z.array(z.string()),
+  /** Where a sign-in page that returns to localhost reaches the harness there; absent reaches nowhere. */
+  reach: PageReach.optional(),
 });
 export type AgentsReport = z.infer<typeof AgentsReport>;
 
@@ -200,6 +199,9 @@ export const addToolsHereRefusal = "The wsp tools go into an agent's config on t
 /** A C0 control character or DEL: what an interactive terminal acts on rather than shows, so a name holding one is
  * never a name wsp runs anything by. */
 export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f]/.test(s);
+
+/** The text with every control character taken out, for a name that reaches a log line. */
+export const withoutControlChars = (s: string): string => s.replace(/[\x00-\x1f\x7f]/g, "");
 
 /** Why a server a config names was left out of the report. */
 export const controlNameRefusal = (file: string): string => `${file} names a server with a control character in its name, which was left out.`;

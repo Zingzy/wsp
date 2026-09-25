@@ -4,13 +4,13 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type WorkspacePhase } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 
 /** What the host reads off a target: the report less what the runtime stamps on it. */
-export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale">;
+export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach">;
 
 /** Where a read runs: this computer, with a project's folder when a workspace here is the target; a computer you
  * joined, over its link, with the login and the sign-ins and versions its own report carries; or any other machine,
@@ -20,6 +20,10 @@ export type AgentsOn =
   | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
+
+/** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
+ * planned by and the report tells the app. */
+export const pageReachOf = (on: AgentsOn): PageReach => (on.kind === "here" ? "here" : on.kind === "machine" && on.relayed === true ? "relay" : "none");
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -125,7 +129,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
 } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
-  const stamped = (target: AgentsTarget, read: AgentsRead): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
+  const stamped = (target: AgentsTarget, read: AgentsRead & { reach: PageReach }): AgentsReport => AgentsReport.parse({ target, readAt: new Date(o.now()).toISOString(), ...read });
   const readerOf = (): AgentsReader => {
     if (o.reader === undefined) throw new Error(NO_AGENTS_READER);
     return o.reader;
@@ -187,7 +191,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const report = stamped(target, await reader.read(on, JSON.stringify(target)));
+      const report = stamped(target, { ...(await reader.read(on, JSON.stringify(target))), reach: pageReachOf(on) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;
     },
@@ -207,7 +211,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         return follow(signInId, run, emit);
       }
       const log = o.log ?? (line => console.warn(line));
-      const what = `${ask.agent}${ask.server !== undefined ? `, server ${ask.server}` : ""}, on ${"workspaceId" in target ? `workspace ${target.workspaceId}` : `computer ${target.placeId}`}`;
+      const what = `${withoutControlChars(ask.agent)}${ask.server !== undefined ? `, server ${withoutControlChars(ask.server)}` : ""}, on ${"workspaceId" in target ? `workspace ${target.workspaceId}` : `computer ${target.placeId}`}`;
       const begun = (async () => {
         const acts = actsOf();
         const on = await onOf(target, origin);
