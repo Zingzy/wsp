@@ -26,7 +26,7 @@ const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: fa
 
 describe("what the section computes beyond the table's own cells", () => {
   it("reads a provider row under the name a person knows it by", () => {
-    expect(placeName(ascii)).toBe("ASCII");
+    expect(placeName(ascii)).toBe("Box by ASCII");
     expect(placeName(hetzner)).toBe("hetzner");
   });
 
@@ -66,7 +66,7 @@ describe("the remove sentence", () => {
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
     expect(removeSentence(ascii, { workspaces: [{ name: "api", state: "Running", threads: 3 }, { name: "web", state: "Running", threads: 2 }] })).toBe(
-      "Its 2 tasks are deleted at ASCII and the key is forgotten on this Mac. Their records and 5 threads leave this Mac.",
+      "Its 2 tasks are deleted at Box by ASCII and the key is forgotten on this Mac. Their records and 5 threads leave this Mac.",
     );
   });
 
