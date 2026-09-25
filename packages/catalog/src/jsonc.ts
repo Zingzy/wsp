@@ -3,50 +3,46 @@
 // and the trailing commas a hand-edited file tends to carry. One reader for
 // everything that opens an agent's config, to list its servers or place one.
 
-/** `out` without a comma that only whitespace separates from its end. */
-function withoutTrailingComma(out: string): string {
-  let j = out.length;
-  while (j > 0 && /\s/.test(out[j - 1]!)) j--;
-  return out[j - 1] === "," ? out.slice(0, j - 1) + out.slice(j) : out;
-}
-
 export interface Jsonc {
   value: unknown;
   /** The text held a comment, which a rewrite as plain JSON loses. */
   comments: boolean;
 }
 
-/** The value the text holds and whether it carried comments; a real syntax error throws as JSON.parse does. */
+/** The value the text holds and whether it carried comments; a real syntax error throws as JSON.parse does. One pass
+ * over the text that copies its spans, since an agent's config runs to tens of megabytes. */
 export function readJsonc(text: string): Jsonc {
-  let out = "";
+  const out: string[] = [];
+  let from = 0;
   let i = 0;
-  let inString = false;
   let comments = false;
+  /** Where in `out` the last comma stands while only whitespace and comments follow it, else -1. */
+  let comma = -1;
   while (i < text.length) {
     const c = text[i]!;
-    if (inString) {
-      out += c;
-      if (c === "\\" && i + 1 < text.length) out += text[++i];
-      else if (c === '"') inString = false;
+    if (c === '"') {
+      comma = -1;
+      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
       i++;
-    } else if (c === '"') {
-      inString = true;
-      out += c;
-      i++;
-    } else if (c === "/" && text[i + 1] === "/") {
+    } else if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
       comments = true;
-      while (i < text.length && text[i] !== "\n") i++;
-    } else if (c === "/" && text[i + 1] === "*") {
-      comments = true;
-      const end = text.indexOf("*/", i + 2);
-      i = end < 0 ? text.length : end + 2;
+      out.push(text.slice(from, i));
+      const end = text[i + 1] === "/" ? text.indexOf("\n", i) : text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : text[i + 1] === "/" ? end : end + 2;
+      from = i;
+    } else if (c === ",") {
+      out.push(text.slice(from, i));
+      comma = out.length;
+      out.push(",");
+      from = ++i;
     } else {
-      if (c === "}" || c === "]") out = withoutTrailingComma(out);
-      out += c;
+      if ((c === "}" || c === "]") && comma >= 0) out[comma] = "";
+      if (!/\s/.test(c)) comma = -1;
       i++;
     }
   }
-  return { value: JSON.parse(out), comments };
+  out.push(text.slice(from));
+  return { value: JSON.parse(out.join("")), comments };
 }
 
 export const parseJsonc = (text: string): unknown => readJsonc(text).value;

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One MCP server in an agent's own config on one computer or workspace: added,
 // removed, or turned off and on, by the agent's format module over the text
-// read off the target, then written back as that computer's login. A file
-// keeps its mode, a new one is the login's alone, a file that is a link out of
-// the folder it belongs to is never written through, and a file the agent
-// wrote between the read and the write is left as the agent left it. The
+// read off the target, then written back as that computer's login by a rename
+// from beside it, so a write that stops partway leaves the file as it was. A
+// file keeps its mode, a new one is the login's alone, a file that is a link
+// out of the folder it belongs to is never written through, and a file the
+// agent wrote between the read and the write is left as the agent left it. The
 // values a person typed go into that file and are never said anywhere else.
 import { posix } from "node:path";
 import { MCP_AGENTS, agentName, catalogEntry, type McpAgent, type McpTransport } from "@wsp/catalog";
@@ -17,6 +18,7 @@ import {
   noServerSwitchRefusal,
   noServersConfigRefusal,
   noSuchServerRefusal,
+  serverNameFormatRefusal,
   serverNameRefusal,
   serverThereRefusal,
   shellQuote,
@@ -49,8 +51,8 @@ export function serverTransport(ask: Omit<ServerAdd, "agent" | "name" | "project
     if (Object.keys(headers).length > 0) throw usage("Headers go with an address; a command takes variables.");
     if (hasControlChar(command) || (ask.args ?? []).some(hasControlChar)) throw usage("The command holds a control character, so nothing was written.");
     for (const [name, value] of Object.entries(env)) {
-      if (!ENV_NAME.test(name)) throw usage(`${name} is not a variable name.`);
-      if (hasControlChar(value)) throw usage(`The value of ${name} holds a control character, so nothing was written.`);
+      if (!ENV_NAME.test(name)) throw usage("A variable's name is letters, digits and underscores, not starting with a digit, so nothing was written.");
+      if (hasControlChar(value)) throw usage("A variable's value holds a control character, so nothing was written.");
     }
     return { kind: "stdio", command, args: [...(ask.args ?? [])], env: { ...env } };
   }
@@ -63,8 +65,8 @@ export function serverTransport(ask: Omit<ServerAdd, "agent" | "name" | "project
   }
   if (parsed === undefined || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) throw usage("The address is not one that starts with https:// or http://.");
   for (const [name, value] of Object.entries(headers)) {
-    if (!HEADER_NAME.test(name)) throw usage(`${name} is not a header name.`);
-    if (hasControlChar(value)) throw usage(`The value of the ${name} header holds a control character, so nothing was written.`);
+    if (!HEADER_NAME.test(name)) throw usage("A header's name is letters, digits and the marks ! # $ % & ' * + - . ^ _ ` | ~, so nothing was written.");
+    if (hasControlChar(value)) throw usage("A header's value holds a control character, so nothing was written.");
   }
   return { kind: "http", url, headers: { ...headers } };
 }
@@ -83,9 +85,20 @@ interface Config {
   folder?: string;
 }
 
-function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): Config {
+function mcpAgent(agentId: string): McpAgent {
   const agent = MCP_AGENTS.find(a => a.id === agentId);
   if (agent === undefined) throw usage(catalogEntry(agentId) === undefined ? `The catalog has no agent ${agentId}.` : noServersConfigRefusal(agentName(agentId)));
+  return agent;
+}
+
+/** A name the agent's format writes and reads back as that same name; any other is refused before a line runs. */
+function checkNameKept(agent: McpAgent, name: string, transport: McpTransport): void {
+  const kept = agent.mcp.format.read(agent.mcp.format.place(undefined, name, transport).text, "/").some(s => s.name === name);
+  if (!kept) throw usage(serverNameFormatRefusal(agentName(agent.id)));
+}
+
+function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): Config {
+  const agent = mcpAgent(agentId);
   const home = road.host.home;
   if (scope !== "project") return { agent, files: agent.mcp.files.map(f => expand(road.host, f)), base: home, ...(scope === "home" ? { folder: home } : {}) };
   const project = on.kind === "box" ? undefined : on.project;
@@ -139,40 +152,44 @@ function linkRefused(res: ExecResult, host: Host): void {
   throw usage(configLinkRefusal(tilde(host.home, file), tilde(host.home, to)));
 }
 
-/** Writes the text over what was read, as the login: an existing file in place, so it keeps its mode and owner; a new
- * one made 0600 with its folder. Nothing is written when the file is no longer what was read, or when its folder
- * reaches out of the base through a link. */
+/** Writes the text over what was read, as the login: staged in a file beside the real one, carrying its mode, then
+ * renamed over it, so the file is either what was read or the whole new text and a link inside the base stays a
+ * link; a new file is made 0600 with its folder the same way. Nothing is written when the file is no longer what was
+ * read, or when its folder reaches out of the base through a link. */
 async function writeConfig(road: Road, config: Config, read: Read, text: string): Promise<void> {
   const q = shellQuote;
   const bytes = new TextEncoder().encode(text);
+  const there = '{ [ -e "$r" ] || [ -L "$r" ]; }';
   const line = [
     "umask 077",
     `b=$(realpath ${q(config.base)}) || exit 1`,
-    't=$(mktemp) || exit 1',
-    "trap 'rm -f -- \"$t\"' EXIT",
-    'cat > "$t"',
-    `[ "$(wc -c < "$t" | tr -d ' ')" = ${bytes.length} ] || exit 1`,
     `f=${q(read.file)}`,
     'if [ -e "$f" ] || [ -L "$f" ]; then',
     `  ${read.sum === undefined ? `exit ${CHANGED_EXIT}` : ":"}`,
     `  r=$(realpath "$f" 2>/dev/null) || exit ${LINK_EXIT}`,
     `  ${inside('"$f"')}`,
-    `  [ "$(cksum < "$r")" = ${q(read.sum ?? "")} ] || exit ${CHANGED_EXIT}`,
-    '  cat "$t" > "$r" || exit 1',
     "else",
     `  ${read.sum === undefined ? ":" : `exit ${CHANGED_EXIT}`}`,
     '  d=${f%/*}; a=$d',
     '  while [ -n "$a" ] && [ ! -e "$a" ]; do a=${a%/*}; done',
     '  r=$(realpath "${a:-/}") || exit 1',
     `  ${inside('"$a"')}`,
-    '  mkdir -p "$d" && cat "$t" > "$f" || exit 1',
+    '  mkdir -p "$d" || exit 1',
+    '  r=$f',
     "fi",
+    'n=$(mktemp "${r%/*}/.wsp-XXXXXX") || exit 1',
+    "trap 'rm -f -- \"$n\"' EXIT",
+    `if ${there}; then cp -p "$r" "$n" || exit 1; fi`,
+    'cat > "$n" || exit 1',
+    `[ "$(wc -c < "$n" | tr -d ' ')" = ${bytes.length} ] || exit 1`,
+    read.sum === undefined ? `${there} && exit ${CHANGED_EXIT}` : `[ "$(cksum < "$r")" = ${q(read.sum)} ] || exit ${CHANGED_EXIT}`,
+    'mv -f "$n" "$r" || exit 1',
   ].join("\n");
   const res = await road.run(line, bytes);
   const shown = tilde(road.host.home, read.file);
   linkRefused(res, road.host);
   if (res.exitCode === CHANGED_EXIT) throw usage(configChangedRefusal(shown));
-  if (res.exitCode !== 0) throw new Error(`${shown} was not written: ${firstLine(res)}`);
+  if (res.exitCode !== 0) throw new Error(`${shown} stands as it was: the write did not finish (${firstLine(res)}).`);
 }
 
 /** The format's own words for text it could not take, named by the file. */
@@ -215,6 +232,7 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
     add: async (on, ask) => {
       checkName(ask.name);
       const transport = serverTransport(ask);
+      checkNameKept(mcpAgent(ask.agent), ask.name, transport);
       const road = await roadOf(on, here, "the server");
       const config = configOf(road, on, ask.agent, ask.project === true ? "project" : "user");
       const read = await readConfig(road, config);

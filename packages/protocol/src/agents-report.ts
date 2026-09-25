@@ -96,19 +96,21 @@ export const nappingSkillsRefusal = (name: string): string => `${name} is nappin
 
 /** A command line as a person types it, in words: split at spaces, a word in single quotes as written, one in double
  * quotes with its backslash escapes, and a backslash outside quotes taking the next character as it is. Nothing is
- * expanded; an unclosed quote runs to the end of the line. */
-export function commandWords(line: string): string[] {
+ * expanded; a line with a quote it never closes has no words, as a shell refuses it. */
+export function commandWords(line: string): string[] | undefined {
   const words: string[] = [];
   let word: string | undefined;
   for (let i = 0; i < line.length; i++) {
     const c = line[i]!;
     if (c === "'") {
       const end = line.indexOf("'", i + 1);
-      word = (word ?? "") + line.slice(i + 1, end < 0 ? line.length : end);
-      i = end < 0 ? line.length : end;
+      if (end < 0) return undefined;
+      word = (word ?? "") + line.slice(i + 1, end);
+      i = end;
     } else if (c === '"') {
       word ??= "";
       for (i++; i < line.length && line[i] !== '"'; i++) word += line[i] === "\\" && i + 1 < line.length ? line[++i]! : line[i]!;
+      if (i >= line.length) return undefined;
     } else if (c === "\\" && i + 1 < line.length) word = (word ?? "") + line[++i]!;
     else if (/\s/.test(c)) {
       if (word !== undefined) words.push(word);
@@ -118,6 +120,12 @@ export function commandWords(line: string): string[] {
   if (word !== undefined) words.push(word);
   return words;
 }
+
+/** Why a command line was refused before anything was sent. */
+export const unclosedQuoteRefusal = "The command has a quote it never closes, so nothing was written.";
+
+/** Why a server's name was refused: the agent's own format would not read it back as that name. */
+export const serverNameFormatRefusal = (agent: string): string => `${agent} cannot keep a server under that name, so nothing was written.`;
 
 /** Why a server's name was refused before anything was written: empty, or holding a control character. */
 export const serverNameRefusal = "A server's name needs at least one character and no control character, so nothing was written.";

@@ -33,6 +33,7 @@ import {
   McpRow,
   McpScope,
   commandWords,
+  unclosedQuoteRefusal,
   McpTool,
   ServerToolsAnswer,
   SkillAdded,
@@ -2765,9 +2766,11 @@ export function serverValues(env: Readonly<Record<string, string | undefined>>, 
 }
 
 /** A server's command line as its program and arguments, split as a shell splits it; nothing without one. */
-function serverCommand(line: string | undefined): { command?: string; args?: string[] } {
+function serverCommand(line: string | undefined, usage: string): { command?: string; args?: string[] } {
   if (line === undefined) return {};
-  const [command = "", ...args] = commandWords(line);
+  const words = commandWords(line);
+  if (words === undefined) throw usageRefusal(unclosedQuoteRefusal, usage);
+  const [command = "", ...args] = words;
   return { command, args };
 }
 
@@ -3211,7 +3214,7 @@ export const VERBS: readonly Verb[] = [
       const command = flag(ctx.flags, "command");
       const url = flag(ctx.flags, "url");
       const values = serverValues(ctx.env, flagList(ctx.flags, "env"), flagList(ctx.flags, "header"), usageIs(ctx));
-      const body = { agent, name, ...serverCommand(command), ...(url !== undefined ? { url } : {}), ...values, ...(ctx.flags["project"] === true ? { project: true } : {}) };
+      const body = { agent, name, ...serverCommand(command, usageIs(ctx)), ...(url !== undefined ? { url } : {}), ...values, ...(ctx.flags["project"] === true ? { project: true } : {}) };
       const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx));
       ctx.out.emit(added, `${name} is in ${added.file}.`);
       return 0;
@@ -3233,7 +3236,7 @@ export const VERBS: readonly Verb[] = [
       call: async ({ name, agent, workspace, on, command, env, url, header, project }, deps) => {
         const usage = "servers_add takes a workspace or on, not both";
         const values = serverValues(deps.env, env ?? [], header ?? [], usage);
-        const body = { agent, name, ...serverCommand(command), ...(url !== undefined ? { url } : {}), ...values, ...(project === true ? { project: true } : {}) };
+        const body = { agent, name, ...serverCommand(command, usage), ...(url !== undefined ? { url } : {}), ...values, ...(project === true ? { project: true } : {}) };
         const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage);
         return asText(`${name} is in ${added.file}.`, added);
       },

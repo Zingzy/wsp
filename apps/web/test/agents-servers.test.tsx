@@ -7,7 +7,7 @@
 // stands in the detail or under the form.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentsReport, AgentsTarget, ServerAdd, ServerAsk } from "@wsp/protocol";
+import { unclosedQuoteRefusal, type AgentsReport, type AgentsTarget, type ServerAdd, type ServerAsk } from "@wsp/protocol";
 import { AgentsManager } from "../src/components/agents/AgentsManager.js";
 import { AGENTS_LIST_WORDS as W, type RowsContext } from "../src/components/agents/agentsRows.js";
 import { useServerActs } from "../src/components/agents/useServerActs.js";
@@ -136,6 +136,25 @@ describe("Add an MCP server", () => {
     type("add-server-command", "uvx acme");
     fireEvent.click(go());
     expect(h.adds[0]![1]).toEqual({ agent: "claude", name: "acme", project: true, command: "uvx", args: ["acme"] });
+  });
+
+  it("refuses a command with an unclosed quote and two variables of one name without sending, saying why under it", () => {
+    const h = host();
+    render(<List />);
+    openForm();
+    type("add-server-name", "acme");
+    type("add-server-command", 'npx "unclosed');
+    fireEvent.click(go());
+    expect(document.querySelector("[data-k=add-server-refused]")?.textContent).toBe(unclosedQuoteRefusal);
+    type("add-server-command", "npx acme");
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=add-server-pair-add]")!);
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=add-server-pair-add]")!);
+    const [a, b] = fields("add-server-pair-name");
+    fireEvent.change(a!, { target: { value: "KEY" } });
+    fireEvent.change(b!, { target: { value: " KEY " } });
+    fireEvent.click(go());
+    expect(document.querySelector("[data-k=add-server-refused]")?.textContent).toBe(W.twoPairsOneName("command"));
+    expect(h.adds).toEqual([]);
   });
 
   it("keeps the form and its values where the host refused, saying why under it", async () => {

@@ -18,7 +18,7 @@ import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, t
 import { HERE_PLACE_ID, ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, DAEMON_TOKEN_PATH, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { catalogEntry } from "@wsp/catalog";
+import { catalogEntry, parseJsonc } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { hostPlatform } from "../src/verbs.js";
 import { signInItems } from "../src/init-pick.js";
@@ -4193,7 +4193,7 @@ describe("wsp init --recipe", () => {
     expect(f.backends.flatMap(b => b.machines).length).toBeGreaterThan(0);
   });
 
-  it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments says they are gone", async () => {
+  it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments keeps them", async () => {
     const f = fake();
     // The file says Codex is installed where it was written; this Mac has Claude Code and Gemini CLI.
     f.opts.recipeFile = recipeFile(f);
@@ -4215,10 +4215,12 @@ describe("wsp init --recipe", () => {
     await f.press(KEY.enter);
     await f.until(BOOT);
     const out = f.text();
-    expect(out).toMatch(/Gemini CLI now has the wsp tools: ~\/\.gemini\/settings\.json\n│\s+~\/\.gemini\/settings\.json held comments; the rewrite is plain JSON, so they are gone\n/);
+    expect(out).toMatch(/Gemini CLI now has the wsp tools: ~\/\.gemini\/settings\.json\n│\s+The wsp skill went to /);
     expect(out).not.toContain("Claude Code now has the wsp tools");
     expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
-    const settings = JSON.parse(readFileSync(join(f.opts.home, ".gemini", "settings.json"), "utf8")) as { theme: string; mcpServers: { wsp: { args: string[] } } };
+    const text = readFileSync(join(f.opts.home, ".gemini", "settings.json"), "utf8");
+    expect(text).toContain("// the theme\n");
+    const settings = parseJsonc(text) as { theme: string; mcpServers: { wsp: { args: string[] } } };
     expect(settings.theme).toBe("dark");
     expect(settings.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
     await f.press("n");

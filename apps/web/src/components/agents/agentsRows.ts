@@ -145,6 +145,7 @@ export const AGENTS_LIST_WORDS = {
   removePair: (name: string): string => (name === "" ? "Remove this line" : `Remove ${name}`),
   addServerGo: "Add server",
   adding: "Adding",
+  twoPairsOneName: (road: "command" | "address"): string => (road === "command" ? "Two variables have the same name; keep one of them." : "Two headers have the same name; keep one of them."),
   noServerAgents: (computer: string): string => `No agent on ${computer} keeps MCP servers in a file wsp writes.`,
 } as const;
 

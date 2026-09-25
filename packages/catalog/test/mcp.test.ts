@@ -4,7 +4,7 @@
 // defines, places the wsp server in a fresh file or beside what the person
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, mcpSwitch, type McpEditLib, type McpFormat, type McpServer, type McpTransport } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, mcpSwitch, parseJsonc, type McpEditLib, type McpFormat, type McpServer, type McpTransport } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const SERVER = { kind: "stdio", command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"], env: {} } satisfies McpTransport;
@@ -129,21 +129,26 @@ describe("place", () => {
     expect(placed).toEqual({ $schema: "https://opencode.ai/config.json", theme: "x", mcp: { wsp: { type: "local", command: [SERVER.command, ...SERVER.args], enabled: true } } });
   });
 
-  it("a settings file with comments and a trailing comma (OpenCode's jsonc, Gemini CLI's settings) is placed into with its other servers intact; the rewrite is plain JSON", () => {
+  it("a settings file with comments and a trailing comma (OpenCode's jsonc, Gemini CLI's settings) is placed into in place: its comments stay, its other servers intact", () => {
     const jsonc = '{\n  // servers I use\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    /* memory */ "other": { "type": "local", "command": ["x"], "enabled": true },\n  },\n}\n';
-    const { text: placed, commentsDropped } = OPENCODE_JSON.place(jsonc, "wsp", SERVER);
-    expect(commentsDropped).toBe(true);
-    expect(JSON.parse(placed)).toEqual({
+    const placed = OPENCODE_JSON.place(jsonc, "wsp", SERVER).text;
+    expect(parseJsonc(placed)).toEqual({
       $schema: "https://opencode.ai/config.json",
       mcp: { other: { type: "local", command: ["x"], enabled: true }, wsp: { type: "local", command: [SERVER.command, ...SERVER.args], enabled: true } },
     });
-    expect(placed).not.toContain("servers I use");
-    const gemini = MCP_SERVERS_JSON.place('{ "theme": "dark", // the look\n "mcpServers": { "docs": { "url": "https://docs.example/mcp" }, }, }', "wsp", SERVER);
-    expect(gemini.commentsDropped).toBe(true);
-    expect(JSON.parse(gemini.text)).toEqual({ theme: "dark", mcpServers: { docs: { url: "https://docs.example/mcp" }, wsp: { command: SERVER.command, args: SERVER.args } } });
-    const url = OPENCODE_JSON.place('{ "mcp": { "ctx": { "type": "remote", "url": "https://ctx.example/*/mcp" } }, }', "wsp", SERVER);
-    expect((JSON.parse(url.text) as { mcp: { ctx: { url: string } } }).mcp.ctx.url).toBe("https://ctx.example/*/mcp");
-    expect(url.commentsDropped).toBe(false);
+    expect(placed).toContain("// servers I use\n");
+    expect(placed).toContain('/* memory */ "other": {');
+    const gemini = MCP_SERVERS_JSON.place('{ "theme": "dark", // the look\n "mcpServers": { "docs": { "url": "https://docs.example/mcp" }, }, }', "wsp", SERVER).text;
+    expect(gemini).toContain("// the look\n");
+    expect(parseJsonc(gemini)).toEqual({ theme: "dark", mcpServers: { docs: { url: "https://docs.example/mcp" }, wsp: { command: SERVER.command, args: SERVER.args } } });
+    const url = OPENCODE_JSON.place('{ "mcp": { "ctx": { "type": "remote", "url": "https://ctx.example/*/mcp" } }, }', "wsp", SERVER).text;
+    expect((parseJsonc(url) as { mcp: { ctx: { url: string } } }).mcp.ctx.url).toBe("https://ctx.example/*/mcp");
+  });
+
+  it("a file that holds the servers' key twice is refused rather than edited into something it was not meant to read as", () => {
+    const twice = '{ "mcpServers": { "a": { "command": "x" } }, // mine\n "mcpServers": { "b": { "command": "y" } } }';
+    expect(() => MCP_SERVERS_JSON.place(twice, "wsp", SERVER)).toThrow("the file could not be changed in place, which keeps its comments; change it by hand");
+    expect(() => MCP_SERVERS_JSON.remove(twice, ["b"])).toThrow("the file could not be changed in place, which keeps its comments; change it by hand");
   });
 
   it("Codex's TOML: a fresh file is one table; an existing file gets the table appended; a rerun replaces the table and leaves its neighbours", () => {
@@ -243,6 +248,17 @@ describe("enable", () => {
     expect(JSON.parse(off.text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: ["a"] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
     expect(GEMINI_SETTINGS_JSON.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", true], ["b", false]]);
     expect(JSON.parse(GEMINI_SETTINGS_JSON.enable!(off.text, "a", true).text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: [] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+  });
+
+  it("OpenCode and Gemini CLI flip a switch in place, so a jsonc file keeps its comments", () => {
+    const opencode = '{\n  // mine\n  "mcp": { "a": { "type": "local", "command": ["x"], "enabled": true } }\n}\n';
+    const off = OPENCODE_JSON.enable!(opencode, "a", false).text;
+    expect(off).toBe(opencode.replace('"enabled": true', '"enabled": false'));
+    const gemini = '{\n  // mine\n  "mcpServers": { "a": { "command": "x" } }\n}\n';
+    const excluded = GEMINI_SETTINGS_JSON.enable!(gemini, "a", false).text;
+    expect(excluded).toContain("// mine\n");
+    expect(parseJsonc(excluded)).toEqual({ mcpServers: { a: { command: "x" } }, mcp: { excluded: ["a"] } });
+    expect(parseJsonc(GEMINI_SETTINGS_JSON.enable!(excluded, "a", true).text)).toEqual({ mcpServers: { a: { command: "x" } }, mcp: { excluded: [] } });
   });
 
   it("Claude Code keeps no switch a person turns per server, so its format has none, and the agent reads as having none", () => {
@@ -449,8 +465,6 @@ describe("remove", () => {
     expect(root.projects["/root"]!.mcpServers).toEqual({ zed: { command: "/root/.local/bin/zed", args: [] } });
     const both = MCP_SERVERS_JSON.remove(gone, ["zed"], "/root");
     expect((JSON.parse(both.text) as { projects: Record<string, { mcpServers: Record<string, unknown> }> }).projects["/root"]!.mcpServers).toEqual({});
-    // Nothing of this file was ever a comment, so the rewrite lost none.
-    expect([...[MCP_SERVERS_JSON.remove(withHome, ["gsc", "notion"]), both].map(r => r.commentsDropped)]).toEqual([false, false]);
 
     // A name the file does not define, a scope it has nothing under, and a file with no servers at all: the text
     // stands as it is rather than being rewritten for nothing.
@@ -460,28 +474,37 @@ describe("remove", () => {
     expect(() => MCP_SERVERS_JSON.remove("[]", ["gsc"])).toThrow("the file is not a JSON object");
   });
 
-  it("OpenCode's JSON: the named keys go from under its own key and the rest of the file is written back as the merge writes it", () => {
+  it("OpenCode's JSON: the named keys go from under its own key, every other byte of the file where it was", () => {
     const own = '{\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] }, "mine": { "type": "local", "command": ["mine"] } }\n}\n';
     const gone = OPENCODE_JSON.remove(own, ["wsp"]);
     expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
-    expect(gone.commentsDropped).toBe(false);
+    expect(gone.text).toBe('{\n  "theme": "x",\n  "mcp": {"mine": { "type": "local", "command": ["mine"] } }\n}\n');
     expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
   });
 
-  it("a jsonc file says the comments its rewrite could not keep, the same loss a merge into it answers, and says nothing of them where it takes no key out", () => {
-    const own = '{\n  // my own servers\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] } }\n}\n';
-    const gone = OPENCODE_JSON.remove(own, ["wsp"]);
-    expect(gone.commentsDropped).toBe(true);
-    expect(gone.text).not.toContain("my own servers");
-    expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: {} });
-    // A name that file does not define leaves it byte for byte, comments and all, so nothing is lost and nothing said.
-    expect(OPENCODE_JSON.remove(own, ["nobody"])).toEqual({ text: own, commentsDropped: false });
+  it("a jsonc file keeps its comments when a key comes out of it", () => {
+    const own = '{\n  // my own servers\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] } } // the rest\n}\n';
+    const gone = OPENCODE_JSON.remove(own, ["wsp"]).text;
+    expect(gone).toContain("// my own servers\n");
+    expect(gone).toContain("// the rest\n");
+    expect(parseJsonc(gone)).toEqual({ theme: "x", mcp: {} });
+    expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
+  });
+
+  it("Gemini CLI takes a removed server's name out of mcp.excluded too, so a later server of that name is not born off", () => {
+    const text = '{\n  // mine\n  "mcp": { "excluded": ["s", "t"] },\n  "mcpServers": { "s": { "command": "x" }, "t": { "command": "y" } }\n}\n';
+    const gone = GEMINI_SETTINGS_JSON.remove(text, ["s"]).text;
+    expect(parseJsonc(gone)).toEqual({ mcp: { excluded: ["t"] }, mcpServers: { t: { command: "y" } } });
+    expect(gone).toContain("// mine\n");
+    const again = GEMINI_SETTINGS_JSON.place(gone, "s", SERVER).text;
+    expect(GEMINI_SETTINGS_JSON.read(again, HOME).map(s => [s.name, s.disabled === true])).toEqual([["t", true], ["s", false]]);
+    expect(GEMINI_SETTINGS_JSON.remove(text, ["nobody"]).text).toBe(text);
   });
 
   it("Codex's TOML: the named tables go with their sub-tables, and the person's trust tables, hooks state and own server stay byte for byte", () => {
     const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
     expect(landed).toContain("[mcp_servers.context7.env]");
-    expect(CODEX_TOML.remove(landed, ["context7"])).toEqual({ text: CODEX_OWN, commentsDropped: false });
+    expect(CODEX_TOML.remove(landed, ["context7"]).text).toBe(CODEX_OWN);
     // A name no table stands for leaves the file exactly as it was, comments and spacing with it.
     expect(CODEX_TOML.remove(landed, ["nobody"]).text).toBe(landed);
     expect(CODEX_TOML.remove(landed, ["mine"]).text).not.toContain("[mcp_servers.mine]");

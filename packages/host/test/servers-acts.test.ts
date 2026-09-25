@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CODEX_TOML, OPENCODE_JSON } from "@wsp/catalog";
+import { CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON } from "@wsp/catalog";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
-import { configChangedRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
+import { configChangedRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameFormatRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
@@ -166,9 +166,84 @@ describe("adding an MCP server", () => {
     const at = fixture();
     const file = join(at.home, ".claude.json");
     const theirs = JSON.stringify({ mcpServers: {}, numStartups: 99 });
-    const { machine } = road(at, { before: cmd => void (cmd.includes('cat "$t" > "$r"') && writeFileSync(file, theirs)) });
+    const { machine } = road(at, { before: cmd => void (cmd.includes("mv -f") && writeFileSync(file, theirs)) });
     await expect(serversActs().add(box(at, machine), { agent: "claude", name: "acme", command: "npx" })).rejects.toThrow(configChangedRefusal("~/.claude.json"));
     expect(readFileSync(file, "utf8")).toBe(theirs);
+  });
+
+  it("a write killed partway leaves the old file whole, and the refusal says it stands as it was", async () => {
+    const at = fixture();
+    const file = join(at.home, ".claude.json");
+    const before = readFileSync(file, "utf8");
+    // Every cat that writes a file stops after its first bytes for a while, which is where the write is killed.
+    const slow = join(at.root, "slow-bin");
+    mkdirSync(slow);
+    writeFileSync(join(slow, "cat"), '#!/bin/bash\n[ -p /dev/stdout ] && exec /bin/cat "$@"\n/bin/cat "$@" | { dd bs=1 count=16 2>/dev/null; sleep 2; /bin/cat; }\n');
+    chmodSync(join(slow, "cat"), 0o755);
+    const halfway = (): boolean => readFileSync(file, "utf8") !== before || readdirSync(at.home).some(n => n.startsWith(".wsp-"));
+    const machine = {
+      exec: (cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult> =>
+        new Promise(resolve => {
+          const env = { PATH: `${at.bin}:/usr/bin:/bin`, HOME: at.home };
+          const child = spawn("/bin/bash", ["-c", cmd], { env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+          const out: Buffer[] = [];
+          child.stdout.on("data", (b: Buffer) => out.push(b));
+          child.stdin.on("error", () => undefined);
+          const poll = setInterval(() => {
+            if (opts?.stdin !== undefined && halfway()) process.kill(-child.pid!, "SIGKILL");
+          }, 5);
+          child.on("close", (code, signal) => {
+            clearInterval(poll);
+            resolve({ exitCode: signal === "SIGKILL" ? 137 : (code ?? 1), stdout: Buffer.concat(out).toString("utf8"), stderr: "" });
+          });
+          child.stdin.end(opts?.stdin === undefined ? undefined : Buffer.from(opts.stdin));
+        }),
+    };
+    const on: AgentsOn = { kind: "box", machine, login: { HOME: at.home, PATH: `${slow}:${at.bin}:/usr/bin:/bin` } };
+    await expect(serversActs().add(on, { agent: "claude", name: "acme", command: "npx" })).rejects.toThrow("~/.claude.json stands as it was: the write did not finish (exit 137).");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(mode(file)).toBe(0o600);
+  }, 20_000);
+
+  it("writes by a rename over the file from beside it, so no copy is left in the folder or anywhere else, and a file keeps its mode", async () => {
+    const at = fixture();
+    const file = join(at.home, ".gemini/settings.json");
+    chmodSync(file, 0o640);
+    const { machine, lines } = road(at);
+    await serversActs().add(box(at, machine), { agent: "gemini", name: "acme", command: "npx" });
+    expect(Object.keys(json(file).mcpServers!)).toEqual(["fs", "acme"]);
+    expect(mode(file)).toBe(0o640);
+    expect(readdirSync(dirname(file)).filter(n => n.startsWith(".wsp-"))).toEqual([]);
+    expect(lines.at(-1)).not.toContain("$(mktemp)");
+  });
+
+  it("keeps a jsonc file's comments through an add, a turn off and a remove", async () => {
+    const at = fixture();
+    const file = join(at.home, ".config/opencode/opencode.jsonc");
+    rmSync(join(at.home, ".config/opencode/opencode.json"));
+    writeFileSync(file, '{\n  // my model, do not change\n  "model": "x",\n  "mcp": { /* mine */ "ctx": { "type": "remote", "url": "https://ctx.example/mcp", "enabled": true } }\n}\n');
+    const acts = serversActs({ here: () => here(at) });
+    await acts.add(HERE, { agent: "opencode", name: "acme", command: "npx" });
+    await acts.toggle(HERE, { agent: "opencode", name: "ctx", on: false });
+    await acts.remove(HERE, { agent: "opencode", name: "acme" });
+    const after = readFileSync(file, "utf8");
+    expect(after).toContain("// my model, do not change\n");
+    expect(after).toContain("/* mine */");
+    expect(OPENCODE_JSON.read(after, at.home).map(s => [s.name, s.disabled === true])).toEqual([["ctx", true]]);
+  });
+
+  it("refuses a name the agent's format would not read back as that name, before a line runs, and takes one it would", async () => {
+    const at = fixture();
+    const { machine, lines } = road(at);
+    await expect(serversActs().add(box(at, machine), { agent: "codex", name: 'x"] ', command: "npx" })).rejects.toThrow(serverNameFormatRefusal("Codex"));
+    expect(lines).toEqual([]);
+    const acts = serversActs({ here: () => here(at) });
+    for (const name of ["a.b", "my server", "__proto__"]) {
+      await acts.add(HERE, { agent: "codex", name, command: "npx" });
+      await acts.add(HERE, { agent: "claude", name, command: "npx" });
+    }
+    expect(CODEX_TOML.read(readFileSync(join(at.home, ".codex/config.toml"), "utf8"), at.home).map(s => s.name)).toEqual(["linear", "old", "a.b", "my server", "__proto__"]);
+    expect(Object.keys(json(join(at.home, ".claude.json")).mcpServers!)).toEqual(["airtable", "notion", "wsp", "a.b", "my server", "__proto__"]);
   });
 
   it("refuses a config that came back cut short rather than writing what was read of it", async () => {
@@ -229,6 +304,16 @@ describe("removing an MCP server", () => {
 });
 
 describe("turning an MCP server off and on", () => {
+  it("a Gemini CLI server turned off and removed is gone whole, so a new one of that name is on", async () => {
+    const at = fixture();
+    const file = join(at.home, ".gemini/settings.json");
+    const acts = serversActs({ here: () => here(at) });
+    await acts.toggle(HERE, { agent: "gemini", name: "fs", on: false });
+    await acts.remove(HERE, { agent: "gemini", name: "fs" });
+    await acts.add(HERE, { agent: "gemini", name: "fs", command: "npx" });
+    expect(GEMINI_SETTINGS_JSON.read(readFileSync(file, "utf8"), at.home).map(s => [s.name, s.disabled === true])).toEqual([["fs", false]]);
+  });
+
   it("flips the switch the agent reads: Codex's enabled line, OpenCode's enabled field", async () => {
     const at = fixture();
     const acts = serversActs({ here: () => here(at) });
@@ -266,13 +351,15 @@ describe("the server a person typed", () => {
     expect(refused({})).toBe("A server needs a command to run or an address to reach.");
     expect(refused({ url: "file:///etc/passwd" })).toBe("The address is not one that starts with https:// or http://.");
     expect(refused({ url: "not a url" })).toBe("The address is not one that starts with https:// or http://.");
-    expect(refused({ command: "npx", env: { "BAD-NAME": "v" } })).toBe("BAD-NAME is not a variable name.");
+    expect(refused({ command: "npx", env: { "BAD-NAME": "v" } })).toBe("A variable's name is letters, digits and underscores, not starting with a digit, so nothing was written.");
+    expect(refused({ command: "npx", env: { "ACME_KEY=sk-live-SECRET3": "" } })).not.toContain("SECRET3");
     expect(refused({ command: "npx", headers: { A: "v" } })).toBe("Headers go with an address; a command takes variables.");
     expect(refused({ url: "https://m.example", env: { A: "v" } })).toBe("Variables go with a command; an address takes headers.");
-    expect(refused({ url: "https://m.example", headers: { "Bad Header": "v" } })).toBe("Bad Header is not a header name.");
+    expect(refused({ url: "https://m.example", headers: { "Bad Header": "v" } })).toBe("A header's name is letters, digits and the marks ! # $ % & ' * + - . ^ _ ` | ~, so nothing was written.");
+    expect(refused({ url: "https://m.example", headers: { "Authorization: Bearer SECRET4": "" } })).not.toContain("SECRET4");
     expect(refused({ command: "npx", args: ["a\nb"] })).toBe("The command holds a control character, so nothing was written.");
     const injected = refused({ url: "https://m.example", headers: { Authorization: "Bearer sk-secret\r\nX-Evil: 1" } });
-    expect(injected).toBe("The value of the Authorization header holds a control character, so nothing was written.");
-    expect(refused({ command: "npx", env: { A: "sk-secret\u0000" } })).not.toContain("sk-secret");
+    expect(injected).toBe("A header's value holds a control character, so nothing was written.");
+    expect(refused({ command: "npx", env: { A: "sk-secret\u0000" } })).toBe("A variable's value holds a control character, so nothing was written.");
   });
 });

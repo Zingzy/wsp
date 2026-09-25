@@ -130,6 +130,8 @@ describe("the agents report on the wire", () => {
     expect(commandWords("  uvx  'a b'  \"c \\\" d\" e\\ f $HOME ")).toEqual(["uvx", "a b", 'c " d', "e f", "$HOME"]);
     expect(commandWords("node '' x")).toEqual(["node", "", "x"]);
     expect(commandWords("")).toEqual([]);
+    expect(commandWords('x "unclosed')).toBeUndefined();
+    expect(commandWords("x 'unclosed")).toBeUndefined();
   });
 
   it("a skill's folder can be off, a search hit is what skills.sh answers, and a preview carries the file's whole size beside its first part", () => {

@@ -6,8 +6,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CATALOG_AGENTS } from "@wsp/catalog";
-import { commentsDroppedLine } from "@wsp/engine";
+import { CATALOG_AGENTS, parseJsonc } from "@wsp/catalog";
 import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
@@ -136,9 +135,9 @@ describe("installing the MCP server for a local agent", () => {
 
   it("places the server in the agent's config file under the home, creating the file and its folder, and says where", () => {
     const spec = mcpServerSpec(statePath, PROC);
-    expect(installMcp("claude", spec, home)).toEqual({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" });
+    expect(installMcp("claude", spec, home)).toEqual({ agent: "Claude Code", path: "~/.claude.json", skill: "~/.claude/skills/wsp/SKILL.md" });
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: spec.command, args: spec.args } } });
-    expect(installMcp("codex", spec, home)).toEqual({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md" });
+    expect(installMcp("codex", spec, home)).toEqual({ agent: "Codex", path: "~/.codex/config.toml", skill: "~/.codex/skills/wsp/SKILL.md" });
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]\n");
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{ "theme": "dark" }\n');
@@ -146,13 +145,15 @@ describe("installing the MCP server for a local agent", () => {
     expect(JSON.parse(readFileSync(join(home, ".gemini", "settings.json"), "utf8"))).toEqual({ theme: "dark", mcpServers: { wsp: { command: spec.command, args: spec.args } } });
   });
 
-  it("an agent whose config is a jsonc file with comments gets the server placed in that file, its other servers kept", () => {
+  it("an agent whose config is a jsonc file with comments gets the server placed in that file, its comments and other servers kept", () => {
     const spec = mcpServerSpec(statePath, PROC);
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
     writeFileSync(join(home, ".config", "opencode", "opencode.jsonc"), '{\n  // mine\n  "mcp": { "other": { "type": "remote", "url": "https://ctx.example/mcp" }, },\n}\n');
-    expect(installMcp("opencode", spec, home)).toEqual({ agent: "OpenCode", path: "~/.config/opencode/opencode.jsonc", commentsDropped: true, skill: "~/.config/opencode/skills/wsp/SKILL.md" });
+    expect(installMcp("opencode", spec, home)).toEqual({ agent: "OpenCode", path: "~/.config/opencode/opencode.jsonc", skill: "~/.config/opencode/skills/wsp/SKILL.md" });
     expect(existsSync(join(home, ".config", "opencode", "opencode.json"))).toBe(false);
-    expect(JSON.parse(readFileSync(join(home, ".config", "opencode", "opencode.jsonc"), "utf8"))).toEqual({
+    const written = readFileSync(join(home, ".config", "opencode", "opencode.jsonc"), "utf8");
+    expect(written).toContain("// mine\n");
+    expect(parseJsonc(written)).toEqual({
       mcp: { other: { type: "remote", url: "https://ctx.example/mcp" }, wsp: { type: "local", command: [spec.command, ...spec.args], enabled: true } },
     });
   });
@@ -186,7 +187,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(report).toEqual({
       server: spec,
       installed: [
-        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" },
+        { id: "claude", agent: "Claude Code", path: "~/.claude.json", skill: "~/.claude/skills/wsp/SKILL.md" },
         { id: "pi", agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" },
       ],
       failures: [{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }],
@@ -203,8 +204,8 @@ describe("installing the MCP server for a local agent", () => {
     expect(JSON.parse(out.lines[0]!)).toEqual({
       server: mcpServerSpec(statePath),
       installed: [
-        { id: "claude", agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md"), join(project, "CLAUDE.md")] },
-        { id: "codex", agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md")] },
+        { id: "claude", agent: "Claude Code", path: "~/.claude.json", skill: "~/.claude/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md"), join(project, "CLAUDE.md")] },
+        { id: "codex", agent: "Codex", path: "~/.codex/config.toml", skill: "~/.codex/skills/wsp/SKILL.md", docs: [join(project, "AGENTS.md")] },
       ],
       failures: [],
     });
@@ -307,17 +308,10 @@ describe("installing the MCP server for a local agent", () => {
     expect(refreshSkills(home)).toEqual([]);
   });
 
-  it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {
-    expect(installLines({ agent: "Claude Code", path: "~/.claude.json", commentsDropped: false, skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
-    // The sentence about the comments is the engine's one export, which the row a merge writes on a joined
-    // computer reads too: one loss, one wording, whichever road wrote the file.
-    expect(installLines({ agent: "Gemini CLI", path: "~/.gemini/settings.json", commentsDropped: true, skill: "~/.gemini/skills/wsp/SKILL.md" })).toEqual([
-      "Gemini CLI now has the wsp tools: ~/.gemini/settings.json",
-      commentsDroppedLine("~/.gemini/settings.json"),
-      "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md",
-    ]);
+  it("what an install says: the agent and its file, the by-hand line when the server was not written, and where the skill went", () => {
+    expect(installLines({ agent: "Claude Code", path: "~/.claude.json", skill: "~/.claude/skills/wsp/SKILL.md" })).toEqual(["Claude Code now has the wsp tools: ~/.claude.json", "The wsp skill went to ~/.claude/skills/wsp/SKILL.md"]);
     expect(installLines({ agent: "Pi", skill: "~/.pi/agent/skills/wsp/SKILL.md" })).toEqual(["Pi: the catalog has no MCP config for it yet, so the server was not written; add it by hand.", "The wsp skill went to ~/.pi/agent/skills/wsp/SKILL.md"]);
-    expect(installLines({ agent: "Codex", path: "~/.codex/config.toml", commentsDropped: false, skill: "~/.codex/skills/wsp/SKILL.md", docs: ["/p/AGENTS.md"] }).at(-1)).toBe("The wsp section is in /p/AGENTS.md");
+    expect(installLines({ agent: "Codex", path: "~/.codex/config.toml", skill: "~/.codex/skills/wsp/SKILL.md", docs: ["/p/AGENTS.md"] }).at(-1)).toBe("The wsp section is in /p/AGENTS.md");
     expect(removeLines({ agent: "Claude Code", docs: ["/p/AGENTS.md", "/p/CLAUDE.md"] })).toEqual(["Claude Code: the wsp section is out of /p/AGENTS.md and /p/CLAUDE.md"]);
     expect(removeLines({ agent: "Codex", docs: [] })).toEqual(["Codex: no wsp section in this folder; nothing was changed."]);
   });
@@ -351,7 +345,6 @@ describe("installing the MCP server for a local agent", () => {
     expect(await cli(["mcp", "install", "--agent", "gemini", "--state", statePath], commented)).toBe(0);
     expect(commented.lines).toEqual([
       "Gemini CLI now has the wsp tools: ~/.gemini/settings.json",
-      commentsDroppedLine("~/.gemini/settings.json"),
       "The wsp skill went to ~/.gemini/skills/wsp/SKILL.md",
       `The wsp section is in ${join(project, "AGENTS.md")}`,
       commandLine(registered),

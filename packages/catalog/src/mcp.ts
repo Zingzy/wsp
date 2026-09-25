@@ -6,6 +6,7 @@
 // the machine, here, since a machine need carry no node of its own. An agent
 // entry registers its format and its files. Pure text in and out: nothing here
 // reads or writes a file.
+import { applyEdits, modify, type JSONPath } from "jsonc-parser";
 import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
@@ -28,15 +29,11 @@ export interface McpServer {
 
 export interface Placed {
   text: string;
-  /** The file held comments the rewrite does not keep, so the person is told. */
-  commentsDropped: boolean;
 }
 
-/** What a remove came to: the file as it should stand, the text as it was where the file defines none of the
- * names, and whether the rewrite could not keep the comments it held, which is the same loss a merge answers. */
+/** What a remove came to: the file as it should stand, the text as it was where the file defines none of the names. */
 export interface McpRemoved {
   text: string;
-  commentsDropped: boolean;
 }
 
 /** One config on the machine as its editor gets it: the kept and dropped server names, and for a format with
@@ -122,9 +119,9 @@ export interface McpFormat {
    * put in one. Throws when either text is not the format. */
   merge(lib: McpEditLib, scope: McpMergeScope, own: string | undefined, travelled: string): McpMerged;
   /** The agent's own file with the named servers taken out from under this format's own key, every other key,
-   * table and line of theirs as it was; `project` is the folder whose own servers the names sit under, for a
-   * format that keeps servers per folder. The text stands where it defines none of them, and the comments it
-   * held are answered the way a merge answers them. Throws when the text is not the format. */
+   * table, line and comment of theirs as it was; `project` is the folder whose own servers the names sit under, for
+   * a format that keeps servers per folder. The text stands where it defines none of them. Throws when the text is
+   * not the format. */
   remove(text: string, names: readonly string[], project?: string): McpRemoved;
 }
 
@@ -160,17 +157,54 @@ function dict(v: unknown): Record<string, string> {
 
 // --- JSON formats ----------------------------------------------------------------------------------------------
 
-function jsonObject(text: string | undefined): { root: Record<string, unknown>; comments: boolean } {
-  if (text === undefined || text.trim() === "") return { root: {}, comments: false };
+function jsonObject(text: string | undefined): Record<string, unknown> {
+  if (text === undefined || text.trim() === "") return {};
   let read: Jsonc;
   try {
     read = readJsonc(text);
   } catch {
     throw new Error("the file is not valid JSON; add the server by hand");
   }
-  const { value, comments } = read;
-  if (!isObject(value)) throw new Error("the file is not a JSON object; add the server by hand");
-  return { root: value, comments };
+  if (!isObject(read.value)) throw new Error("the file is not a JSON object; add the server by hand");
+  return read.value;
+}
+
+/** One change to a JSON file: the value at the path set, or taken out where it is undefined. */
+type JsonEdit = [JSONPath, unknown];
+
+/** The same change made to the parsed value, a missing object on the way made as the in-place edit makes one. */
+function setAt(root: Tree, [path, value]: JsonEdit): void {
+  // Own keys only, so a name such as __proto__ is a key as JSON.parse reads it and never the object's prototype.
+  const put = (o: Tree, key: string, v: unknown): void => void Object.defineProperty(o, key, { value: v, enumerable: true, writable: true, configurable: true });
+  let at = root;
+  for (const key of path.slice(0, -1).map(String)) {
+    const next = Object.hasOwn(at, key) ? tree(at[key]) : undefined;
+    if (next === undefined) put(at, key, {});
+    at = at[key] as Tree;
+  }
+  const last = String(path[path.length - 1]);
+  if (value === undefined) delete at[last];
+  else put(at, last, value);
+}
+
+/** The file's text with the edits made in place, so every comment and every byte they do not touch stays where it
+ * was; `root` is the text parsed. An edit whose result would read as anything but the edits made to that value is
+ * refused, since a file with a key twice or a shape the in-place edit cannot follow is not written as a guess. */
+function editJsonc(text: string, root: Tree, edits: readonly JsonEdit[]): string {
+  const edited = (): string | undefined => {
+    try {
+      let out = text;
+      // A value put in is laid out on lines of its own; a key taken out leaves every line beside it as written.
+      for (const [path, value] of edits) out = applyEdits(out, modify(out, path, value, value === undefined ? {} : { formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" } }));
+      for (const edit of edits) setAt(root, edit);
+      return jsonCanonical(readJsonc(out).value) === jsonCanonical(root) ? out : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const out = edited();
+  if (out === undefined) throw new Error("the file could not be changed in place, which keeps its comments; change it by hand");
+  return out;
 }
 
 /** The servers under `key` of a JSON object, each read by the format's own entry shape. */
@@ -264,23 +298,28 @@ function jsonMerger(key: string): McpFormat["merge"] {
   };
 }
 
-/** The remove for a JSON file with its servers under `key`: the named keys taken out of the table they sit in,
- * written back as the merge writes the file, and every other key of theirs where it was. The table itself stays,
- * empty or not: it is the agent's own key, not wsp's to take. */
-function jsonRemover(key: string): McpFormat["remove"] {
+/** The remove for a JSON file with its servers under `key`: the named keys taken out of the table they sit in, in
+ * place, and every other key and comment of theirs where it was. The table itself stays, empty or not: it is the
+ * agent's own key, not wsp's to take. */
+function jsonRemover(shape: JsonShape): McpFormat["remove"] {
+  const key = shape.key;
   return (text, names, project) => {
-    const held = readJsonc(text);
-    const root = tree(held.value);
+    const root = tree(readJsonc(text).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
+    const at: JSONPath = project === undefined ? [key] : ["projects", project, key];
     const table = project === undefined ? tree(root[key]) : tree(tree(tree(root.projects)?.[project])?.[key]);
-    if (table === undefined) return { text, commentsDropped: false };
-    let took = false;
-    for (const name of names) {
-      if (table[name] === undefined) continue;
-      delete table[name];
-      took = true;
+    if (table === undefined) return { text };
+    const took = names.filter(name => Object.hasOwn(table, name));
+    if (took.length === 0) return { text };
+    const edits = took.map((name): JsonEdit => [[...at, name], undefined]);
+    // A name the file switches off outside its entry is switched back on as the entry goes, so it goes whole.
+    for (const name of took) {
+      if (shape.flip === undefined || !(shape.off?.(root) ?? []).includes(name)) continue;
+      const on = shape.flip(root, [...at, name], name, true);
+      setAt(root, on);
+      edits.push(on);
     }
-    return took ? { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: held.comments } : { text, commentsDropped: false };
+    return { text: editJsonc(text, root, edits) };
   };
 }
 
@@ -333,8 +372,8 @@ interface JsonShape {
   projects: boolean;
   /** The names the file switches off outside their entries, as Gemini CLI's `mcp.excluded`. */
   off?(root: Record<string, unknown>): string[];
-  /** Turns one entry on or off by the switch the agent reads; absent where it keeps none. */
-  flip?(root: Tree, entry: Tree, name: string, on: boolean): void;
+  /** The edit that turns the entry at `entry` on or off by the switch the agent reads; absent where it keeps none. */
+  flip?(root: Tree, entry: JSONPath, name: string, on: boolean): JsonEdit;
 }
 
 function jsonFormat(shape: JsonShape): McpFormat {
@@ -353,10 +392,10 @@ function jsonFormat(shape: JsonShape): McpFormat {
       return isObject(project) ? [...own, ...jsonServers(project, shape.key, "home", shape.server)] : own;
     },
     place: (text, name, server) => {
-      const { root, comments } = jsonObject(text);
-      const current = root[shape.key];
-      root[shape.key] = { ...(isObject(current) ? current : {}), [name]: shape.entry(server) };
-      return { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: comments };
+      const root = jsonObject(text);
+      const entry = shape.entry(server);
+      if (text === undefined || text.trim() === "") return { text: `${JSON.stringify({ [shape.key]: { [name]: entry } }, null, 2)}\n` };
+      return { text: editJsonc(text, root, [isObject(root[shape.key]) ? [[shape.key, name], entry] : [[shape.key], { [name]: entry }]]) };
     },
     edit: jsonEditor(shape.key),
     entryOf: (text, name, project) => {
@@ -372,21 +411,20 @@ function jsonFormat(shape: JsonShape): McpFormat {
       return def === undefined ? undefined : jsonCanonical(def);
     },
     merge: jsonMerger(shape.key),
-    remove: jsonRemover(shape.key),
+    remove: jsonRemover(shape),
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }
 
-/** The switch for a JSON file: the named entry found under `key` (a folder's own under `projects.<folder>`), flipped,
- * and the file written back as place writes it. */
+/** The switch for a JSON file: the named entry found under `key` (a folder's own under `projects.<folder>`), flipped
+ * in place. */
 function jsonEnabler(key: string, flip: NonNullable<JsonShape["flip"]>): NonNullable<McpFormat["enable"]> {
   return (text, name, on, project) => {
-    const { root, comments } = jsonObject(text);
+    const root = jsonObject(text);
     const source = project === undefined ? root : tree(tree(root.projects)?.[project]);
-    const entry = tree(tree(source?.[key])?.[name]);
-    if (entry === undefined) throw new Error(`the file names no server called ${name}`);
-    flip(root, entry, name, on);
-    return { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: comments };
+    if (tree(tree(source?.[key])?.[name]) === undefined) throw new Error(`the file names no server called ${name}`);
+    const at: JSONPath = project === undefined ? [key, name] : ["projects", project, key, name];
+    return { text: editJsonc(text, root, [flip(root, at, name, on)]) };
   };
 }
 
@@ -423,9 +461,8 @@ export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z
 export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g, url => ({ httpUrl: url }), {
   off: root => strs(tree(root.mcp)?.excluded),
   flip: (root, _entry, name, on) => {
-    const mcp = (root.mcp = tree(root.mcp) ?? {});
-    const rest = strs(mcp.excluded).filter(n => n !== name);
-    mcp.excluded = on ? rest : [...rest, name];
+    const rest = strs(tree(root.mcp)?.excluded).filter(n => n !== name);
+    return [["mcp", "excluded"], on ? rest : [...rest, name]];
   },
 });
 
@@ -447,7 +484,7 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
     return { name, scope, transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [], ...off };
   },
   entry: s => (s.kind === "stdio" ? { type: "local", command: [s.command, ...s.args], enabled: true, ...some("environment", s.env) } : { type: "remote", url: s.url, enabled: true, ...some("headers", s.headers) }),
-  flip: (_root, entry, _name, on) => void (entry.enabled = on),
+  flip: (_root, entry, _name, on) => [[...entry, "enabled"], on],
 });
 
 // --- Codex's TOML ------------------------------------------------------------------------------------------------
@@ -758,7 +795,7 @@ function removeCodex(text: string, names: readonly string[]): McpRemoved {
     lines = lines.filter((_, i) => !at.has(i));
     took = true;
   }
-  return { text: took ? lines.join("\n") : text, commentsDropped: false };
+  return { text: took ? lines.join("\n") : text };
 }
 
 /** The switch: `enabled = false` as the first line of the server's own table turns it off, and on takes the line out;
@@ -778,12 +815,12 @@ function enableCodex(text: string, name: string, on: boolean): Placed {
   while (end < lines.length && !uncommentToml(lines[end]!).trim().startsWith("[")) end++;
   const at = lines.findIndex((l, i) => i > start && i < end && /^\s*enabled\s*=/.test(uncommentToml(l)));
   const next = on ? lines.filter((_, i) => i !== at) : at >= 0 ? lines.map((l, i) => (i === at ? "enabled = false" : l)) : [...lines.slice(0, start + 1), "enabled = false", ...lines.slice(start + 1)];
-  return { text: next.join("\n"), commentsDropped: false };
+  return { text: next.join("\n") };
 }
 
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
-  place: (text, name, server) => ({ text: placeCodex(text, name, server), commentsDropped: false }),
+  place: (text, name, server) => ({ text: placeCodex(text, name, server) }),
   edit: codexEditor,
   entryOf: (text, name) => {
     const lines = text.split("\n");

@@ -33,7 +33,7 @@ import {
   type ProvisionLanding,
   type ServerPort,
 } from "../src/provision-files.js";
-import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
+import type { McpPlan } from "../src/golden-mcp.js";
 import type { PackFiles, PackedFiles, StagedFile } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -675,8 +675,8 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
 
     const took = await unmergeServers(port, "/root");
     expect(took).toEqual([
-      { path: CLAUDE, names: ["gsc", "zed"], commentsDropped: false },
-      { path: CODEX, names: ["context7"], commentsDropped: false },
+      { path: CLAUDE, names: ["gsc", "zed"] },
+      { path: CODEX, names: ["context7"] },
     ]);
     expect(wrote.sort()).toEqual([CODEX, CLAUDE].sort());
     expect(serversOutLines(took[1]!)).toEqual([`context7 (out of ${CODEX})`]);
@@ -690,7 +690,7 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
     expect(files[CODEX]).toBe(['[projects."/root/repo"]', 'trust_level = "trusted"', "", "[mcp_servers.mine]", 'command = "/usr/local/bin/mine"', ""].join("\n"));
   });
 
-  it("says the comments a jsonc file loses as it is written back, in the one sentence that loss has, and says nothing of them for a plain JSON file", async () => {
+  it("keeps the comments of a jsonc file it takes a key out of", async () => {
     const opencode = "/root/.config/opencode/opencode.json";
     const commented = '{\n  // my own servers\n  "theme": "dark",\n  "mcp": { "docs": { "type": "local", "command": ["npx", "docs-mcp"] } }\n}\n';
     const files = { [opencode]: commented, [CLAUDE]: claudeText() };
@@ -702,14 +702,11 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
 
     const took = await unmergeServers(port, "/root");
     expect(took).toEqual([
-      { path: CLAUDE, names: ["gsc"], commentsDropped: false },
-      { path: opencode, names: ["docs"], commentsDropped: true },
+      { path: CLAUDE, names: ["gsc"] },
+      { path: opencode, names: ["docs"] },
     ]);
-    // The leave's lines for that file: what came out of it, then the one sentence for the comments it lost.
-    expect(serversOutLines(took[1]!)).toEqual([`docs (out of ${opencode})`, commentsDroppedLine(opencode)]);
-    expect(files[opencode]).not.toContain("my own servers");
-    // The file that held no comment says nothing of them.
-    expect(serversOutLines(took[0]!)).toEqual([`gsc (out of ${CLAUDE})`]);
+    expect(serversOutLines(took[1]!)).toEqual([`docs (out of ${opencode})`]);
+    expect(files[opencode]).toContain("// my own servers\n");
   });
 
   it("writes nothing where the list holds no key of that agent's, where the file is not there, and where every entry has changed", async () => {

@@ -7,7 +7,7 @@
 import { PlusIcon, XIcon } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { MCP_AGENTS, agentName } from "@wsp/catalog";
-import { commandWords, type AgentsReport, type ServerAdd } from "@wsp/protocol";
+import { commandWords, unclosedQuoteRefusal, type AgentsReport, type ServerAdd } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { RefusalSlot } from "../../settings/sheetParts.js";
@@ -109,8 +109,11 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
 
   const submit = (): void => {
     if (!ready) return;
+    const words = road === "command" ? commandWords(command) : [];
+    if (words === undefined) return setRefused(unclosedQuoteRefusal);
+    if (new Set(named.map(p => p.name.trim())).size < named.length) return setRefused(W.twoPairsOneName(road));
     const values = Object.fromEntries(named.map(p => [p.name.trim(), p.value]));
-    const [program = "", ...args] = commandWords(command);
+    const [program = "", ...args] = words;
     const ask: ServerAdd = {
       agent,
       name: name.trim(),
