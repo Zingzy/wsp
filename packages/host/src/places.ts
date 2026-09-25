@@ -78,11 +78,12 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   usageRefusal,
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
+  SignInLine,
 } from "@wsp/protocol";
 import { PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
-import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
+import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
@@ -94,7 +95,7 @@ import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
-import { placeLink, sharedAgentsOn, sharedOn, signInOnBox, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
+import { placeLink, relaySignIn, sharedAgentsOn, sharedOn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
 import { systemOpener } from "./relay.js";
 import type { RelayTerminal } from "./signin-relay.js";
@@ -328,10 +329,11 @@ export const NOTHING_TO_LEAVE_LINE = "this computer is not a place in any wsp, s
 export const SIGN_IN_FLAGS_REFUSAL =
   "wsp add --sign-in names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --sign-in to join a computer.";
 
-/** The refusal for an agent that signs in in the image rather than on the computer: those are answered by the
- * recipe at init, not here. The list is the catalog's own, so a tool that starts sharing a login says so on its row. */
-export const signInAgentRefusal = (agent: string): string =>
-  `wsp add --sign-in takes an agent whose login lives on the computer that runs the workspaces, which ${agent} is not: ${sharedAgentsOn(CATALOG_AGENTS.map(a => a.id)).join(", ")}.`;
+/** The agents with a sign-in to run on a computer, off the catalog's rows: a token or key this host keeps is none. */
+export const signsInOnComputer = (): string[] => CATALOG_AGENTS.filter(a => hasLogin(a.signIn)).map(a => a.id);
+
+/** The refusal for an agent with no sign-in to run on a computer. The list is the catalog's own. */
+export const signInAgentRefusal = (agent: string): string => `wsp add --sign-in takes an agent with a sign-in to run on a computer, which ${agent} is not: ${signsInOnComputer().join(", ")}.`;
 
 /** A computer that has not told this host where it keeps the logins its workspaces share. It says so on every
  * link, so the two causes left are a computer that is not connected and one whose agent is older than the one
@@ -344,7 +346,7 @@ export const boxSignInAsk = (name: string, agent: string): string =>
   `Sign ${agentName(agent)} in on ${name} now? The login stays on that computer, outside every workspace, and each of them shares it.`;
 
 export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
-  `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}; every workspace there shares that login.`;
+  `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}${sharedOn(agent) === undefined ? "." : "; every workspace there shares that login."}`;
 
 export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
   `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
@@ -886,7 +888,7 @@ const systemDeps: PlaceDeps = {
   terminal: { input: process.stdin, output: process.stdout },
   open: systemOpener(platform()),
   placeLink,
-  signIn: signInOnBox,
+  signIn: relaySignIn,
   heldHostKey: reach => knownHostKey(reach),
   offeredHostKey: reach => offeredHostKey(reach),
   sshWord: (word, opts) => sshWordReach(word, opts),
@@ -1313,7 +1315,7 @@ async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDe
 /** One agent signed in on one computer already in this wsp. The work runs at this terminal: the tool's own flow is
  * shown here while it runs on that computer, over the link that computer is holding. */
 async function signInOnPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, agent: string, deps: PlaceDeps): Promise<number> {
-  if (sharedOn(agent) === undefined) {
+  if (!signsInOnComputer().includes(agent)) {
     io.error(signInAgentRefusal(agent));
     return 1;
   }
@@ -1346,13 +1348,15 @@ async function offerBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, d
 
 /** The sign-in itself and the one line it comes to. Whether it landed is what the caller answers with. */
 async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, agent: string, deps: PlaceDeps): Promise<boolean> {
-  if (place.logins === undefined) {
+  if (sharedOn(agent) !== undefined && place.logins === undefined) {
     io.error(placeNoLoginsLine(place.name));
     return false;
   }
+  // The host plans the line: a shared login at that computer's logins folder, any other as the owner of its home.
+  const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
   const road = await deps.placeLink(client, place.id);
   try {
-    const answer = await deps.signIn({ link: road.link, agent, logins: place.logins, terminal: deps.terminal, open: deps.open });
+    const answer = await deps.signIn({ link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open });
     io.log(answer.signedIn ? boxSignedInLine(place.name, agent, answer.detail) : boxNotSignedInLine(place.name, agent, answer.said));
     return answer.signedIn;
   } finally {

@@ -8,14 +8,9 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import type { Question } from "@wsp/catalog";
+import type { PtyLink } from "@wsp/runtime";
 
-export interface PtyLink {
-  op(op: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  /** Daemon events as they arrive; the return detaches. */
-  onEvent(fn: (e: Record<string, unknown>) => void): () => void;
-  /** Settles when the link is gone; a relay waiting on a pty then ends instead of holding the terminal. */
-  closed?: Promise<unknown>;
-}
+export type { PtyLink };
 
 export interface RelayTerminal {
   input: Readable & { isTTY?: boolean; isRaw?: boolean; setRawMode?(on: boolean): unknown };

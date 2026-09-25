@@ -13,6 +13,8 @@ import type { AgentsWhere } from "./agentsRows.js";
 import { AgentsList } from "./AgentsList.js";
 import { useAgentsReport } from "./useAgentsReport.js";
 import { useServerTools } from "./useServerTools.js";
+import { useAgentActs } from "./useAgentActs.js";
+import { openPanelTerminalWith } from "../../shell/shellCommands.js";
 
 export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
@@ -20,6 +22,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const absent = useAbsentComputer(workspaceId);
   const { report, reading, error, refresh } = useAgentsReport(workspace === null ? null : { workspaceId });
   const tools = useServerTools(workspace === null ? null : { workspaceId });
+  const acts = useAgentActs(workspace === null ? null : { workspaceId });
   const place = workspace === null ? undefined : placeOf(places, workspace);
   const where: AgentsWhere = workspace === null || isLocalWorkspace(workspace) ? "here" : place?.kind === "computer" ? "box-task" : "fork";
   const computer = where === "box-task" && place !== undefined ? placeName(place) : undefined;
@@ -36,7 +39,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
         reading={reading}
         error={error}
         on={workspace?.name ?? ""}
-        ctx={{ where, ...(computer === undefined ? {} : { computer }), heldWhy: absent?.away ?? null, ...(where === "fork" ? { editImage: () => useStore.getState().openSetup() } : {}), ...(tools === undefined ? {} : { tools }) }}
+        ctx={{ where, ...(computer === undefined ? {} : { computer }), heldWhy: absent?.away ?? null, ...(where === "fork" ? { editImage: () => useStore.getState().openSetup() } : {}), ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(where === "here" ? { typeInTerminal: (line: string) => void openPanelTerminalWith(workspaceId, line) } : {}) }}
         onRefresh={refresh}
         now={Date.now()}
         {...(computer === undefined

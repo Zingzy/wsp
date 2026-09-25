@@ -32,6 +32,7 @@ import {
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
+  AGENTS_KEY_REFUSAL,
   DEVICE_ACCOUNT_UNSERVED,
   DEVICE_AUTH_REFUSAL,
   DEVICE_REVOKED_REFUSAL,
@@ -1390,6 +1391,64 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               send({ id: msg.id, ok: true, answer: await rt.agents.tools(msg.target, { agent: msg.agent, name: msg.name, ...(msg.refresh !== undefined ? { refresh: msg.refresh } : {}) }, origin) });
+              return;
+            case "agents.signIn":
+            case "servers.signIn": {
+              // A sign-in on one of the person's computers is theirs alone, and its page and code go to the socket
+              // that asked and to no other: they are what finishes that login.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              let queued: Record<string, unknown>[] | null = [];
+              const emit = (event: Record<string, unknown>): void => {
+                if (queued !== null) queued.push(event);
+                else if (ws.readyState === ws.OPEN) send(event);
+              };
+              const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent };
+              const { signInId, stop } = await rt.agents.signIn(msg.target, ask, emit, origin);
+              detaches.push(stop);
+              if (ws.readyState !== ws.OPEN) {
+                stop();
+                return;
+              }
+              send({ id: msg.id, ok: true, signInId });
+              const held = queued;
+              queued = null;
+              for (const event of held) send(event);
+              return;
+            }
+            case "agents.signInCode":
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              await rt.agents.signInCode(msg.signInId, msg.code);
+              send({ id: msg.id, ok: true });
+              return;
+            case "agents.signInLine":
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, line: await rt.agents.signInLine(msg.target, { agent: msg.agent, ...(msg.name !== undefined ? { server: msg.name } : {}) }, origin) });
+              return;
+            case "agents.key":
+              // A token crosses this socket into the vault, so only the host's own process may send one, as a
+              // pairing code is only minted there.
+              if (!ownRoad() || me?.kind !== "host") {
+                send({ id: msg.id, ok: false, error: AGENTS_KEY_REFUSAL });
+                return;
+              }
+              await rt.agents.key(msg.agent, msg.key);
+              send({ id: msg.id, ok: true });
+              return;
+            case "agents.addTools":
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await rt.agents.addTools(msg.target, msg.agent, origin)) });
               return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });

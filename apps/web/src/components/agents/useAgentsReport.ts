@@ -3,6 +3,7 @@
 // shows it and again on Read again. The last report of each target is kept
 // for as long as the window lives, so a computer that stopped answering or a
 // task that is paused still draws what stood there when it was last read.
+// The host saying the agents there changed reads it again.
 import { useCallback, useEffect, useState } from "react";
 import type { AgentsReport, AgentsTarget } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
@@ -50,6 +51,14 @@ export function useAgentsReport(target: AgentsTarget | null): ReportState & { re
   }, [api, key, asked]);
 
   const refresh = useCallback(() => setAsked(n => n + 1), []);
+  // A sign-in, a key or the wsp tools written there changes what the report reads, so it is read again.
+  useEffect(() => {
+    if (key === null || api?.subscribe === undefined) return;
+    return api.subscribe(event => {
+      if (event.type !== "agents.changed") return;
+      if (event.target === undefined || JSON.stringify(event.target) === key) refresh();
+    });
+  }, [api, key, refresh]);
   // A client with no such read says so once, rather than standing the bars of a read that never comes.
   return { ...shown, ...(key !== null && api !== null && !readable && shown.report === null ? { error: AGENTS_LIST_WORDS.noReader } : {}), refresh };
 }

@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -1146,7 +1146,7 @@ describe("wsp add on a computer reached over ssh", () => {
       logins: "/var/lib/wsp/logins",
     };
     const client = {
-      request: async () => ({ place, hostKey: "ssh-ed25519 SHA256:abc" }) as Record<string, unknown>,
+      request: async (op: string) => (op === "agents.signInLine" ? { line: { command: "codex login --device-auth", prepare: "mkdir -p x" } } : ({ place, hostKey: "ssh-ed25519 SHA256:abc" } as Record<string, unknown>)),
       events: async () => {},
       onFrame: () => () => {},
       closeWords: () => "",
@@ -1155,12 +1155,12 @@ describe("wsp add on a computer reached over ssh", () => {
       terminate: () => {},
     };
     const asked: string[] = [];
-    const signedIn: { agent: string; logins: string }[] = [];
+    const signedIn: { agent?: string; line: SignInLine }[] = [];
     const deps = {
       ...systemPlaceDeps,
       dial: async () => client as never,
-      signIn: async (o: { agent: string; logins: string }) => {
-        signedIn.push({ agent: o.agent, logins: o.logins });
+      signIn: async (o: { agent?: string; line: SignInLine }) => {
+        signedIn.push({ agent: o.agent, line: o.line });
         return { signedIn: true };
       },
     } as Parameters<typeof addCommand>[4];
@@ -1169,7 +1169,7 @@ describe("wsp add on a computer reached over ssh", () => {
     // Only the agent whose login lives on that computer is offered; Claude Code's token is this computer's.
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain("Sign Codex in on box now?");
-    expect(signedIn).toEqual([{ agent: "codex", logins: "/var/lib/wsp/logins" }]);
+    expect(signedIn).toEqual([{ agent: "codex", line: { command: "codex login --device-auth", prepare: "mkdir -p x" } }]);
     expect(io.lines.join("\n")).toContain(boxSignedInLine("box", "codex"));
     // Nobody at the keyboard: nothing is asked and nothing runs, and the line says what threads there read
     // until it is signed in and how to sign it in later.
@@ -2161,10 +2161,16 @@ describe("wsp add <place> --sign-in <agent>", () => {
     logins: "/var/lib/wsp/logins",
   };
 
-  /** A host holding one joined computer, answering the listing alone: the sign-in itself is handed in. */
+  /** A host holding one joined computer, answering the listing and planning each line: the sign-in itself is handed in. */
+  const planned: { target: unknown; agent: unknown }[] = [];
   const listing = (places: PlaceView[] = [spoo]): NonNullable<Parameters<typeof addCommand>[4]>["dial"] => () =>
     Promise.resolve({
-      request: (op: string) => (op === "places.list" ? Promise.resolve({ places } as never) : Promise.reject(new Error(`unexpected op ${op}`))),
+      request: (op: string, params: Record<string, unknown> = {}) =>
+        op === "places.list"
+          ? Promise.resolve({ places } as never)
+          : op === "agents.signInLine"
+            ? (planned.push({ target: params["target"], agent: params["agent"] }), Promise.resolve({ line: { command: `${String(params["agent"])} login` } } as never))
+            : Promise.reject(new Error(`unexpected op ${op}`)),
       events: () => Promise.resolve(),
       onFrame: () => () => {},
       closed: Promise.resolve(),
@@ -2173,29 +2179,40 @@ describe("wsp add <place> --sign-in <agent>", () => {
     } as never);
 
   const signingIn = (answer: Awaited<ReturnType<NonNullable<Parameters<typeof addCommand>[4]>["signIn"]>>, places?: PlaceView[]) => {
-    const asked: { agent: string; logins: string }[] = [];
+    const asked: { agent?: string; line: SignInLine }[] = [];
     return {
       asked,
       deps: {
         ...systemPlaceDeps,
         dial: listing(places),
-        signIn: async (o: { agent: string; logins: string }) => {
-          asked.push({ agent: o.agent, logins: o.logins });
+        signIn: async (o: { agent?: string; line: SignInLine }) => {
+          asked.push({ agent: o.agent, line: o.line });
           return answer;
         },
       } as Parameters<typeof addCommand>[4],
     };
   };
 
-  it("signs the agent in on the computer named, at the logins directory that computer said it keeps", async () => {
+  it("signs the agent in on the computer named by the line the host plans for it there", async () => {
     const io = captured();
     const run = signingIn({ signedIn: true, detail: "ChatGPT" });
+    planned.length = 0;
     expect(await addCommand(io, opts(tmp("signin-place")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
-    expect(run.asked).toEqual([{ agent: "codex", logins: "/var/lib/wsp/logins" }]);
+    expect(planned).toEqual([{ target: { placeId: "p_1" }, agent: "codex" }]);
+    expect(run.asked).toEqual([{ agent: "codex", line: { command: "codex login" } }]);
     expect(io.lines.join("\n")).toContain("Codex is signed in on spoo (ChatGPT); every workspace there shares that login.");
     // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
     // whenever a computer dials back on another daemon, so a box that has just taken this one is ready here.
     expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
+  });
+
+  it("signs in an agent whose login is not shared too, as the host plans it, and says so without a shared login", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true });
+    expect(await addCommand(io, opts(tmp("signin-gemini")), ["spoo"], { signIn: "gemini" }, run.deps)).toBe(0);
+    expect(run.asked).toEqual([{ agent: "gemini", line: { command: "gemini login" } }]);
+    expect(io.lines.join("\n")).toContain("Gemini CLI is signed in on spoo.");
+    expect(io.lines.join("\n")).not.toContain("shares that login");
   });
 
   it("answers a sign-in that did not land with what the tool said and the line that runs it again", async () => {

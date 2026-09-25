@@ -8,6 +8,7 @@
 import {
   AccountView,
   AgentsReport,
+  AgentsSignInEvent,
   ServerToolsAnswer,
   type AgentsTarget,
   BringBackResult,
@@ -419,6 +420,15 @@ export interface Api {
   /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
    * answer an hour unless `refresh`. A client without it holds List tools. */
   serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
+  /** Runs an agent's sign-in there, or one server's with `server`, in a watched pty; each step reaches `onStep` alone,
+   * and `stop` stops listening once the last one has come. A client without it holds Sign in. */
+  agentsSignIn?(target: AgentsTarget, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void): Promise<{ signInId: string; stop(): void }>;
+  /** Types what a sign-in's page handed back into that sign-in's pty. */
+  agentsSignInCode?(signInId: string, code: string): Promise<void>;
+  /** Puts an agent's token or key into the host's vault; refused off the host's own socket. */
+  agentsKey?(agent: string, key: string): Promise<void>;
+  /** Writes the wsp server into an agent's config on this computer. */
+  agentsAddTools?(target: AgentsTarget, agent: string): Promise<{ file: string }>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -768,6 +778,29 @@ export function makeApi(c: ProtocolClient): Api {
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
+    agentsSignIn: async (target, agent, server, onStep) => {
+      // The host answers before it pushes a step, but a step that lands first is kept for the id it names.
+      let signInId: string | undefined;
+      const early: AgentsSignInEvent[] = [];
+      const off = c.subscribe(event => {
+        const step = AgentsSignInEvent.safeParse(event);
+        if (!step.success) return;
+        if (signInId === undefined) early.push(step.data);
+        else if (step.data.signInId === signInId) onStep(step.data);
+      });
+      try {
+        const started = await c.request<{ signInId?: unknown }>(server === undefined ? "agents.signIn" : "servers.signIn", { target, agent, ...(server === undefined ? {} : { name: server }) });
+        signInId = String(started.signInId);
+        for (const step of early) if (step.signInId === signInId) onStep(step);
+        return { signInId, stop: off };
+      } catch (e) {
+        off();
+        throw e;
+      }
+    },
+    agentsSignInCode: async (signInId, code) => void (await c.request("agents.signInCode", { signInId, code })),
+    agentsKey: async (agent, key) => void (await c.request("agents.key", { agent, key })),
+    agentsAddTools: async (target, agent) => ({ file: String((await c.request<{ file?: unknown }>("agents.addTools", { target, agent })).file) }),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

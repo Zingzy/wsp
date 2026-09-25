@@ -140,3 +140,57 @@ export const noRunuserRefusal = (user: string): string => `this computer runs ws
 /** Why a computer that runs every line as root refused to read: the home it names is not there, so there is no
  * owner to hand the lines to and running them as root is not an answer. */
 export const noHomeRefusal = (home: string): string => `this computer runs wsp as root and its home ${home} is not there, so nothing was read`;
+
+/** Where one sign-in started from the app stands, pushed to the socket that started it and no other: `running` until
+ * the tool prints a page, `waiting` once it has, with that page, the code the tool printed beside it where it prints
+ * one, and `paste` where what the page hands back is typed into the tool; then `signed-in`, or `failed` with the
+ * tool's own last words. */
+export const AgentsSignInEvent = z.object({
+  type: z.literal("agents.signIn"),
+  signInId: z.string(),
+  state: z.enum(["running", "waiting", "signed-in", "failed"]),
+  url: z.string().optional(),
+  code: z.string().optional(),
+  paste: z.boolean().optional(),
+  said: z.string().optional(),
+});
+export type AgentsSignInEvent = z.infer<typeof AgentsSignInEvent>;
+
+/** Something written changed what a report there reads: a sign-in, a key in the vault, the wsp tools in a config.
+ * No target: every report, which is what a key in this host's vault changes. */
+export const AgentsChangedEvent = z.object({ type: z.literal("agents.changed"), target: AgentsTarget.optional() });
+export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;
+
+/** One sign-in as a line on the computer it runs on, for the person's own terminal: what runs first (the store's
+ * folder, where the login lives outside the home), the command, the environment it runs with, and the tool's own
+ * status line afterwards. Paths and commands only, never a value. */
+export const SignInLine = z.object({ command: z.string(), env: z.record(z.string()).optional(), prepare: z.string().optional(), status: z.string().optional() });
+export type SignInLine = z.infer<typeof SignInLine>;
+
+/** A paste the agent's token check refused. */
+export const notTokenRefusal = (agent: string): string => `That is not a ${agent} token.`;
+
+/** Why an agent has no key for this host to keep. */
+export const noVaultKeyRefusal = (agent: string): string => `${agent} takes no token or key this host keeps.`;
+
+/** Why an agent's sign-in is not run for the app: it asks the person to pick, so it runs in their terminal. */
+export const signInTerminalRefusal = (agent: string, line: string): string => `${agent} asks you to pick while it signs in, so it runs in your terminal: ${line}`;
+
+/** Why an agent has no sign-in to run: it signs in with a token or key this host keeps, or not at all. */
+export const signInVaultRefusal = (agent: string): string => `${agent} has no sign-in to run on a computer; it reads a token or key this host keeps.`;
+
+/** Why a server's sign-in is not run for the app, with the line the person runs instead. */
+export const serverSignInCopyRefusal = (agent: string, line: string, why: "inside" | "callback"): string =>
+  why === "inside" ? `${agent} signs a server in inside its own session: ${line}` : `${agent} finishes a server's sign-in on a page at localhost, which reaches only the computer your browser is on; run ${line} in a terminal there.`;
+
+/** Why the wsp tools go only into an agent's config on this computer: a thread elsewhere is handed them on every turn. */
+export const addToolsHereRefusal = "The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.";
+
+/** The sign-in a code was sent to is not running. */
+export const noSignInRefusal = "That sign-in is not running any more.";
+
+/** Why a napping workspace ran no sign-in: nothing here wakes a machine. */
+export const nappingSignInRefusal = (name: string): string => `${name} is napping, and a sign-in runs there only while it runs; wake it to sign in`;
+
+/** Why agents.key was refused: a token goes into the vault only from a socket holding this host's own token. */
+export const AGENTS_KEY_REFUSAL = "only a socket holding this host's own token may put a key in its vault; use the app on the computer the host runs on, or wsp agents key there";
