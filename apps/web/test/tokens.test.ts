@@ -54,13 +54,19 @@ describe("index.css", () => {
     expect(additions).toMatchInlineSnapshot(`
       "/* wsp additions below this line. */
 
+      /* A backdrop blur lays its blurred copy over the page it sampled, so on the Mac's transparent page the sharp text
+         shows through it unless the copy stands on a ground: --glass-ground, the filter GlassGround renders. */
+      @utility glass-backdrop {
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+      }
+
       /* The shell's sidebar floats over the app background, so it takes the same
          glass recipe as the other floating surfaces, tinted with the sidebar
          palette instead of the popover, and its border joins the sidebar tokens. */
       @utility sidebar-glass {
         background: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+        @apply glass-backdrop;
         border-color: var(--sidebar-border);
 
         @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -150,6 +156,7 @@ describe("index.css", () => {
       }
 
       .desktop-mac {
+        --glass-ground: url(#glass-ground);
         --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
       }
 
